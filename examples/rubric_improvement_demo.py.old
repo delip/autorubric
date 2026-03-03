@@ -1,0 +1,321 @@
+#!/usr/bin/env python3
+"""Demo: improve a deliberately poor rubric using ricechem ground-truth data.
+
+Workflow:
+1. Load the ricechem q1 dataset (327 student responses on ionization energy)
+2. Replace the dataset's expert rubric with a deliberately vague 4-criterion rubric
+3. Split 30/70 into validation (98 items) and held-out test (229 items)
+4. Measure Spearman rho on the test set with the poor rubric (before)
+5. Generate a baseline rubric via a single LLM call and measure its rho
+6. Run ImprovementRunner with the validation split for ground-truth feedback
+7. Measure Spearman rho on the test set with the improved rubric (after)
+8. Print three-way comparison: poor vs. baseline vs. improved
+
+Usage:
+    python rubric_improvement_demo.py
+"""
+
+import asyncio
+
+from pydantic import BaseModel, Field
+
+from autorubric import LLMConfig, Rubric
+from autorubric.dataset import RubricDataset
+from autorubric.graders import CriterionGrader
+from autorubric.llm import LLMClient
+from autorubric.meta import ImprovementConfig, ImprovementRunner, IterationResult
+from autorubric.meta._improve import compute_expected_scores, validate_ground_truth
+
+MAX_ITERATIONS = 10
+N_VAL = 98  # ~30% of 327 items
+
+
+def create_poor_rubric() -> Rubric:
+    """Create a deliberately vague rubric for the ionization energy question."""
+    return Rubric.from_dict(
+        [
+            {
+                "weight": 3,
+                "requirement": (
+                    "The response demonstrates understanding of ionization "
+                    "energy concepts"
+                ),
+            },
+            {
+                "weight": 3,
+                "requirement": "The response is scientifically accurate",
+            },
+            {
+                "weight": 2,
+                "requirement": "The response explains the trend in the data",
+            },
+            {
+                "weight": 2,
+                "requirement": ("The response uses appropriate chemistry terminology"),
+            },
+        ]
+    )
+
+
+class CriterionSpec(BaseModel):
+    weight: int = Field(
+        description="Importance weight (5-15 for positive, negative for errors)"
+    )
+    requirement: str = Field(description="Clear, specific evaluation criterion")
+    name: str | None = Field(default=None, description="Short identifier")
+
+
+class GeneratedRubric(BaseModel):
+    criteria: list[CriterionSpec] = Field(description="List of evaluation criteria")
+
+
+async def generate_baseline1_rubric(
+    task_prompt: str, llm_config: LLMConfig
+) -> tuple[Rubric, float]:
+    """Generate a baseline rubric via a single LLM call (no iterative improvement)."""
+    client = LLMClient(llm_config)
+    gen = await client.generate(
+        system_prompt="You are an expert rubric designer for educational assessment.",
+        user_prompt=(
+            "Write a detailed rubric to grade college-level chemistry exam questions."
+        ),
+        response_format=GeneratedRubric,
+        return_result=True,
+    )
+    rubric = Rubric.from_dict(
+        [c.model_dump(exclude_none=True) for c in gen.parsed.criteria]
+    )
+    return rubric, gen.cost or 0.0
+
+
+async def generate_baseline2_rubric(
+    task_prompt: str, llm_config: LLMConfig
+) -> tuple[Rubric, float]:
+    """Generate a baseline rubric via a single LLM call (no iterative improvement)."""
+    client = LLMClient(llm_config)
+    gen = await client.generate(
+        system_prompt="You are an expert rubric designer for educational assessment.",
+        user_prompt=(
+            "Write a detailed rubric to grade the following chemistry exam question:\n\n"
+            f"Question: {task_prompt}"
+        ),
+        response_format=GeneratedRubric,
+        return_result=True,
+    )
+    rubric = Rubric.from_dict(
+        [c.model_dump(exclude_none=True) for c in gen.parsed.criteria]
+    )
+    return rubric, gen.cost or 0.0
+
+
+def quality_plateau(
+    current: IterationResult, history: list[IterationResult]
+) -> str | None:
+    """Stop when no issues remain or quality score plateaus for 4 iterations."""
+    if not current.issues:
+        return "no_issues"
+    if len(history) >= MAX_ITERATIONS:
+        return "max_iterations"
+    if len(history) < 4:
+        return None
+    prev = max(r.quality_score for r in history[-4:-1])
+    if current.quality_score - prev < 0.02:
+        return "quality_plateau"
+    return None
+
+
+async def measure_test_correlation(
+    rubric: Rubric,
+    test: RubricDataset,
+    expected_scores: list[float],
+    grader: CriterionGrader,
+    task_prompt: str,
+    label: str = "Grading test set",
+) -> tuple[float, float]:
+    """Grade the held-out test set and return (Spearman rho, cost)."""
+    from rich.progress import (
+        BarColumn,
+        MofNCompleteColumn,
+        Progress,
+        SpinnerColumn,
+        TextColumn,
+        TimeElapsedColumn,
+    )
+
+    progress = Progress(
+        SpinnerColumn(),
+        TextColumn(f"[bold blue]{label}"),
+        BarColumn(bar_width=30),
+        MofNCompleteColumn(),
+        TimeElapsedColumn(),
+        transient=True,
+    )
+    with progress:
+        task = progress.add_task("", total=len(test.items))
+        correlation, _per_item, cost = await validate_ground_truth(
+            rubric,
+            test,
+            expected_scores,
+            grader,
+            task_prompt=task_prompt,
+            on_item_complete=lambda: progress.advance(task),
+        )
+    return correlation, cost or 0.0
+
+
+async def main() -> None:
+    """Run the rubric improvement demo with ricechem data."""
+    print("Rubric Improvement Demo (ricechem q1 -- ionization energy)")
+    print("=" * 64)
+
+    # -- LLM configs --
+    eval_llm = LLMConfig(
+        model="gemini/gemini-3-flash-preview",
+        temperature=1.0,
+        max_parallel_requests=10,
+    )
+    revision_llm = LLMConfig(
+        model="gemini/gemini-3-pro-preview",
+        temperature=1.0,
+        thinking="medium",
+        timeout=300,
+    )
+
+    # -- Load dataset and prepare splits --
+    dataset = RubricDataset.from_file("examples/data/ricechem/q1.json")
+    task_prompt = dataset.prompt
+    good_rubric = dataset.rubric
+
+    poor_rubric = create_poor_rubric()
+
+    # 30/70 split: validation for the improvement loop, test for held-out eval.
+    # Both splits keep the original rubric so expected scores can be computed.
+    val, test = dataset.split_train_test(n_train=N_VAL, seed=42)
+    test_expected = compute_expected_scores(test)
+
+    # For the "before" measurement we need expected scores computed against the
+    # original (good) rubric, since ground-truth verdicts map to those criteria.
+    # The poor rubric has different criteria, so we grade with the poor rubric
+    # and compare rubric scores against the original expected scores.
+    grader = CriterionGrader(llm_config=eval_llm)
+    extra_cost = 0.0  # costs outside the improvement loop
+
+    # -- Before: test-set correlation with the poor rubric --
+    print()
+    before_rho, cost = await measure_test_correlation(
+        poor_rubric,
+        test,
+        test_expected,
+        grader,
+        task_prompt,
+        label="[Before] Grading test set with poor rubric",
+    )
+    extra_cost += cost
+    print(f"[Before] Spearman rho on test set: {before_rho:.3f}")
+
+    # -- Baseline: one-shot LLM-generated rubric --
+    print("\nGenerating baseline 1 rubric via single LLM call ...")
+    baseline1_rubric, cost = await generate_baseline1_rubric(task_prompt, revision_llm)
+    extra_cost += cost
+    baseline_rho1, cost = await measure_test_correlation(
+        baseline1_rubric,
+        test,
+        test_expected,
+        grader,
+        task_prompt,
+        label="[Baseline1] Grading test set with LLM-generated rubric",
+    )
+    extra_cost += cost
+    print(f"[Baseline1] Spearman rho on test set: {baseline_rho1:.3f}")
+
+    # -- Baseline: one-shot LLM-generated rubric --
+    print("\nGenerating baseline 2 rubric via single LLM call ...")
+    baseline2_rubric, cost = await generate_baseline2_rubric(task_prompt, revision_llm)
+    extra_cost += cost
+    baseline_rho2, cost = await measure_test_correlation(
+        baseline2_rubric,
+        test,
+        test_expected,
+        grader,
+        task_prompt,
+        label="[Baseline2] Grading test set with LLM-generated rubric",
+    )
+    extra_cost += cost
+    print(f"[Baseline2] Spearman rho on test set: {baseline_rho2:.3f}")
+
+    # -- Improve the poor rubric using the validation split --
+    print(f"\nRunning improvement loop (max {MAX_ITERATIONS} iterations) ...")
+
+    # The validation data keeps the *original* rubric so that expected scores
+    # are computed from ground-truth verdicts matched to the 8 expert criteria.
+    # The improvement runner grades with its own evolving rubric separately.
+    config = ImprovementConfig(
+        eval_llm=eval_llm,
+        revision_llm=revision_llm,
+        validation_data=val,
+        artifacts_dir="experiments/ricechem_improvement",
+        display="stdout",
+        convergence_fn=quality_plateau,
+        max_iterations=MAX_ITERATIONS,
+    )
+
+    runner = ImprovementRunner(poor_rubric, task_prompt, config=config)
+    result = await runner.run()
+
+    improved_rubric = result.final_rubric
+
+    # -- After: test-set correlation with the improved rubric --
+    print("\n[After] Grading test set with improved rubric ...")
+    after_rho, cost = await measure_test_correlation(
+        improved_rubric,
+        test,
+        test_expected,
+        grader,
+        task_prompt,
+    )
+    extra_cost += cost
+    print(f"[After] Spearman rho on test set: {after_rho:.3f}")
+
+    # -- Summary --
+    print("\n" + "=" * 64)
+    print("SUMMARY")
+    print("=" * 64)
+    print("  Spearman rho (test set):")
+    print(f"    Poor rubric (start):     {before_rho:.3f}")
+    print(f"    Baseline 1 (zero-shot LLM): {baseline_rho1:.3f}")
+    print(f"    Baseline 2 (zero-shot LLM): {baseline_rho2:.3f}")
+    print(f"    Improved (iterative):    {after_rho:.3f}")
+    delta = after_rho - before_rho
+    print(f"  Delta (poor -> improved):  {delta:+.3f}")
+    print(f"  Improvement iterations:    {len(result.iterations)}")
+    print(f"  Convergence reason:        {result.convergence_reason}")
+    improvement_cost = result.total_completion_cost or 0.0
+    total_cost = improvement_cost + extra_cost
+    print(f"  Improvement loop cost:     ${improvement_cost:.4f}")
+    print(f"  Baselines + test eval cost:${extra_cost:.4f}")
+    print(f"  Total cost:                ${total_cost:.4f}")
+
+    print("\n--- Poor rubric (start) ---")
+    for i, c in enumerate(poor_rubric.rubric, 1):
+        print(f"  {i}. [w={c.weight}] {c.requirement}")
+
+    print("\n--- Baseline 1 rubric (zero-shot LLM) ---")
+    for i, c in enumerate(baseline1_rubric.rubric, 1):
+        print(f"  {i}. [w={c.weight}] {c.requirement}")
+
+    print("\n--- Baseline 2 rubric (zero-shot LLM) ---")
+    for i, c in enumerate(baseline2_rubric.rubric, 1):
+        print(f"  {i}. [w={c.weight}] {c.requirement}")
+
+    print("\n--- Improved rubric (iterative) ---")
+    for i, c in enumerate(improved_rubric.rubric, 1):
+        print(f"  {i}. [w={c.weight}] {c.requirement}")
+
+    if good_rubric:
+        print("\n--- Original expert rubric (reference) ---")
+        for i, c in enumerate(good_rubric.rubric, 1):
+            print(f"  {i}. [w={c.weight:.4f}] {c.requirement}")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

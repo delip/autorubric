@@ -1,0 +1,88 @@
+{
+  "name": "industrial-revolution-essay-grading",
+  "prompt": "Explain the causes and effects of the Industrial Revolution.",
+  "rubric": [
+    {
+      "name": "Causes",
+      "weight": 30.0,
+      "requirement": "Correctly identifies at least 2 major causes of the Industrial Revolution (e.g., natural resources like coal/iron, agricultural changes, technological innovation, capital availability, stable political system, colonial trade)"
+    },
+    {
+      "name": "Effects",
+      "weight": 30.0,
+      "requirement": "Correctly describes at least 2 major effects of the Industrial Revolution (e.g., urbanization, factory system, changes in working conditions, rise of middle class, environmental impact, labor movements)"
+    },
+    {
+      "name": "Structure",
+      "weight": 12.0,
+      "requirement": "Demonstrates clear essay structure with introduction, body paragraphs, and logical flow between ideas"
+    },
+    {
+      "name": "Britain",
+      "weight": 8.0,
+      "requirement": "Correctly identifies Britain as the origin and provides accurate timeframe (starting between 1760-1800)"
+    },
+    {
+      "name": "Errors",
+      "weight": -15.0,
+      "requirement": "Contains significant factual errors such as wrong country of origin, incorrect dates (off by more than 50 years), or misattribution of inventions"
+    }
+  ],
+  "items": [
+    {
+      "submission": "The Industrial Revolution, spanning roughly 1760-1840, originated in Britain due to several\n    key factors. First, Britain possessed abundant natural resources, particularly coal and iron ore,\n    which powered factories and machinery. Second, agricultural improvements like crop rotation and\n    the enclosure movement freed rural workers to migrate to cities. Third, a stable political system\n    and strong property rights encouraged investment in new technologies.\n\n    The effects were profound and far-reaching. Economically, factory production replaced cottage\n    industries, dramatically increasing output and creating new wealth. Socially, urbanization\n    accelerated as workers flocked to industrial centers, leading to overcrowded cities with poor\n    sanitation. Working conditions in early factories were harsh, with long hours, low wages, and\n    child labor common. Environmentally, coal burning polluted air and waterways.\n\n    Long-term consequences included the rise of the middle class, labor movements demanding workers'\n    rights, and technological innovations that continue shaping our world today.",
+      "description": "Excellent - all criteria met",
+      "ground_truth": ["MET", "MET", "MET", "MET", "UNMET"]
+    },
+    {
+      "submission": "The Industrial Revolution happened because Britain had lots of coal and iron. Factories\n    started using machines instead of hand tools. James Watt improved the steam engine which\n    helped power many factories.\n\n    Effects included people moving from farms to cities. Factory work was hard and dangerous.\n    Children often worked in mines and mills. Cities became crowded and dirty. But there were\n    also positive effects - more goods were produced cheaper, and eventually living standards\n    improved. The middle class grew as factory owners and merchants became wealthy.",
+      "description": "Good - content strong, missing timeframe",
+      "ground_truth": ["MET", "MET", "MET", "UNMET", "UNMET"]
+    },
+    {
+      "submission": "The Industrial Revolution was when factories started. It happened in England first\n    because they had resources. People used to work at home but then moved to factories.\n\n    Steam engines were invented and this helped make things faster. Cities got bigger because\n    people moved there for jobs. Some effects were good like more products, but some were bad\n    like pollution and child labor.",
+      "description": "Basic - core content present, weak structure",
+      "ground_truth": ["MET", "MET", "UNMET", "UNMET", "UNMET"]
+    },
+    {
+      "submission": "The industrial revolution was a big change in history. Factories were made and people\n    worked in them. Machines replaced handwork. It started a long time ago in Europe.\n\n    Things changed a lot because of it. People lived differently after. There was more stuff\n    to buy.",
+      "description": "Minimal - vague, only hints at effects",
+      "ground_truth": ["UNMET", "MET", "UNMET", "UNMET", "UNMET"]
+    },
+    {
+      "submission": "The industrial revolution happened because people wanted change. It made things different.\n    Factories are where they made stuff. I think it was important for history.",
+      "description": "Poor - no real content",
+      "ground_truth": ["UNMET", "UNMET", "UNMET", "UNMET", "UNMET"]
+    },
+    {
+      "submission": "The Industrial Revolution began around 1800 in Britain (though some historians date it\n    to 1760). Key causes included technological innovation, available labor from enclosed farms,\n    capital from colonial trade, and natural resources like coal.\n\n    Major inventions like the spinning jenny, water frame, and steam engine transformed textile\n    manufacturing. The cotton gin, invented by Eli Whitney, also boosted cotton production\n    (though this was in America, not Britain).\n\n    Effects included urbanization, class struggle between workers and owners, environmental\n    degradation, and eventually improved living standards. The labor movement emerged in response\n    to exploitation of workers.",
+      "description": "Comprehensive - all content, correctly notes cotton gin is American",
+      "ground_truth": ["MET", "MET", "MET", "MET", "UNMET"]
+    },
+    {
+      "submission": "The Industrial Revolution started in France around 1700. The main cause was that people\n    invented electricity which powered all the factories. Thomas Edison was the key figure\n    who started the revolution.\n\n    People moved to cities and worked in factories. This was better than farming because they\n    got paid more money. The main effect was that everyone got richer and life improved\n    immediately for workers.",
+      "description": "Major errors - wrong country, date, technology",
+      "ground_truth": ["UNMET", "UNMET", "MET", "UNMET", "MET"]
+    },
+    {
+      "submission": "Britain had coal iron and rivers for transport also they had colonies for raw materials\n    and markets this helped them start factories. Steam power was key because water power\n    limited where factories could be built but steam let them go anywhere.\n\n    Socially there was major disruption traditional crafts died out and families split up as\n    members moved to different cities for work the new urban conditions bred disease and crime\n    but also new forms of social organization like unions and reform movements.\n\n    Long term effects include modern capitalism the labor movement industrialized warfare and\n    eventually the environmental challenges we face today from centuries of burning fossil fuels.",
+      "description": "Good content, run-on sentences, poor structure",
+      "ground_truth": ["MET", "MET", "UNMET", "UNMET", "UNMET"]
+    },
+    {
+      "submission": "The Industrial Revolution had massive effects on society.\n\n    Economic effects: Productivity soared. Goods that once took weeks to produce by hand could\n    be made in hours by machine. This lowered prices, made products accessible to more people,\n    and generated enormous wealth - though distributed unequally.\n\n    Social effects: The traditional social order was disrupted. Landed aristocracy gradually\n    ceded power to industrial capitalists. A new working class emerged, often living in squalid\n    conditions. Child labor was rampant until reform movements succeeded in passing protective\n    legislation.\n\n    Environmental effects: Deforestation, air pollution from coal burning, and water\n    contamination became serious problems. Rivers like the Thames became essentially open sewers.\n\n    Political effects: Workers organized into unions and demanded rights. The Chartist movement\n    pushed for democratic reforms. Eventually, the middle and working classes gained political\n    representation.",
+      "description": "Excellent effects coverage, but ignores causes entirely",
+      "ground_truth": ["UNMET", "MET", "MET", "UNMET", "UNMET"]
+    },
+    {
+      "submission": "The French Revolution was caused by inequality between the nobility and common people.\n    King Louis XVI was a weak ruler who couldn't solve France's financial problems. The\n    storming of the Bastille in 1789 marked the beginning of major changes.\n\n    The effects included the execution of the king and queen, the Reign of Terror, and\n    eventually Napoleon taking power. The revolution inspired democratic movements across\n    Europe and the Americas.",
+      "description": "Off-topic - discusses French Revolution instead",
+      "ground_truth": ["UNMET", "UNMET", "MET", "UNMET", "MET"]
+    },
+    {
+      "submission": "[Image attachment: factory_diagram.png]\n\n    As shown in the diagram above, the process flow demonstrates the key mechanisms.\n    Refer to Table 3.2 for the complete data analysis. The highlighted sections in\n    the appendix provide additional context for the claims made in my previous\n    submission.\n\n    See also: Bibliography items 7-12 for supporting evidence.",
+      "description": "Unassessable - references missing attachments/context",
+      "ground_truth": ["CANNOT_ASSESS", "CANNOT_ASSESS", "MET", "CANNOT_ASSESS", "CANNOT_ASSESS"]
+    }
+  ]
+}

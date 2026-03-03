@@ -1,0 +1,203 @@
+/* AutoRubric Documentation - Luxury Aesthetic */
+
+:root {
+  --md-primary-fg-color: #000000;
+  --md-primary-fg-color--light: #333333;
+  --md-primary-fg-color--dark: #000000;
+  --md-accent-fg-color: #d4a853;
+  --md-accent-fg-color--transparent: rgba(212, 168, 83, 0.1);
+}
+
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: #1a1a1a;
+  --md-default-bg-color: #121212;
+  --md-default-bg-color--light: #1e1e1e;
+  --md-accent-fg-color: #d4a853;
+}
+
+/* Typography refinements */
+.md-typeset {
+  font-size: 0.85rem;
+  line-height: 1.7;
+  letter-spacing: 0.01em;
+}
+
+.md-typeset h1 {
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin-bottom: 1.5rem;
+}
+
+.md-typeset h2 {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin-top: 2.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--md-default-fg-color--lightest);
+}
+
+.md-typeset h3 {
+  font-weight: 600;
+}
+
+/* Code blocks - elegant styling */
+.md-typeset code {
+  font-size: 0.82em;
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+}
+
+.md-typeset pre {
+  border-radius: 8px;
+  border: 1px solid var(--md-default-fg-color--lightest);
+}
+
+.md-typeset pre > code {
+  font-size: 0.8em;
+  line-height: 1.6;
+}
+
+/* Tables - clean and minimal */
+.md-typeset table:not([class]) {
+  font-size: 0.82rem;
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.md-typeset table:not([class]) th {
+  background-color: var(--md-default-fg-color--lightest);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  letter-spacing: 0.05em;
+}
+
+.md-typeset table:not([class]) td,
+.md-typeset table:not([class]) th {
+  padding: 0.75rem 1rem;
+}
+
+/* Admonitions - refined look */
+.md-typeset .admonition {
+  border-radius: 8px;
+  border-left-width: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.md-typeset .admonition-title {
+  font-weight: 600;
+}
+
+/* Navigation - cleaner feel */
+.md-nav__link {
+  font-size: 0.82rem;
+}
+
+.md-nav__item--active > .md-nav__link {
+  font-weight: 600;
+}
+
+/* Header - minimal */
+.md-header {
+  box-shadow: 0 1px 0 var(--md-default-fg-color--lightest);
+}
+
+/* Links - subtle gold accent on hover */
+.md-typeset a:hover {
+  color: var(--md-accent-fg-color);
+}
+
+.md-nav__link:hover {
+  color: var(--md-accent-fg-color);
+}
+
+/* Content area - generous whitespace */
+.md-content {
+  max-width: 52rem;
+}
+
+.md-content__inner {
+  padding-top: 2rem;
+  padding-bottom: 3rem;
+}
+
+/* API documentation specific */
+.doc-heading {
+  border-bottom: 2px solid var(--md-accent-fg-color);
+  padding-bottom: 0.5rem;
+}
+
+.doc-signature {
+  font-size: 0.9em;
+  background: var(--md-code-bg-color);
+  padding: 1rem;
+  border-radius: 8px;
+  border-left: 3px solid var(--md-accent-fg-color);
+  overflow-x: auto;
+}
+
+.doc-object > .doc-children {
+  border-left: 2px solid var(--md-default-fg-color--lightest);
+  margin-left: 1rem;
+  padding-left: 1.5rem;
+}
+
+/* Parameters and returns styling */
+.doc-md-description dt {
+  font-weight: 600;
+  margin-top: 1rem;
+}
+
+/* Source code toggle */
+.md-typeset details.quote {
+  border-radius: 8px;
+}
+
+/* Search highlighting */
+.md-search-result mark {
+  background-color: var(--md-accent-fg-color--transparent);
+  color: inherit;
+}
+
+/* Footer */
+.md-footer {
+  margin-top: 3rem;
+}
+
+/* Tabs */
+.md-typeset .tabbed-labels > label {
+  font-weight: 500;
+  font-size: 0.82rem;
+}
+
+/* Copy button */
+.md-clipboard {
+  color: var(--md-default-fg-color--light);
+}
+
+.md-clipboard:hover {
+  color: var(--md-accent-fg-color);
+}
+
+/* TOC */
+.md-sidebar__scrollwrap {
+  scrollbar-width: thin;
+}
+
+.md-nav__link--active {
+  color: var(--md-accent-fg-color) !important;
+}
+
+/* Version warning banner (for future use) */
+.md-banner {
+  background-color: var(--md-accent-fg-color);
+  color: #000;
+}
+
+/* Mobile responsiveness */
+@media screen and (max-width: 76.1875em) {
+  .md-content {
+    max-width: 100%;
+  }
+}

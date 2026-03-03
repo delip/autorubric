@@ -1,0 +1,101 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "autorubric"
+dynamic = ["version"]
+description = "A Python library encapsulating best practices for rubric-based evaluation of LLM/VLM outputs using LLM-as-a-judge."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [
+    { name = "Delip Rao", email = "" }
+]
+keywords = ["rubrics", "grading", "eval", "llm", "evaluation", "autorubric", "llm judge", "llm as a judge"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Education",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Education",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "pydantic>=2.0.0",
+    "litellm>=1.50.0",
+    "tenacity>=8.2.0",
+    "diskcache>=5.6.0",
+    "python-dotenv>=1.0.0",
+    "pyyaml>=6.0.0",
+    "rich>=13.0.0",
+    "coolname>=2.0.0",
+    "numpy>=1.24.0",
+    "scipy>=1.10.0",
+    "scikit-learn>=1.3.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "ruff>=0.12.0",
+    "ty>=0.0.9",
+]
+docs = [
+    "mkdocs>=1.6.0",
+    "mkdocs-material>=9.5.0",
+    "mkdocstrings[python]>=0.27.0",
+    "pymdown-extensions>=10.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.hatch.version]
+path = "VERSION"
+pattern = "(?P<version>.+)"
+
+[tool.hatch.build.targets.sdist]
+exclude = [
+    "researcher_bench/",
+    "paper/",
+    "examples/",
+    "experiments/",
+    "tests/",
+    "docs/",
+    "dist/",
+    ".github/",
+    ".claude/",
+    "scripts/",
+    "mkdocs.yml",
+    "pytest.ini",
+    "uv.lock",
+    ".env*",
+    "*.pdf",
+    "*_notes.md",
+    "*_best_practices*.md",
+    "*_report.md",
+    "laj_vs_llm_rubrics.md",
+    "llm_config.example.yaml",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/autorubric"]
+
+[project.urls]
+Homepage = "https://github.com/delip/autorubric"
+Repository = "https://github.com/delip/autorubric"
+Issues = "https://github.com/delip/autorubric/issues"
+

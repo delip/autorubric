@@ -1,0 +1,155 @@
+site_name: AutoRubric
+site_url: https://autorubric.org/docs/
+site_description: A Python library for evaluating text outputs against weighted criteria using LLM-as-a-judge.
+site_author: Delip Rao
+repo_url: https://github.com/delip/autorubric
+repo_name: delip/autorubric
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: black
+      accent: amber
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: amber
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  font:
+    text: Inter
+    code: JetBrains Mono
+  features:
+    - navigation.instant
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - navigation.footer
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - toc.follow
+  icon:
+    repo: fontawesome/brands/github
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            show_source: true
+            show_root_heading: true
+            show_root_full_path: false
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            members_order: alphabetical
+            show_signature_annotations: true
+            separate_signature: true
+            signature_crossrefs: true
+            docstring_style: google
+            docstring_section_style: spacy
+            merge_init_into_class: true
+            show_if_no_docstring: false
+            inherited_members: false
+            filters:
+              - "!^_"
+              - "^__init__$"
+
+markdown_extensions:
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.details
+  - pymdownx.snippets
+  - pymdownx.mark
+  - pymdownx.keys
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      toc_depth: 3
+  - def_list
+  - footnotes
+
+extra_css:
+  - assets/stylesheets/extra.css
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/delip/autorubric
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/autorubric/
+
+nav:
+  - Home: index.md
+  - Quickstart: quickstart.md
+  - Cookbook:
+      - cookbook/index.md
+      - Foundation:
+          - Your First Evaluation: cookbook/first-evaluation.md
+          - Managing Datasets: cookbook/managing-datasets.md
+          - Working with Explanations: cookbook/explanations.md
+      - Reliability:
+          - Few-Shot Calibration: cookbook/few-shot-calibration.md
+          - Ensemble Judging: cookbook/ensemble-judging.md
+          - Handling CANNOT_ASSESS: cookbook/cannot-assess.md
+      - Advanced Evaluation:
+          - Multi-Choice Rubrics: cookbook/multi-choice-rubrics.md
+          - Extended Thinking: cookbook/extended-thinking.md
+          - Length Penalty: cookbook/length-penalty.md
+      - Validation & Production:
+          - Evaluating Rubric Quality: cookbook/rubric-evaluation.md
+          - Automated Rubric Improvement: cookbook/automated-rubric-improvement.md
+          - Judge Validation: cookbook/judge-validation.md
+          - Synthetic Ground Truth: cookbook/synthetic-ground-truth.md
+          - Batch Evaluation: cookbook/batch-evaluation.md
+      - Specialized:
+          - Per-Item Rubrics: cookbook/per-item-rubrics.md
+          - Cost Optimization: cookbook/cost-optimization.md
+          - Configuration Management: cookbook/configuration-management.md
+  - API Reference:
+      - api/index.md
+      - CANNOT_ASSESS Handling: api/cannot-assess.md
+      - Core Grading: api/core-grading.md
+      - Dataset: api/dataset.md
+      - Distribution Metrics: api/distribution-metrics.md
+      - Ensemble: api/ensemble.md
+      - Eval Runner: api/eval-runner.md
+      - Few-Shot: api/few-shot.md
+      - Graders: api/graders.md
+      - Length Penalty: api/length-penalty.md
+      - LLM Infrastructure: api/llm.md
+      - Meta-Rubric Evaluation: api/meta.md
+      - Meta-Rubric Improvement: api/meta-improvement.md
+      - Metrics: api/metrics.md
+      - Multi-Choice: api/multi-choice.md
+      - Utilities: api/utilities.md

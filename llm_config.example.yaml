@@ -1,0 +1,67 @@
+# LLM Configuration Examples for AutoRubric
+# Copy and customize for your use case
+
+# ============================================================================
+# OpenAI Configuration
+# ============================================================================
+# model: openai/gpt-5.2
+# temperature: 0.0
+# max_tokens: 1024
+# cache_enabled: true
+# cache_ttl: 3600  # 1 hour
+# seed: 42  # For reproducibility
+
+# ============================================================================
+# Anthropic Claude Configuration
+# ============================================================================
+# model: anthropic/claude-sonnet-4-5-20250929
+# temperature: 0.0
+# max_tokens: 4096
+# prompt_caching: true  # Enable prompt caching for cost savings
+
+# ============================================================================
+# Thinking/Reasoning (works across providers)
+# ============================================================================
+# model: anthropic/claude-sonnet-4-5-20250929
+# thinking: high  # "low", "medium", "high", or token budget (e.g., 32000)
+# max_tokens: 16000
+# prompt_caching: true
+
+# model: openai/responses/gpt-5-mini
+# thinking: medium  # Uses reasoning_effort parameter
+
+# model: gemini/gemini-2.5-pro
+# thinking: 20000  # Explicit token budget
+
+# ============================================================================
+# Google Gemini Configuration
+# ============================================================================
+# model: gemini/gemini-2.5-flash
+# temperature: 0.0
+# max_tokens: 2048
+
+# ============================================================================
+# Local Ollama Configuration
+# ============================================================================
+# model: ollama/qwen3:14b
+# temperature: 0.0
+# cache_enabled: true
+# cache_dir: .dev_cache
+
+# ============================================================================
+# Azure OpenAI Configuration
+# ============================================================================
+# model: azure/your-deployment-name
+# temperature: 0.0
+# api_base: https://your-resource.openai.azure.com/
+
+# ============================================================================
+# Development Configuration (with caching)
+# ============================================================================
+model: openai/gpt-5.2-mini
+temperature: 0.0
+cache_enabled: true
+cache_dir: .autorubric_cache
+cache_ttl: 3600
+max_retries: 3
+timeout: 60.0
