@@ -278,6 +278,7 @@ def _extract_ground_truth_from_report(
     Raises:
         ValueError: If report is missing or malformed.
     """
+    from autorubric.metrics._helpers import _extract_raw_verdicts
     from autorubric.types import CriterionVerdict
 
     if report.report is None:
@@ -292,34 +293,19 @@ def _extract_ground_truth_from_report(
 
     for i, cr in enumerate(report.report):
         criterion = criteria[i]
+        binary_v, mc_v = _extract_raw_verdicts(cr)
 
         if criterion.is_binary:
-            # Binary criterion: extract CriterionVerdict
-            if hasattr(cr, "final_verdict") and cr.final_verdict is not None:
-                # EnsembleCriterionReport
-                ground_truth.append(cr.final_verdict)
-            elif hasattr(cr, "verdict") and cr.verdict is not None:
-                # CriterionReport
-                ground_truth.append(cr.verdict)
+            if binary_v is not None:
+                ground_truth.append(binary_v)
             else:
                 raise ValueError(
                     f"Could not extract binary verdict for criterion {i} "
                     f"({criterion.name or 'unnamed'})"
                 )
         else:
-            # Multi-choice criterion: extract label string (not index)
-            if (
-                hasattr(cr, "final_multi_choice_verdict")
-                and cr.final_multi_choice_verdict is not None
-            ):
-                # EnsembleCriterionReport
-                ground_truth.append(cr.final_multi_choice_verdict.selected_label)
-            elif (
-                hasattr(cr, "multi_choice_verdict")
-                and cr.multi_choice_verdict is not None
-            ):
-                # CriterionReport
-                ground_truth.append(cr.multi_choice_verdict.selected_label)
+            if mc_v is not None:
+                ground_truth.append(mc_v.selected_label)
             else:
                 raise ValueError(
                     f"Could not extract multi-choice verdict for criterion {i} "

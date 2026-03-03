@@ -20,6 +20,22 @@ if TYPE_CHECKING:
     from ..rubric import Rubric
 
 
+def _extract_raw_verdicts(cr) -> tuple:
+    """Extract raw verdict and multi-choice verdict from a criterion report.
+
+    Handles both CriterionReport (verdict, multi_choice_verdict) and
+    EnsembleCriterionReport (final_verdict, final_multi_choice_verdict).
+
+    Returns:
+        (binary_verdict, multi_choice_verdict) — either may be None.
+    """
+    if hasattr(cr, "final_verdict"):
+        return cr.final_verdict, getattr(cr, "final_multi_choice_verdict", None)
+    if hasattr(cr, "verdict"):
+        return cr.verdict, getattr(cr, "multi_choice_verdict", None)
+    return None, None
+
+
 def extract_verdicts_from_report(
     report: EvaluationReport | EnsembleEvaluationReport,
     num_criteria: int,
@@ -39,16 +55,10 @@ def extract_verdicts_from_report(
     verdicts = []
     for cr in report.report:
         if isinstance(cr, dict):
-            # Handle dict case (shouldn't happen but defensive)
             verdicts.append(cr.get("verdict", CriterionVerdict.UNMET))
-        elif hasattr(cr, "final_verdict"):
-            # EnsembleCriterionReport
-            verdicts.append(cr.final_verdict)
-        elif hasattr(cr, "verdict"):
-            # CriterionReport
-            verdicts.append(cr.verdict)
         else:
-            verdicts.append(CriterionVerdict.UNMET)
+            binary_v, _ = _extract_raw_verdicts(cr)
+            verdicts.append(binary_v if binary_v is not None else CriterionVerdict.UNMET)
 
     return verdicts
 
@@ -247,7 +257,6 @@ def extract_all_verdicts_from_report(
 
     for cr in report.report:
         if isinstance(cr, dict):
-            # Handle dict case (shouldn't happen but defensive)
             if "verdict" in cr:
                 verdicts.append(cr.get("verdict", CriterionVerdict.UNMET))
             elif "multi_choice_verdict" in cr:
@@ -258,24 +267,14 @@ def extract_all_verdicts_from_report(
                     verdicts.append(None)
             else:
                 verdicts.append(None)
-        elif hasattr(cr, "final_verdict"):
-            # EnsembleCriterionReport - check for multi-choice first
-            if hasattr(cr, "final_multi_choice_verdict") and cr.final_multi_choice_verdict is not None:
-                verdicts.append(cr.final_multi_choice_verdict.selected_index)
-            elif cr.final_verdict is not None:
-                verdicts.append(cr.final_verdict)
-            else:
-                verdicts.append(None)
-        elif hasattr(cr, "verdict"):
-            # CriterionReport - check for multi-choice first
-            if hasattr(cr, "multi_choice_verdict") and cr.multi_choice_verdict is not None:
-                verdicts.append(cr.multi_choice_verdict.selected_index)
-            elif cr.verdict is not None:
-                verdicts.append(cr.verdict)
-            else:
-                verdicts.append(None)
         else:
-            verdicts.append(None)
+            binary_v, mc_v = _extract_raw_verdicts(cr)
+            if mc_v is not None:
+                verdicts.append(mc_v.selected_index)
+            elif binary_v is not None:
+                verdicts.append(binary_v)
+            else:
+                verdicts.append(None)
 
     return verdicts
 

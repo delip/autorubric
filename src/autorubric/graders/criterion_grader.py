@@ -323,6 +323,56 @@ class CriterionGrader(Grader):
                 for item in all_items[:n_examples]
             ]
 
+    def _balanced_pick(
+        self,
+        groups: dict,
+        n_examples: int,
+        rng: random.Random,
+        transform,
+        identity,
+    ) -> list:
+        """Select items with balanced distribution across non-empty groups.
+
+        Divides slots evenly, assigns remainder to the first groups, then
+        fills any remaining slots from unused items across all groups.
+
+        Args:
+            groups: Mapping from group key to list of items.
+            n_examples: Total number of items to select.
+            rng: Random instance for shuffling.
+            transform: Convert an item to the output type.
+            identity: Extract a hashable dedup key from an item.
+        """
+        results = []
+        available = [(k, v) for k, v in groups.items() if v]
+        if not available:
+            return results
+
+        base_per_group = n_examples // len(available)
+        remainder = n_examples % len(available)
+
+        used_ids: set = set()
+        for i, (_key, items) in enumerate(available):
+            pool = items.copy()
+            rng.shuffle(pool)
+            count = min(base_per_group + (1 if i < remainder else 0), len(pool))
+            for item in pool[:count]:
+                results.append(transform(item))
+                used_ids.add(identity(item))
+
+        if len(results) < n_examples:
+            remaining = [
+                item
+                for _k, items in groups.items()
+                for item in items
+                if identity(item) not in used_ids
+            ]
+            rng.shuffle(remaining)
+            for item in remaining[: n_examples - len(results)]:
+                results.append(transform(item))
+
+        return results
+
     def _balanced_selection(
         self,
         verdict_groups: dict[CriterionVerdict, list],
@@ -331,47 +381,17 @@ class CriterionGrader(Grader):
         rng: random.Random,
     ) -> list[FewShotExample]:
         """Select examples with balanced verdict distribution."""
-        examples: list[FewShotExample] = []
-        available_verdicts = [v for v, items in verdict_groups.items() if items]
-
-        base_per_verdict = n_examples // len(available_verdicts)
-        remainder = n_examples % len(available_verdicts)
-
-        for i, verdict in enumerate(available_verdicts):
-            items = verdict_groups[verdict].copy()
-            rng.shuffle(items)
-            count = base_per_verdict + (1 if i < remainder else 0)
-            count = min(count, len(items))
-
-            for item in items[:count]:
-                examples.append(
-                    FewShotExample(
-                        submission=item.submission,
-                        verdict=item.ground_truth[criterion_idx],  # type: ignore
-                        reason=None,
-                    )
-                )
-
-        # Fill remaining slots if some groups were too small
-        if len(examples) < n_examples:
-            used_submissions = {e.submission for e in examples}
-            all_remaining = [
-                item
-                for items in verdict_groups.values()
-                for item in items
-                if item.submission not in used_submissions
-            ]
-            rng.shuffle(all_remaining)
-            for item in all_remaining[: n_examples - len(examples)]:
-                examples.append(
-                    FewShotExample(
-                        submission=item.submission,
-                        verdict=item.ground_truth[criterion_idx],  # type: ignore
-                        reason=None,
-                    )
-                )
-
-        return examples
+        return self._balanced_pick(
+            groups=verdict_groups,
+            n_examples=n_examples,
+            rng=rng,
+            transform=lambda item: FewShotExample(
+                submission=item.submission,
+                verdict=item.ground_truth[criterion_idx],  # type: ignore
+                reason=None,
+            ),
+            identity=lambda item: item.submission,
+        )
 
     def _label_to_option_index(self, criterion_idx: int, label: str) -> int | None:
         """Map a ground truth label string to a 0-based option index."""
@@ -380,13 +400,10 @@ class CriterionGrader(Grader):
         criteria = self._training_data.rubric.rubric
         if criterion_idx >= len(criteria):
             return None
-        options = criteria[criterion_idx].options
-        if options is None:
+        try:
+            return criteria[criterion_idx].find_option_by_label(label)
+        except ValueError:
             return None
-        for i, opt in enumerate(options):
-            if opt.label == label:
-                return i
-        return None
 
     def _select_multi_choice_examples(
         self, criterion_idx: int
@@ -421,32 +438,14 @@ class CriterionGrader(Grader):
         n_examples = config.n_examples
 
         if config.balance_verdicts and len(available_options) > 1:
-            examples: list[tuple[str, int, str | None]] = []
-            base_per_option = n_examples // len(available_options)
-            remainder = n_examples % len(available_options)
-
-            for i, opt_idx in enumerate(sorted(available_options)):
-                pairs = option_groups[opt_idx].copy()
-                rng.shuffle(pairs)
-                count = base_per_option + (1 if i < remainder else 0)
-                count = min(count, len(pairs))
-                for item, resolved_idx in pairs[:count]:
-                    examples.append((item.submission, resolved_idx, None))
-
-            # Fill remaining slots
-            if len(examples) < n_examples:
-                used = {e[0] for e in examples}
-                remaining = [
-                    (item, resolved_idx)
-                    for pairs in option_groups.values()
-                    for item, resolved_idx in pairs
-                    if item.submission not in used
-                ]
-                rng.shuffle(remaining)
-                for item, resolved_idx in remaining[: n_examples - len(examples)]:
-                    examples.append((item.submission, resolved_idx, None))
-
-            return examples
+            sorted_groups = {k: option_groups[k] for k in sorted(available_options)}
+            return self._balanced_pick(
+                groups=sorted_groups,
+                n_examples=n_examples,
+                rng=rng,
+                transform=lambda pair: (pair[0].submission, pair[1], None),
+                identity=lambda pair: pair[0].submission,
+            )
         else:
             all_pairs = [(item, resolved_idx) for pairs in option_groups.values() for item, resolved_idx in pairs]
             rng.shuffle(all_pairs)
@@ -725,11 +724,11 @@ class CriterionGrader(Grader):
             self._judge_single_criterion(judge, criterion, idx, to_grade, query, reference_submission)
             for idx, criterion in enumerate(rubric)
         ]
-        results = list(await asyncio.gather(*tasks))
+        results = await asyncio.gather(*tasks)
         return JudgeCriterionResults(
             judge_id=judge.judge_id,
             weight=judge.weight,
-            criterion_results=results,
+            criterion_results=list(results),
         )
 
     # =========================================================================

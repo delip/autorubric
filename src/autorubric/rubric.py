@@ -243,6 +243,29 @@ class Rubric:
                 f"got {type(source).__name__}"
             )
 
+    @staticmethod
+    def _apply_cannot_assess_strategy(
+        strategy: CannotAssessStrategy,
+        weight: float,
+        partial_credit: float,
+    ) -> tuple[float, float, bool]:
+        """Apply CANNOT_ASSESS/NA strategy for a single criterion.
+
+        Returns:
+            (score_contribution, skip_positive_weight_adjustment, should_skip_criterion)
+        """
+        if strategy == CannotAssessStrategy.SKIP:
+            return 0.0, max(0.0, weight), True
+        elif strategy == CannotAssessStrategy.FAIL:
+            # Worst case: 0 for positive weight, MET (subtract) for negative
+            score = weight if weight < 0 else 0.0
+            return score, 0.0, False
+        elif strategy == CannotAssessStrategy.PARTIAL:
+            score = partial_credit * weight if weight > 0 else 0.0
+            return score, 0.0, False
+        else:  # ZERO
+            return 0.0, 0.0, False
+
     def compute_score(
         self,
         verdicts: list[CriterionVerdict | str],
@@ -290,16 +313,13 @@ class Rubric:
                 idx = criterion.find_option_by_label(verdict)
                 opt = criterion.options[idx]  # type: ignore[index]
                 if opt.na:
-                    # NA option — apply strategy
-                    if cannot_assess_strategy == CannotAssessStrategy.SKIP:
-                        skip_positive_weight += max(0.0, weight)
+                    score, skip_adj, should_skip = self._apply_cannot_assess_strategy(
+                        cannot_assess_strategy, weight, partial_credit
+                    )
+                    weighted_sum += score
+                    skip_positive_weight += skip_adj
+                    if should_skip:
                         continue
-                    elif cannot_assess_strategy == CannotAssessStrategy.FAIL:
-                        weighted_sum += 0.0  # worst case
-                    elif cannot_assess_strategy == CannotAssessStrategy.PARTIAL:
-                        if weight > 0:
-                            weighted_sum += partial_credit * weight
-                    # ZERO: 0 contribution (default fall-through)
                 else:
                     weighted_sum += opt.value * weight
                 if weight > 0:
@@ -318,18 +338,13 @@ class Rubric:
                         ) from None
 
                 if verdict == CriterionVerdict.CANNOT_ASSESS:
-                    if cannot_assess_strategy == CannotAssessStrategy.SKIP:
-                        skip_positive_weight += max(0.0, weight)
+                    score, skip_adj, should_skip = self._apply_cannot_assess_strategy(
+                        cannot_assess_strategy, weight, partial_credit
+                    )
+                    weighted_sum += score
+                    skip_positive_weight += skip_adj
+                    if should_skip:
                         continue
-                    elif cannot_assess_strategy == CannotAssessStrategy.FAIL:
-                        if weight > 0:
-                            pass  # UNMET → 0 contribution
-                        else:
-                            weighted_sum += weight  # MET for negative
-                    elif cannot_assess_strategy == CannotAssessStrategy.PARTIAL:
-                        if weight > 0:
-                            weighted_sum += partial_credit * weight
-                    # ZERO: 0 contribution
                 elif verdict == CriterionVerdict.MET:
                     weighted_sum += weight
 

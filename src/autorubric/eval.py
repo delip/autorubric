@@ -75,9 +75,9 @@ def _compute_dataset_hash(dataset: RubricDataset) -> str:
     except ValueError:
         # Per-item rubrics — use sum of all item rubric lengths as a stable fingerprint
         num_criteria = sum(
-            len(dataset.get_item_rubric(i).rubric)
+            len(r.rubric)
             for i in range(len(dataset))
-            if dataset.get_item_rubric(i) is not None
+            if (r := dataset.get_item_rubric(i)) is not None
         )
     content = json.dumps(
         {
