@@ -1,4 +1,4 @@
-# Meta-Rubric Improvement
+# Rubric Improvement
 
 Iterative rubric improvement engine that optimizes for meta-rubric quality (validity) and validation reliability.
 
@@ -107,6 +107,51 @@ result = await improve_rubric(
 )
 ```
 
+## Improvement Strategies
+
+The improvement loop supports two strategies for guiding rubric revision:
+
+| Strategy | Description | Metric |
+|----------|-------------|--------|
+| **`meta_rubric`** (default) | Revise based on meta-rubric quality issues | Meta-rubric quality score |
+| **`held_out`** | Revise based on per-criterion grading errors on held-out data | Mean per-criterion accuracy |
+
+### Held-Out Strategy
+
+The `held_out` strategy optimizes the rubric against grading errors on held-out data. Instead of using a meta-rubric to identify structural issues, it grades the validation items, compares per-criterion verdicts against ground truth, and uses the resulting error analysis (false positives, false negatives, disagreement exemplars) to guide revision. This requires `validation_data` with `ground_truth` verdicts.
+
+```python
+result = await improve_rubric(
+    rubric, prompt,
+    eval_llm=LLMConfig(model="openai/gpt-4.1"),
+    revision_llm=LLMConfig(model="openai/gpt-4.1"),
+    validation_data=dataset,  # must have ground_truth
+    strategy="held_out",
+)
+```
+
+Strategies can be chained — for example, first optimize against held-out errors, then polish with meta-rubric evaluation:
+
+```python
+# Phase 1: fix grading errors
+result1 = await improve_rubric(
+    rubric, prompt,
+    eval_llm=eval_llm, revision_llm=revision_llm,
+    validation_data=dataset,
+    strategy="held_out",
+    max_iterations=5,
+)
+
+# Phase 2: polish with meta-rubric
+result2 = await improve_rubric(
+    result1.final_rubric, prompt,
+    eval_llm=eval_llm, revision_llm=revision_llm,
+    validation_data=dataset,
+    strategy="meta_rubric",
+    max_iterations=5,
+)
+```
+
 ## Artifact Persistence
 
 When `save_artifacts=True` and `artifacts_dir` is set, the improvement loop writes:
@@ -166,7 +211,7 @@ Full-control runner class following the `EvalRunner` pattern.
 
 ## ImprovementConfig
 
-Configuration for the rubric improvement process.
+Configuration for the rubric improvement process. The `strategy` field selects the revision approach: `"meta_rubric"` (default) or `"held_out"`.
 
 ::: autorubric.meta.ImprovementConfig
     options:
@@ -202,6 +247,39 @@ Result from a single improvement iteration.
 A single issue identified in a rubric by meta-rubric evaluation.
 
 ::: autorubric.meta.IssueDetail
+    options:
+      show_source: false
+      members_order: source
+
+---
+
+## CriterionExemplar
+
+A single grading case for a criterion, capturing the LLM verdict, ground-truth verdict, and whether they disagree.
+
+::: autorubric.meta.CriterionExemplar
+    options:
+      show_source: false
+      members_order: source
+
+---
+
+## CriterionErrorReport
+
+Per-criterion error analysis from held-out grading, including accuracy, false positive/negative rates, and exemplars.
+
+::: autorubric.meta.CriterionErrorReport
+    options:
+      show_source: false
+      members_order: source
+
+---
+
+## HeldOutValidationResult
+
+Result from held-out validation with per-criterion diagnostics and overall accuracy.
+
+::: autorubric.meta.HeldOutValidationResult
     options:
       show_source: false
       members_order: source
@@ -326,6 +404,46 @@ Compute expected scores from ground-truth verdicts and rubric weights.
 Check revision acceptance under the Pareto constraint.
 
 ::: autorubric.meta.pareto_accept
+    options:
+      show_source: false
+
+---
+
+### validate_held_out
+
+Grade held-out items and compare per-criterion verdicts against ground truth.
+
+::: autorubric.meta.validate_held_out
+    options:
+      show_source: false
+
+---
+
+### format_held_out_for_prompt
+
+Format held-out validation result into revision prompt text.
+
+::: autorubric.meta.format_held_out_for_prompt
+    options:
+      show_source: false
+
+---
+
+### validate_criteria_structure
+
+Post-revision check that criteria count and order were preserved.
+
+::: autorubric.meta.validate_criteria_structure
+    options:
+      show_source: false
+
+---
+
+### revise_rubric_held_out
+
+Revise a rubric using held-out-specific prompt templates.
+
+::: autorubric.meta.revise_rubric_held_out
     options:
       show_source: false
 

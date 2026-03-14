@@ -1,0 +1,130 @@
+{
+  "v1_skill": "Provide brief feedback on the text below.",
+  "gold_skill": "# Scientific Peer Review\n\n## Procedure\n\n1. **Summarize** the paper in 2-3 sentences covering contribution, methodology, and findings.\n2. **Evaluate methodology** --- assess study design, appropriateness for the research question, and specific limitations.\n3. **Assess statistics** --- check appropriateness of tests, sample size justification, and effect sizes.\n4. **List strengths** --- identify at least 2 specific strengths with references to the paper.\n5. **List weaknesses** --- identify at least 2 specific weaknesses with actionable suggestions.\n6. **Pose questions** --- ask 2-3 clarifying questions for the authors.\n7. **Recommend** --- state Accept, Minor Revision, Major Revision, or Reject with justification.\n\n## Formatting\n- Use section headers for each step.\n- Reference specific sections, figures, and quoted results.\n- Keep under 800 words.",
+  "iterations": [
+    {
+      "iteration": 0,
+      "skill": "Provide brief feedback on the text below.",
+      "mean_score": 0.458,
+      "pass_rates": {
+        "paper_summary": 0.0,
+        "methodology_assessment": 1.0,
+        "statistical_evaluation": 0.2,
+        "strengths_and_weaknesses": 1.0,
+        "constructive_tone": 0.6,
+        "structured_format": 0.0,
+        "specific_references": 0.4,
+        "concise_review": 1.0,
+        "clear_recommendation": 0.0,
+        "factual_misrepresentation": 0.4
+      },
+      "sample_reviews": [
+        {
+          "paper_id": "P1: Neuroscience fMRI study",
+          "review": "Overall, the research paper \"Prefrontal Cortex Activation Patterns During Risky Decision-Making: An fMRI Study\" presents a well-structured and clear analysis of brain activity patterns during decision-making under uncertainty. Here are some brief feedback points:\n\nStrengths:\n\n1. **Clear research question**: The paper addresses a specific research question, making the study focused and relevant to the field.\n2. **Effective methodology**: The use of fMRI, BART, and PPI analysis provides a robust m"
+        },
+        {
+          "paper_id": "P2: Diabetes drug RCT",
+          "review": "Here's a brief review of the research paper:\n\n**Strengths:**\n\n1. Clear and concise title and abstract, highlighting the main findings of the study.\n2. Well-structured introduction that sets up the importance of dual incretin agonists in treating type 2 diabetes.\n3. The study's design is well-described, including the randomization process and the use of a placebo-controlled trial.\n4. The results section clearly presents the key findings, including the primary and secondary endpoints.\n\n**Weaknesse"
+        },
+        {
+          "paper_id": "P3: UPF and CVD cohort study",
+          "review": "Here's a brief review of the research paper:\n\n**Strengths:**\n\n1. **Large sample size**: With 48,217 participants and 562,418 person-years of follow-up, the study has a high statistical power to detect associations.\n2. **Long-term follow-up**: The 12.3-year median follow-up period allows for the detection of incident CVD events and provides insights into the long-term effects of UPF consumption.\n3. **Validated dietary assessment tool**: The use of a validated 280-item semi-quantitative food frequ"
+        }
+      ],
+      "generation_cost": 0.0,
+      "grading_cost": 0.36957260000000003
+    },
+    {
+      "iteration": 1,
+      "skill": "Review the provided research paper according to the following structured procedure. Keep the total review under 800 words. Use only information explicitly stated in the text to avoid factual misrepresentation.\n\n### 1. Summary\nWrite exactly 2-3 sentences summarizing the paper\u2019s primary contribution, the methodology employed, and the key findings.\n\n### 2. Methodology\nEvaluate the study design and its appropriateness for the research question. Identify at least one specific limitation of the design. Reference specific sections or figure numbers.\n\n### 3. Statistics\nEvaluate the statistical analysis quality. You must explicitly address:\n- The appropriateness of the specific statistical tests used (e.g., ANOVA, Cox models, t-tests).\n- The adequacy of the sample size (n=) and statistical power.\n- The reported effect sizes (e.g., Cohen\u2019s d, Hazard Ratios, R-squared) and p-values.\n\n### 4. Strengths\nList at least 2 specific strengths. Reference concrete details such as quoted results, specific MNI coordinates, or precise numerical data from the text.\n\n### 5. Weaknesses\nList at least 2 specific weaknesses. For every weakness identified, provide a specific, actionable suggestion for how the authors can improve the manuscript or study. Reference specific sections or figures.\n\n### 6. Questions\nList any clarifying questions for the authors regarding their methods or data representation.\n\n### 7. Recommendation\nProvide a definitive recommendation: **Accept**, **Minor Revision**, **Major Revision**, or **Reject**. \nInclude a 2-3 sentence justification for this decision that directly links to your analysis of the paper\u2019s methodology and statistical rigor.\n\n**Formatting Constraints:**\n- Use the bolded headers above for each section.\n- Include specific references: quote results, cite sample sizes (n=), and mention Figure/Table numbers.\n- Avoid generic praise; every evaluative statement must be backed by a specific detail from the paper.",
+      "mean_score": 0.8869999999999999,
+      "pass_rates": {
+        "paper_summary": 0.9,
+        "methodology_assessment": 1.0,
+        "statistical_evaluation": 1.0,
+        "strengths_and_weaknesses": 1.0,
+        "constructive_tone": 0.9,
+        "structured_format": 0.9,
+        "specific_references": 1.0,
+        "concise_review": 1.0,
+        "clear_recommendation": 0.9,
+        "factual_misrepresentation": 0.5
+      },
+      "sample_reviews": [
+        {
+          "paper_id": "P1: Neuroscience fMRI study",
+          "review": "### 1. Summary\nThis fMRI study explores the neural basis of risky decision-making in 24 healthy adults using the Balloon Analogue Risk Task (BART). The primary contribution is the identification of a dynamic interplay between the dorsolateral prefrontal cortex (dlPFC) and ventromedial prefrontal cortex (vmPFC) during risky choices. Key findings include increased dlPFC activation, reduced vmPFC activation, and increased negative functional connectivity between the two regions during risky decisio"
+        },
+        {
+          "paper_id": "P2: Diabetes drug RCT",
+          "review": "### 1. Summary\nDualutide, a novel dual GLP-1/GIP receptor agonist, demonstrated significant efficacy in improving glycemic control and reducing body weight in adults with type 2 diabetes in a 52-week phase III randomized controlled trial. The study showed that dualutide reduced HbA1c levels by 1.8% compared to a 0.3% reduction with placebo. The safety profile of dualutide was consistent with the incretin class.\n\n### 2. Methodology\nThe study design was a 52-week, multicenter, phase III randomized"
+        },
+        {
+          "paper_id": "P3: UPF and CVD cohort study",
+          "review": "### 1. Summary\nThis prospective cohort study examined the relationship between ultra-processed food (UPF) consumption and incident cardiovascular disease (CVD) in a large European cohort. The study found a positive association between UPF intake and CVD risk, with a 24% higher risk in the highest quartile of UPF consumption compared to the lowest quartile. The association remained after adjusting for various confounding variables.\n\n### 2. Methodology\nThe study design is a prospective cohort stud"
+        }
+      ],
+      "generation_cost": 0.0,
+      "grading_cost": 0.32881205
+    },
+    {
+      "iteration": 2,
+      "skill": "Review the provided research paper according to the following procedure. Maintain a total word count under 800 words. \n\n**Constraint for Factual Accuracy:** For every claim, result, or figure reference, you must perform a \"Source Check\": locate the exact text in the paper and verify the data matches before writing. Do not hallucinate findings, infer results not explicitly stated, or generalize specific findings to broader populations unless the authors do so.\n\n### 1. Summary\nWrite exactly 2-3 sentences. Sentence 1: state the primary contribution. Sentence 2: summarize the methodology. Sentence 3: state the primary result.\n\n### 2. Methodology\nEvaluate the study design's appropriateness. Reference specific section names (e.g., \"Section 2.2\") or Figure numbers. Identify at least one specific design limitation found in the text.\n\n### 3. Statistics\nExplicitly address the following using only values found in the paper:\n- **Test Names:** List the specific tests used (e.g., ANOVA, Cox models).\n- **Sample Size:** Report the exact \"n=\" for the primary analysis.\n- **Metrics:** Report specific effect sizes (e.g., Cohen\u2019s d, HR, R-squared) and p-values exactly as they appear in the text.\n\n### 4. Strengths\nList at least 2 strengths. Each must include a direct quote of a result or a specific numerical value/coordinate from the paper to prove existence.\n\n### 5. Weaknesses\nList at least 2 weaknesses. For each, provide one actionable suggestion for improvement. Reference specific figures or sections where the weakness originates.\n\n### 6. Questions\nList 2-3 clarifying questions for the authors regarding their methods or data representation.\n\n### 7. Recommendation\nProvide a definitive recommendation: **Accept**, **Minor Revision**, **Major Revision**, or **Reject**.\nInclude a 2-3 sentence justification that summarizes the methodology and statistical rigor based on the specific evidence cited in sections 2 and 3.\n\n**Formatting Constraints:**\n- Use the bolded headers above.\n- Every section must cite a specific location (Section X.X), Figure/Table number, or numerical result.\n- If a value (like an effect size) is missing from the paper, state \"Not reported\" rather than estimating.\n- Do not attribute findings to the authors that are only mentioned in their \"Introduction\" or \"References\" sections as prior work.",
+      "mean_score": 0.885,
+      "pass_rates": {
+        "paper_summary": 0.9,
+        "methodology_assessment": 1.0,
+        "statistical_evaluation": 0.9,
+        "strengths_and_weaknesses": 1.0,
+        "constructive_tone": 1.0,
+        "structured_format": 1.0,
+        "specific_references": 1.0,
+        "concise_review": 1.0,
+        "clear_recommendation": 1.0,
+        "factual_misrepresentation": 0.6
+      },
+      "sample_reviews": [
+        {
+          "paper_id": "P1: Neuroscience fMRI study",
+          "review": "### 1. Summary\nThe primary contribution of this study is the investigation of the prefrontal cortex (PFC) activation patterns during risky decision-making. The methodology involved using functional magnetic resonance imaging (fMRI) to scan 24 healthy adults while they completed the Balloon Analogue Risk Task (BART). The primary result is that risky decisions are associated with increased activation in the bilateral dorsolateral PFC (dlPFC) and reduced activation in the ventromedial PFC (vmPFC).\n"
+        },
+        {
+          "paper_id": "P2: Diabetes drug RCT",
+          "review": "### 1. Summary\nDualutide, a novel dual GLP-1/GIP receptor agonist, was studied in a 52-week phase III randomized controlled trial in adults with type 2 diabetes (T2D). Participants were randomized 2:1 to receive dualutide 15mg weekly (n=561) or placebo (n=281). The primary endpoint was the change in HbA1c from baseline at week 52, which showed a significant reduction of -1.8% with dualutide compared to -0.3% with placebo. Key secondary endpoints, including body weight change and fasting plasma g"
+        },
+        {
+          "paper_id": "P3: UPF and CVD cohort study",
+          "review": "**1. Summary**\n\nThe primary contribution of this study is the prospective analysis of the relationship between ultra-processed food (UPF) consumption and incident cardiovascular disease (CVD) risk in a large European cohort. The methodology involved analyzing data from 48,217 adults without prevalent CVD at enrollment, using a validated 280-item semi-quantitative food frequency questionnaire (FFQ) to assess dietary intake. The primary result is that higher UPF consumption is independently associ"
+        }
+      ],
+      "generation_cost": 0.0,
+      "grading_cost": 0.3903468
+    }
+  ],
+  "gold_comparison": {
+    "mean_score": 0.828,
+    "pass_rates": {
+      "paper_summary": 0.9,
+      "methodology_assessment": 1.0,
+      "statistical_evaluation": 0.7,
+      "strengths_and_weaknesses": 1.0,
+      "constructive_tone": 0.5,
+      "structured_format": 1.0,
+      "specific_references": 0.9,
+      "concise_review": 1.0,
+      "clear_recommendation": 1.0,
+      "factual_misrepresentation": 0.4
+    }
+  },
+  "convergence_reason": "score_plateau (delta=-0.002)",
+  "total_cost": 1.4427004,
+  "elapsed_seconds": 417.8207130432129,
+  "config": {
+    "agent_model": "groq/llama-3.1-8b-instant",
+    "eval_model": "gemini/gemini-3-flash-preview",
+    "revision_model": "gemini/gemini-3-flash-preview",
+    "max_iterations": 5,
+    "num_papers": 10
+  }
+}

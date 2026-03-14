@@ -158,4 +158,4 @@ Load the in-context meta-rubric.
 
 ## Rubric Improvement
 
-For the iterative rubric improvement API (`improve_rubric`, `ImprovementRunner`, building blocks, etc.), see the dedicated **[Meta-Rubric Improvement](meta-improvement.md)** page.
+For the iterative rubric improvement API (`improve_rubric`, `ImprovementRunner`, building blocks, etc.), see the dedicated **[Rubric Improvement](meta-improvement.md)** page.

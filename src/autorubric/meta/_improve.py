@@ -98,13 +98,49 @@ class IssueDetail:
 
 
 @dataclass
+class CriterionExemplar:
+    """A single grading case for a criterion."""
+
+    item_index: int
+    submission_snippet: str
+    llm_verdict: CriterionVerdict
+    ground_truth_verdict: CriterionVerdict
+    llm_reason: str
+    is_disagreement: bool
+
+
+@dataclass
+class CriterionErrorReport:
+    """Per-criterion error analysis from held-out grading."""
+
+    criterion_index: int
+    criterion_name: str
+    n_samples: int
+    accuracy: float
+    false_positive_rate: float
+    false_negative_rate: float
+    disagreement_exemplars: list[CriterionExemplar]
+    agreement_exemplars: list[CriterionExemplar]
+
+
+@dataclass
+class HeldOutValidationResult:
+    """Result from held-out validation with per-criterion diagnostics."""
+
+    mean_accuracy: float
+    per_criterion: list[CriterionErrorReport]
+    total_cost: float | None
+    item_reports: list[EnsembleEvaluationReport]
+
+
+@dataclass
 class IterationResult:
     """Result from a single improvement iteration.
 
     Attributes:
         iteration: Zero-based iteration number.
         rubric: The rubric at this iteration.
-        quality_score: Meta-rubric quality score (0-1).
+        quality_score: Meta-rubric quality score (0-1), or mean accuracy for held_out.
         agreement: Mean inter-judge agreement (0-1), or None if not tested.
         per_criterion_agreement: Per-criterion agreement scores, or None.
         issues: List of issues identified in this iteration.
@@ -112,9 +148,11 @@ class IterationResult:
         issues_introduced: Names of issues not in previous iteration but present now.
         accepted: Whether this revision was accepted (Pareto check passed).
         rejection_reason: Why the revision was rejected, if applicable.
-        quality_report: Full meta-rubric evaluation report.
+        quality_report: Full meta-rubric evaluation report. None in held_out mode.
         token_usage: Token usage for this iteration.
         completion_cost: Cost in USD for this iteration.
+        held_out_diagnostics: Per-criterion error analysis from held-out validation.
+            Populated only in held_out mode.
     """
 
     iteration: int
@@ -127,9 +165,10 @@ class IterationResult:
     issues_introduced: list[str]
     accepted: bool
     rejection_reason: str | None
-    quality_report: EnsembleEvaluationReport
+    quality_report: EnsembleEvaluationReport | None
     token_usage: TokenUsage | None
     completion_cost: float | None
+    held_out_diagnostics: HeldOutValidationResult | None = None
 
 
 @dataclass
@@ -167,15 +206,21 @@ class ImprovementConfig:
               meta-rubric evaluation uses the first judge's config).
         revision_llm: LLM configuration for rubric revision.
         mode: Evaluation mode - "standalone" or "in_context".
+        strategy: Improvement strategy - "meta_rubric" (default) optimizes
+            against structural meta-rubric quality; "held_out" optimizes
+            against grading errors on held-out data with ground truth.
         validation_data: Optional dataset for validation. When items have
             ``ground_truth``, uses ground-truth mode (Spearman ρ). When items
             lack ``ground_truth``, requires ``eval_llm`` as ``list[JudgeSpec]``
-            for multi-judge agreement mode.
+            for multi-judge agreement mode. Required for ``held_out`` strategy.
         max_iterations: Maximum number of improvement iterations.
         min_quality_score: Stop if quality score reaches this threshold.
         min_agreement: Stop if agreement/correlation reaches this threshold.
         score_plateau_threshold: Minimum score improvement to avoid plateau detection.
         plateau_patience: Number of iterations with no improvement before stopping.
+        max_exemplars_per_criterion: Max disagreement exemplars per criterion
+            in the held-out revision prompt.
+        held_out_min_accuracy: Convergence threshold for held_out strategy.
         history_window: Number of recent iterations to include in revision prompt.
         reject_agreement_regression: Whether to reject revisions that decrease
             validation reliability.
@@ -191,14 +236,17 @@ class ImprovementConfig:
         revision_system_prompt: Custom system prompt for rubric revision LLM calls.
             Falls back to the default from prompts.py if None.
         revision_user_prompt_template: Custom user prompt template for revision.
-            Must contain {task_prompt}, {original_criteria}, {issues_text},
-            {validation_text}, {history_text} placeholders.
+            For meta_rubric: must contain {task_prompt}, {original_criteria},
+            {issues_text}, {validation_text}, {history_text} placeholders.
+            For held_out: must contain {task_prompt}, {original_criteria},
+            {diagnostics_text}, {history_text}, {num_criteria} placeholders.
             Falls back to the default from prompts.py if None.
     """
 
     eval_llm: LLMConfig | list[JudgeSpec]
     revision_llm: LLMConfig
     mode: Literal["standalone", "in_context"] = "in_context"
+    strategy: Literal["meta_rubric", "held_out"] = "meta_rubric"
 
     validation_data: RubricDataset | None = None
 
@@ -207,6 +255,8 @@ class ImprovementConfig:
     min_agreement: float = 0.85
     score_plateau_threshold: float = 0.02
     plateau_patience: int = 2
+    max_exemplars_per_criterion: int = 3
+    held_out_min_accuracy: float = 0.90
 
     history_window: int = 3
     reject_agreement_regression: bool = True
@@ -396,6 +446,68 @@ class ImprovementProgressDisplay:
             border_style="blue",
         )
         self._console.print(panel)
+
+    def log_held_out_iteration(self, result: IterationResult) -> None:
+        """Print a one-line iteration summary for held-out mode."""
+        parts = [f"  Iter {result.iteration}:"]
+        parts.append(f"accuracy={result.quality_score:.1%}")
+        if result.held_out_diagnostics:
+            worst = min(
+                result.held_out_diagnostics.per_criterion,
+                key=lambda c: c.accuracy,
+                default=None,
+            )
+            if worst:
+                parts.append(
+                    f"worst={worst.criterion_name}({worst.accuracy:.0%})"
+                )
+        self._console.print(" ".join(parts))
+
+    def print_held_out_summary(
+        self,
+        iterations: list["IterationResult"],
+        convergence_reason: str,
+        total_cost: float,
+        artifacts_dir: "Path | None",
+    ) -> None:
+        """Print a summary table for held-out improvement."""
+        table = Table(title="Held-Out Improvement Summary", show_lines=False)
+        table.add_column("Iter", justify="right", style="cyan", no_wrap=True)
+        table.add_column("Accuracy", justify="right")
+        table.add_column("Worst Criterion", justify="left")
+
+        for it in iterations:
+            worst_str = "N/A"
+            if it.held_out_diagnostics:
+                worst = min(
+                    it.held_out_diagnostics.per_criterion,
+                    key=lambda c: c.accuracy,
+                    default=None,
+                )
+                if worst:
+                    worst_str = f"{worst.criterion_name} ({worst.accuracy:.0%})"
+            table.add_row(
+                str(it.iteration),
+                f"{it.quality_score:.1%}",
+                worst_str,
+            )
+
+        self._console.print()
+        self._console.print(table)
+
+        if len(iterations) >= 2:
+            initial = iterations[0]
+            final = iterations[-1]
+            self._console.print(
+                f"\n  Accuracy: {initial.quality_score:.1%} -> "
+                f"{final.quality_score:.1%}"
+            )
+
+        self._console.print(f"  Convergence: {convergence_reason}")
+        if total_cost > 0:
+            self._console.print(f"  Total cost: ${total_cost:.4f}")
+        if artifacts_dir:
+            self._console.print(f"  Artifacts: {artifacts_dir}")
 
     def log_rubric_diff(
         self,
@@ -1105,6 +1217,380 @@ async def revise_rubric(
     return Rubric.from_dict(criteria_data), revision_cost
 
 
+async def validate_held_out(
+    rubric: Rubric,
+    validation_data: RubricDataset,
+    grader: CriterionGrader,
+    task_prompt: str | None = None,
+    *,
+    max_exemplars_per_criterion: int = 3,
+    on_item_complete: Callable[[], None] | None = None,
+    _capture: list | None = None,
+) -> HeldOutValidationResult:
+    """Grade held-out items and compare per-criterion verdicts against ground truth.
+
+    Args:
+        rubric: Current rubric to evaluate.
+        validation_data: Dataset where all items have ``ground_truth``.
+        grader: Grader configured from ``eval_llm``.
+        task_prompt: Optional task prompt for grading context.
+        max_exemplars_per_criterion: Max disagreement exemplars per criterion.
+        on_item_complete: Callback invoked after each item is graded.
+        _capture: When provided, per-item results are appended for artifact persistence.
+
+    Returns:
+        HeldOutValidationResult with per-criterion error analysis.
+    """
+    from autorubric.metrics._helpers import extract_verdicts_from_report, filter_cannot_assess
+
+    num_criteria = len(rubric.rubric)
+    item_reports: list[EnsembleEvaluationReport] = []
+    total_cost: float = 0.0
+
+    # Per-criterion confusion tallies
+    tp = [0] * num_criteria
+    fp = [0] * num_criteria
+    tn = [0] * num_criteria
+    fn = [0] * num_criteria
+
+    # Collect exemplars per criterion
+    all_exemplars: list[list[CriterionExemplar]] = [[] for _ in range(num_criteria)]
+
+    for item_idx, item in enumerate(validation_data.items):
+        result = await rubric.grade(
+            to_grade=item.submission,
+            grader=grader,
+            query=task_prompt or validation_data.prompt,
+            reference_submission=(
+                item.reference_submission
+                or validation_data.reference_submission
+            ),
+        )
+        item_reports.append(result)
+        total_cost += result.completion_cost or 0.0
+
+        llm_verdicts = extract_verdicts_from_report(result, num_criteria)
+
+        gt_verdicts: list[CriterionVerdict] = []
+        for gt_val in item.ground_truth:  # type: ignore[union-attr]
+            if isinstance(gt_val, CriterionVerdict):
+                gt_verdicts.append(gt_val)
+            else:
+                gt_verdicts.append(CriterionVerdict(gt_val))
+
+        for c_idx in range(num_criteria):
+            filtered_llm, filtered_gt = filter_cannot_assess(
+                [llm_verdicts[c_idx]], [gt_verdicts[c_idx]]
+            )
+            if not filtered_llm:
+                continue
+
+            llm_v = filtered_llm[0]
+            gt_v = filtered_gt[0]
+            is_met_llm = llm_v == CriterionVerdict.MET
+            is_met_gt = gt_v == CriterionVerdict.MET
+
+            if is_met_llm and is_met_gt:
+                tp[c_idx] += 1
+            elif is_met_llm and not is_met_gt:
+                fp[c_idx] += 1
+            elif not is_met_llm and not is_met_gt:
+                tn[c_idx] += 1
+            else:
+                fn[c_idx] += 1
+
+            # Get reason from the report
+            llm_reason = ""
+            if result.report and c_idx < len(result.report):
+                llm_reason = result.report[c_idx].final_reason or ""
+
+            exemplar = CriterionExemplar(
+                item_index=item_idx,
+                submission_snippet=item.submission[:200],
+                llm_verdict=llm_v,
+                ground_truth_verdict=gt_v,
+                llm_reason=llm_reason,
+                is_disagreement=llm_v != gt_v,
+            )
+            all_exemplars[c_idx].append(exemplar)
+
+        if _capture is not None:
+            _capture.append({
+                "submission": item.submission[:200],
+                "description": item.description,
+                "rubric_score": result.score,
+            })
+
+        if on_item_complete is not None:
+            on_item_complete()
+
+    # Build per-criterion error reports
+    per_criterion: list[CriterionErrorReport] = []
+    for c_idx in range(num_criteria):
+        total = tp[c_idx] + fp[c_idx] + tn[c_idx] + fn[c_idx]
+        accuracy = (tp[c_idx] + tn[c_idx]) / total if total > 0 else 1.0
+        fpr = fp[c_idx] / (fp[c_idx] + tn[c_idx]) if (fp[c_idx] + tn[c_idx]) > 0 else 0.0
+        fnr = fn[c_idx] / (fn[c_idx] + tp[c_idx]) if (fn[c_idx] + tp[c_idx]) > 0 else 0.0
+
+        criterion = rubric.rubric[c_idx]
+
+        # Sort disagreements by criterion weight (higher weight = higher impact)
+        disagreements = [e for e in all_exemplars[c_idx] if e.is_disagreement]
+        disagreements.sort(key=lambda _e: abs(criterion.weight), reverse=True)
+        disagreements = disagreements[:max_exemplars_per_criterion]
+
+        agreements = [e for e in all_exemplars[c_idx] if not e.is_disagreement]
+        agreements = agreements[:min(2, max_exemplars_per_criterion)]
+
+        per_criterion.append(CriterionErrorReport(
+            criterion_index=c_idx,
+            criterion_name=criterion.name or f"criterion_{c_idx}",
+            n_samples=total,
+            accuracy=accuracy,
+            false_positive_rate=fpr,
+            false_negative_rate=fnr,
+            disagreement_exemplars=disagreements,
+            agreement_exemplars=agreements,
+        ))
+
+    accuracies = [cr.accuracy for cr in per_criterion if cr.n_samples > 0]
+    mean_accuracy = sum(accuracies) / len(accuracies) if accuracies else 1.0
+
+    return HeldOutValidationResult(
+        mean_accuracy=mean_accuracy,
+        per_criterion=per_criterion,
+        total_cost=total_cost if total_cost > 0 else None,
+        item_reports=item_reports,
+    )
+
+
+def format_held_out_for_prompt(
+    result: HeldOutValidationResult,
+    *,
+    max_exemplars_per_criterion: int = 3,
+) -> str:
+    """Format HeldOutValidationResult into text for the revision prompt.
+
+    Args:
+        result: The held-out validation result.
+        max_exemplars_per_criterion: Max exemplars shown per criterion.
+
+    Returns:
+        Formatted diagnostics text with per-criterion analysis.
+    """
+    lines: list[str] = [
+        f"## Held-Out Validation (Mean Accuracy: {result.mean_accuracy:.0%})",
+        "",
+        "### Per-Criterion Summary",
+        f"{'Criterion':<30} {'Accuracy':>10} {'FP Rate':>10} {'FN Rate':>10}",
+        f"{'-' * 30} {'-' * 10} {'-' * 10} {'-' * 10}",
+    ]
+
+    for cr in sorted(result.per_criterion, key=lambda c: c.accuracy):
+        lines.append(
+            f"{cr.criterion_name:<30} {cr.accuracy:>10.0%} "
+            f"{cr.false_positive_rate:>10.0%} {cr.false_negative_rate:>10.0%}"
+        )
+
+    # Per-criterion detail sections (worst-performing first)
+    sorted_criteria = sorted(result.per_criterion, key=lambda c: c.accuracy)
+    for cr in sorted_criteria:
+        lines.append("")
+        lines.append(
+            f"### Criterion {cr.criterion_index + 1}: {cr.criterion_name} "
+            f"(Accuracy: {cr.accuracy:.0%}, FP: {cr.false_positive_rate:.0%}, "
+            f"FN: {cr.false_negative_rate:.0%})"
+        )
+
+        if cr.disagreement_exemplars:
+            lines.append("")
+            lines.append("**Disagreements** (judge got these WRONG):")
+            for ex in cr.disagreement_exemplars[:max_exemplars_per_criterion]:
+                lines.append(f"  Item {ex.item_index + 1}:")
+                lines.append(f"    Submission: {ex.submission_snippet!r}")
+                lines.append(
+                    f"    Judge verdict: {ex.llm_verdict.value}, "
+                    f"Ground truth: {ex.ground_truth_verdict.value}"
+                )
+                lines.append(f"    Judge reasoning: {ex.llm_reason}")
+
+        if cr.agreement_exemplars:
+            lines.append("")
+            lines.append("**Agreements** (judge got these RIGHT):")
+            for ex in cr.agreement_exemplars[:max_exemplars_per_criterion]:
+                lines.append(f"  Item {ex.item_index + 1}:")
+                lines.append(
+                    f"    Judge verdict: {ex.llm_verdict.value} (correct)"
+                )
+                lines.append(f"    Judge reasoning: {ex.llm_reason}")
+
+    lines.append("")
+    lines.append(
+        "Use the disagreement reasoning to identify ambiguous criterion wording. "
+        "Preserve wording patterns from agreement cases."
+    )
+    return "\n".join(lines)
+
+
+def validate_criteria_structure(
+    original: Rubric,
+    revised: Rubric,
+) -> tuple[bool, str | None]:
+    """Check that criteria count and order was preserved after revision.
+
+    Args:
+        original: The rubric before revision.
+        revised: The rubric after revision.
+
+    Returns:
+        (valid, error_message) — True and None if valid, False and reason if not.
+    """
+    if len(original.rubric) != len(revised.rubric):
+        return False, (
+            f"Criteria count changed: {len(original.rubric)} -> {len(revised.rubric)}"
+        )
+
+    for i, (orig, rev) in enumerate(zip(original.rubric, revised.rubric)):
+        if orig.name and rev.name and orig.name != rev.name:
+            return False, (
+                f"Criterion {i + 1} name changed: {orig.name!r} -> {rev.name!r}"
+            )
+
+    return True, None
+
+
+async def revise_rubric_held_out(
+    rubric: Rubric,
+    task_prompt: str | None,
+    diagnostics_text: str,
+    history_text: str,
+    config: ImprovementConfig,
+    *,
+    system_prompt: str | None = None,
+    user_prompt_template: str | None = None,
+    _capture: dict | None = None,
+) -> tuple[Rubric, float | None]:
+    """Revise rubric based on held-out grading diagnostics.
+
+    Uses held-out-specific prompt templates that enforce structural constraints
+    (same number of criteria in same order).
+
+    Args:
+        rubric: Current rubric to revise.
+        task_prompt: The task the rubric evaluates.
+        diagnostics_text: Formatted held-out diagnostics from ``format_held_out_for_prompt``.
+        history_text: Formatted revision history.
+        config: Improvement configuration (provides revision_llm).
+        system_prompt: Override system prompt.
+        user_prompt_template: Override user prompt template.
+        _capture: When provided, populated with prompts and response for artifact persistence.
+
+    Returns:
+        Tuple of (revised Rubric, completion cost or None).
+    """
+    from autorubric.prompts import (
+        HELD_OUT_REVISION_SYSTEM_PROMPT,
+        HELD_OUT_REVISION_USER_PROMPT_TEMPLATE,
+    )
+
+    effective_system_prompt = (
+        system_prompt
+        or config.revision_system_prompt
+        or HELD_OUT_REVISION_SYSTEM_PROMPT
+    )
+    effective_user_template = (
+        user_prompt_template
+        or config.revision_user_prompt_template
+        or HELD_OUT_REVISION_USER_PROMPT_TEMPLATE
+    )
+
+    original_criteria = json.dumps(
+        [
+            {
+                "weight": c.weight,
+                "requirement": c.requirement,
+                **({"name": c.name} if c.name else {}),
+            }
+            for c in rubric.rubric
+        ],
+        indent=2,
+    )
+
+    user_prompt = effective_user_template.format(
+        task_prompt=task_prompt or "(No specific task — standalone evaluation)",
+        original_criteria=original_criteria,
+        diagnostics_text=diagnostics_text,
+        history_text=history_text,
+        num_criteria=len(rubric.rubric),
+    )
+
+    client = LLMClient(config.revision_llm)
+    gen_result = await client.generate(
+        effective_system_prompt, user_prompt, return_result=True
+    )
+
+    text = gen_result.content
+    revision_cost = gen_result.cost
+
+    if _capture is not None:
+        _capture["system_prompt"] = effective_system_prompt
+        _capture["user_prompt"] = user_prompt
+        _capture["llm_response"] = text
+
+    start = text.find("[")
+    end = text.rfind("]") + 1
+    if start == -1 or end == 0:
+        raise ValueError(f"Could not find JSON array in LLM response: {text[:200]}")
+
+    criteria_data = json.loads(text[start:end])
+    revised = Rubric.from_dict(criteria_data)
+
+    valid, error = validate_criteria_structure(rubric, revised)
+    if not valid:
+        logger.warning("Held-out revision violated structural constraint: %s", error)
+        return rubric, revision_cost
+
+    return revised, revision_cost
+
+
+def _check_held_out_convergence(
+    iteration: int,
+    mean_accuracy: float,
+    config: ImprovementConfig,
+    state: _ConvergenceState,
+    total_cost: float | None,
+) -> str | None:
+    """Check if the held-out improvement loop should stop.
+
+    Converges on: mean_accuracy >= held_out_min_accuracy, max iterations,
+    accuracy plateau, or cost limit.
+
+    Returns:
+        Convergence reason string, or None to continue.
+    """
+    if mean_accuracy >= config.held_out_min_accuracy:
+        return "held_out_accuracy_met"
+
+    if iteration >= config.max_iterations - 1:
+        return "max_iterations"
+
+    improvement = mean_accuracy - state.prev_score
+    if abs(improvement) < config.score_plateau_threshold:
+        state.plateau_count += 1
+    else:
+        state.plateau_count = 0
+
+    if state.plateau_count >= config.plateau_patience:
+        return "score_plateau"
+
+    if config.max_total_cost is not None and total_cost is not None:
+        if total_cost >= config.max_total_cost:
+            return "cost_limit"
+
+    state.prev_score = mean_accuracy
+    return None
+
+
 # Backward-compatible private aliases
 _extract_issues = extract_issues
 _diff_issues = diff_issues
@@ -1281,19 +1767,42 @@ def _serialize_iteration(iter_result: IterationResult) -> dict:
     """Serialize an IterationResult to a JSON-safe dict for artifact persistence."""
     from autorubric.eval import _serialize_ensemble_criterion_report
 
-    qr = iter_result.quality_report
-    quality_report_data: dict = {
-        "score": qr.score,
-        "raw_score": qr.raw_score,
-        "mean_agreement": qr.mean_agreement,
-        "completion_cost": qr.completion_cost,
-    }
-    if qr.report:
-        quality_report_data["criterion_reports"] = [
-            _serialize_ensemble_criterion_report(ecr) for ecr in qr.report
-        ]
-    if qr.judge_scores:
-        quality_report_data["judge_scores"] = qr.judge_scores
+    quality_report_data: dict | None = None
+    if iter_result.quality_report is not None:
+        qr = iter_result.quality_report
+        quality_report_data = {
+            "score": qr.score,
+            "raw_score": qr.raw_score,
+            "mean_agreement": qr.mean_agreement,
+            "completion_cost": qr.completion_cost,
+        }
+        if qr.report:
+            quality_report_data["criterion_reports"] = [
+                _serialize_ensemble_criterion_report(ecr) for ecr in qr.report
+            ]
+        if qr.judge_scores:
+            quality_report_data["judge_scores"] = qr.judge_scores
+
+    held_out_data: dict | None = None
+    if iter_result.held_out_diagnostics is not None:
+        ho = iter_result.held_out_diagnostics
+        held_out_data = {
+            "mean_accuracy": ho.mean_accuracy,
+            "total_cost": ho.total_cost,
+            "per_criterion": [
+                {
+                    "criterion_index": cr.criterion_index,
+                    "criterion_name": cr.criterion_name,
+                    "n_samples": cr.n_samples,
+                    "accuracy": cr.accuracy,
+                    "false_positive_rate": cr.false_positive_rate,
+                    "false_negative_rate": cr.false_negative_rate,
+                    "num_disagreements": len(cr.disagreement_exemplars),
+                    "num_agreements": len(cr.agreement_exemplars),
+                }
+                for cr in ho.per_criterion
+            ],
+        }
 
     token_usage_data = None
     if iter_result.token_usage:
@@ -1313,7 +1822,7 @@ def _serialize_iteration(iter_result: IterationResult) -> dict:
         for c in iter_result.rubric.rubric
     ]
 
-    return {
+    result: dict = {
         "iteration": iter_result.iteration,
         "quality_score": iter_result.quality_score,
         "agreement": iter_result.agreement,
@@ -1323,11 +1832,16 @@ def _serialize_iteration(iter_result: IterationResult) -> dict:
         "issues_introduced": iter_result.issues_introduced,
         "accepted": iter_result.accepted,
         "rejection_reason": iter_result.rejection_reason,
-        "quality_report": quality_report_data,
         "rubric_criteria": rubric_criteria,
         "token_usage": token_usage_data,
         "completion_cost": iter_result.completion_cost,
     }
+    if quality_report_data is not None:
+        result["quality_report"] = quality_report_data
+    if held_out_data is not None:
+        result["held_out_diagnostics"] = held_out_data
+
+    return result
 
 
 # ============================================================================
@@ -1370,6 +1884,10 @@ class ImprovementRunner:
     async def run(self) -> ImprovementResult:
         """Run the improvement loop and return the result.
 
+        Dispatches to the appropriate strategy: ``_run_meta_rubric()`` for
+        meta-rubric-based optimization, or ``_run_held_out()`` for
+        held-out grading error optimization.
+
         Returns:
             ImprovementResult with the original, final, and best rubrics
             plus all iteration details.
@@ -1377,6 +1895,12 @@ class ImprovementRunner:
         Raises:
             ValueError: If task_prompt is required but not provided.
         """
+        if self.config.strategy == "held_out":
+            return await self._run_held_out()
+        return await self._run_meta_rubric()
+
+    async def _run_meta_rubric(self) -> ImprovementResult:
+        """Run the meta-rubric improvement loop."""
         config = self.config
 
         if config.mode == "in_context" and self.task_prompt is None:
@@ -1894,6 +2418,299 @@ class ImprovementRunner:
                 f"{len(it.issues):<8} {fixed_str:<8} {intro_str:<12}{status}"
             )
 
+    async def _run_held_out(self) -> ImprovementResult:
+        """Run the held-out improvement loop.
+
+        Each iteration: grade held-out items, compute per-criterion errors,
+        check convergence, revise rubric with structural constraints.
+        """
+        config = self.config
+
+        # Validate requirements
+        if config.validation_data is None:
+            raise ValueError(
+                "validation_data is required for held_out strategy"
+            )
+        if not all(
+            item.ground_truth is not None
+            for item in config.validation_data.items
+        ):
+            raise ValueError(
+                "All validation_data items must have ground_truth "
+                "for held_out strategy"
+            )
+
+        # Set up artifacts directory
+        artifacts_dir = self._setup_artifacts_dir()
+
+        # Build grader
+        if isinstance(config.eval_llm, list):
+            validation_grader = CriterionGrader(judges=config.eval_llm)
+        else:
+            validation_grader = CriterionGrader(llm_config=config.eval_llm)
+
+        n_items = len(config.validation_data.items)
+
+        # Set up progress display
+        progress: ImprovementProgressDisplay | None = None
+        if config.show_progress:
+            progress = ImprovementProgressDisplay()
+
+        original_rubric = self.rubric
+        current_rubric = self.rubric
+        iterations: list[IterationResult] = []
+        convergence_state = _ConvergenceState()
+        total_cost: float = 0.0
+        best_accuracy: float = -1.0
+        best_iteration: int = 0
+        best_rubric = self.rubric
+        convergence_reason = "max_iterations"
+
+        for iteration in range(config.max_iterations):
+            validation_capture: list | None = [] if artifacts_dir else None
+            revision_capture: dict | None = {} if artifacts_dir else None
+
+            # --- Validate held-out ---
+            if progress:
+                progress.begin_iteration(
+                    iteration, config.max_iterations, n_items,
+                )
+
+            held_out_result = await validate_held_out(
+                current_rubric,
+                config.validation_data,
+                validation_grader,
+                task_prompt=self.task_prompt,
+                max_exemplars_per_criterion=config.max_exemplars_per_criterion,
+                on_item_complete=(
+                    progress.advance if progress else None
+                ),
+                _capture=validation_capture,
+            )
+
+            if progress:
+                progress.end_iteration()
+
+            mean_accuracy = held_out_result.mean_accuracy
+            iter_cost = held_out_result.total_cost or 0.0
+
+            # --- Record iteration ---
+            iter_result = IterationResult(
+                iteration=iteration,
+                rubric=current_rubric,
+                quality_score=mean_accuracy,
+                agreement=None,
+                per_criterion_agreement=None,
+                issues=[],
+                issues_fixed=[],
+                issues_introduced=[],
+                accepted=True,
+                rejection_reason=None,
+                quality_report=None,
+                token_usage=None,
+                completion_cost=iter_cost if iter_cost else None,
+                held_out_diagnostics=held_out_result,
+            )
+            iterations.append(iter_result)
+            total_cost += iter_cost
+
+            # --- Save artifacts ---
+            if artifacts_dir:
+                _save_rubric(
+                    current_rubric,
+                    artifacts_dir / f"rubric-iter-{iteration:02d}.json",
+                )
+
+            # --- Display ---
+            if progress:
+                progress.log_held_out_iteration(iter_result)
+                if iteration > 0:
+                    progress.log_rubric_diff(
+                        iterations[-2].rubric, current_rubric, iteration
+                    )
+                else:
+                    progress.log_rubric(current_rubric, iteration)
+            elif config.display == "stdout":
+                print(
+                    f"  Iter {iteration}: accuracy={mean_accuracy:.1%}"
+                )
+
+            # --- Track best ---
+            if mean_accuracy > best_accuracy:
+                best_accuracy = mean_accuracy
+                best_iteration = iteration
+                best_rubric = current_rubric
+
+            # --- Check convergence ---
+            if config.convergence_fn is not None:
+                reason = config.convergence_fn(iter_result, iterations)
+            else:
+                reason = _check_held_out_convergence(
+                    iteration,
+                    mean_accuracy,
+                    config,
+                    convergence_state,
+                    total_cost,
+                )
+            if reason is not None:
+                convergence_reason = reason
+                if progress:
+                    progress.log_convergence(reason)
+                elif config.display == "stdout":
+                    print(f"\nConverged: {reason}")
+                if artifacts_dir:
+                    iter_data = _serialize_iteration(iter_result)
+                    if validation_capture:
+                        iter_data["validation_samples"] = validation_capture
+                    with open(
+                        artifacts_dir / f"iter-{iteration:02d}.json",
+                        "w",
+                        encoding="utf-8",
+                    ) as f:
+                        json.dump(iter_data, f, indent=2, default=str)
+                break
+
+            # --- Revise rubric ---
+            diagnostics_text = format_held_out_for_prompt(
+                held_out_result,
+                max_exemplars_per_criterion=config.max_exemplars_per_criterion,
+            )
+            history_text = build_revision_history(
+                iterations, config.history_window
+            )
+
+            if progress:
+                with progress.phase(
+                    iteration, config.max_iterations, "Revising rubric"
+                ):
+                    revised_rubric, revision_cost = await revise_rubric_held_out(
+                        current_rubric,
+                        self.task_prompt,
+                        diagnostics_text,
+                        history_text,
+                        config,
+                        _capture=revision_capture,
+                    )
+            else:
+                revised_rubric, revision_cost = await revise_rubric_held_out(
+                    current_rubric,
+                    self.task_prompt,
+                    diagnostics_text,
+                    history_text,
+                    config,
+                    _capture=revision_capture,
+                )
+            total_cost += revision_cost or 0.0
+
+            # Structural validation (already handled in revise_rubric_held_out,
+            # which returns original on failure)
+            current_rubric = revised_rubric
+
+            # --- Write per-iteration JSON ---
+            if artifacts_dir:
+                iter_data = _serialize_iteration(iter_result)
+                if validation_capture:
+                    iter_data["validation_samples"] = validation_capture
+                if revision_capture:
+                    iter_data["revision"] = revision_capture
+                with open(
+                    artifacts_dir / f"iter-{iteration:02d}.json",
+                    "w",
+                    encoding="utf-8",
+                ) as f:
+                    json.dump(iter_data, f, indent=2, default=str)
+
+        # --- HTML improvement report ---
+        if artifacts_dir:
+            from ._display import render_improvement_report_html
+
+            html = render_improvement_report_html(
+                iterations,
+                convergence_reason,
+                total_cost,
+                original_rubric,
+                best_rubric,
+            )
+            (artifacts_dir / "improvement_report.html").write_text(
+                html, encoding="utf-8"
+            )
+
+        # --- summary.json ---
+        if artifacts_dir:
+            def _rubric_to_criteria_list(rubric: Rubric) -> list[dict]:
+                return [
+                    {
+                        "weight": c.weight,
+                        "requirement": c.requirement,
+                        **({"name": c.name} if c.name else {}),
+                    }
+                    for c in rubric.rubric
+                ]
+
+            summary = {
+                "strategy": "held_out",
+                "original_rubric": _rubric_to_criteria_list(original_rubric),
+                "final_rubric": _rubric_to_criteria_list(best_rubric),
+                "task_prompt": self.task_prompt,
+                "convergence_reason": convergence_reason,
+                "best_iteration": best_iteration,
+                "total_iterations": len(iterations),
+                "total_completion_cost": total_cost if total_cost > 0 else None,
+                "config": {
+                    "strategy": "held_out",
+                    "mode": config.mode,
+                    "max_iterations": config.max_iterations,
+                    "held_out_min_accuracy": config.held_out_min_accuracy,
+                    "max_exemplars_per_criterion": config.max_exemplars_per_criterion,
+                    "score_plateau_threshold": config.score_plateau_threshold,
+                    "plateau_patience": config.plateau_patience,
+                    "eval_llm_model": (
+                        _get_eval_llm_config(config.eval_llm).model
+                    ),
+                    "revision_llm_model": config.revision_llm.model,
+                },
+                "iterations_summary": [
+                    {
+                        "iteration": it.iteration,
+                        "mean_accuracy": it.quality_score,
+                        "accepted": it.accepted,
+                        "completion_cost": it.completion_cost,
+                    }
+                    for it in iterations
+                ],
+            }
+            with open(
+                artifacts_dir / "summary.json", "w", encoding="utf-8"
+            ) as f:
+                json.dump(summary, f, indent=2, default=str)
+
+        # --- Summary ---
+        if progress:
+            progress.print_held_out_summary(
+                iterations, convergence_reason, total_cost, artifacts_dir
+            )
+        elif config.display == "stdout":
+            print(f"\n{'=' * 60}")
+            print("HELD-OUT IMPROVEMENT SUMMARY")
+            print(f"{'=' * 60}")
+            for it in iterations:
+                print(
+                    f"  Iter {it.iteration}: accuracy={it.quality_score:.1%}"
+                )
+            print(f"  Convergence: {convergence_reason}")
+            if total_cost > 0:
+                print(f"  Total cost: ${total_cost:.4f}")
+
+        return ImprovementResult(
+            original_rubric=original_rubric,
+            final_rubric=best_rubric,
+            iterations=iterations,
+            best_rubric=best_rubric,
+            best_iteration=best_iteration,
+            convergence_reason=convergence_reason,
+            total_completion_cost=total_cost if total_cost > 0 else None,
+        )
+
 
 # ============================================================================
 # Convenience API
@@ -1913,6 +2730,7 @@ def _build_config(
     show_progress: bool | None = None,
     mode: Literal["standalone", "in_context"] | None = None,
     max_total_cost: float | None = None,
+    strategy: Literal["meta_rubric", "held_out"] | None = None,
 ) -> ImprovementConfig:
     """Build an ImprovementConfig by merging kwargs over an optional base config.
 
@@ -1931,6 +2749,7 @@ def _build_config(
         "show_progress": show_progress,
         "mode": mode,
         "max_total_cost": max_total_cost,
+        "strategy": strategy,
     }
     overrides = {k: v for k, v in overrides_map.items() if v is not None}
 
@@ -1959,12 +2778,17 @@ async def improve_rubric(
     show_progress: bool | None = None,
     mode: Literal["standalone", "in_context"] | None = None,
     max_total_cost: float | None = None,
+    strategy: Literal["meta_rubric", "held_out"] | None = None,
 ) -> ImprovementResult:
     """Iteratively improve a rubric using meta-rubric evaluation and validation.
 
-    Convenience wrapper around ImprovementRunner. Optimizes for both quality
-    (meta-rubric score) and validation reliability. Uses a Pareto constraint
-    to reject revisions that improve quality but decrease reliability.
+    Convenience wrapper around ImprovementRunner. Two strategies available:
+
+    - ``meta_rubric`` (default): Optimize against structural meta-rubric quality.
+    - ``held_out``: Optimize against grading errors on held-out data with ground truth.
+
+    Strategies are composable: feed ``result.best_rubric`` from one run into
+    the next (e.g., ``held_out`` -> ``meta_rubric``).
 
     Args:
         rubric: The rubric to improve.
@@ -1982,6 +2806,7 @@ async def improve_rubric(
         show_progress: Whether to show Rich progress indicators.
         mode: Evaluation mode - "standalone" or "in_context".
         max_total_cost: Stop if total cost exceeds this amount (USD).
+        strategy: Improvement strategy - "meta_rubric" or "held_out".
 
     Returns:
         ImprovementResult with the original, final, and best rubrics plus
@@ -2002,6 +2827,7 @@ async def improve_rubric(
         show_progress=show_progress,
         mode=mode,
         max_total_cost=max_total_cost,
+        strategy=strategy,
     )
     runner = ImprovementRunner(rubric, task_prompt, config=cfg)
     return await runner.run()
