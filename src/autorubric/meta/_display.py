@@ -628,13 +628,23 @@ def render_improvement_report_html(
     for it in iterations:
         iter_id = f"iter{it.iteration}"
         agr_str = f"{it.agreement:.0%}" if it.agreement is not None else "N/A"
+        # Adapt header text for held-out mode (no issues/agreement)
+        if it.held_out_diagnostics is not None:
+            header_label = (
+                f"Iteration {it.iteration} — "
+                f"Accuracy: {it.quality_score:.1%}"
+            )
+        else:
+            header_label = (
+                f"Iteration {it.iteration} — Quality: {it.quality_score:.1%}, "
+                f"Agreement: {agr_str}, Issues: {len(it.issues)}"
+            )
         parts.append(f'<div class="accordion-item">\n')
         parts.append(
             f'<h2 class="accordion-header">'
             f'<button class="accordion-button collapsed" type="button" '
             f'data-bs-toggle="collapse" data-bs-target="#{iter_id}">'
-            f"Iteration {it.iteration} — Quality: {it.quality_score:.1%}, "
-            f"Agreement: {agr_str}, Issues: {len(it.issues)}"
+            f"{header_label}"
             f"</button></h2>\n"
         )
         parts.append(
@@ -645,16 +655,48 @@ def render_improvement_report_html(
 
         # Metrics bar
         cost_str = f"${it.completion_cost:.4f}" if it.completion_cost else "N/A"
-        parts.append(
-            f'<div class="metrics-bar">'
-            f"<span><strong>Quality:</strong> {it.quality_score:.1%}</span>"
-            f"<span><strong>Agreement:</strong> {agr_str}</span>"
-            f"<span><strong>Cost:</strong> {cost_str}</span>"
-            f"</div>\n"
-        )
+        if it.held_out_diagnostics is not None:
+            parts.append(
+                f'<div class="metrics-bar">'
+                f"<span><strong>Accuracy:</strong> {it.quality_score:.1%}</span>"
+                f"<span><strong>Cost:</strong> {cost_str}</span>"
+                f"</div>\n"
+            )
+        else:
+            parts.append(
+                f'<div class="metrics-bar">'
+                f"<span><strong>Quality:</strong> {it.quality_score:.1%}</span>"
+                f"<span><strong>Agreement:</strong> {agr_str}</span>"
+                f"<span><strong>Cost:</strong> {cost_str}</span>"
+                f"</div>\n"
+            )
 
-        # Issues table
-        if it.issues:
+        # Held-out per-criterion accuracy table
+        if it.held_out_diagnostics is not None:
+            parts.append("<h4>Per-Criterion Accuracy</h4>\n<table>\n<thead><tr>")
+            parts.append(
+                "<th>Criterion</th><th>Accuracy</th>"
+                "<th>FP Rate</th><th>FN Rate</th>"
+            )
+            parts.append("</tr></thead>\n<tbody>\n")
+            for cr in sorted(
+                it.held_out_diagnostics.per_criterion,
+                key=lambda c: c.accuracy,
+            ):
+                acc_color = "var(--green)" if cr.accuracy >= 0.9 else (
+                    "var(--yellow)" if cr.accuracy >= 0.7 else "var(--red)"
+                )
+                parts.append(
+                    f"<tr><td class='crit-name'>"
+                    f"{_escape_html(cr.criterion_name)}</td>"
+                    f"<td style='color: {acc_color};'>{cr.accuracy:.0%}</td>"
+                    f"<td>{cr.false_positive_rate:.0%}</td>"
+                    f"<td>{cr.false_negative_rate:.0%}</td></tr>\n"
+                )
+            parts.append("</tbody>\n</table>\n")
+
+        # Issues table (meta-rubric mode only)
+        elif it.issues:
             from ._improve import _match_issue_to_criteria
 
             parts.append("<h4>Issues</h4>\n<table>\n<thead><tr>")
@@ -694,11 +736,12 @@ def render_improvement_report_html(
             )
         parts.append("</tbody>\n</table>\n")
 
-        # Link to per-iteration eval HTML
-        eval_file = f"eval-iter-{it.iteration:02d}.html"
-        parts.append(
-            f"<p><a href='{eval_file}'>View detailed evaluation report</a></p>\n"
-        )
+        # Link to per-iteration eval HTML (meta-rubric mode only)
+        if it.quality_report is not None:
+            eval_file = f"eval-iter-{it.iteration:02d}.html"
+            parts.append(
+                f"<p><a href='{eval_file}'>View detailed evaluation report</a></p>\n"
+            )
 
         parts.append("</div>\n</div>\n</div>\n")
     parts.append("</div>\n")

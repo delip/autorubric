@@ -21,7 +21,7 @@ AutoRubric exports 89 public items across the main module and `autorubric.grader
 | [Length Penalty](length-penalty.md) | `LengthPenalty`, `compute_length_penalty` | Verbosity control |
 | [LLM Infrastructure](llm.md) | `LLMConfig`, `LLMClient`, `generate()` | LLM client and configuration |
 | [Meta-Rubric Evaluation](meta.md) | `evaluate_rubric_standalone`, `evaluate_rubric_in_context` | Assess rubric quality |
-| [Meta-Rubric Improvement](meta-improvement.md) | `improve_rubric`, `ImprovementRunner`, `ImprovementConfig` | Iterative rubric improvement |
+| [Rubric Improvement](meta-improvement.md) | `improve_rubric`, `ImprovementRunner`, `ImprovementConfig` | Iterative rubric improvement |
 | [Metrics](metrics.md) | `MetricsResult`, `compute_metrics` | Agreement and correlation metrics |
 | [Multi-Choice](multi-choice.md) | `CriterionOption`, `MultiChoiceVerdict` | Ordinal and nominal scales |
 | [Utilities](utilities.md) | `aggregate_token_usage`, `word_count` | Helper functions |

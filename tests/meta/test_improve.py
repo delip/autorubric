@@ -2513,3 +2513,1137 @@ class TestStartupValidation:
         runner = ImprovementRunner(rubric, "prompt", config=config)
         with pytest.raises(ValueError, match=">= 2 judges"):
             await runner.run()
+
+
+# ============================================================================
+# Held-out strategy: validate_held_out
+# ============================================================================
+
+
+class TestValidateHeldOut:
+    """Tests for the validate_held_out building block."""
+
+    def _rubric_and_dataset(self):
+        rubric = Rubric([
+            Criterion(name="accuracy", weight=1.0, requirement="Must be accurate"),
+            Criterion(name="style", weight=1.0, requirement="Must have good style"),
+        ])
+        dataset = RubricDataset(
+            prompt="task",
+            rubric=rubric,
+            items=[
+                DataItem(
+                    submission="Good submission",
+                    description="d1",
+                    ground_truth=[CriterionVerdict.MET, CriterionVerdict.MET],
+                ),
+                DataItem(
+                    submission="Bad submission",
+                    description="d2",
+                    ground_truth=[CriterionVerdict.UNMET, CriterionVerdict.UNMET],
+                ),
+                DataItem(
+                    submission="Mixed submission",
+                    description="d3",
+                    ground_truth=[CriterionVerdict.MET, CriterionVerdict.UNMET],
+                ),
+            ],
+        )
+        return rubric, dataset
+
+    def _make_grade_report(self, verdicts):
+        """Build a mock grade report from a list of (name, weight, verdict) tuples."""
+        criterion_reports = [
+            _make_ensemble_criterion_report(name, weight, verdict)
+            for name, weight, verdict in verdicts
+        ]
+        return _make_ensemble_report(criterion_reports, score=0.5)
+
+    @pytest.mark.asyncio
+    async def test_per_criterion_accuracy(self):
+        """Verifies accuracy is computed correctly per criterion."""
+        from autorubric.meta._improve import validate_held_out
+
+        rubric, dataset = self._rubric_and_dataset()
+        grader = CriterionGrader(llm_config=LLMConfig(model="test"))
+
+        # LLM agrees with ground truth on all items for criterion 0 (accuracy),
+        # disagrees on all items for criterion 1 (style).
+        reports = [
+            self._make_grade_report([
+                ("accuracy", 1.0, CriterionVerdict.MET),
+                ("style", 1.0, CriterionVerdict.UNMET),  # GT=MET, wrong
+            ]),
+            self._make_grade_report([
+                ("accuracy", 1.0, CriterionVerdict.UNMET),
+                ("style", 1.0, CriterionVerdict.MET),  # GT=UNMET, wrong
+            ]),
+            self._make_grade_report([
+                ("accuracy", 1.0, CriterionVerdict.MET),
+                ("style", 1.0, CriterionVerdict.MET),  # GT=UNMET, wrong
+            ]),
+        ]
+
+        with patch.object(
+            rubric, "grade", new_callable=AsyncMock,
+            side_effect=reports,
+        ):
+            result = await validate_held_out(
+                rubric, dataset, grader,
+                max_exemplars_per_criterion=5,
+            )
+
+        assert len(result.per_criterion) == 2
+        # Criterion 0: all 3 correct
+        acc_report = result.per_criterion[0]
+        assert acc_report.criterion_name == "accuracy"
+        assert acc_report.accuracy == pytest.approx(1.0)
+        # Criterion 1: all 3 wrong
+        style_report = result.per_criterion[1]
+        assert style_report.criterion_name == "style"
+        assert style_report.accuracy == pytest.approx(0.0)
+
+    @pytest.mark.asyncio
+    async def test_fp_fn_rates(self):
+        """Verifies false positive and false negative rates."""
+        from autorubric.meta._improve import validate_held_out
+
+        rubric, dataset = self._rubric_and_dataset()
+        grader = CriterionGrader(llm_config=LLMConfig(model="test"))
+
+        # For criterion 0 (accuracy):
+        #   item0: GT=MET, LLM=MET -> TP
+        #   item1: GT=UNMET, LLM=MET -> FP
+        #   item2: GT=MET, LLM=UNMET -> FN
+        reports = [
+            self._make_grade_report([
+                ("accuracy", 1.0, CriterionVerdict.MET),
+                ("style", 1.0, CriterionVerdict.MET),
+            ]),
+            self._make_grade_report([
+                ("accuracy", 1.0, CriterionVerdict.MET),  # FP
+                ("style", 1.0, CriterionVerdict.UNMET),
+            ]),
+            self._make_grade_report([
+                ("accuracy", 1.0, CriterionVerdict.UNMET),  # FN
+                ("style", 1.0, CriterionVerdict.UNMET),
+            ]),
+        ]
+
+        with patch.object(
+            rubric, "grade", new_callable=AsyncMock,
+            side_effect=reports,
+        ):
+            result = await validate_held_out(
+                rubric, dataset, grader,
+            )
+
+        acc = result.per_criterion[0]
+        # FP rate = FP / (FP + TN) = 1 / (1 + 0) = 1.0
+        assert acc.false_positive_rate == pytest.approx(1.0)
+        # FN rate = FN / (FN + TP) = 1 / (1 + 1) = 0.5
+        assert acc.false_negative_rate == pytest.approx(0.5)
+
+    @pytest.mark.asyncio
+    async def test_exemplar_selection_capped(self):
+        """Disagreement exemplars are capped at max_exemplars_per_criterion."""
+        from autorubric.meta._improve import validate_held_out
+
+        rubric = Rubric([
+            Criterion(name="c", weight=1.0, requirement="Test"),
+        ])
+        # 5 items, all disagreeing
+        items = [
+            DataItem(
+                submission=f"s{i}",
+                description=f"d{i}",
+                ground_truth=[CriterionVerdict.MET],
+            )
+            for i in range(5)
+        ]
+        dataset = RubricDataset(prompt="task", rubric=rubric, items=items)
+        grader = CriterionGrader(llm_config=LLMConfig(model="test"))
+
+        report = self._make_grade_report([("c", 1.0, CriterionVerdict.UNMET)])
+
+        with patch.object(
+            rubric, "grade", new_callable=AsyncMock,
+            return_value=report,
+        ):
+            result = await validate_held_out(
+                rubric, dataset, grader,
+                max_exemplars_per_criterion=2,
+            )
+
+        assert len(result.per_criterion[0].disagreement_exemplars) == 2
+
+    @pytest.mark.asyncio
+    async def test_on_item_complete_callback(self):
+        """on_item_complete is called once per item."""
+        from autorubric.meta._improve import validate_held_out
+
+        rubric, dataset = self._rubric_and_dataset()
+        grader = CriterionGrader(llm_config=LLMConfig(model="test"))
+        report = self._make_grade_report([
+            ("accuracy", 1.0, CriterionVerdict.MET),
+            ("style", 1.0, CriterionVerdict.MET),
+        ])
+        callback = MagicMock()
+
+        with patch.object(
+            rubric, "grade", new_callable=AsyncMock,
+            return_value=report,
+        ):
+            await validate_held_out(
+                rubric, dataset, grader,
+                on_item_complete=callback,
+            )
+
+        assert callback.call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_mean_accuracy(self):
+        """mean_accuracy is the mean of per-criterion accuracies."""
+        from autorubric.meta._improve import validate_held_out
+
+        rubric = Rubric([
+            Criterion(name="a", weight=1.0, requirement="A"),
+            Criterion(name="b", weight=1.0, requirement="B"),
+        ])
+        dataset = RubricDataset(
+            prompt="task",
+            rubric=rubric,
+            items=[
+                DataItem(
+                    submission="s1", description="d1",
+                    ground_truth=[CriterionVerdict.MET, CriterionVerdict.MET],
+                ),
+            ],
+        )
+        grader = CriterionGrader(llm_config=LLMConfig(model="test"))
+
+        # a: correct (MET==MET), b: wrong (UNMET!=MET)
+        report = self._make_grade_report([
+            ("a", 1.0, CriterionVerdict.MET),
+            ("b", 1.0, CriterionVerdict.UNMET),
+        ])
+
+        with patch.object(
+            rubric, "grade", new_callable=AsyncMock,
+            return_value=report,
+        ):
+            result = await validate_held_out(rubric, dataset, grader)
+
+        # a: 100%, b: 0% -> mean = 50%
+        assert result.mean_accuracy == pytest.approx(0.5)
+
+
+# ============================================================================
+# Held-out strategy: format_held_out_for_prompt
+# ============================================================================
+
+
+class TestFormatHeldOutForPrompt:
+    """Tests for the format_held_out_for_prompt building block."""
+
+    def _make_held_out_result(
+        self,
+        per_criterion=None,
+        mean_accuracy=0.75,
+    ):
+        from autorubric.meta._improve import (
+            CriterionErrorReport,
+            CriterionExemplar,
+            HeldOutValidationResult,
+        )
+
+        if per_criterion is None:
+            per_criterion = [
+                CriterionErrorReport(
+                    criterion_index=0,
+                    criterion_name="accuracy",
+                    n_samples=4,
+                    accuracy=0.50,
+                    false_positive_rate=0.25,
+                    false_negative_rate=0.25,
+                    disagreement_exemplars=[
+                        CriterionExemplar(
+                            item_index=0,
+                            submission_snippet="bad answer",
+                            llm_verdict=CriterionVerdict.MET,
+                            ground_truth_verdict=CriterionVerdict.UNMET,
+                            llm_reason="Looks ok",
+                            is_disagreement=True,
+                        ),
+                    ],
+                    agreement_exemplars=[
+                        CriterionExemplar(
+                            item_index=1,
+                            submission_snippet="good answer",
+                            llm_verdict=CriterionVerdict.MET,
+                            ground_truth_verdict=CriterionVerdict.MET,
+                            llm_reason="Correct",
+                            is_disagreement=False,
+                        ),
+                    ],
+                ),
+                CriterionErrorReport(
+                    criterion_index=1,
+                    criterion_name="style",
+                    n_samples=4,
+                    accuracy=1.0,
+                    false_positive_rate=0.0,
+                    false_negative_rate=0.0,
+                    disagreement_exemplars=[],
+                    agreement_exemplars=[],
+                ),
+            ]
+        return HeldOutValidationResult(
+            mean_accuracy=mean_accuracy,
+            per_criterion=per_criterion,
+            total_cost=0.05,
+            item_reports=[],
+        )
+
+    def test_header_includes_accuracy(self):
+        from autorubric.meta._improve import format_held_out_for_prompt
+
+        result = self._make_held_out_result(mean_accuracy=0.75)
+        text = format_held_out_for_prompt(result)
+        assert "## Held-Out Validation (Mean Accuracy: 75%)" in text
+
+    def test_per_criterion_sections_present(self):
+        from autorubric.meta._improve import format_held_out_for_prompt
+
+        result = self._make_held_out_result()
+        text = format_held_out_for_prompt(result)
+        assert "### Criterion 1: accuracy" in text
+        assert "### Criterion 2: style" in text
+
+    def test_worst_first_ordering(self):
+        from autorubric.meta._improve import format_held_out_for_prompt
+
+        result = self._make_held_out_result()
+        text = format_held_out_for_prompt(result)
+        # accuracy (50%) should come before style (100%) in the per-criterion summary
+        acc_pos = text.find("accuracy")
+        style_pos = text.find("style")
+        assert acc_pos < style_pos
+
+    def test_exemplar_capping(self):
+        from autorubric.meta._improve import (
+            CriterionErrorReport,
+            CriterionExemplar,
+            format_held_out_for_prompt,
+        )
+
+        exemplars = [
+            CriterionExemplar(
+                item_index=i,
+                submission_snippet=f"snippet {i}",
+                llm_verdict=CriterionVerdict.MET,
+                ground_truth_verdict=CriterionVerdict.UNMET,
+                llm_reason=f"reason {i}",
+                is_disagreement=True,
+            )
+            for i in range(10)
+        ]
+        report = CriterionErrorReport(
+            criterion_index=0,
+            criterion_name="c",
+            n_samples=10,
+            accuracy=0.0,
+            false_positive_rate=1.0,
+            false_negative_rate=0.0,
+            disagreement_exemplars=exemplars,
+            agreement_exemplars=[],
+        )
+        from autorubric.meta._improve import HeldOutValidationResult
+
+        ho_result = HeldOutValidationResult(
+            mean_accuracy=0.0,
+            per_criterion=[report],
+            total_cost=None,
+            item_reports=[],
+        )
+        text = format_held_out_for_prompt(ho_result, max_exemplars_per_criterion=2)
+        # Only 2 exemplars shown even though 10 exist
+        assert text.count("Judge verdict:") == 2
+
+    def test_perfect_accuracy(self):
+        from autorubric.meta._improve import (
+            CriterionErrorReport,
+            format_held_out_for_prompt,
+            HeldOutValidationResult,
+        )
+
+        report = CriterionErrorReport(
+            criterion_index=0,
+            criterion_name="perfect",
+            n_samples=4,
+            accuracy=1.0,
+            false_positive_rate=0.0,
+            false_negative_rate=0.0,
+            disagreement_exemplars=[],
+            agreement_exemplars=[],
+        )
+        ho_result = HeldOutValidationResult(
+            mean_accuracy=1.0,
+            per_criterion=[report],
+            total_cost=None,
+            item_reports=[],
+        )
+        text = format_held_out_for_prompt(ho_result)
+        assert "Mean Accuracy: 100%" in text
+        assert "Disagreements" not in text
+
+    def test_disagreement_content_shown(self):
+        from autorubric.meta._improve import format_held_out_for_prompt
+
+        result = self._make_held_out_result()
+        text = format_held_out_for_prompt(result)
+        assert "**Disagreements** (judge got these WRONG)" in text
+        assert "bad answer" in text
+        assert "Looks ok" in text
+
+    def test_agreement_content_shown(self):
+        from autorubric.meta._improve import format_held_out_for_prompt
+
+        result = self._make_held_out_result()
+        text = format_held_out_for_prompt(result)
+        assert "**Agreements** (judge got these RIGHT)" in text
+        assert "Correct" in text
+
+
+# ============================================================================
+# Held-out strategy: validate_criteria_structure
+# ============================================================================
+
+
+class TestValidateCriteriaStructure:
+    """Tests for the validate_criteria_structure building block."""
+
+    def test_same_count_same_names(self):
+        from autorubric.meta._improve import validate_criteria_structure
+
+        original = Rubric([
+            Criterion(name="a", weight=1.0, requirement="R1"),
+            Criterion(name="b", weight=1.0, requirement="R2"),
+        ])
+        revised = Rubric([
+            Criterion(name="a", weight=1.0, requirement="R1 improved"),
+            Criterion(name="b", weight=1.0, requirement="R2 improved"),
+        ])
+        valid, error = validate_criteria_structure(original, revised)
+        assert valid is True
+        assert error is None
+
+    def test_different_count_more(self):
+        from autorubric.meta._improve import validate_criteria_structure
+
+        original = Rubric([
+            Criterion(name="a", weight=1.0, requirement="R1"),
+        ])
+        revised = Rubric([
+            Criterion(name="a", weight=1.0, requirement="R1"),
+            Criterion(name="b", weight=1.0, requirement="R2"),
+        ])
+        valid, error = validate_criteria_structure(original, revised)
+        assert valid is False
+        assert "1 -> 2" in error
+
+    def test_different_count_fewer(self):
+        from autorubric.meta._improve import validate_criteria_structure
+
+        original = Rubric([
+            Criterion(name="a", weight=1.0, requirement="R1"),
+            Criterion(name="b", weight=1.0, requirement="R2"),
+        ])
+        revised = Rubric([
+            Criterion(name="a", weight=1.0, requirement="R1"),
+        ])
+        valid, error = validate_criteria_structure(original, revised)
+        assert valid is False
+        assert "2 -> 1" in error
+
+    def test_name_mismatch(self):
+        from autorubric.meta._improve import validate_criteria_structure
+
+        original = Rubric([
+            Criterion(name="a", weight=1.0, requirement="R1"),
+            Criterion(name="b", weight=1.0, requirement="R2"),
+        ])
+        revised = Rubric([
+            Criterion(name="a", weight=1.0, requirement="R1"),
+            Criterion(name="c", weight=1.0, requirement="R2"),
+        ])
+        valid, error = validate_criteria_structure(original, revised)
+        assert valid is False
+        assert "'b'" in error
+        assert "'c'" in error
+
+    def test_unnamed_criteria_name_check_skipped(self):
+        from autorubric.meta._improve import validate_criteria_structure
+
+        original = Rubric([
+            Criterion(name=None, weight=1.0, requirement="R1"),
+            Criterion(name="b", weight=1.0, requirement="R2"),
+        ])
+        revised = Rubric([
+            Criterion(name=None, weight=1.0, requirement="R1 improved"),
+            Criterion(name="b", weight=1.0, requirement="R2 improved"),
+        ])
+        valid, error = validate_criteria_structure(original, revised)
+        assert valid is True
+        assert error is None
+
+    def test_one_side_unnamed_skips_name_check(self):
+        """When one side has a name and the other doesn't, skip name check."""
+        from autorubric.meta._improve import validate_criteria_structure
+
+        original = Rubric([
+            Criterion(name="a", weight=1.0, requirement="R1"),
+        ])
+        revised = Rubric([
+            Criterion(name=None, weight=1.0, requirement="R1 improved"),
+        ])
+        valid, error = validate_criteria_structure(original, revised)
+        assert valid is True
+        assert error is None
+
+
+# ============================================================================
+# Held-out strategy: _check_held_out_convergence
+# ============================================================================
+
+
+class TestCheckHeldOutConvergence:
+    """Tests for the _check_held_out_convergence building block."""
+
+    def _default_config(self, **overrides):
+        cfg = ImprovementConfig(
+            eval_llm=LLMConfig(model="test"),
+            revision_llm=LLMConfig(model="test"),
+            max_iterations=10,
+            held_out_min_accuracy=0.90,
+            score_plateau_threshold=0.02,
+            plateau_patience=2,
+        )
+        for k, v in overrides.items():
+            setattr(cfg, k, v)
+        return cfg
+
+    def test_accuracy_met(self):
+        from autorubric.meta._improve import _check_held_out_convergence
+
+        config = self._default_config(held_out_min_accuracy=0.90)
+        state = _ConvergenceState()
+        result = _check_held_out_convergence(0, 0.92, config, state, 0.0)
+        assert result == "held_out_accuracy_met"
+
+    def test_max_iterations(self):
+        from autorubric.meta._improve import _check_held_out_convergence
+
+        config = self._default_config(max_iterations=5)
+        state = _ConvergenceState()
+        result = _check_held_out_convergence(4, 0.50, config, state, 0.0)
+        assert result == "max_iterations"
+
+    def test_score_plateau(self):
+        from autorubric.meta._improve import _check_held_out_convergence
+
+        config = self._default_config(
+            plateau_patience=2, score_plateau_threshold=0.02,
+        )
+        state = _ConvergenceState(prev_score=0.80)
+
+        # First plateau tick
+        result = _check_held_out_convergence(0, 0.81, config, state, 0.0)
+        assert result is None
+        assert state.plateau_count == 1
+
+        # Second tick triggers
+        result = _check_held_out_convergence(1, 0.82, config, state, 0.0)
+        assert result == "score_plateau"
+
+    def test_cost_limit(self):
+        from autorubric.meta._improve import _check_held_out_convergence
+
+        config = self._default_config(max_total_cost=1.0)
+        state = _ConvergenceState()
+        result = _check_held_out_convergence(0, 0.50, config, state, 1.5)
+        assert result == "cost_limit"
+
+    def test_continues_when_no_stopping_condition(self):
+        from autorubric.meta._improve import _check_held_out_convergence
+
+        config = self._default_config()
+        state = _ConvergenceState()
+        result = _check_held_out_convergence(0, 0.50, config, state, 0.0)
+        assert result is None
+
+    def test_plateau_resets_on_improvement(self):
+        from autorubric.meta._improve import _check_held_out_convergence
+
+        config = self._default_config(
+            plateau_patience=2, score_plateau_threshold=0.02,
+        )
+        state = _ConvergenceState(prev_score=0.80, plateau_count=1)
+
+        result = _check_held_out_convergence(0, 0.85, config, state, 0.0)
+        assert result is None
+        assert state.plateau_count == 0
+
+    def test_updates_prev_score(self):
+        from autorubric.meta._improve import _check_held_out_convergence
+
+        config = self._default_config()
+        state = _ConvergenceState(prev_score=0.0)
+        _check_held_out_convergence(0, 0.60, config, state, 0.0)
+        assert state.prev_score == pytest.approx(0.60)
+
+
+# ============================================================================
+# Held-out strategy: revise_rubric_held_out
+# ============================================================================
+
+
+class TestReviseRubricHeldOut:
+    """Tests for the revise_rubric_held_out building block."""
+
+    @pytest.mark.asyncio
+    async def test_uses_held_out_prompt_templates(self):
+        from autorubric.meta._improve import revise_rubric_held_out
+
+        rubric = Rubric([
+            Criterion(name="a", weight=1.0, requirement="R1"),
+        ])
+
+        revised_json = json.dumps([
+            {"name": "a", "weight": 1.0, "requirement": "Improved R1"}
+        ])
+        gen_result = GenerateResult(content=revised_json, cost=0.05)
+        generate_mock = AsyncMock(return_value=gen_result)
+
+        config = ImprovementConfig(
+            eval_llm=LLMConfig(model="test"),
+            revision_llm=LLMConfig(model="test"),
+        )
+
+        with patch("autorubric.meta._improve.LLMClient") as mock_cls:
+            mock_cls.return_value.generate = generate_mock
+
+            revised, cost = await revise_rubric_held_out(
+                rubric, "task prompt", "diagnostics text", "history text",
+                config,
+            )
+
+        assert len(revised.rubric) == 1
+        assert revised.rubric[0].requirement == "Improved R1"
+        assert cost == 0.05
+
+        # Verify the system prompt used is the held-out one
+        call_args = generate_mock.call_args
+        system_prompt = call_args[0][0]
+        assert "held-out" in system_prompt.lower() or "grading diagnostics" in system_prompt.lower()
+
+    @pytest.mark.asyncio
+    async def test_returns_original_on_criteria_count_change(self):
+        """When revised rubric has different criteria count, returns original."""
+        from autorubric.meta._improve import revise_rubric_held_out
+
+        rubric = Rubric([
+            Criterion(name="a", weight=1.0, requirement="R1"),
+        ])
+
+        # LLM returns 2 criteria instead of 1
+        revised_json = json.dumps([
+            {"name": "a", "weight": 1.0, "requirement": "R1"},
+            {"name": "b", "weight": 1.0, "requirement": "R2"},
+        ])
+        gen_result = GenerateResult(content=revised_json, cost=0.02)
+        generate_mock = AsyncMock(return_value=gen_result)
+
+        config = ImprovementConfig(
+            eval_llm=LLMConfig(model="test"),
+            revision_llm=LLMConfig(model="test"),
+        )
+
+        with patch("autorubric.meta._improve.LLMClient") as mock_cls:
+            mock_cls.return_value.generate = generate_mock
+
+            revised, cost = await revise_rubric_held_out(
+                rubric, "task", "diag", "hist", config,
+            )
+
+        # Should return original rubric, not the invalid revised one
+        assert len(revised.rubric) == 1
+        assert revised.rubric[0].requirement == "R1"
+        assert cost == 0.02
+
+    @pytest.mark.asyncio
+    async def test_capture_populated(self):
+        from autorubric.meta._improve import revise_rubric_held_out
+
+        rubric = Rubric([
+            Criterion(name="a", weight=1.0, requirement="R1"),
+        ])
+
+        revised_json = json.dumps([
+            {"name": "a", "weight": 1.0, "requirement": "Better R1"}
+        ])
+        gen_result = GenerateResult(content=revised_json, cost=0.03)
+        generate_mock = AsyncMock(return_value=gen_result)
+
+        config = ImprovementConfig(
+            eval_llm=LLMConfig(model="test"),
+            revision_llm=LLMConfig(model="test"),
+        )
+
+        capture: dict = {}
+        with patch("autorubric.meta._improve.LLMClient") as mock_cls:
+            mock_cls.return_value.generate = generate_mock
+
+            await revise_rubric_held_out(
+                rubric, "task", "diag", "hist", config,
+                _capture=capture,
+            )
+
+        assert "system_prompt" in capture
+        assert "user_prompt" in capture
+        assert "llm_response" in capture
+        assert len(capture["system_prompt"]) > 0
+        assert "diag" in capture["user_prompt"]
+
+    @pytest.mark.asyncio
+    async def test_cost_is_returned(self):
+        from autorubric.meta._improve import revise_rubric_held_out
+
+        rubric = Rubric([
+            Criterion(name="a", weight=1.0, requirement="R1"),
+        ])
+
+        revised_json = json.dumps([
+            {"name": "a", "weight": 1.0, "requirement": "R1v2"}
+        ])
+        gen_result = GenerateResult(content=revised_json, cost=0.07)
+        generate_mock = AsyncMock(return_value=gen_result)
+
+        config = ImprovementConfig(
+            eval_llm=LLMConfig(model="test"),
+            revision_llm=LLMConfig(model="test"),
+        )
+
+        with patch("autorubric.meta._improve.LLMClient") as mock_cls:
+            mock_cls.return_value.generate = generate_mock
+            _, cost = await revise_rubric_held_out(
+                rubric, "task", "diag", "hist", config,
+            )
+
+        assert cost == 0.07
+
+    @pytest.mark.asyncio
+    async def test_custom_system_prompt(self):
+        """Custom system_prompt is used when provided."""
+        from autorubric.meta._improve import revise_rubric_held_out
+
+        rubric = Rubric([
+            Criterion(name="a", weight=1.0, requirement="R1"),
+        ])
+
+        revised_json = json.dumps([
+            {"name": "a", "weight": 1.0, "requirement": "R1v2"}
+        ])
+        gen_result = GenerateResult(content=revised_json, cost=0.01)
+        generate_mock = AsyncMock(return_value=gen_result)
+
+        config = ImprovementConfig(
+            eval_llm=LLMConfig(model="test"),
+            revision_llm=LLMConfig(model="test"),
+        )
+
+        with patch("autorubric.meta._improve.LLMClient") as mock_cls:
+            mock_cls.return_value.generate = generate_mock
+
+            await revise_rubric_held_out(
+                rubric, "task", "diag", "hist", config,
+                system_prompt="Custom system prompt",
+            )
+
+        call_args = generate_mock.call_args
+        assert call_args[0][0] == "Custom system prompt"
+
+
+# ============================================================================
+# Held-out strategy: integration tests
+# ============================================================================
+
+
+class TestHeldOutIntegration:
+    """Integration tests for the held-out strategy."""
+
+    def _make_dataset_and_rubric(self):
+        rubric = Rubric([
+            Criterion(name="accuracy", weight=1.0, requirement="Must be accurate"),
+        ])
+        dataset = RubricDataset(
+            prompt="Evaluate this",
+            rubric=rubric,
+            items=[
+                DataItem(
+                    submission="good",
+                    description="d1",
+                    ground_truth=[CriterionVerdict.MET],
+                ),
+                DataItem(
+                    submission="bad",
+                    description="d2",
+                    ground_truth=[CriterionVerdict.UNMET],
+                ),
+            ],
+        )
+        return rubric, dataset
+
+    @pytest.mark.asyncio
+    async def test_converges_on_high_accuracy(self):
+        """held_out strategy converges when accuracy >= threshold."""
+        from autorubric.meta._improve import ImprovementRunner
+
+        rubric, dataset = self._make_dataset_and_rubric()
+
+        # LLM grades matching ground truth perfectly
+        report_met = _make_ensemble_report(
+            [_make_ensemble_criterion_report("accuracy", 1.0, CriterionVerdict.MET)],
+            score=1.0,
+        )
+        report_unmet = _make_ensemble_report(
+            [_make_ensemble_criterion_report("accuracy", 1.0, CriterionVerdict.UNMET)],
+            score=0.0,
+        )
+
+        config = ImprovementConfig(
+            eval_llm=LLMConfig(model="test"),
+            revision_llm=LLMConfig(model="test"),
+            strategy="held_out",
+            validation_data=dataset,
+            held_out_min_accuracy=0.90,
+            save_artifacts=False,
+            show_progress=False,
+            max_iterations=5,
+        )
+
+        with patch.object(
+            rubric, "grade", new_callable=AsyncMock,
+            side_effect=[report_met, report_unmet],
+        ):
+            runner = ImprovementRunner(rubric, "Evaluate this", config=config)
+            result = await runner.run()
+
+        assert result.convergence_reason == "held_out_accuracy_met"
+        assert len(result.iterations) == 1
+        assert result.iterations[0].quality_score == pytest.approx(1.0)
+        assert result.iterations[0].quality_report is None
+        assert result.iterations[0].held_out_diagnostics is not None
+
+    @pytest.mark.asyncio
+    async def test_validation_data_required(self):
+        """held_out strategy raises if validation_data is None."""
+        from autorubric.meta._improve import ImprovementRunner
+
+        rubric = Rubric([
+            Criterion(name="x", weight=1.0, requirement="Test"),
+        ])
+
+        config = ImprovementConfig(
+            eval_llm=LLMConfig(model="test"),
+            revision_llm=LLMConfig(model="test"),
+            strategy="held_out",
+            validation_data=None,
+            save_artifacts=False,
+            show_progress=False,
+        )
+
+        runner = ImprovementRunner(rubric, "prompt", config=config)
+        with pytest.raises(ValueError, match="validation_data is required"):
+            await runner.run()
+
+    @pytest.mark.asyncio
+    async def test_all_items_must_have_ground_truth(self):
+        """held_out strategy raises if any item lacks ground_truth."""
+        from autorubric.meta._improve import ImprovementRunner
+
+        rubric = Rubric([
+            Criterion(name="x", weight=1.0, requirement="Test"),
+        ])
+        dataset = RubricDataset(
+            prompt="task",
+            rubric=rubric,
+            items=[
+                DataItem(
+                    submission="s1", description="d1",
+                    ground_truth=[CriterionVerdict.MET],
+                ),
+                DataItem(
+                    submission="s2", description="d2",
+                    ground_truth=None,
+                ),
+            ],
+        )
+
+        config = ImprovementConfig(
+            eval_llm=LLMConfig(model="test"),
+            revision_llm=LLMConfig(model="test"),
+            strategy="held_out",
+            validation_data=dataset,
+            save_artifacts=False,
+            show_progress=False,
+        )
+
+        runner = ImprovementRunner(rubric, "prompt", config=config)
+        with pytest.raises(ValueError, match="ground_truth"):
+            await runner.run()
+
+    @pytest.mark.asyncio
+    async def test_improve_rubric_convenience_api(self):
+        """improve_rubric() with strategy='held_out' dispatches correctly."""
+        rubric, dataset = self._make_dataset_and_rubric()
+
+        # Perfect grading
+        report_met = _make_ensemble_report(
+            [_make_ensemble_criterion_report("accuracy", 1.0, CriterionVerdict.MET)],
+            score=1.0,
+        )
+        report_unmet = _make_ensemble_report(
+            [_make_ensemble_criterion_report("accuracy", 1.0, CriterionVerdict.UNMET)],
+            score=0.0,
+        )
+
+        with patch.object(
+            rubric, "grade", new_callable=AsyncMock,
+            side_effect=[report_met, report_unmet],
+        ):
+            result = await improve_rubric(
+                rubric,
+                "Evaluate this",
+                eval_llm=LLMConfig(model="test"),
+                revision_llm=LLMConfig(model="test"),
+                strategy="held_out",
+                validation_data=dataset,
+                save_artifacts=False,
+                show_progress=False,
+            )
+
+        assert result.convergence_reason == "held_out_accuracy_met"
+        assert result.best_rubric is rubric
+
+    @pytest.mark.asyncio
+    async def test_revision_loop_with_held_out(self):
+        """Held-out loop: bad accuracy -> revise -> good accuracy -> converge."""
+        from autorubric.meta._improve import (
+            HeldOutValidationResult,
+            CriterionErrorReport,
+            ImprovementRunner,
+        )
+
+        rubric, dataset = self._make_dataset_and_rubric()
+
+        # Iteration 0: 50% accuracy (wrong on 1 of 1 criteria)
+        held_out_bad = HeldOutValidationResult(
+            mean_accuracy=0.50,
+            per_criterion=[
+                CriterionErrorReport(
+                    criterion_index=0,
+                    criterion_name="accuracy",
+                    n_samples=2,
+                    accuracy=0.50,
+                    false_positive_rate=0.0,
+                    false_negative_rate=0.50,
+                    disagreement_exemplars=[],
+                    agreement_exemplars=[],
+                ),
+            ],
+            total_cost=0.01,
+            item_reports=[],
+        )
+
+        # Iteration 1: 100% accuracy
+        held_out_good = HeldOutValidationResult(
+            mean_accuracy=1.0,
+            per_criterion=[
+                CriterionErrorReport(
+                    criterion_index=0,
+                    criterion_name="accuracy",
+                    n_samples=2,
+                    accuracy=1.0,
+                    false_positive_rate=0.0,
+                    false_negative_rate=0.0,
+                    disagreement_exemplars=[],
+                    agreement_exemplars=[],
+                ),
+            ],
+            total_cost=0.01,
+            item_reports=[],
+        )
+
+        validate_mock = AsyncMock(side_effect=[held_out_bad, held_out_good])
+
+        revised_json = json.dumps([
+            {"name": "accuracy", "weight": 1.0, "requirement": "Improved accuracy"}
+        ])
+        gen_result = GenerateResult(content=revised_json, cost=0.01)
+        generate_mock = AsyncMock(return_value=gen_result)
+
+        config = ImprovementConfig(
+            eval_llm=LLMConfig(model="test"),
+            revision_llm=LLMConfig(model="test"),
+            strategy="held_out",
+            validation_data=dataset,
+            held_out_min_accuracy=0.90,
+            save_artifacts=False,
+            show_progress=False,
+            max_iterations=5,
+        )
+
+        with (
+            patch(
+                "autorubric.meta._improve.validate_held_out",
+                validate_mock,
+            ),
+            patch("autorubric.meta._improve.LLMClient") as mock_llm_cls,
+        ):
+            mock_llm_cls.return_value.generate = generate_mock
+
+            runner = ImprovementRunner(rubric, "Evaluate this", config=config)
+            result = await runner.run()
+
+        assert result.convergence_reason == "held_out_accuracy_met"
+        assert len(result.iterations) == 2
+        assert result.iterations[0].quality_score == pytest.approx(0.50)
+        assert result.iterations[1].quality_score == pytest.approx(1.0)
+
+
+# ============================================================================
+# Held-out strategy: _serialize_iteration with held_out_diagnostics
+# ============================================================================
+
+
+class TestSerializeIterationHeldOut:
+    """Tests for _serialize_iteration with held-out-specific fields."""
+
+    def test_held_out_diagnostics_serialized(self):
+        from autorubric.meta._improve import (
+            CriterionErrorReport,
+            CriterionExemplar,
+            HeldOutValidationResult,
+        )
+
+        held_out = HeldOutValidationResult(
+            mean_accuracy=0.75,
+            per_criterion=[
+                CriterionErrorReport(
+                    criterion_index=0,
+                    criterion_name="accuracy",
+                    n_samples=4,
+                    accuracy=0.75,
+                    false_positive_rate=0.25,
+                    false_negative_rate=0.0,
+                    disagreement_exemplars=[
+                        CriterionExemplar(
+                            item_index=0,
+                            submission_snippet="test",
+                            llm_verdict=CriterionVerdict.MET,
+                            ground_truth_verdict=CriterionVerdict.UNMET,
+                            llm_reason="reason",
+                            is_disagreement=True,
+                        ),
+                    ],
+                    agreement_exemplars=[],
+                ),
+            ],
+            total_cost=0.05,
+            item_reports=[],
+        )
+
+        rubric = Rubric([_make_criterion("accuracy")])
+        iter_result = IterationResult(
+            iteration=0,
+            rubric=rubric,
+            quality_score=0.75,
+            agreement=None,
+            per_criterion_agreement=None,
+            issues=[],
+            issues_fixed=[],
+            issues_introduced=[],
+            accepted=True,
+            rejection_reason=None,
+            quality_report=None,
+            token_usage=None,
+            completion_cost=0.05,
+            held_out_diagnostics=held_out,
+        )
+
+        data = _serialize_iteration(iter_result)
+
+        # JSON-safe
+        serialized = json.dumps(data, default=str)
+        roundtripped = json.loads(serialized)
+
+        # held_out_diagnostics present
+        assert "held_out_diagnostics" in roundtripped
+        ho = roundtripped["held_out_diagnostics"]
+        assert ho["mean_accuracy"] == 0.75
+        assert ho["total_cost"] == 0.05
+        assert len(ho["per_criterion"]) == 1
+        assert ho["per_criterion"][0]["criterion_name"] == "accuracy"
+        assert ho["per_criterion"][0]["accuracy"] == 0.75
+        assert ho["per_criterion"][0]["num_disagreements"] == 1
+        assert ho["per_criterion"][0]["num_agreements"] == 0
+
+    def test_quality_report_absent_when_none(self):
+        rubric = Rubric([_make_criterion("test")])
+        iter_result = IterationResult(
+            iteration=0,
+            rubric=rubric,
+            quality_score=0.80,
+            agreement=None,
+            per_criterion_agreement=None,
+            issues=[],
+            issues_fixed=[],
+            issues_introduced=[],
+            accepted=True,
+            rejection_reason=None,
+            quality_report=None,
+            token_usage=None,
+            completion_cost=None,
+            held_out_diagnostics=None,
+        )
+
+        data = _serialize_iteration(iter_result)
+        serialized = json.dumps(data, default=str)
+        roundtripped = json.loads(serialized)
+
+        assert "quality_report" not in roundtripped
+        assert "held_out_diagnostics" not in roundtripped
+
+    def test_both_quality_report_and_held_out_absent(self):
+        """When both quality_report and held_out_diagnostics are None, neither key appears."""
+        rubric = Rubric([_make_criterion("test")])
+        iter_result = IterationResult(
+            iteration=0,
+            rubric=rubric,
+            quality_score=0.50,
+            agreement=None,
+            per_criterion_agreement=None,
+            issues=[],
+            issues_fixed=[],
+            issues_introduced=[],
+            accepted=True,
+            rejection_reason=None,
+            quality_report=None,
+            token_usage=None,
+            completion_cost=None,
+        )
+
+        data = _serialize_iteration(iter_result)
+        assert "quality_report" not in data
+        assert "held_out_diagnostics" not in data

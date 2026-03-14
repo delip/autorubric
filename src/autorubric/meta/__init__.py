@@ -45,6 +45,9 @@ from ._evaluate import (
 )
 from ._improve import (
     ConvergenceFn,
+    CriterionErrorReport,
+    CriterionExemplar,
+    HeldOutValidationResult,
     ImprovementConfig,
     ImprovementProgressDisplay,
     ImprovementResult,
@@ -57,12 +60,16 @@ from ._improve import (
     extract_issues,
     format_agreement_for_prompt,
     format_ground_truth_for_prompt,
+    format_held_out_for_prompt,
     format_issues_for_prompt,
     improve_rubric,
     pareto_accept,
     revise_rubric,
+    revise_rubric_held_out,
     validate_agreement,
+    validate_criteria_structure,
     validate_ground_truth,
+    validate_held_out,
 )
 
 __all__ = [
@@ -76,6 +83,9 @@ __all__ = [
     "ImprovementRunner",
     # Improvement - types
     "ConvergenceFn",
+    "CriterionErrorReport",
+    "CriterionExemplar",
+    "HeldOutValidationResult",
     "ImprovementConfig",
     "ImprovementProgressDisplay",
     "ImprovementResult",
@@ -88,9 +98,13 @@ __all__ = [
     "extract_issues",
     "format_agreement_for_prompt",
     "format_ground_truth_for_prompt",
+    "format_held_out_for_prompt",
     "format_issues_for_prompt",
     "pareto_accept",
     "revise_rubric",
+    "revise_rubric_held_out",
     "validate_agreement",
+    "validate_criteria_structure",
     "validate_ground_truth",
+    "validate_held_out",
 ]

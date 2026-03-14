@@ -593,3 +593,72 @@ Example:
   {{"weight": 8, "requirement": "Includes at least two real-world applications of the concept"}},
   {{"weight": -5, "name": "incorrect_formula", "requirement": "Presents an incorrect mathematical formula for the relationship"}}
 ]"""
+
+
+# ============================================================================
+# Held-Out Revision Prompts
+# ============================================================================
+
+HELD_OUT_REVISION_SYSTEM_PROMPT = """\
+You are an expert rubric editor specializing in making evaluation criteria precise enough for \
+automated LLM judges to apply consistently.
+
+Your task is to revise criterion wording based on held-out grading diagnostics — real cases where \
+the rubric's criteria led to incorrect verdicts when applied by an LLM judge.
+
+Key constraints:
+- You MUST NOT add, remove, or reorder criteria. The revised rubric must have EXACTLY the same \
+number of criteria in the same order.
+- You MAY modify criterion wording and weights.
+- Use disagreement reasoning (where the LLM judge disagreed with ground truth) to identify \
+ambiguous or misleading wording.
+- Use agreement reasoning (where the LLM judge agreed with ground truth) to preserve effective \
+wording — do not change what already works.
+- A high false positive rate (GT=UNMET but LLM=MET) means the wording is too permissive — make \
+it more specific about what exactly must be present.
+- A high false negative rate (GT=MET but LLM=UNMET) means the wording is too strict or too \
+narrow — broaden the acceptance criteria or clarify edge cases.
+- Each criterion should target a single, observable quality verifiable from the submission text.
+- Avoid subjective language, hedging words, or vague qualifiers."""
+
+HELD_OUT_REVISION_USER_PROMPT_TEMPLATE = """\
+You are revising an evaluation rubric to fix grading errors identified on held-out data.
+
+## Task Being Evaluated
+{task_prompt}
+
+## Current Rubric
+{original_criteria}
+
+## Held-Out Grading Diagnostics
+{diagnostics_text}
+
+## Revision History
+{history_text}
+Do NOT reintroduce wording that was changed in previous iterations.
+
+## Revision Rules
+1. Output EXACTLY {num_criteria} criteria in the SAME ORDER as the current rubric.
+2. For criteria with high accuracy (>90%), preserve their wording closely — small tweaks only.
+3. For criteria with low accuracy, study the disagreement exemplars:
+   - If FP rate is high: the wording is too easy to satisfy. Add specificity about what evidence \
+is required.
+   - If FN rate is high: the wording is too restrictive. Broaden acceptance or clarify that \
+implicit satisfaction counts.
+4. Use the judge's reasoning from disagreement cases to understand HOW the wording is being \
+misinterpreted, then fix it.
+5. Use the judge's reasoning from agreement cases to understand what phrasing works well — \
+preserve those patterns.
+6. Each criterion must assess ONE specific, observable quality.
+7. Weights may be adjusted (integers, typically 5-15 for positive, -5 to -15 for negative).
+
+## Output Format
+Return ONLY a valid JSON array of EXACTLY {num_criteria} criteria objects. Each object must have \
+"weight" (integer) and "requirement" (string) fields, and optionally a "name" (string) field. \
+No other text or explanation.
+
+Example:
+[
+  {{"weight": 10, "name": "factual_accuracy", "requirement": "States that the boiling point of water at sea level is 100 degrees Celsius (212 degrees Fahrenheit)"}},
+  {{"weight": -5, "name": "incorrect_formula", "requirement": "Presents an incorrect mathematical formula for the relationship"}}
+]"""

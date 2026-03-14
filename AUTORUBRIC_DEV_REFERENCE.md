@@ -91,16 +91,19 @@ Note: `FewShotConfig` is listed in the Core Types table above (defined in `src/a
 | `OrdinalCriterionMetrics` | weighted_kappa, adjacent_accuracy, correlations                           |
 | `NominalCriterionMetrics` | kappa, per_option metrics                                                 |
 
-### Meta-Rubric Improvement Types (src/autorubric/meta/_improve.py)
+### Rubric Improvement Types (src/autorubric/meta/_improve.py)
 
 | Type                          | Purpose                                                                              |
 | ----------------------------- | ------------------------------------------------------------------------------------ |
-| `ImprovementConfig`           | Configuration: eval_llm (LLMConfig | list[JudgeSpec]), revision_llm, mode, validation_data, convergence_fn, custom prompts |
+| `ImprovementConfig`           | Configuration: eval_llm, revision_llm, mode, strategy (`"meta_rubric"` or `"held_out"`), validation_data, convergence_fn, custom prompts |
 | `ImprovementResult`           | Final result: original/final/best rubric, iterations, best_iteration, convergence_reason, total_completion_cost |
 | `ImprovementRunner`           | Full-control runner class following the EvalRunner pattern                            |
 | `ImprovementProgressDisplay`  | Rich-based progress display with bar, issues table, rubric panel, and summary table  |
 | `IterationResult`             | Per-iteration: iteration, rubric, quality_score, agreement, per_criterion_agreement, issues, issues_fixed, issues_introduced, accepted, rejection_reason, quality_report, token_usage, completion_cost |
 | `IssueDetail`                 | Single issue: criterion_name, requirement, weight, is_antipattern, feedback           |
+| `CriterionExemplar`           | A single grading case for a criterion (item_index, submission_snippet, verdicts, reason, is_disagreement) |
+| `CriterionErrorReport`        | Per-criterion error analysis from held-out grading (accuracy, FP/FN rates, exemplars) |
+| `HeldOutValidationResult`     | Result from held-out validation with per-criterion diagnostics                       |
 | `ConvergenceFn`               | Custom convergence callback type alias                                               |
 
 ### Meta-Rubric Types (src/autorubric/meta/_evaluate.py)
@@ -128,7 +131,11 @@ Note: `FewShotConfig` is listed in the Core Types table above (defined in `src/a
 | `validate_ground_truth`        | Grade validation items and compute Spearman rho against expected scores |
 | `compute_expected_scores`      | Compute expected scores from ground-truth verdicts and rubric weights |
 | `pareto_accept`                | Check revision acceptance under the Pareto constraint           |
+| `validate_held_out`            | Grade held-out items, compare per-criterion verdicts against ground truth |
+| `format_held_out_for_prompt`   | Format held-out validation result into revision prompt text     |
+| `validate_criteria_structure`  | Post-revision check that criteria count/order was preserved     |
 | `revise_rubric`                | Revise rubric via LLM; returns (Rubric, cost)                   |
+| `revise_rubric_held_out`       | Revise rubric using held-out-specific prompt templates          |
 | `render_improvement_report_html` | Render consolidated HTML improvement report (in `_display.py`, private — not in `__all__`) |
 | `_match_issue_to_criteria`       | Best-effort match of meta-rubric issues to rubric criterion indices (private) |
 

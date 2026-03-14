@@ -43,6 +43,7 @@ Deploy with confidence.
 |--------|--------|-------------------|
 | [Evaluating Rubric Quality](rubric-evaluation.md) | Peer Review | Meta-rubrics to validate and improve rubrics |
 | [Automated Rubric Improvement](automated-rubric-improvement.md) | EV Analysis | LLM-driven iterative refinement of rubrics |
+| [Held-Out Rubric Improvement](held-out-rubric-improvement.md) | Peer Review | Data-driven criterion refinement using grading errors |
 | [Judge Validation](judge-validation.md) | Content Moderation | Measuring agreement with human labels |
 | [Synthetic Ground Truth](synthetic-ground-truth.md) | Product Descriptions | Bootstrapping labels from strong models |
 | [Batch Evaluation](batch-evaluation.md) | Customer Feedback | Checkpointing, resumption, and cost tracking |
@@ -57,6 +58,7 @@ Advanced patterns for specific needs.
 | [Cost Optimization](cost-optimization.md) | News Fact-Checking | Caching and model selection strategies |
 | [Configuration Management](configuration-management.md) | Academic Papers | Sharing reproducible configs across teams |
 | [Evaluating Agent Skills](agent-skill-evaluation.md) | Peer Review | Skill evaluation with with/without-skill comparison |
+| [Improving Agent Skills](improving-agent-skills.md) | Peer Review | Automated skill refinement using rubric feedback |
 
 ## Quick Start
 
