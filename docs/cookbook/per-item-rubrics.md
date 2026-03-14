@@ -49,6 +49,14 @@ dataset = RubricDataset(
 )
 ```
 
+The resolution logic follows a simple fallback chain:
+
+| Scenario | Rubric Source | Example |
+|----------|--------------|---------|
+| Item has per-item rubric | Item's own `DataItem.rubric` | Sorting problem with complexity criteria |
+| Item has no per-item rubric, dataset has global rubric | Dataset's `RubricDataset.rubric` | Simple string reversal using baseline criteria |
+| Neither item nor dataset has a rubric | Error raised at evaluation time | Misconfigured dataset with no rubric at any level |
+
 ### Step 2: Add Items with Problem-Specific Rubrics
 
 Override rubrics for items that need specialized criteria:
@@ -136,6 +144,13 @@ def two_sum(nums, target):
 )
 ```
 
+!!! tip "When to Use Per-Item Rubrics"
+    Per-item rubrics are most useful when evaluation items require fundamentally different
+    criteria, not just different prompts. A sorting problem and a system design question
+    need distinct criteria (time complexity vs. architecture quality), so a single global
+    rubric cannot adequately cover both. If items differ only in prompt wording but share
+    the same quality dimensions, a global rubric with per-item prompts is simpler.
+
 ### Step 3: Items Using Global Rubric
 
 Some items can use the global rubric without customization:
@@ -177,6 +192,12 @@ def fibonacci(n):
 """,  # Optimal iterative solution for comparison
 )
 ```
+
+!!! note "Reference Submissions"
+    A reference submission is an ideal or expected solution attached to a data item. When
+    provided, the grader can compare the candidate submission against the reference to make
+    more informed judgments. Reference submissions are optional and do not affect rubric
+    resolution -- they serve purely as additional context for the LLM judge.
 
 ### Step 5: Resolve Effective Rubrics
 
@@ -258,6 +279,20 @@ dataset.add_item(
     rubric=system_design_rubric,
 )
 ```
+
+!!! warning "Rubric Compatibility with Ground-Truth Verdicts"
+    When using `ground_truth` verdicts on a `DataItem`, those verdicts must correspond to
+    the criteria in the item's per-item rubric, not the global rubric. A mismatch between
+    verdict keys and rubric criteria will produce incorrect metrics. Always verify that
+    ground-truth labels align with the effective rubric for each item.
+
+| Problem | Custom Rubric? | Criteria Count |
+|---------|---------------|----------------|
+| Sorting algorithm | Yes | 4 (correctness, complexity, space, edge cases) |
+| Two Sum | Yes | 4 (correctness, complexity, single pass, clarity) |
+| String reversal | No (global) | 3 (correctness, clarity, edge cases) |
+| Fibonacci | No (global) | 3 (correctness, clarity, edge cases) |
+| System design | Yes | 3 (architecture, scale, failure handling) |
 
 ## Key Takeaways
 

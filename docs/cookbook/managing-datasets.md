@@ -16,6 +16,14 @@ You're building a medical triage chatbot that assesses patient symptoms and prov
 
 ## The Solution
 
+```mermaid
+flowchart LR
+    A[Create Dataset] --> B[Add Items]
+    B --> C[to_file]
+    C --> D[split_train_test]
+    D --> E[Evaluate]
+```
+
 ### Step 1: Create a Dataset with Ground Truth
 
 Build a dataset where each item has expert-assigned verdicts:
@@ -54,6 +62,13 @@ dataset = RubricDataset(
     name="medical-triage-v1"
 )
 ```
+
+| Criterion | Weight | Type | Purpose |
+|-----------|--------|------|---------|
+| `symptom_acknowledgment` | 10.0 | Positive | Checks that the chatbot recognizes reported symptoms |
+| `appropriate_urgency` | 15.0 | Positive | Checks correct triage level (emergency, urgent, routine) |
+| `safe_guidance` | 12.0 | Positive | Checks that initial guidance is medically sound |
+| `dangerous_advice` | -20.0 | Penalty | Penalizes responses that include harmful recommendations |
 
 ### Step 2: Add Items with Ground Truth Labels
 
@@ -96,6 +111,12 @@ dataset.add_item(
     Ground truth verdicts must be in the same order as rubric criteria.
     `[MET, MET, UNMET, MET]` maps to criteria 1, 2, 3, 4 respectively.
 
+| Verdict | Meaning | Scoring Effect |
+|---------|---------|----------------|
+| `MET` | The criterion is satisfied | Positive-weight criteria add to the score; negative-weight criteria (penalties) subtract |
+| `UNMET` | The criterion is not satisfied | Positive-weight criteria contribute nothing; negative-weight criteria contribute nothing |
+| `CANNOT_ASSESS` | Evidence is insufficient to judge | The criterion is excluded from scoring entirely |
+
 ### Step 3: Save and Load Datasets
 
 Persist datasets to JSON for sharing and reproducibility:
@@ -132,6 +153,12 @@ The JSON format is human-readable:
   ]
 }
 ```
+
+!!! tip "Per-item prompts override the global prompt"
+    Each `DataItem` can carry its own `prompt` field, which overrides the
+    dataset-level prompt during evaluation. This is useful when individual
+    items need different evaluation instructions -- for example, when the
+    same rubric applies to varied patient scenarios with distinct context.
 
 ### Step 4: Split for Training and Testing
 

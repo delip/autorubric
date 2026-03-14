@@ -233,6 +233,13 @@ result = await improve_rubric(
 
 The revision prompt includes per-criterion agreement data, guiding the LLM to clarify criteria where judges disagree.
 
+!!! tip "Even a Small Validation Set Helps"
+    Providing as few as 5-10 items with ground-truth verdicts significantly improves the
+    loop's ability to detect and fix rubric issues. The meta-rubric checks structural quality
+    (clarity, specificity, overlap), but a validation set adds an objective behavioral signal:
+    does the rubric actually rank responses correctly? That complementary signal catches
+    problems that structural analysis alone misses.
+
 ### Step 5: Custom Convergence Functions
 
 The built-in convergence logic handles common cases. For custom stopping conditions, provide a `convergence_fn`:

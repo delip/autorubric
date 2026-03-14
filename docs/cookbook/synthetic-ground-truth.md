@@ -6,6 +6,20 @@ Bootstrap evaluation by generating labels with a strong model.
 
 You're evaluating product descriptions for an e-commerce platform. You have 100 unlabeled descriptions and no budget for human annotation. You want to use a powerful model (like GPT-4 or Claude Opus) to generate ground truth labels, then use those labels to evaluate a cheaper model for production.
 
+```mermaid
+flowchart LR
+    subgraph Phase 1: Label Generation
+        A[Unlabeled Items] --> B[Strong LLM]
+        B --> C[Ground Truth Labels]
+    end
+    subgraph Phase 2: Evaluation
+        D[Cheap LLM] --> E[Predictions]
+        C --> F{Compare}
+        E --> F
+        F --> G[Metrics]
+    end
+```
+
 ## What You'll Learn
 
 - Using `fill_ground_truth()` to generate synthetic labels
@@ -132,6 +146,12 @@ if unlabeled:
 clean_items = [item for item in labeled_dataset if item.ground_truth is not None]
 ```
 
+!!! note "Partial label strategies"
+    You do not need to label every criterion for every item. Labeling a
+    representative subset of items fully is more cost-effective than labeling
+    all items partially, because full labels per item give you reliable
+    per-criterion metrics for that subset.
+
 ### Step 4: Save the Labeled Dataset
 
 Persist synthetic ground truth for reuse:
@@ -218,6 +238,11 @@ GPT-4 (GT source)        100.0%      1.000   $0.0823
 GPT-4-mini (prod)         89.0%      0.762   $0.0124
 ```
 
+| Model | Accuracy | Kappa | Cost |
+|-------|----------|-------|------|
+| GPT-4 (GT source) | 100.0% | 1.000 | $0.0823 |
+| GPT-4-mini (prod) | 89.0% | 0.762 | $0.0124 |
+
 !!! tip "Synthetic Label Limitations"
     Synthetic ground truth is only as good as the generating model.
     If the strong model makes systematic errors, the cheaper model will
@@ -226,6 +251,14 @@ GPT-4-mini (prod)         89.0%      0.762   $0.0124
     - Validating a sample of synthetic labels manually
     - Using ensemble generation (multiple strong models)
     - Treating metrics as relative, not absolute
+
+| Scenario | Recommended Approach |
+|----------|----------------------|
+| No annotation budget, need relative model comparison | Synthetic GT from a strong model |
+| High-stakes domain (medical, legal) where errors are costly | Human labels, at least for a validation sample |
+| Large dataset, partial budget available | Synthetic GT for bulk labeling, human labels for a validation subset |
+| Comparing models from the same provider/family | Synthetic GT from a different provider to avoid shared biases |
+| Ground truth already exists from production logs | Use existing labels directly; no generation needed |
 
 ## Key Takeaways
 

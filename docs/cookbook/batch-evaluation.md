@@ -17,6 +17,19 @@ You need to evaluate 10,000 customer feedback responses for sentiment and helpfu
 
 ## The Solution
 
+```mermaid
+flowchart LR
+    A[Dataset] --> B[EvalRunner]
+    B --> C{Checkpoint\nexists?}
+    C -->|No| D[Grade Item]
+    C -->|Yes| F[Load Checkpoint]
+    F --> D
+    D --> E[Save Checkpoint]
+    E -->|Next item| D
+    E -->|All done| G[EvalResult]
+    G --> H[Metrics]
+```
+
 ### Step 1: Configure the Evaluation
 
 Set up `EvalConfig` for production runs:
@@ -109,6 +122,12 @@ Output when resuming:
 INFO: Resuming experiment customer-feedback-v1 with 4,235 completed items
 ⠋ Evaluating ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4,236/10,000 (2.28/s) 0:00:01 -0:42:15
 ```
+
+!!! tip "Experiment naming conventions"
+    Use descriptive experiment names that encode the date, model, and config variant --
+    for example, `feedback-gpt4m-2026-03-14` or `feedback-v2-ensemble`. This makes it
+    straightforward to resume a specific run and to compare results across experiments
+    without opening each checkpoint directory.
 
 ### Step 5: Examine Timing Statistics
 
@@ -249,6 +268,13 @@ grader = CriterionGrader(
 
 # Each provider has independent rate limit
 ```
+
+| Dataset Size | Concurrent Items | Parallel Requests | Notes |
+|---|---|---|---|
+| < 100 | 10 | 5 | Small experiments; low concurrency avoids throttling |
+| 100 - 1,000 | 25 - 50 | 10 - 15 | Moderate workloads; monitor rate-limit errors |
+| 1,000 - 10,000 | 50 - 100 | 15 - 20 | Set `fail_fast=False` and use checkpointing |
+| > 10,000 | 100 - 200 | 20 - 30 | Ensure provider tier supports the request rate |
 
 ## Key Takeaways
 

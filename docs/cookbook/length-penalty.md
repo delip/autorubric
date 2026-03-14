@@ -16,6 +16,20 @@ You're evaluating executive summaries for business reports. These summaries shou
 
 ## The Solution
 
+```mermaid
+flowchart LR
+    A[Count words/tokens] --> B{count <= free_budget?}
+    B -->|Yes| C[penalty = 0]
+    B -->|No| D{count >= max_cap?}
+    D -->|Yes| E[penalty = penalty_at_cap]
+    D -->|No| F[Compute ratio]
+    F --> G[penalty = penalty_at_cap * ratio^exponent]
+    C --> H[Final Score = base - penalty]
+    E --> H
+    G --> H
+    H --> I[Clamp to 0]
+```
+
 ### Step 1: Define Content Quality Criteria
 
 First, create a rubric for summary quality:
@@ -92,6 +106,8 @@ else:
 | 300 | ~12% |
 | 350 | ~21% |
 | 400+ | 30% (capped) |
+
+![Length penalty curves for different exponents](../images/length-penalty-curve.png)
 
 !!! tip "Exponent Tuning"
     - **Higher exponent** (2.0+): More lenient near free_budget, steep increase near cap
@@ -209,6 +225,14 @@ grader = CriterionGrader(
 # - Penalty subtracted directly (e.g., -15.0 for 300 words)
 # - Final raw_score: 21.0
 ```
+
+| Property | Normalized Mode | Raw Mode |
+|---|---|---|
+| Score range | 0.0 - 1.0 | Unbounded weighted sum |
+| `penalty_at_cap` meaning | Fraction of score removed (e.g., 0.3 = 30%) | Absolute points subtracted (e.g., 50.0) |
+| `free_budget` | Words/tokens before any penalty applies | Same |
+| Typical use case | Leaderboard ranking, human-readable reports | RL reward shaping, training signal |
+| How penalty is applied | `score * (1 - penalty)` | `raw_score - penalty` |
 
 ### Step 6: OUTPUT_ONLY with Extended Thinking
 

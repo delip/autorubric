@@ -6,6 +6,16 @@ Learn the fundamentals of AutoRubric by evaluating tech support ticket responses
 
 You're a QA lead at a tech company. Support agents respond to customer tickets, and you need to ensure responses are helpful, accurate, and professional. Manual review doesn't scale, so you want to automate quality assessment with an LLM judge.
 
+```mermaid
+flowchart LR
+    R[Rubric] --> G[grade]
+    Gr[CriterionGrader] --> G
+    G --> E[EvaluationReport]
+    E --> S[score]
+    E --> V[verdicts]
+    E --> Re[reasons]
+```
+
 ## What You'll Learn
 
 - Creating rubrics with `Rubric.from_dict()`
@@ -46,6 +56,13 @@ rubric = Rubric.from_dict([
     }
 ])
 ```
+
+| Criterion | Weight | Type | What It Checks |
+|-----------|--------|------|----------------|
+| addresses_issue | +10.0 | Positive | Response directly addresses the reported issue |
+| provides_solution | +8.0 | Positive | Response provides a clear solution or next steps |
+| professional_tone | +5.0 | Positive | Response maintains professional, courteous tone |
+| factual_errors | -15.0 | Negative (penalty) | Response contains incorrect technical information |
 
 !!! tip "Positive vs Negative Weights"
     - **Positive weights**: Desirable traits. MET adds to the score.
@@ -164,6 +181,14 @@ Score: 1.00
 
 ### Understanding the Score
 
+| Step | Calculation | Value |
+|------|-------------|-------|
+| MET positive weights | 10.0 + 8.0 + 5.0 | 23.0 |
+| MET negative weights | (factual_errors UNMET, no penalty) | 0.0 |
+| Total positive weight | 10.0 + 8.0 + 5.0 | 23.0 |
+| Normalized score | 23.0 / 23.0 | **1.00** |
+| If factual_errors were MET | (23.0 - 15.0) / 23.0 | **0.35** |
+
 The score calculation:
 
 1. Sum weights of MET positive criteria: 10.0 + 8.0 + 5.0 = 23.0
@@ -173,6 +198,12 @@ The score calculation:
 
 If the response had contained factual errors (that criterion MET), the score would be:
 (23.0 - 15.0) / 23.0 = 0.35
+
+!!! note "Score Normalization"
+    Scores are divided by the total positive weight, so they always range from 0 to 1.
+    Negative-weight criteria do not contribute to the denominator. When a negative criterion
+    is MET, its absolute weight is subtracted from the numerator after normalization, which
+    means scores can drop well below what the positive criteria alone would produce.
 
 ## Key Takeaways
 

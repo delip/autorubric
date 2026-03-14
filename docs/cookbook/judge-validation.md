@@ -16,6 +16,16 @@ You've deployed an LLM judge for content moderation. Before trusting it at scale
 
 ## The Solution
 
+```mermaid
+flowchart LR
+    A[Ground Truth Dataset\nwith human labels] --> B[LLM Grader]
+    B --> C[Predictions]
+    A --> D{Compare}
+    C --> D
+    D --> E[Metrics\naccuracy, kappa,\nprecision, recall]
+    E --> F[Per-Criterion\nAnalysis]
+```
+
 ### Step 1: Prepare Your Validation Dataset
 
 Load a dataset with human-labeled ground truth:
@@ -125,6 +135,8 @@ self_harm                    95.0%    0.876    0.923
 spam                         89.0%    0.761    0.856
 ```
 
+![Per-criterion validation metrics for content moderation](../images/judge-validation-per-criterion.png)
+
 The `misinformation` criterion has lower kappa—consider few-shot calibration or clearer criteria definition.
 
 ### Step 5: Detect Systematic Bias
@@ -144,6 +156,12 @@ print(f"  Effect size: {bias.effect_size:.3f}")
 
 - **Permissive bias**: Judge marks MET more often than humans
 - **Strict bias**: Judge marks MET less often than humans
+
+!!! note "Remediation strategies for judge bias"
+    When bias is detected, several options can bring the judge closer to human agreement.
+    Adding few-shot examples of correctly labeled edge cases often fixes borderline misclassifications.
+    Rewording ambiguous criteria reduces disagreement that stems from unclear requirements rather than model error.
+    Upgrading to a more capable model or using ensemble judging across multiple models both reduce individual model bias at the cost of higher inference spend.
 
 ### Step 6: Bootstrap Confidence Intervals
 
