@@ -56,6 +56,7 @@ Advanced patterns for specific needs.
 | [Per-Item Rubrics](per-item-rubrics.md) | Coding Interviews | Different rubrics for different items |
 | [Cost Optimization](cost-optimization.md) | News Fact-Checking | Caching and model selection strategies |
 | [Configuration Management](configuration-management.md) | Academic Papers | Sharing reproducible configs across teams |
+| [Evaluating Agent Skills](agent-skill-evaluation.md) | Peer Review | Skill evaluation with with/without-skill comparison |
 
 ## Quick Start
 

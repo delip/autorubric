@@ -39,6 +39,11 @@ from autorubric import LLMConfig
 config = LLMConfig.from_yaml("configs/llm/production.yaml")
 ```
 
+!!! tip "YAML over JSON for human-edited configs"
+    Prefer YAML for configuration files that team members edit by hand. YAML supports inline
+    comments and reads more naturally than JSON, which matters when configs are reviewed in
+    pull requests. Reserve JSON for machine-generated files like exported rubrics.
+
 ### Step 2: Create Environment-Specific Configs
 
 ```yaml
@@ -68,6 +73,12 @@ import os
 env = os.getenv("EVAL_ENV", "development")
 config = LLMConfig.from_yaml(f"configs/llm/{env}.yaml")
 ```
+
+| Environment | Model | Cache | Parallelism | Use Case |
+|---|---|---|---|---|
+| development | `gpt-4.1-mini` | Enabled (local) | 1 (default) | Rapid iteration with cached responses |
+| staging | `gpt-4.1` | Disabled | 10 | Pre-production validation on full model |
+| production | `gpt-4.1` | Prompt caching | 50 | High-throughput batch evaluation |
 
 ### Step 3: Store Rubrics in JSON
 
@@ -198,6 +209,11 @@ for section_name, criteria in config["sections"].items():
 rubric = Rubric.from_dict(all_criteria)
 ```
 
+!!! warning "Section names must be unique"
+    When sections are flattened into a single criteria list, section names serve as dictionary
+    keys. Duplicate section names will silently overwrite earlier entries. Use distinct,
+    descriptive names (e.g., `technical`, `presentation`) and verify uniqueness before loading.
+
 ### Step 5: Version Control Experiment Configs
 
 Create a complete experiment configuration:
@@ -287,6 +303,15 @@ project/
 └── README.md
 ```
 
+```mermaid
+flowchart LR
+    A[Environment Variable] --> B[YAML File]
+    B --> C[LLMConfig]
+    B --> D[Rubric]
+    C --> E[EvalRunner]
+    D --> E
+```
+
 ### Step 7: Reproducibility with Experiment Names
 
 Use deterministic experiment names for reproducibility:
@@ -336,6 +361,11 @@ git push
 git pull
 python scripts/run_experiment.py --config configs/experiments/paper_review_v3.yaml
 ```
+
+!!! note "Keep secrets out of config files"
+    API keys and other credentials must never appear in YAML config files that are committed
+    to version control. Store them in `.env` files or environment variables instead, and
+    confirm that `.env` is listed in your `.gitignore`.
 
 ## Key Takeaways
 

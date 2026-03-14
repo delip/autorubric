@@ -16,6 +16,25 @@ You're evaluating restaurant reviews for a review platform. Simple "good/bad" do
 
 ## The Solution
 
+```mermaid
+flowchart LR
+    C[Criterion with Options] --> J[Judge selects option]
+    J --> V["option.value (0-1)"]
+    V --> W[Weighted by criterion weight]
+    W --> A[Aggregate into final score]
+
+    subgraph "Binary (MET/UNMET)"
+        B1[Criterion] --> B2{MET or UNMET?}
+        B2 -->|MET| B3["1.0"]
+        B2 -->|UNMET| B4["0.0"]
+    end
+
+    subgraph "Multi-Choice"
+        M1[Criterion] --> M2{Select from N options}
+        M2 --> M3["option.value (any 0-1)"]
+    end
+```
+
 ### Step 1: Define Ordinal (Likert) Criteria
 
 For criteria with ordered options (1-5 scales, agreement levels):
@@ -257,6 +276,14 @@ grader = CriterionGrader(
 - `mode`: Most common selection (majority)
 - `weighted_mode`: Weighted by judge weights
 - `unanimous`: All must agree (else fallback to mode)
+
+| Property | Ordinal | Nominal |
+|---|---|---|
+| Option ordering | Matters - options have inherent rank | Does not matter - categories are unordered |
+| Agreement metric | Weighted kappa (penalizes distant disagreements more) | Unweighted kappa (all disagreements equal) |
+| Ensemble aggregation | Mean, median, or mode of option values | Mode or weighted mode of selections |
+| When to use | Quality ratings, Likert scales, satisfaction levels | Sentiment type, content category, tone classification |
+| Example | "Very Poor / Poor / Average / Good / Excellent" | "Positive / Neutral / Negative / Mixed" |
 
 ## Key Takeaways
 

@@ -16,6 +16,18 @@ You're fact-checking news articles at scale. Each article requires evaluating mu
 
 ## The Solution
 
+```mermaid
+flowchart LR
+    A[Request] --> B{Local Cache?}
+    B -->|hit| C[Return Cached]
+    B -->|miss| D{Prompt Cache\nEligible?}
+    D -->|yes| E[API Call\nw/ Cached Prefix]
+    D -->|no| F[API Call\nFull Prompt]
+    E --> G[Store in Cache]
+    F --> G
+    G --> H[Return Result]
+```
+
 ### Step 1: Enable Response Caching
 
 Cache LLM responses to avoid redundant API calls:
@@ -93,6 +105,9 @@ cleared = client.clear_cache()
 print(f"Cleared {cleared} cached entries")
 ```
 
+!!! warning "Cache Invalidation"
+    Changing the model, temperature, rubric criteria, or system prompt invalidates cached responses. Use distinct experiment names or cache keys when testing different configurations so that stale results from a prior setup are never reused.
+
 ### Step 5: Enable Prompt Caching (Anthropic)
 
 For Anthropic models, prompt caching reduces costs for repeated system prompts:
@@ -121,6 +136,13 @@ if result.total_token_usage:
     - **Anthropic**: Requires explicit cache_control (AutoRubric handles this)
     - **OpenAI/DeepSeek**: Automatic for prompts ≥1024 tokens
     - **Gemini**: Supported on 2.5+ models
+
+| Provider | Cache Type | Min Prompt Size | Discount | Notes |
+|----------|-----------|-----------------|----------|-------|
+| Anthropic | Explicit prefix | 1024 tokens | 90% on cached input | Requires `cache_control` breakpoints; AutoRubric sets these automatically |
+| OpenAI | Automatic prefix | 1024 tokens | 50% on cached input | No opt-in needed; applies when the prefix matches a recent request |
+| DeepSeek | Automatic prefix | 1024 tokens | 50-90% on cached input | Behavior mirrors OpenAI; discount varies by model tier |
+| Gemini | Context caching | 32k tokens | 75% on cached input | Best suited for large system prompts or few-shot context |
 
 ### Step 6: Compare Model Cost vs Accuracy
 
@@ -167,6 +189,11 @@ Claude Haiku              89.2%    $0.0018       5.1s
 GPT-4 Mini                91.3%    $0.0034       6.8s
 GPT-4 Turbo               94.1%    $0.0156      12.3s
 ```
+
+![Model cost vs accuracy comparison](../images/cost-accuracy-models.png)
+
+!!! tip "Model Selection Heuristic"
+    Start with the cheapest model that meets your accuracy threshold, then upgrade selectively. Run a per-criterion breakdown: if a cheap model scores well on most criteria but underperforms on one or two, route only those criteria to a stronger model instead of upgrading everything.
 
 ### Step 7: Cost-Effective Production Strategy
 

@@ -69,6 +69,18 @@ The specific data can be found on page 47 of the annual report.
 # it cannot verify the WHO report claim without access to the document.
 ```
 
+```mermaid
+flowchart LR
+    J[Judge Evaluates Criterion] --> V{Verdict?}
+    V -->|MET| S1[Add Weight to Score]
+    V -->|UNMET| S2[No Contribution]
+    V -->|CANNOT_ASSESS| CS{Strategy?}
+    CS -->|SKIP| R1[Exclude from Denominator]
+    CS -->|ZERO| R2[Score as 0]
+    CS -->|PARTIAL| R3[Apply Partial Credit]
+    CS -->|FAIL| R4[Worst-Case Score]
+```
+
 ### Step 3: Configure CANNOT_ASSESS Handling
 
 Choose a strategy based on your needs:
@@ -123,6 +135,9 @@ grader_fail = CriterionGrader(
 | `ZERO` | Counts as UNMET | Lower (0 contribution) | Burden of proof on response |
 | `PARTIAL` | Partial weight credit | Middle ground | Balanced uncertainty handling |
 | `FAIL` | Worst case (UNMET for positive, MET for negative) | Lowest | Safety-critical applications |
+
+!!! tip "Choosing a default strategy"
+    SKIP is the safest default because it avoids penalizing submissions for criteria the judge genuinely cannot evaluate. The denominator shrinks, so assessed criteria still receive their full weight. However, ZERO or FAIL may be more appropriate when the inability to assess itself signals a problem -- for instance, if a response lacks citations and citation quality is a criterion, the missing evidence is the finding.
 
 ### Step 4: Compare Strategy Effects
 
@@ -183,6 +198,8 @@ ZERO             0.72         1
 PARTIAL (0.5)    0.78         1
 FAIL             0.60         1
 ```
+
+![CANNOT_ASSESS strategy score comparison](../images/cannot-assess-strategy-comparison.png)
 
 ### Step 5: Monitor CANNOT_ASSESS Frequency
 

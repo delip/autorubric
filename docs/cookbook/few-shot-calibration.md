@@ -15,6 +15,21 @@ You're evaluating legal contract clauses for compliance with company standards. 
 
 ## The Solution
 
+```mermaid
+flowchart LR
+    D[Dataset] --> S[split_train_test]
+    S --> TR[Training Set]
+    S --> TE[Test Set]
+    TR --> FS[FewShotConfig]
+    FS --> CG[Calibrated Grader]
+    TE --> E1[Evaluate]
+    BG[Baseline Grader] --> E1
+    CG --> E2[Evaluate]
+    TE --> E2
+    E1 --> CM[Compare Metrics]
+    E2 --> CM
+```
+
 ### Step 1: Prepare Your Labeled Dataset
 
 Start with a dataset that has expert-assigned ground truth:
@@ -159,6 +174,15 @@ Cohen's Kappa: 0.412
 Criterion Accuracy: 90.0%
 Cohen's Kappa: 0.782
 ```
+
+![Few-shot calibration comparison showing accuracy and kappa improvements](../images/fewshot-calibration-comparison.png)
+
+| Metric | Baseline | Calibrated (3-shot) | Delta |
+|---|---|---|---|
+| Criterion Accuracy | 75.0% | 90.0% | +15.0% |
+| Cohen's Kappa | 0.412 | 0.782 | +0.370 |
+| False Compliant Rate | 30.0% | 10.0% | -20.0% |
+| Cost per Item | $0.0032 | $0.0051 | +$0.0019 |
 
 ### Step 6: Tune Example Count
 

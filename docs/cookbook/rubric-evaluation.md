@@ -24,6 +24,19 @@ AutoRubric's meta-rubric module lets you evaluate rubric quality before using th
 
 ## The Solution
 
+```mermaid
+flowchart LR
+    subgraph Standalone
+        R1[Rubric] --> ME1[Meta-Rubric Eval]
+        ME1 --> QR1[Quality Report]
+    end
+    subgraph In-Context
+        R2[Rubric] --> ME2[Meta-Rubric Eval]
+        TP[Task Prompt] --> ME2
+        ME2 --> QR2[Quality Report<br/>+ task-specific issues]
+    end
+```
+
 ### Step 1: The Problem Rubric
 
 Let's start with a rubric for evaluating peer reviews. This rubric has several common anti-patterns:
@@ -165,6 +178,12 @@ for criterion in meta_rubric.rubric:
   [-6] hedging_language
   [-8] generic_boilerplate
 ```
+
+!!! warning "Negative weights and MET verdicts"
+    For negative-weight criteria, a MET verdict means the undesirable behavior was detected.
+    This is the correct pattern: set the weight to a negative value when the criterion
+    describes something bad (e.g., "contains factual errors"). Do not use a positive weight
+    and invert the requirement wording --- that breaks the scoring algebra.
 
 ### Step 4: In-Context Evaluation
 
@@ -445,6 +464,12 @@ In your CI configuration:
     name: rubric-validation-report
     path: rubric_validation_report.html
 ```
+
+!!! note "Choosing a quality threshold"
+    A threshold of 0.7 is permissive and appropriate during early rubric iteration, when
+    you want fast feedback without blocking on marginal issues. For production rubrics,
+    raise the bar to 0.85 or higher. The right value depends on your tolerance for false
+    positives (rejecting an acceptable rubric) versus false negatives (passing a flawed one).
 
 ## Key Takeaways
 

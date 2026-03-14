@@ -136,6 +136,7 @@ nav:
           - Per-Item Rubrics: cookbook/per-item-rubrics.md
           - Cost Optimization: cookbook/cost-optimization.md
           - Configuration Management: cookbook/configuration-management.md
+          - Evaluating Agent Skills: cookbook/agent-skill-evaluation.md
   - API Reference:
       - api/index.md
       - CANNOT_ASSESS Handling: api/cannot-assess.md

@@ -15,6 +15,17 @@ You're building an automated essay feedback system. Students submit essays, and 
 
 ## The Solution
 
+```mermaid
+flowchart LR
+    A[Submission] --> B[CriterionGrader]
+    B --> C{Mode}
+    C -->|Single Judge| D[One Reason per Criterion]
+    C -->|Ensemble| E[Multiple Judge Reasons]
+    E --> F[Aggregated final_reason]
+    D --> G[EnsembleCriterionReport]
+    F --> G
+```
+
 ### Step 1: Grade and Access Explanations
 
 Every grading result contains a `report` — a list of `EnsembleCriterionReport` objects, each with a `final_reason` field:
@@ -49,6 +60,12 @@ async def main():
 
 asyncio.run(main())
 ```
+
+!!! tip "Single vs. Ensemble Explanations"
+    With a single judge, `final_reason` is the judge's direct explanation. With an ensemble,
+    `final_reason` concatenates all judges' reasons with a pipe separator, and individual
+    verdicts are accessible through `cr.votes`. Choose ensemble when you need multiple
+    perspectives or higher reliability.
 
 ### Step 2: Format as Student Feedback
 
@@ -131,13 +148,21 @@ def get_error_explanations(result):
     }
 ```
 
+!!! note "Negative-Weight Criteria and MET Verdicts"
+    For negative-weight criteria like `errors`, a MET verdict means the undesirable behavior
+    was detected -- the submission contains the problem described in the requirement. The
+    `final_reason` then explains what the error is, not what was done well. Filter these
+    separately when building feedback reports.
+
 ## Key Takeaways
 
-- Every `EnsembleCriterionReport` has a `final_reason` explaining the verdict
-- For single-judge grading, `final_reason` is the judge's direct explanation
-- For ensemble grading, `final_reason` concatenates all judges' reasons with ` | `; individual votes are in `cr.votes`
-- Use `final_verdict.value` to get the string ("MET", "UNMET", "CANNOT_ASSESS")
-- Negative-weight criteria that are MET indicate detected problems — their reasons explain the issue
+| Concept | Single Judge | Ensemble |
+|---------|-------------|----------|
+| `final_reason` | Judge's direct explanation | All judges' reasons joined with ` \| ` |
+| Individual votes | One verdict in `cr.votes` | Multiple verdicts in `cr.votes`, one per judge |
+| `final_verdict` | Same as the judge's verdict | Aggregated verdict (e.g., majority vote) |
+| Negative-weight MET | Reason explains the detected problem | Each judge's reason for detecting the problem |
+| Access pattern | `cr.final_reason` directly | Split on ` \| ` or iterate `cr.votes` |
 
 ## Going Further
 

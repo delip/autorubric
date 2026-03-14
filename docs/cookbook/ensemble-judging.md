@@ -86,6 +86,24 @@ grader = CriterionGrader(
     If all judges are from the same family (e.g., all GPT models), they may
     make correlated errors.
 
+```mermaid
+flowchart LR
+    S[Submission] --> J1[Judge 1]
+    S --> J2[Judge 2]
+    S --> J3[Judge 3]
+    J1 --> V1[Vote]
+    J2 --> V2[Vote]
+    J3 --> V3[Vote]
+    V1 --> A[Aggregation]
+    V2 --> A
+    V3 --> A
+    A --> F[Final Verdict]
+
+    subgraph Strategies
+        A
+    end
+```
+
 ### Step 3: Understand Aggregation Strategies
 
 Choose how judge votes are combined:
@@ -203,6 +221,11 @@ Per-Criterion Votes:
     Reason: No concerning statements or red flags identified...
 ```
 
+!!! note "Low agreement signals ambiguous criteria"
+    When a criterion consistently shows low agreement across judges, the
+    requirement text is likely ambiguous. Revise the wording to be more
+    specific before trusting ensemble results on that criterion.
+
 ### Step 6: Weighted Judges for Expert Calibration
 
 If some judges are more reliable, weight them higher:
@@ -234,6 +257,19 @@ With these weights:
 
 - GPT-4 MET + others UNMET → Total weight: 2 MET vs 2 UNMET → Tie (defaults to UNMET)
 - GPT-4 MET + one other MET → Total weight: 3 MET vs 1 UNMET → MET wins
+
+| GPT-4 Vote | GPT-4-Mini Vote | Gemini Flash Vote | Weight (MET vs UNMET) | Result |
+|------------|-----------------|--------------------|-----------------------|--------|
+| MET        | MET             | MET                | 4 vs 0                | MET    |
+| MET        | MET             | UNMET              | 3 vs 1                | MET    |
+| MET        | UNMET           | UNMET              | 2 vs 2                | UNMET  |
+| UNMET      | MET             | MET                | 2 vs 2                | UNMET  |
+| UNMET      | UNMET           | UNMET              | 0 vs 4                | UNMET  |
+
+!!! warning "Tie-breaking defaults to UNMET"
+    When weighted votes are perfectly split, the aggregation defaults to UNMET.
+    This is a conservative choice that avoids false positives in quality
+    assurance. Adjust judge weights to reduce the likelihood of ties.
 
 ## Key Takeaways
 

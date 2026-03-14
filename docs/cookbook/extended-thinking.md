@@ -15,6 +15,15 @@ You're evaluating security vulnerability assessment reports. These require deep 
 
 ## The Solution
 
+```mermaid
+flowchart LR
+    A[LLMConfig<br/>thinking level] --> B[LLM Call]
+    B --> C[Thinking Tokens<br/>internal reasoning]
+    C --> D[Output Tokens<br/>verdict + justification]
+    D --> E[CriterionGrader<br/>parses response]
+    E --> F[EvaluationReport]
+```
+
 ### Step 1: Define Technical Evaluation Criteria
 
 Create a rubric for security assessments:
@@ -118,6 +127,9 @@ LLMConfig(model="deepseek/deepseek-reasoner", thinking="high")
 
 LiteLLM translates the thinking configuration to provider-specific parameters automatically.
 
+!!! tip "Provider-specific behavior"
+    Not all providers implement thinking tokens the same way. Anthropic uses an explicit `budget_tokens` parameter that caps reasoning length, while OpenAI's o-series models and Gemini's thinking mode rely on level presets mapped internally. When switching providers, verify that your thinking configuration produces comparable reasoning depth by inspecting the `GenerateResult.thinking` field.
+
 ### Step 4: Grade with Extended Thinking
 
 ```python
@@ -220,6 +232,13 @@ async def compare_thinking_modes():
     Thinking tokens are typically charged at a lower rate than output tokens,
     but the volume can be substantial. Use thinking selectively for complex
     evaluations where accuracy justifies the cost.
+
+| Evaluation Complexity | Thinking Level | Budget Tokens (approx) | Use Case |
+|---|---|---|---|
+| Simple factual checks | LOW | ~1,024 | Style, formatting, and presence/absence criteria |
+| Moderate analysis | MEDIUM | ~2,048 | Coherence, relevance, and moderate reasoning tasks |
+| Deep technical review | HIGH | ~4,096 | Security audits, code correctness, multi-step logic |
+| Domain-expert judgment | Custom (8,000-16,000) | User-specified | Novel research evaluation, complex legal or medical review |
 
 ### Step 6: Use OUTPUT_ONLY with Length Penalty
 
