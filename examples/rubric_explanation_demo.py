@@ -50,13 +50,13 @@ async def main():
 
     # Display per-criterion explanations
     for cr in result.report:
-        verdict = cr.final_verdict.value if cr.final_verdict else "N/A"
-        name = cr.criterion.name or "unnamed"
-        weight = cr.criterion.weight
+        verdict = cr.verdict.value if cr.verdict else "N/A"
+        name = cr.name or "unnamed"
+        weight = cr.weight
         sign = "+" if weight > 0 else ""
 
         print(f"[{verdict}] {name} ({sign}{weight})")
-        print(f"  Reason: {cr.final_reason}")
+        print(f"  Reason: {cr.reason}")
         print()
 
 

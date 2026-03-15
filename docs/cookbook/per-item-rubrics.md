@@ -548,11 +548,11 @@ async def main():
 
         if item_result.report.report:
             for cr in item_result.report.report:
-                if cr.final_verdict:
-                    status = cr.final_verdict.value
+                if cr.verdict:
+                    status = cr.verdict.value
                 else:
-                    status = cr.final_multi_choice_verdict.selected_label if cr.final_multi_choice_verdict else "?"
-                print(f"    [{status}] {cr.criterion.name}")
+                    status = cr.multi_choice_verdict.selected_label if cr.multi_choice_verdict else "?"
+                print(f"    [{status}] {cr.name}")
 
 
 if __name__ == "__main__":

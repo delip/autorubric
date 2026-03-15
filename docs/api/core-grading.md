@@ -32,8 +32,8 @@ result = await rubric.grade(to_grade="...", grader=grader)
 
 print(f"Score: {result.score:.2f}")
 for cr in result.report:
-    print(f"  [{cr.final_verdict}] {cr.criterion.requirement}")
-    print(f"    Reason: {cr.final_reason}")
+    print(f"  [{cr.verdict}] {cr.criterion.requirement}")
+    print(f"    Reason: {cr.reason}")
 ```
 
 ## Score Calculation

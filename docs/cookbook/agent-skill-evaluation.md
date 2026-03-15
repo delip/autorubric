@@ -304,9 +304,9 @@ for dim_name, criteria_names in dimensions.items():
         total_count = 0
         for r in results:
             for cr in r.report.report:
-                if cr.criterion.name in criteria_names:
+                if cr.name in criteria_names:
                     total_count += 1
-                    if cr.final_verdict.value == "MET":
+                    if cr.verdict.value == "MET":
                         met_count += 1
         accuracy = met_count / total_count if total_count > 0 else 0
         print(f"  {cond}: {accuracy:.0%}")
@@ -351,9 +351,9 @@ for cr_name in criterion_names:
         total = 0
         for r in conditions[cond]:
             for cr in r.report.report:
-                if cr.criterion.name == cr_name:
+                if cr.name == cr_name:
                     total += 1
-                    if cr.final_verdict.value == "MET":
+                    if cr.verdict.value == "MET":
                         met += 1
         rate = met / total if total > 0 else 0
         row += f" {rate:>9.0%}"
@@ -524,9 +524,9 @@ async def main():
             total_count = 0
             for r in results:
                 for cr in r.report.report:
-                    if cr.criterion.name in criteria_names:
+                    if cr.name in criteria_names:
                         total_count += 1
-                        if cr.final_verdict.value == "MET":
+                        if cr.verdict.value == "MET":
                             met_count += 1
             accuracy = met_count / total_count if total_count > 0 else 0
             print(f"  {cond}: {accuracy:.0%}")
@@ -541,12 +541,12 @@ async def main():
             met = sum(
                 1 for r in conditions[cond]
                 for cr in r.report.report
-                if cr.criterion.name == cr_name and cr.final_verdict.value == "MET"
+                if cr.name == cr_name and cr.verdict.value == "MET"
             )
             total = sum(
                 1 for r in conditions[cond]
                 for cr in r.report.report
-                if cr.criterion.name == cr_name
+                if cr.name == cr_name
             )
             rate = met / total if total > 0 else 0
             row += f" {rate:>9.0%}"

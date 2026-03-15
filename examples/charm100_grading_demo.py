@@ -277,36 +277,13 @@ async def main():
             print("  Verdicts:")
             for i, cr in enumerate(result.report):
                 criterion = dataset.rubric.rubric[i]
-                if hasattr(cr, "final_verdict") and cr.final_verdict is not None:
-                    # Binary
-                    verdict = cr.final_verdict.value
-                    gt = item.ground_truth[i]
-                    match = "✓" if str(verdict) == str(gt) else "✗"
-                    print(f"    {criterion.name}: {verdict} (GT: {gt}) {match}")
-                elif (
-                    hasattr(cr, "final_multi_choice_verdict")
-                    and cr.final_multi_choice_verdict is not None
-                ):
-                    # Multi-choice
-                    mc = cr.final_multi_choice_verdict
-                    gt = item.ground_truth[i]
-                    match = "✓" if mc.selected_label == gt else "✗"
-                    print(
-                        f"    {criterion.name}: {mc.selected_label} (GT: {gt}) {match}"
-                    )
-                elif hasattr(cr, "verdict") and cr.verdict is not None:
-                    # Binary (non-ensemble)
+                gt = item.ground_truth[i]
+                if cr.verdict is not None:
                     verdict = cr.verdict.value
-                    gt = item.ground_truth[i]
                     match = "✓" if str(verdict) == str(gt) else "✗"
                     print(f"    {criterion.name}: {verdict} (GT: {gt}) {match}")
-                elif (
-                    hasattr(cr, "multi_choice_verdict")
-                    and cr.multi_choice_verdict is not None
-                ):
-                    # Multi-choice (non-ensemble)
+                elif cr.multi_choice_verdict is not None:
                     mc = cr.multi_choice_verdict
-                    gt = item.ground_truth[i]
                     match = "✓" if mc.selected_label == gt else "✗"
                     print(
                         f"    {criterion.name}: {mc.selected_label} (GT: {gt}) {match}"

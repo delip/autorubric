@@ -501,8 +501,8 @@ async def main():
     print(f"Raw score: {result.raw_score:.2f}")
     print("\nPer-criterion verdicts:")
     for cr in result.report:
-        verdict = cr.final_verdict.value
-        print(f"  [{verdict}] {cr.criterion.name} (weight: {cr.criterion.weight:+.0f})")
+        verdict = cr.verdict.value
+        print(f"  [{verdict}] {cr.name} (weight: {cr.weight:+.0f})")
 
 
 if __name__ == "__main__":

@@ -35,7 +35,7 @@ flowchart LR
 Start with items that have no ground truth:
 
 ```python
-from autorubric import Rubric, RubricDataset
+from autorubric import Rubric, RubricDataset, fill_ground_truth
 
 rubric = Rubric.from_dict([
     {
@@ -110,7 +110,8 @@ strong_grader = CriterionGrader(
 )
 
 # Generate ground truth for all unlabeled items
-labeled_dataset = await dataset.fill_ground_truth(
+labeled_dataset = await fill_ground_truth(
+    dataset,
     grader=strong_grader,
     show_progress=True
 )
@@ -136,7 +137,8 @@ if unlabeled:
     print(f"Failed to label {len(unlabeled)} items")
 
     # Retry with force=True to regenerate
-    labeled_dataset = await labeled_dataset.fill_ground_truth(
+    labeled_dataset = await fill_ground_truth(
+        labeled_dataset,
         grader=strong_grader,
         force=True,  # Re-generate even if ground_truth exists
         show_progress=True
@@ -283,7 +285,7 @@ GPT-4-mini (prod)         89.0%      0.762   $0.0124
 """Synthetic Ground Truth - Product Description Evaluation"""
 
 import asyncio
-from autorubric import Rubric, RubricDataset, LLMConfig, evaluate
+from autorubric import Rubric, RubricDataset, LLMConfig, evaluate, fill_ground_truth
 from autorubric.graders import CriterionGrader
 
 
@@ -495,7 +497,8 @@ async def main():
     print("GENERATING SYNTHETIC GROUND TRUTH")
     print("=" * 60)
 
-    labeled_dataset = await dataset.fill_ground_truth(
+    labeled_dataset = await fill_ground_truth(
+        dataset,
         grader=strong_grader,
         show_progress=True
     )

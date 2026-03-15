@@ -425,7 +425,7 @@ async def main():
 
         for j, cr in enumerate(item_result.report.report or []):
             total += 1
-            if cr.final_verdict == CriterionVerdict.MET:
+            if cr.verdict == CriterionVerdict.MET:
                 pred_met += 1
             if item.ground_truth[j] == CriterionVerdict.MET:
                 gt_met += 1

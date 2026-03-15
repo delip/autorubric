@@ -215,20 +215,20 @@ result = asyncio.run(main())
 print(f"Overall Score: {result.score:.2f}\n")
 
 for criterion in result.report:
-    name = criterion.criterion.name
+    name = criterion.name
 
-    if criterion.final_verdict is not None:
+    if criterion.verdict is not None:
         # Binary criterion
-        print(f"[{criterion.final_verdict.value}] {name}")
+        print(f"[{criterion.verdict.value}] {name}")
     else:
         # Multi-choice criterion
-        mc = criterion.final_multi_choice_verdict
+        mc = criterion.multi_choice_verdict
         print(f"[{mc.selected_label}] {name}")
         print(f"  Value: {mc.value:.2f}")
         if mc.na:
             print(f"  (Not applicable)")
 
-    print(f"  Reason: {criterion.final_reason}\n")
+    print(f"  Reason: {criterion.reason}\n")
 ```
 
 Sample output:
@@ -489,16 +489,16 @@ async def main():
         print(f"{'─' * 70}")
 
         for cr in result.report:
-            if cr.final_verdict is not None:
+            if cr.verdict is not None:
                 # Binary
-                verdict_str = f"[{cr.final_verdict.value}]"
+                verdict_str = f"[{cr.verdict.value}]"
             else:
                 # Multi-choice
-                mc = cr.final_multi_choice_verdict
+                mc = cr.multi_choice_verdict
                 na_marker = " (N/A)" if mc.na else ""
                 verdict_str = f"[{mc.selected_label}]{na_marker}"
 
-            print(f"  {verdict_str} {cr.criterion.name}")
+            print(f"  {verdict_str} {cr.name}")
 
 
 if __name__ == "__main__":

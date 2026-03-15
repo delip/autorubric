@@ -213,9 +213,9 @@ print(f"Could not assess: {result.cannot_assess_count}")
 
 # Identify which criteria caused issues
 for criterion in result.report:
-    if criterion.final_verdict == CriterionVerdict.CANNOT_ASSESS:
-        print(f"\nCANNOT_ASSESS: {criterion.criterion.name}")
-        print(f"  Reason: {criterion.final_reason}")
+    if criterion.verdict == CriterionVerdict.CANNOT_ASSESS:
+        print(f"\nCANNOT_ASSESS: {criterion.name}")
+        print(f"  Reason: {criterion.reason}")
 ```
 
 !!! warning "High CANNOT_ASSESS Rates"
@@ -401,7 +401,7 @@ async def main():
             # Summarize verdicts
             verdicts = []
             for cr in result.report:
-                v = cr.final_verdict.value
+                v = cr.verdict.value
                 if v == "MET":
                     verdicts.append("✓")
                 elif v == "UNMET":
@@ -432,11 +432,11 @@ async def main():
     )
 
     for cr in result.report:
-        status = cr.final_verdict.value
-        name = cr.criterion.name
+        status = cr.verdict.value
+        name = cr.name
         print(f"\n[{status:^6}] {name}")
-        print(f"  Weight: {cr.criterion.weight:+.0f}")
-        print(f"  Reason: {cr.final_reason}")
+        print(f"  Weight: {cr.weight:+.0f}")
+        print(f"  Reason: {cr.reason}")
 
 
 if __name__ == "__main__":

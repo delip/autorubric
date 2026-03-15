@@ -127,9 +127,9 @@ async def grade_reviews(
     for review, report in zip(reviews, reports):
         per_criterion = {}
         for cr in report.report:
-            per_criterion[cr.criterion.name] = {
-                "verdict": cr.final_verdict.value,
-                "reason": cr.final_reason,
+            per_criterion[cr.name] = {
+                "verdict": cr.verdict.value,
+                "reason": cr.reason,
             }
         graded.append({
             "paper_id": review["paper_id"],

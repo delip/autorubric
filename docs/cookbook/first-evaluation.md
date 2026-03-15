@@ -148,14 +148,14 @@ if result.completion_cost:
 # Per-criterion breakdown
 for criterion in result.report:
     # Get the verdict (MET, UNMET, or CANNOT_ASSESS)
-    verdict = criterion.final_verdict.value
+    verdict = criterion.verdict.value
 
     # The weight and requirement
-    name = criterion.criterion.name or "unnamed"
-    weight = criterion.criterion.weight
+    name = criterion.name or "unnamed"
+    weight = criterion.weight
 
     # The judge's explanation
-    reason = criterion.final_reason
+    reason = criterion.reason
 
     print(f"\n[{verdict}] {name} (weight: {weight})")
     print(f"  Reason: {reason}")
@@ -389,10 +389,10 @@ async def main():
 
         # Show per-criterion verdicts
         for criterion in result.report:
-            verdict = criterion.final_verdict.value
-            name = criterion.criterion.name or "unnamed"
-            symbol = "+" if criterion.criterion.weight > 0 else "-"
-            print(f"  [{verdict:^6}] {symbol}{abs(criterion.criterion.weight):.0f} {name}")
+            verdict = criterion.verdict.value
+            name = criterion.name or "unnamed"
+            symbol = "+" if criterion.weight > 0 else "-"
+            print(f"  [{verdict:^6}] {symbol}{abs(criterion.weight):.0f} {name}")
 
     print(f"\n{'=' * 60}")
     print(f"Total evaluation cost: ${total_cost:.4f}")

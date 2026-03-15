@@ -132,7 +132,7 @@ LiteLLM translates the thinking configuration to provider-specific parameters au
 
 ### Step 4: Grade with Extended Thinking
 
-```python
+````python
 import asyncio
 
 security_report = """
@@ -186,7 +186,7 @@ async def main():
     return result
 
 result = asyncio.run(main())
-```
+````
 
 ### Step 5: Compare With and Without Thinking
 
@@ -280,7 +280,7 @@ grader = CriterionGrader(
 
 ## Appendix: Complete Code
 
-```python
+````python
 """Extended Thinking - Security Vulnerability Assessment"""
 
 import asyncio
@@ -505,12 +505,12 @@ async def main():
         # Compare verdicts
         print("\nVerdicts comparison:")
         for j, (basic_cr, think_cr) in enumerate(zip(basic_result.report, thinking_result.report)):
-            basic_v = basic_cr.final_verdict.value if basic_cr.final_verdict else "?"
-            think_v = think_cr.final_verdict.value if think_cr.final_verdict else "?"
+            basic_v = basic_cr.verdict.value if basic_cr.verdict else "?"
+            think_v = think_cr.verdict.value if think_cr.verdict else "?"
             match = "=" if basic_v == think_v else "≠"
-            print(f"  {basic_cr.criterion.name}: {basic_v} {match} {think_v}")
+            print(f"  {basic_cr.name}: {basic_v} {match} {think_v}")
 
 
 if __name__ == "__main__":
     asyncio.run(main())
-```
+````

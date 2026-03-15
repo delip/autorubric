@@ -101,9 +101,9 @@ async def grade_reviews(rubric, grader, reviews, papers):
             "paper_id": r["paper_id"],
             "score": report.score,
             "per_criterion": {
-                cr.criterion.name: {
-                    "verdict": cr.final_verdict.value,
-                    "reason": cr.final_reason,
+                cr.name: {
+                    "verdict": cr.verdict.value,
+                    "reason": cr.reason,
                 }
                 for cr in report.report
             },
@@ -488,9 +488,9 @@ async def grade_reviews(rubric, grader, reviews, papers):
             "paper_id": r["paper_id"],
             "score": report.score,
             "per_criterion": {
-                cr.criterion.name: {
-                    "verdict": cr.final_verdict.value,
-                    "reason": cr.final_reason,
+                cr.name: {
+                    "verdict": cr.verdict.value,
+                    "reason": cr.reason,
                 }
                 for cr in report.report
             },

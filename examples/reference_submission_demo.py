@@ -91,7 +91,7 @@ convert CO2 into glucose. The overall equation is:
 
         print(f"\nScore: {report.score:.2f}")
         for cr in report.report:
-            print(f"  - {cr.criterion.name}: {cr.final_verdict.value} ({cr.final_reason})")
+            print(f"  - {cr.name}: {cr.verdict.value} ({cr.reason})")
 
 
 if __name__ == "__main__":
