@@ -2,13 +2,15 @@
 
 `autorubric` is a <a href="https://producingoss.com/en/forks.html#:~:text=Hard%20forks%20(also,cooperative%20development%20fork.">hard fork</a> of [`rubric` v1.2.8](https://github.com/The-LLM-Data-Company/rubric/releases/tag/v1.2.8) by The LLM Data Company. We are grateful to The LLM Data Company for their work and for making the code available under the MIT license. While `autorubric` shares a conceptual similarity with `rubric` in the sense that it is a library for evaluating text outputs against criteria via LLM-as-a-judge, it should be considered categorically distinct, as this document explains.
 
+Note (added on 3/27): rubric has continued active development since v1.2.8 and is currently on v2.2.0. This document describes the state of the library at the time of the fork, and many of the observations below have since changed.
+
 ---
 
 ## Where rubric v1.2.8 fell short
 
 `rubric` v1.2.8 was a clean, minimal implementation of rubric-based LLM grading: define weighted criteria, call an LLM, get MET/UNMET verdicts. About 800 lines of Python across 9 files. As a starting point it was useful, but several gaps made it unsuitable for evaluation work where you need to trust the scores.
 
-The library was locked to a single LLM provider. It hardcoded a Gemini API call and parsed responses with regex-based JSON extraction. You could swap in another model by writing a custom async callable, but the friction discouraged the systematic model comparisons that evaluation work requires.
+The library used a generate_fn callable pattern that allowed any LLM provider. The package used Gemini by default and parsed responses with regex-based JSON extraction. While you could swap in another model by writing a custom async callable, but the friction discouraged the systematic model comparisons that evaluation work requires.
 
 There was also no way to know whether a verdict was reliable. A single judge produced a single MET or UNMET per criterion, with no mechanism for agreement measurement or confidence estimation. You couldn't tell whether a score reflected a stable judgment or an artifact of one model's behavior on one prompt variation.
 
