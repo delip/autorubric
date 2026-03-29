@@ -122,6 +122,7 @@ nav:
           - Few-Shot Calibration: cookbook/few-shot-calibration.md
           - Ensemble Judging: cookbook/ensemble-judging.md
           - Handling CANNOT_ASSESS: cookbook/cannot-assess.md
+          - Fixing Seeds: cookbook/fixing-seeds.md
       - Advanced Evaluation:
           - Multi-Choice Rubrics: cookbook/multi-choice-rubrics.md
           - Extended Thinking: cookbook/extended-thinking.md
