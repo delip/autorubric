@@ -871,3 +871,49 @@ class TestEvalResultFromExperiment:
 
             with pytest.raises(FileNotFoundError, match="Manifest not found"):
                 EvalResult.from_experiment(exp_dir)
+
+
+class TestManifestSeedPersistence:
+    """Tests for master seed persistence in experiment manifests."""
+
+    @pytest.fixture
+    def sample_dataset(self):
+        items = [
+            DataItem(submission=f"Answer {i}", description=f"Item {i}")
+            for i in range(2)
+        ]
+        rubric = Rubric(rubric=[
+            Criterion(weight=10.0, requirement="Is the answer correct?"),
+        ])
+        return RubricDataset(
+            name="seed-test",
+            prompt="Test prompt",
+            items=items,
+            rubric=rubric,
+        )
+
+    @pytest.mark.asyncio
+    async def test_manifest_contains_master_seed(self, sample_dataset):
+        """Manifest grader_config includes master_seed after evaluation."""
+        mock_grader = create_mock_grader()
+        mock_grader._seed = 42
+        mock_grader._shuffle_options = True
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = EvalConfig(
+                show_progress=False,
+                experiments_dir=tmp_dir,
+                experiment_name="seed-test",
+            )
+            runner = EvalRunner(
+                dataset=sample_dataset,
+                grader=mock_grader,
+                config=config,
+            )
+            await runner.run()
+
+            with open(Path(tmp_dir) / "seed-test" / "manifest.json") as f:
+                manifest = json.load(f)
+
+            assert manifest["grader_config"]["master_seed"] == 42
+            assert manifest["grader_config"]["shuffle_options"] is True

@@ -466,6 +466,7 @@ class MultiChoiceJudgeVote:
     reason: str
     weight: float = 1.0
     na: bool = False
+    shuffle_order: list[int] | None = None
 
 
 class CriterionReport(Criterion):
@@ -478,11 +479,15 @@ class CriterionReport(Criterion):
         verdict: Binary verdict (MET/UNMET/CANNOT_ASSESS). None for multi-choice criteria.
         multi_choice_verdict: Multi-choice verdict with selected option. None for binary.
         reason: Explanation for the verdict from the LLM judge.
+        shuffle_order: Permutation used when presenting multi-choice options to the LLM.
+            Maps shuffled position → original index. None for binary criteria or when
+            shuffle_options is disabled.
     """
 
     verdict: CriterionVerdict | None = None
     multi_choice_verdict: MultiChoiceVerdict | AggregatedMultiChoiceVerdict | None = None
     reason: str
+    shuffle_order: list[int] | None = None
 
     @property
     def score_value(self) -> float:

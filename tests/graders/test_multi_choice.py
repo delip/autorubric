@@ -608,3 +608,165 @@ class TestOptionShuffling:
             for shuffled_pos in range(len(shuffled_indices)):
                 original_idx = shuffled_indices[shuffled_pos]
                 assert 0 <= original_idx < len(original_indices)
+
+
+class TestSeedReproducibility:
+    """Tests for master seed coordination and reproducibility."""
+
+    def test_seed_auto_generated(self):
+        """Grader without explicit seed gets a valid auto-generated seed."""
+        from autorubric.graders.criterion_grader import CriterionGrader
+        from autorubric import LLMConfig
+
+        grader = CriterionGrader(llm_config=LLMConfig(model="openai/gpt-4"))
+        assert isinstance(grader.seed, int)
+        assert 0 <= grader.seed < 2**31
+
+    def test_seed_explicit(self):
+        """Grader uses the explicit seed when provided."""
+        from autorubric.graders.criterion_grader import CriterionGrader
+        from autorubric import LLMConfig
+
+        grader = CriterionGrader(llm_config=LLMConfig(model="openai/gpt-4"), seed=42)
+        assert grader.seed == 42
+
+    def test_seed_produces_deterministic_shuffle(self):
+        """Same seed + same inputs → same shuffle order."""
+        from autorubric.graders.criterion_grader import _derive_shuffle_rng
+        import random
+
+        indices_a = list(range(5))
+        rng_a = _derive_shuffle_rng(42, "abc123", 0, "default")
+        rng_a.shuffle(indices_a)
+
+        indices_b = list(range(5))
+        rng_b = _derive_shuffle_rng(42, "abc123", 0, "default")
+        rng_b.shuffle(indices_b)
+
+        assert indices_a == indices_b
+
+    def test_different_seeds_produce_different_shuffles(self):
+        """Different seeds → different shuffle orders (with high probability)."""
+        from autorubric.graders.criterion_grader import _derive_shuffle_rng
+
+        indices_a = list(range(10))
+        rng_a = _derive_shuffle_rng(42, "abc123", 0, "default")
+        rng_a.shuffle(indices_a)
+
+        indices_b = list(range(10))
+        rng_b = _derive_shuffle_rng(99, "abc123", 0, "default")
+        rng_b.shuffle(indices_b)
+
+        assert indices_a != indices_b
+
+    def test_different_items_get_different_shuffles(self):
+        """Different item content → different shuffle orders."""
+        from autorubric.graders.criterion_grader import _derive_shuffle_rng
+
+        indices_a = list(range(10))
+        rng_a = _derive_shuffle_rng(42, "item_one", 0, "default")
+        rng_a.shuffle(indices_a)
+
+        indices_b = list(range(10))
+        rng_b = _derive_shuffle_rng(42, "item_two", 0, "default")
+        rng_b.shuffle(indices_b)
+
+        assert indices_a != indices_b
+
+    def test_different_judges_get_different_shuffles(self):
+        """Different judges → different shuffle orders for same item."""
+        from autorubric.graders.criterion_grader import _derive_shuffle_rng
+
+        indices_a = list(range(10))
+        rng_a = _derive_shuffle_rng(42, "abc123", 0, "judge_a")
+        rng_a.shuffle(indices_a)
+
+        indices_b = list(range(10))
+        rng_b = _derive_shuffle_rng(42, "abc123", 0, "judge_b")
+        rng_b.shuffle(indices_b)
+
+        assert indices_a != indices_b
+
+    def test_seed_coordinates_few_shot(self):
+        """Master seed flows to FewShotConfig when its seed is unset."""
+        from autorubric.graders.criterion_grader import CriterionGrader
+        from autorubric import Criterion, LLMConfig, FewShotConfig, Rubric
+        from autorubric.dataset import RubricDataset
+
+        rubric = Rubric(rubric=[Criterion(weight=1.0, requirement="test")])
+        dataset = RubricDataset(
+            name="test",
+            prompt="test",
+            items=[],
+            rubric=rubric,
+        )
+        grader = CriterionGrader(
+            llm_config=LLMConfig(model="openai/gpt-4"),
+            training_data=dataset,
+            few_shot_config=FewShotConfig(n_examples=2),
+            seed=42,
+        )
+        assert grader._few_shot_config.seed == 42
+
+    def test_seed_does_not_override_explicit_few_shot_seed(self):
+        """Master seed does not override an explicitly set FewShotConfig.seed."""
+        from autorubric.graders.criterion_grader import CriterionGrader
+        from autorubric import Criterion, LLMConfig, FewShotConfig, Rubric
+        from autorubric.dataset import RubricDataset
+
+        rubric = Rubric(rubric=[Criterion(weight=1.0, requirement="test")])
+        dataset = RubricDataset(
+            name="test",
+            prompt="test",
+            items=[],
+            rubric=rubric,
+        )
+        grader = CriterionGrader(
+            llm_config=LLMConfig(model="openai/gpt-4"),
+            training_data=dataset,
+            few_shot_config=FewShotConfig(n_examples=2, seed=99),
+            seed=42,
+        )
+        assert grader._few_shot_config.seed == 99
+
+    def test_shuffle_order_field_in_criterion_report(self):
+        """CriterionReport supports the shuffle_order field."""
+        from autorubric.types import CriterionReport, CriterionVerdict
+
+        report = CriterionReport(
+            weight=1.0,
+            requirement="test",
+            verdict=None,
+            reason="test",
+            shuffle_order=[2, 0, 1],
+        )
+        assert report.shuffle_order == [2, 0, 1]
+
+        # Serialization includes shuffle_order
+        dumped = report.model_dump(mode="json")
+        assert dumped["shuffle_order"] == [2, 0, 1]
+
+    def test_shuffle_order_none_for_binary(self):
+        """Binary criteria have shuffle_order=None."""
+        from autorubric.types import CriterionReport, CriterionVerdict
+
+        report = CriterionReport(
+            weight=1.0,
+            requirement="test",
+            verdict=CriterionVerdict.MET,
+            reason="test",
+        )
+        assert report.shuffle_order is None
+
+    def test_shuffle_order_backward_compat(self):
+        """Old serialized data without shuffle_order deserializes correctly."""
+        from autorubric.types import CriterionReport
+
+        old_data = {
+            "weight": 1.0,
+            "requirement": "test",
+            "verdict": None,
+            "reason": "test",
+        }
+        report = CriterionReport.model_validate(old_data)
+        assert report.shuffle_order is None

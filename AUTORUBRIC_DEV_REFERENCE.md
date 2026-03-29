@@ -165,6 +165,15 @@ score = clamp(weighted_sum / total_positive_weight, 0, 1)  # if normalized
 - `shuffle_options=True` (default) mitigates position bias
 - NA options (`na: true`) excluded from scoring like CANNOT_ASSESS
 
+### Reproducibility & Seed Coordination
+`CriterionGrader(seed=...)` controls all non-LLM randomness (option shuffling, few-shot example selection). Auto-generated when `None` so shuffles are always pinned.
+
+- Per-call shuffle RNGs are derived from `(master_seed, content_hash, criterion_idx, judge_id)` via SHA-256. This is concurrency-safe (no shared mutable state).
+- If `FewShotConfig.seed` is unset, it is coordinated from the master seed.
+- `CriterionReport.shuffle_order` records the permutation used for each multi-choice criterion.
+- `ExperimentManifest.grader_config` persists `master_seed` and `shuffle_options` for checkpoint reproducibility.
+- Helper: `_derive_shuffle_rng()` in `criterion_grader.py`.
+
 ### CANNOT_ASSESS Handling
 Strategies: `SKIP` (adjust denominator), `ZERO`, `PARTIAL` (configurable), `FAIL` (worst case)
 

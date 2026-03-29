@@ -24,6 +24,7 @@ Improve grading consistency and accuracy.
 | [Few-Shot Calibration](few-shot-calibration.md) | Legal Contracts | Calibrating judges with labeled examples |
 | [Ensemble Judging](ensemble-judging.md) | Job Applications | Multi-judge voting for high-stakes decisions |
 | [Handling CANNOT_ASSESS](cannot-assess.md) | RAG Responses | Strategies for uncertain verdicts |
+| [Fixing Seeds](fixing-seeds.md) | Product Reviews | Pinning shuffles and few-shot selection for reproducibility |
 
 ### Tier 3: Advanced Evaluation
 
