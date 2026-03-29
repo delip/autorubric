@@ -60,6 +60,9 @@ grader = CriterionGrader(
 
     # Position bias mitigation (for multi-choice)
     shuffle_options=True,    # Default: enabled
+
+    # Reproducibility — pins all non-LLM randomness (shuffles, few-shot selection)
+    seed=42,                 # Default: auto-generated
 )
 ```
 

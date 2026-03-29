@@ -151,6 +151,17 @@ def _serialize_grader_config(grader: Grader) -> dict[str, Any]:
     except (TypeError, AttributeError):
         pass
 
+    # Capture master seed and shuffle_options
+    try:
+        master_seed = getattr(grader, "_seed", None)
+        if isinstance(master_seed, int):
+            config["master_seed"] = master_seed
+        shuffle_opts = getattr(grader, "_shuffle_options", None)
+        if isinstance(shuffle_opts, bool):
+            config["shuffle_options"] = shuffle_opts
+    except (TypeError, AttributeError):
+        pass
+
     # Capture cannot_assess_config if present
     try:
         cac = getattr(grader, "_cannot_assess_config", None)
@@ -223,6 +234,7 @@ def _serialize_ensemble_criterion_report(ecr: EnsembleCriterionReport) -> dict[s
                 "reason": v.reason,
                 "weight": v.weight,
                 "na": v.na,
+                "shuffle_order": v.shuffle_order,
             }
             for v in ecr.multi_choice_votes
         ]
@@ -288,6 +300,7 @@ def _deserialize_ensemble_report(
                 reason=v["reason"],
                 weight=v.get("weight", 1.0),
                 na=v.get("na", False),
+                shuffle_order=v.get("shuffle_order"),
             )
             for v in ecr_data.get("multi_choice_votes", [])
         ]

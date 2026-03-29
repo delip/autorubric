@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
+import hashlib
 import logging
 import random
 from dataclasses import dataclass, field
@@ -49,6 +51,22 @@ if TYPE_CHECKING:
     from autorubric.dataset import RubricDataset
 
 logger = logging.getLogger(__name__)
+
+
+def _derive_shuffle_rng(
+    master_seed: int,
+    item_key: str,
+    criterion_idx: int,
+    judge_id: str,
+) -> random.Random:
+    """Derive a deterministic, concurrency-safe RNG for option shuffling.
+
+    Produces a unique random.Random instance for each combination of
+    master seed, item content, criterion, and judge.
+    """
+    key = f"{master_seed}:{item_key}:{criterion_idx}:{judge_id}"
+    derived = int(hashlib.sha256(key.encode()).hexdigest()[:16], 16) % (2**31)
+    return random.Random(derived)
 
 
 @dataclass
@@ -167,6 +185,8 @@ class CriterionGrader(Grader):
         cannot_assess_config: CannotAssessConfig | None = None,
         # Position bias mitigation
         shuffle_options: bool = True,
+        # Reproducibility
+        seed: int | None = None,
         # Structured output override for binary criteria
         binary_response_format: type[BaseModel] | None = None,
     ):
@@ -191,6 +211,9 @@ class CriterionGrader(Grader):
                 presented to the LLM to mitigate position bias. Each judge/call sees a
                 different random order, and responses are mapped back to original indices.
                 Disable for deterministic behavior in tests.
+            seed: Master seed for all non-LLM randomness (option shuffling, few-shot
+                example selection). Auto-generated when None so that randomness is always
+                pinned and reproducible. Inspect via the ``seed`` property after construction.
             binary_response_format: Pydantic model to use as the structured output schema
                 for binary criterion judgments. Must be a subclass of (or compatible with)
                 CriterionJudgment. If the model includes an ``affected_criteria`` field
@@ -218,9 +241,15 @@ class CriterionGrader(Grader):
         self._ordinal_aggregation = ordinal_aggregation
         self._nominal_aggregation = nominal_aggregation
         self._training_data = training_data
-        self._few_shot_config = few_shot_config or FewShotConfig()
         self._cannot_assess_config = cannot_assess_config or CannotAssessConfig()
         self._shuffle_options = shuffle_options
+        self._seed = seed if seed is not None else random.randint(0, 2**31 - 1)
+
+        # Coordinate few-shot seed with master seed when unset
+        fsc = few_shot_config or FewShotConfig()
+        if fsc.seed is None and training_data is not None:
+            fsc = dataclasses.replace(fsc, seed=self._seed)
+        self._few_shot_config = fsc
         self._binary_response_format = binary_response_format or CriterionJudgment
 
         # Build system prompts (separate for binary and multi-choice)
@@ -260,6 +289,11 @@ class CriterionGrader(Grader):
     def has_few_shot(self) -> bool:
         """Whether this grader uses few-shot prompting."""
         return self._training_data is not None
+
+    @property
+    def seed(self) -> int:
+        """The master seed governing all non-LLM randomness in this grader."""
+        return self._seed
 
     # =========================================================================
     # Few-Shot Example Preparation
@@ -582,7 +616,9 @@ class CriterionGrader(Grader):
         if self._shuffle_options:
             original_indices = list(range(len(criterion.options)))
             shuffled_indices = original_indices.copy()
-            random.shuffle(shuffled_indices)
+            item_key = hashlib.sha256(to_grade.encode()).hexdigest()[:16]
+            rng = _derive_shuffle_rng(self._seed, item_key, criterion_idx, judge.judge_id)
+            rng.shuffle(shuffled_indices)
 
             # Create shuffled options list
             shuffled_options = [criterion.options[i] for i in shuffled_indices]
@@ -668,6 +704,7 @@ class CriterionGrader(Grader):
                 options=criterion.options,
                 scale_type=criterion.scale_type,
                 aggregation=criterion.aggregation,
+                shuffle_order=shuffled_indices if self._shuffle_options else None,
             )
             return CriterionResult(report=report, usage=result.usage, cost=result.cost)
 
@@ -708,6 +745,7 @@ class CriterionGrader(Grader):
                 options=criterion.options,
                 scale_type=criterion.scale_type,
                 aggregation=criterion.aggregation,
+                shuffle_order=shuffled_indices if self._shuffle_options else None,
             )
             return CriterionResult(report=report, usage=None, cost=None)
 
@@ -791,6 +829,7 @@ class CriterionGrader(Grader):
                                 reason=cr.report.reason,
                                 weight=judge_result.weight,
                                 na=mcv.na,
+                                shuffle_order=cr.report.shuffle_order,
                             )
                         )
 
