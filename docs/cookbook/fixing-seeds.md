@@ -169,7 +169,7 @@ asyncio.run(verify_reproducibility())
 ```
 
 !!! note "LLM outputs may still differ"
-    With `temperature > 0`, the LLM's chosen option may differ between runs even with identical shuffle orders. The seed guarantees identical *presentation* to the LLM, not identical *responses*. For fully deterministic output, set `temperature=0.0`.
+    With `temperature > 0`, the LLM's chosen option may differ between runs even with identical shuffle orders. The seed guarantees identical *presentation* to the LLM, not identical *responses*.
 
 ### Step 6: Check the Checkpoint
 
