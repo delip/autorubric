@@ -1,0 +1,130 @@
+{
+  "v1_skill": "Provide brief feedback on the text below.",
+  "gold_skill": "# Scientific Peer Review\n\n## Procedure\n\n1. **Summarize** the paper in 2-3 sentences covering contribution, methodology, and findings.\n2. **Evaluate methodology** --- assess study design, appropriateness for the research question, and specific limitations.\n3. **Assess statistics** --- check appropriateness of tests, sample size justification, and effect sizes.\n4. **List strengths** --- identify at least 2 specific strengths with references to the paper.\n5. **List weaknesses** --- identify at least 2 specific weaknesses with actionable suggestions.\n6. **Pose questions** --- ask 2-3 clarifying questions for the authors.\n7. **Recommend** --- state Accept, Minor Revision, Major Revision, or Reject with justification.\n\n## Formatting\n- Use section headers for each step.\n- Reference specific sections, figures, and quoted results.\n- Keep under 800 words.",
+  "iterations": [
+    {
+      "iteration": 0,
+      "skill": "Provide brief feedback on the text below.",
+      "mean_score": 0.579,
+      "pass_rates": {
+        "paper_summary": 0.0,
+        "methodology_assessment": 1.0,
+        "statistical_evaluation": 0.3,
+        "strengths_and_weaknesses": 1.0,
+        "constructive_tone": 1.0,
+        "structured_format": 0.0,
+        "specific_references": 0.7,
+        "concise_review": 1.0,
+        "clear_recommendation": 0.0,
+        "factual_misrepresentation": 0.1
+      },
+      "sample_reviews": [
+        {
+          "paper_id": "P1: Neuroscience fMRI study",
+          "review": "Here's a brief review of the research paper:\n\n**Strengths:**\n\n1. The study explores a significant and timely topic: understanding the neural mechanisms of decision-making under uncertainty, particularly in relation to addictive behaviors.\n2. The use of functional magnetic resonance imaging (fMRI) allows for direct observation of brain activity during a well-established decision-making task, the Balloon Analogue Risk Task (BART).\n3. The study controls for potential confounding factors, such as mo"
+        },
+        {
+          "paper_id": "P2: Diabetes drug RCT",
+          "review": "The provided research paper appears to be well-structured and follows a standard format for clinical trial research papers. Here's a brief feedback on the paper:\n\n**Strengths:**\n\n1. **Clear title and background**: The title and background section effectively summarize the research paper and provide context for the study.\n2. **Thorough methodology**: The methods section provides detailed information about the trial design, participant selection, and outcome measures.\n3. **Significant results**: T"
+        },
+        {
+          "paper_id": "P3: UPF and CVD cohort study",
+          "review": "The provided research paper appears to be well-structured and effectively communicates the results of a prospective cohort study on the relationship between ultra-processed food consumption and cardiovascular disease (CVD) risk. Here are some key strengths and suggestions for improvement:\n\nStrengths:\n\n1. **Clear research question**: The paper clearly states the research question and provides a concise background on the topic.\n2. **Large sample size**: The study involved a large cohort of 48,217 "
+        }
+      ],
+      "generation_cost": 0.0,
+      "grading_cost": 0.3167816
+    },
+    {
+      "iteration": 1,
+      "skill": "Write a peer-review style critique of the paper in under 800 words.\n\nUse exactly these section headers in this order:\n1. **Summary**\n2. **Methodology**\n3. **Statistics**\n4. **Strengths**\n5. **Weaknesses**\n6. **Questions**\n7. **Recommendation**\n\nRequirements for each section:\n- **Summary**: Write 2\u20133 sentences that accurately state the paper\u2019s main contribution, study design/methodology, and principal findings. Include at least one concrete detail (for example: sample size, dataset, intervention, outcome, effect estimate, or main result).\n- **Methodology**: Evaluate whether the design matches the research question. Note specific methodological limitations and at least one actionable improvement.\n- **Statistics**: Explicitly assess all 3 of the following:\n  - whether the statistical tests/models used are appropriate,\n  - whether the sample size/power is adequate,\n  - whether effect sizes are reported and interpreted appropriately.\n  If any of these are missing from the paper, say so directly. Reference specific results, tests, confidence intervals, p-values, or figures/tables when available.\n- **Strengths**: List at least 2 specific strengths with concrete references to the paper.\n- **Weaknesses**: List at least 2 specific weaknesses, and for each weakness give a specific, actionable suggestion for improvement.\n- **Questions**: List 1\u20133 clarification questions for the authors.\n- **Recommendation**: End with exactly one of: **Accept**, **Minor Revision**, **Major Revision**, or **Reject**, followed by 1\u20132 sentences justifying that recommendation based on the issues above.\n\nAccuracy rules:\n- Do not invent details.\n- Do not infer unstated methods, results, sample sizes, or effect sizes.\n- If a detail is unclear or absent, say \u201cnot reported,\u201d \u201cunclear from the provided text,\u201d or similar.\n- Base every critique on the paper text; prefer specific references (section, figure, table, quoted result, sample size) over generic comments.\n\nStyle rules:\n- Keep a constructive, professional tone.\n- Make criticisms specific and actionable.\n- Stay concise; no preamble and no closing text after the recommendation.",
+      "mean_score": 0.893,
+      "pass_rates": {
+        "paper_summary": 0.9,
+        "methodology_assessment": 1.0,
+        "statistical_evaluation": 1.0,
+        "strengths_and_weaknesses": 1.0,
+        "constructive_tone": 1.0,
+        "structured_format": 1.0,
+        "specific_references": 0.9,
+        "concise_review": 1.0,
+        "clear_recommendation": 1.0,
+        "factual_misrepresentation": 0.6
+      },
+      "sample_reviews": [
+        {
+          "paper_id": "P1: Neuroscience fMRI study",
+          "review": "**Summary**\nThe study employed fMRI to examine prefrontal cortex (PFC) activation patterns during the Balloon Analogue Risk Task (BART) in 24 healthy adults. Risky decisions were associated with increased activation in the dorsolateral PFC (dlPFC) and reduced activation in the ventromedial PFC (vmPFC). Functional connectivity analysis revealed increased negative connectivity between dlPFC and vmPFC during risky trials, which correlated with individual differences in risk-taking behavior.\n\n**Meth"
+        },
+        {
+          "paper_id": "P2: Diabetes drug RCT",
+          "review": "**Summary**\n\nThis Phase III randomized controlled trial (DUAL-T2D) evaluated the efficacy and safety of dualutide, a novel dual GLP-1/GIP receptor agonist, in adults with type 2 diabetes (T2D). The study randomly assigned 842 participants to dualutide 15mg weekly (n=561) or placebo (n=281) for 52 weeks, with the primary endpoint being change in HbA1c from baseline at week 52. Dualutide significantly reduced HbA1c (-1.8% vs -0.3%) and body weight (-5.2kg vs -0.8kg) compared to placebo.\n\n**Methodo"
+        },
+        {
+          "paper_id": "P3: UPF and CVD cohort study",
+          "review": "**Summary**\nThis prospective cohort study from the NutriHealth-EU Consortium examined the relationship between ultra-processed food (UPF) consumption and incident cardiovascular disease (CVD) in 48,217 adults across 6 European countries. The main contribution is the demonstration of a 24% higher CVD risk in participants consuming the highest quartile of UPF (>52% of calories) compared to the lowest quartile (<18%), with a dose-response relationship. The association remained significant after adj"
+        }
+      ],
+      "generation_cost": 0.0,
+      "grading_cost": 0.3269391
+    },
+    {
+      "iteration": 2,
+      "skill": "Write a peer-review style critique of the paper in under 750 words.\n\nUse exactly these section headers in this order:\n1. **Summary**\n2. **Methodology**\n3. **Statistics**\n4. **Strengths**\n5. **Weaknesses**\n6. **Questions**\n7. **Recommendation**\n\nGlobal accuracy rules:\n- Use only information explicitly stated in the provided paper text.\n- Do not infer unstated sample sizes, methods, results, effect directions, significance, limitations, or novelty.\n- Do not convert vague language into precise claims. If the paper says \u201cimproved,\u201d do not supply a number unless a number is given.\n- Do not report a result as significant, causal, randomized, prospective, powered, validated, or generalizable unless the text explicitly says so.\n- Before stating any numeric detail, verify it appears in the paper text exactly. If unsure, omit it.\n- If information is missing or ambiguous, write \u201cnot reported,\u201d \u201cnot described in the provided text,\u201d or \u201cunclear from the provided text.\u201d\n- Prefer direct anchors for every substantive claim: section name/number, figure/table number, quoted result, endpoint name, sample size, or model/test name.\n\nRequirements for each section:\n- **Summary**: Write exactly 2\u20133 sentences stating the main contribution, study design/methodology, and principal findings. Include at least 1 concrete detail explicitly reported in the paper (for example sample size, dataset, intervention, outcome, figure/table, effect estimate, or quoted result). Do not include any critique here.\n- **Methodology**: Evaluate whether the design matches the research question. Name at least 2 specific methodological features or limitations from the paper. Give at least 1 actionable improvement. If a design detail is absent, say so explicitly.\n- **Statistics**: Use exactly 3 bullets labeled:\n  - **Appropriateness of tests/models:**\n  - **Sample size/power:**\n  - **Effect sizes/reporting:**\n  For each bullet, assess what the paper reports and whether it is adequate. If the paper does not report enough information, say so directly. Reference specific tests, models, confidence intervals, p-values, tables, or figures when available. Do not assume power calculations or effect-size interpretation if not stated.\n- **Strengths**: Provide at least 2 bullets. Each bullet must name a specific strength and cite a concrete paper detail.\n- **Weaknesses**: Provide at least 2 bullets. Each bullet must include:\n  1. a specific weakness grounded in the paper text, and\n  2. one specific actionable suggestion.\n  Do not criticize the absence of an element unless it is actually relevant and not reported.\n- **Questions**: List 1\u20133 concise clarification questions for the authors. Ask only about uncertainties created by missing, ambiguous, or inconsistent reporting.\n- **Recommendation**: End with exactly one of: **Accept**, **Minor Revision**, **Major Revision**, or **Reject**. On the next sentence, justify the recommendation by tying it to the most important issues above.\n\nVerification rule before finalizing:\n- Check every claim against the source text.\n- Remove any statement that cannot be directly supported.\n- Replace any uncertain statement with an explicit uncertainty marker.\n\nStyle rules:\n- Keep a constructive, professional tone.\n- Stay concise and specific.\n- No preamble.\n- No closing text after the recommendation section.",
+      "mean_score": 0.905,
+      "pass_rates": {
+        "paper_summary": 0.9,
+        "methodology_assessment": 1.0,
+        "statistical_evaluation": 1.0,
+        "strengths_and_weaknesses": 1.0,
+        "constructive_tone": 0.9,
+        "structured_format": 1.0,
+        "specific_references": 1.0,
+        "concise_review": 1.0,
+        "clear_recommendation": 1.0,
+        "factual_misrepresentation": 0.5
+      },
+      "sample_reviews": [
+        {
+          "paper_id": "P1: Neuroscience fMRI study",
+          "review": "**Summary**\n\nThis paper contributes to the understanding of prefrontal cortex activation patterns during risky decision-making by employing a within-subjects fMRI design. The study found that risky decisions were associated with greater bilateral dorsolateral prefrontal cortex (dlPFC) activation and reduced ventromedial prefrontal cortex (vmPFC) activation compared to safe decisions. The dynamic interplay between dlPFC and vmPFC was further characterized by increased negative functional connecti"
+        },
+        {
+          "paper_id": "P2: Diabetes drug RCT",
+          "review": "**Summary**\n\nThis study, a 52-week phase III randomized controlled trial, evaluated the efficacy and safety of dualutide, a novel dual GLP-1/GIP receptor agonist, in adults with type 2 diabetes (T2D). Participants were randomized to receive either dualutide 15mg weekly (n=561) or placebo (n=281). The results showed that dualutide significantly improved glycemic control, reduced body weight, and improved fasting plasma glucose levels compared to placebo.\n\n**Methodology**\n\nThe study design was a m"
+        },
+        {
+          "paper_id": "P3: UPF and CVD cohort study",
+          "review": "**Summary**\n\nThis prospective cohort study from the NutriHealth-EU Consortium investigated the association between ultra-processed food (UPF) consumption and incident cardiovascular disease (CVD) in 48,217 adults across 6 European countries. The study found that higher UPF consumption was independently associated with increased CVD risk, with a 24% higher risk in the highest quartile compared to the lowest quartile. The association remained significant after adjustment for diet quality indices a"
+        }
+      ],
+      "generation_cost": 0.0,
+      "grading_cost": 0.34830755
+    }
+  ],
+  "gold_comparison": {
+    "mean_score": 0.828,
+    "pass_rates": {
+      "paper_summary": 0.9,
+      "methodology_assessment": 1.0,
+      "statistical_evaluation": 1.0,
+      "strengths_and_weaknesses": 0.9,
+      "constructive_tone": 0.2,
+      "structured_format": 1.0,
+      "specific_references": 0.9,
+      "concise_review": 1.0,
+      "clear_recommendation": 1.0,
+      "factual_misrepresentation": 0.4
+    }
+  },
+  "convergence_reason": "score_plateau (delta=0.012)",
+  "total_cost": 1.4054027,
+  "elapsed_seconds": 388.36945390701294,
+  "config": {
+    "agent_model": "groq/llama-3.1-8b-instant",
+    "eval_model": "gemini/gemini-3-flash-preview",
+    "revision_model": "openai/gpt-5.4",
+    "max_iterations": 5,
+    "num_papers": 10
+  }
+}

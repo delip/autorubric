@@ -1,8 +1,9 @@
-"""Run the skill improvement experiment.
+"""Run the skill improvement experiment with a cross-judge revision model.
 
-Iteratively improves a vague peer review skill by grading agent outputs
-against a rubric, analyzing per-criterion pass rates, and using a revision
-LLM to rewrite the skill. Saves results to JSON for chart generation.
+Same as run_skill_improvement.py but uses Claude Sonnet 4.6 for skill
+revision while keeping Gemini-3-Flash as the rubric grading judge.
+This isolates the self-preference concern: if a different revision model
+achieves similar scores, the improvement is not judge-specific overfitting.
 """
 
 import asyncio
@@ -10,14 +11,18 @@ import json
 import time
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 from autorubric import LLMConfig, Rubric
 from autorubric.dataset import RubricDataset
 from autorubric.graders import CriterionGrader
 from autorubric.llm import LLMClient
 from autorubric.types import CriterionVerdict
 
+load_dotenv()
+
 DATA_PATH = Path(__file__).parent.parent / "examples" / "data" / "peer_review_skill_eval.json"
-OUTPUT_PATH = Path(__file__).parent.parent / "examples" / "data" / "skill_improvement_results.json"
+OUTPUT_PATH = Path(__file__).parent.parent / "examples" / "data" / "skill_improvement_results_cross_judge.json"
 
 V1_SKILL = "Provide brief feedback on the text below."
 
@@ -74,11 +79,10 @@ Revise the skill to improve pass rates on failing criteria while maintaining per
 Output only the revised skill text."""
 
 MAX_ITERATIONS = 5
-CONVERGENCE_THRESHOLD = 0.02  # stop if score improves less than this
+CONVERGENCE_THRESHOLD = 0.02
 
 
 def extract_unique_papers(dataset: RubricDataset) -> list[dict]:
-    """Extract one prompt per unique paper from the dataset."""
     seen = set()
     papers = []
     for item in dataset.items:
@@ -92,7 +96,6 @@ def extract_unique_papers(dataset: RubricDataset) -> list[dict]:
 async def generate_reviews(
     client: LLMClient, skill: str, papers: list[dict],
 ) -> list[dict]:
-    """Generate a review for each paper using the given skill."""
     tasks = []
     for paper in papers:
         tasks.append(client.generate(
@@ -114,7 +117,6 @@ async def generate_reviews(
 async def grade_reviews(
     rubric: Rubric, grader: CriterionGrader, reviews: list[dict], papers: list[dict],
 ) -> list[dict]:
-    """Grade each review against the rubric. Returns per-review grading data."""
     tasks = []
     for review, paper in zip(reviews, papers):
         tasks.append(rubric.grade(
@@ -144,7 +146,6 @@ async def grade_reviews(
 
 
 def compute_pass_rates(graded: list[dict], criteria_names: list[str]) -> dict[str, float]:
-    """Compute per-criterion pass rate from grading results."""
     rates = {}
     for name in criteria_names:
         met = sum(
@@ -156,7 +157,6 @@ def compute_pass_rates(graded: list[dict], criteria_names: list[str]) -> dict[st
 
 
 def format_criteria_table(criteria: list, pass_rates: dict[str, float]) -> str:
-    """Format rubric criteria with pass rates for the revision prompt."""
     lines = []
     for c in criteria:
         rate = pass_rates.get(c.name, 0.0)
@@ -166,7 +166,6 @@ def format_criteria_table(criteria: list, pass_rates: dict[str, float]) -> str:
 
 
 def format_failure_examples(graded: list[dict], criteria: list, pass_rates: dict[str, float], max_examples: int = 3) -> str:
-    """Format sample failure explanations for criteria with low pass rates."""
     sections = []
     failing = [(c.name, pass_rates[c.name]) for c in criteria if pass_rates[c.name] < 0.7]
     failing.sort(key=lambda x: x[1])
@@ -186,7 +185,6 @@ def format_failure_examples(graded: list[dict], criteria: list, pass_rates: dict
 
 
 def format_history(iterations: list[dict]) -> str:
-    """Format iteration history for the revision prompt."""
     if not iterations:
         return "This is the first iteration."
     lines = []
@@ -202,7 +200,6 @@ async def run_improvement_loop(
     eval_grader: CriterionGrader,
     revision_client: LLMClient,
 ) -> list[dict]:
-    """Run the iterative skill improvement loop."""
     criteria_names = [c.name for c in rubric.rubric]
     current_skill = V1_SKILL
     iterations = []
@@ -213,19 +210,16 @@ async def run_improvement_loop(
         print(f"Iteration {i}")
         print(f"{'='*60}")
 
-        # Generate reviews
         print(f"  Generating reviews with current skill...")
         reviews = await generate_reviews(agent_client, current_skill, papers)
         gen_cost = sum(r["cost"] for r in reviews)
         total_cost += gen_cost
 
-        # Grade reviews
         print(f"  Grading reviews...")
         graded = await grade_reviews(rubric, eval_grader, reviews, papers)
         grade_cost = sum(g["cost"] for g in graded)
         total_cost += grade_cost
 
-        # Compute pass rates and mean score
         pass_rates = compute_pass_rates(graded, criteria_names)
         mean_score = sum(g["score"] for g in graded) / len(graded)
 
@@ -245,7 +239,6 @@ async def run_improvement_loop(
         }
         iterations.append(iteration_data)
 
-        # Check convergence
         if i > 0:
             prev_score = iterations[i - 1]["mean_score"]
             if mean_score - prev_score < CONVERGENCE_THRESHOLD:
@@ -256,8 +249,7 @@ async def run_improvement_loop(
             print(f"  Max iterations reached.")
             break
 
-        # Revise skill
-        print(f"  Revising skill...")
+        print(f"  Revising skill (cross-judge: Claude Sonnet 4.6)...")
         criteria_table = format_criteria_table(rubric.rubric, pass_rates)
         failure_examples = format_failure_examples(graded, rubric.rubric, pass_rates)
         history = format_history(iterations)
@@ -288,7 +280,6 @@ async def evaluate_with_skill(
     skill: str, label: str, rubric: Rubric, papers: list[dict],
     agent_client: LLMClient, eval_grader: CriterionGrader,
 ) -> dict:
-    """Generate and grade reviews for a given skill. Returns summary."""
     print(f"\nEvaluating {label}...")
     reviews = await generate_reviews(agent_client, skill, papers)
     graded = await grade_reviews(rubric, eval_grader, reviews, papers)
@@ -308,13 +299,12 @@ async def evaluate_with_skill(
 async def main():
     start_time = time.time()
 
-    # Load dataset
     dataset = RubricDataset.from_file(DATA_PATH)
     rubric = dataset.rubric
     papers = extract_unique_papers(dataset)
     print(f"Loaded {len(papers)} papers, {len(rubric.rubric)} criteria")
 
-    # LLM configs
+    # LLM configs — same agent and eval, different revision model
     agent_config = LLMConfig(
         model="groq/llama-3.1-8b-instant",
         temperature=0.7,
@@ -327,7 +317,7 @@ async def main():
         max_parallel_requests=10,
     )
     revision_config = LLMConfig(
-        model="gemini/gemini-3-flash-preview",
+        model="openai/gpt-5.4",
         temperature=1.0,
     )
 
@@ -354,14 +344,12 @@ async def main():
         GOLD_SKILL, "Curated Skill", rubric, papers, agent_client, eval_grader,
     )
 
-    # Compute total cost
     total_cost = sum(
         it.get("generation_cost", 0) + it.get("grading_cost", 0) for it in iterations
     ) + gold_result["cost"]
 
     elapsed = time.time() - start_time
 
-    # Build output
     output = {
         "v1_skill": V1_SKILL,
         "gold_skill": GOLD_SKILL,
@@ -391,12 +379,23 @@ async def main():
 
     # Summary
     print(f"\n{'='*60}")
-    print("SUMMARY")
+    print("SUMMARY (Cross-Judge: Gemini grading, Claude revision)")
     print(f"{'='*60}")
     print(f"V1 score:       {iterations[0]['mean_score']:.2f}")
     print(f"Improved score: {iterations[-1]['mean_score']:.2f}")
     print(f"Gold score:     {gold_result['mean_score']:.2f}")
     print(f"Convergence:    {convergence_reason}")
+
+    # Compare with original results if available
+    original_path = Path(__file__).parent.parent / "examples" / "data" / "skill_improvement_results.json"
+    if original_path.exists():
+        with open(original_path, encoding="utf-8") as f:
+            original = json.load(f)
+        print(f"\n--- Comparison with same-judge run ---")
+        print(f"Same-judge (Gemini→Gemini) final: {original['iterations'][-1]['mean_score']:.2f}")
+        print(f"Cross-judge (Gemini→Claude) final: {iterations[-1]['mean_score']:.2f}")
+        print(f"Same-judge gold: {original['gold_comparison']['mean_score']:.2f}")
+        print(f"Cross-judge gold: {gold_result['mean_score']:.2f}")
 
 
 if __name__ == "__main__":

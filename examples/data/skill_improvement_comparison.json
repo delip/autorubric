@@ -1,0 +1,449 @@
+{
+  "n_seeds": 3,
+  "n_papers": 10,
+  "config": {
+    "agent_model": "groq/llama-3.1-8b-instant",
+    "eval_model": "gemini/gemini-3-flash-preview",
+    "same_revision_model": "gemini/gemini-3-flash-preview",
+    "cross_revision_model": "openai/gpt-5.4"
+  },
+  "results": {
+    "same_judge": [
+      {
+        "vague": {
+          "scores": [
+            0.47,
+            0.5,
+            0.47,
+            0.35,
+            0.6,
+            0.52,
+            0.5,
+            0.35,
+            0.42,
+            0.4
+          ],
+          "mean": 0.4580000000000001,
+          "pass_rates": {
+            "paper_summary": 0.1,
+            "methodology_assessment": 0.9,
+            "statistical_evaluation": 0.0,
+            "strengths_and_weaknesses": 1.0,
+            "constructive_tone": 0.7,
+            "structured_format": 0.0,
+            "specific_references": 0.4,
+            "concise_review": 1.0,
+            "clear_recommendation": 0.1,
+            "factual_misrepresentation": 0.3
+          }
+        },
+        "revised": {
+          "scores": [
+            0.9,
+            0.75,
+            0.85,
+            0.65,
+            0.65,
+            1.0,
+            0.9,
+            0.9,
+            1.0,
+            0.75
+          ],
+          "mean": 0.835,
+          "pass_rates": {
+            "paper_summary": 0.7,
+            "methodology_assessment": 1.0,
+            "statistical_evaluation": 1.0,
+            "strengths_and_weaknesses": 1.0,
+            "constructive_tone": 0.5,
+            "structured_format": 1.0,
+            "specific_references": 1.0,
+            "concise_review": 0.9,
+            "clear_recommendation": 1.0,
+            "factual_misrepresentation": 0.5
+          },
+          "skill": "Write a scholarly review of the provided paper following these exact constraints:\n\n**Formatting and Structure**\nOrganize the review using these seven headers in this specific order:\n1. **Summary**: Provide exactly 2-3 sentences covering the paper's contribution, methodology, and specific findings.\n2. **Methodology**: Evaluate the study design's appropriateness for the research question. Identify at least one specific limitation in the design.\n3. **Statistics**: Evaluate the statistical analysis. You must explicitly address: (a) appropriateness of specific tests used (e.g., ANOVA, Cox models), (b) adequacy of sample size, and (c) the magnitude and reporting of effect sizes (e.g., Cohen's d, Hazard Ratios, CIs).\n4. **Strengths**: List at least 2 specific strengths. Reference specific sections, figures, or quoted results.\n5. **Weaknesses**: List at least 2 specific weaknesses. Reference specific details like sample sizes or section numbers.\n6. **Questions**: List specific questions for the authors regarding their data or interpretations.\n7. **Recommendation**: State a definitive recommendation from these four options: **Accept**, **Minor Revision**, **Major Revision**, or **Reject**. Provide a 1-2 sentence justification tied to your analysis.\n\n**Content Requirements**\n- **Actionable Feedback**: For every weakness identified, provide a specific, constructive suggestion for how the authors can improve or correct the issue.\n- **Evidence-Based Critique**: Reference observable details (e.g., \"In Figure 2...\", \"the n=24 sample...\", \"Section 3.1 states...\"). \n- **Factual Accuracy**: Do not attribute findings or methods to the paper that are not explicitly stated. Verify all quoted results and sample sizes against the text before including them.\n- **Length**: Keep the entire review under 800 words. Use concise, professional language and avoid tangential discussion."
+        },
+        "gold": {
+          "scores": [
+            1.0,
+            0.65,
+            0.75,
+            0.6,
+            0.85,
+            0.8,
+            0.75,
+            0.9,
+            0.75,
+            0.6
+          ],
+          "mean": 0.7649999999999999
+        }
+      },
+      {
+        "vague": {
+          "scores": [
+            0.57,
+            0.47,
+            0.47,
+            0.35,
+            0.35,
+            0.4,
+            0.72,
+            0.57,
+            0.4,
+            0.4
+          ],
+          "mean": 0.47000000000000003,
+          "pass_rates": {
+            "paper_summary": 0.0,
+            "methodology_assessment": 1.0,
+            "statistical_evaluation": 0.2,
+            "strengths_and_weaknesses": 1.0,
+            "constructive_tone": 0.5,
+            "structured_format": 0.0,
+            "specific_references": 0.5,
+            "concise_review": 1.0,
+            "clear_recommendation": 0.0,
+            "factual_misrepresentation": 0.3
+          }
+        },
+        "revised": {
+          "scores": [
+            1.0,
+            0.75,
+            1.0,
+            0.75,
+            0.85,
+            0.85,
+            0.85,
+            0.9,
+            0.85,
+            0.85
+          ],
+          "mean": 0.865,
+          "pass_rates": {
+            "paper_summary": 0.8,
+            "methodology_assessment": 1.0,
+            "statistical_evaluation": 1.0,
+            "strengths_and_weaknesses": 1.0,
+            "constructive_tone": 0.9,
+            "structured_format": 1.0,
+            "specific_references": 1.0,
+            "concise_review": 1.0,
+            "clear_recommendation": 1.0,
+            "factual_misrepresentation": 0.7
+          },
+          "skill": "Review the provided research text and provide a technical critique under 800 words using the following structured format and headers:\n\n### Summary\nWrite exactly 2-3 sentences summarizing the paper's contribution, the methodology used, and the primary findings. Use only facts explicitly stated in the text.\n\n### Methodology\nEvaluate the study design and its appropriateness for the research question. Identify specific limitations of the approach used. Reference specific section numbers or figure names.\n\n### Statistics\nEvaluate the statistical analysis quality. Specifically address:\n1. Appropriateness of the statistical tests used.\n2. Adequacy of the sample size (cite the exact N).\n3. Quality and magnitude of reported effect sizes (e.g., hazard ratios, beta values, correlation coefficients).\n\n### Strengths\nList at least 2 specific strengths. Support each with a direct quote or a specific result from the text.\n\n### Weaknesses\nList at least 2 specific weaknesses. For each weakness identified, provide a concrete, actionable suggestion for how the authors could improve the study or the manuscript.\n\n### Questions\nList specific technical questions for the authors regarding their data or interpretations.\n\n### Recommendation\nProvide a definitive recommendation: **Accept**, **Minor Revision**, **Major Revision**, or **Reject**. Include a 1-2 sentence justification tied directly to your preceding analysis.\n\n**Constraints:**\n- Do not attribute findings or methods to the paper that are not explicitly present in the text.\n- Use concrete references: cite specific figure numbers, sample sizes, p-values, and quoted results.\n- Maintain a constructive, professional tone in all suggestions."
+        },
+        "gold": {
+          "scores": [
+            1.0,
+            0.85,
+            0.9,
+            0.83,
+            0.9,
+            0.9,
+            0.75,
+            0.85,
+            0.75,
+            0.65
+          ],
+          "mean": 0.8380000000000001
+        }
+      },
+      {
+        "vague": {
+          "scores": [
+            0.57,
+            0.35,
+            0.47,
+            0.47,
+            0.2,
+            0.35,
+            0.35,
+            0.6,
+            0.5,
+            0.72
+          ],
+          "mean": 0.458,
+          "pass_rates": {
+            "paper_summary": 0.1,
+            "methodology_assessment": 0.9,
+            "statistical_evaluation": 0.3,
+            "strengths_and_weaknesses": 0.9,
+            "constructive_tone": 0.8,
+            "structured_format": 0.0,
+            "specific_references": 0.4,
+            "concise_review": 1.0,
+            "clear_recommendation": 0.0,
+            "factual_misrepresentation": 0.5
+          }
+        },
+        "revised": {
+          "scores": [
+            1.0,
+            0.9,
+            0.9,
+            0.6,
+            0.75,
+            1.0,
+            0.85,
+            0.9,
+            0.85,
+            0.75
+          ],
+          "mean": 0.85,
+          "pass_rates": {
+            "paper_summary": 0.9,
+            "methodology_assessment": 1.0,
+            "statistical_evaluation": 0.9,
+            "strengths_and_weaknesses": 1.0,
+            "constructive_tone": 0.5,
+            "structured_format": 1.0,
+            "specific_references": 1.0,
+            "concise_review": 1.0,
+            "clear_recommendation": 1.0,
+            "factual_misrepresentation": 0.5
+          },
+          "skill": "Provide a technical review of the text under 800 words using the following seven section headers in this exact order:\n\n1. **Summary**: Provide a 2-3 sentence summary covering the paper's contribution, methodology (e.g., study design, participants), and primary findings (including specific numerical results).\n2. **Methodology**: Evaluate the study design's appropriateness for the research question. Address specific limitations in the setup, controls, or data collection.\n3. **Statistics**: Evaluate the quality of the statistical analysis. Explicitly address:\n    - Appropriateness of the specific tests used (e.g., ANOVA, Cox models).\n    - Adequacy of sample size (n=X).\n    - Magnitude and significance of effect sizes (e.g., t-values, R\u00b2, Hazard Ratios).\n4. **Strengths**: List at least 2 specific strengths. Use concrete references such as quoted results, section numbers, or Figure/Table numbers.\n5. **Weaknesses**: List at least 2 specific weaknesses. For every weakness identified, provide a specific, actionable suggestion for improvement.\n6. **Questions**: List specific technical questions for the authors regarding their data or interpretations.\n7. **Recommendation**: State a definitive recommendation from these options: **Accept**, **Minor Revision**, **Major Revision**, or **Reject**. Provide a 1-2 sentence justification for this choice based on your preceding analysis.\n\n**Constraint Checklist & Requirements:**\n- **Accuracy**: Do not misquote results, mischaracterize methodology, or attribute findings not present in the text.\n- **Specificity**: Replace generic statements with specific details from the paper, including section numbers, figure/table references, exact sample sizes, and quoted numerical results.\n- **Tone**: Maintain a constructive, professional tone throughout."
+        },
+        "gold": {
+          "scores": [
+            0.9,
+            0.6,
+            0.75,
+            0.85,
+            0.75,
+            0.73,
+            0.75,
+            0.8,
+            1.0,
+            1.0
+          ],
+          "mean": 0.8130000000000001
+        }
+      }
+    ],
+    "cross_judge": [
+      {
+        "vague": {
+          "scores": [
+            0.57,
+            0.42,
+            0.35,
+            0.5,
+            0.5,
+            0.45,
+            0.57,
+            0.35,
+            0.72,
+            0.57
+          ],
+          "mean": 0.5,
+          "pass_rates": {
+            "paper_summary": 0.1,
+            "methodology_assessment": 0.9,
+            "statistical_evaluation": 0.1,
+            "strengths_and_weaknesses": 1.0,
+            "constructive_tone": 1.0,
+            "structured_format": 0.0,
+            "specific_references": 0.5,
+            "concise_review": 1.0,
+            "clear_recommendation": 0.0,
+            "factual_misrepresentation": 0.3
+          }
+        },
+        "revised": {
+          "scores": [
+            0.9,
+            0.75,
+            0.68,
+            0.6,
+            0.75,
+            0.83,
+            0.85,
+            1.0,
+            1.0,
+            0.9
+          ],
+          "mean": 0.826,
+          "pass_rates": {
+            "paper_summary": 0.5,
+            "methodology_assessment": 1.0,
+            "statistical_evaluation": 0.9,
+            "strengths_and_weaknesses": 1.0,
+            "constructive_tone": 0.8,
+            "structured_format": 1.0,
+            "specific_references": 0.8,
+            "concise_review": 1.0,
+            "clear_recommendation": 1.0,
+            "factual_misrepresentation": 0.5
+          },
+          "skill": "Write a peer-review under 800 words using exactly these section headers in this order:\n\n1. **Summary**\n2. **Methodology**\n3. **Statistics**\n4. **Strengths**\n5. **Weaknesses**\n6. **Questions**\n7. **Recommendation**\n\nRequirements:\n\n- In **Summary**, write 2\u20133 sentences that accurately state:\n  - the paper\u2019s main contribution or research question,\n  - the study design or methodology,\n  - the principal findings.\n- Base every claim only on information explicitly stated in the paper text. Do not infer missing details, invent analyses, or overstate results.\n- Reference specific details from the paper throughout the review when available, such as section names/numbers, figure/table numbers, quoted values, sample sizes, model names, p-values, confidence intervals, hazard ratios, beta coefficients, or other reported results.\n- In **Methodology**, assess whether the design matches the research question and note specific limitations.\n- In **Statistics**, explicitly address all 3:\n  - appropriateness of the statistical tests/models used,\n  - sample size or power/precision,\n  - effect sizes and how well they are reported/interpreted.\n  If the paper does not report one of these, state that explicitly.\n- In **Strengths**, list at least 2 specific strengths with concrete references to the paper.\n- In **Weaknesses**, list at least 2 specific weaknesses, each paired with a specific, actionable suggestion for improvement.\n- In **Questions**, list 1\u20133 concise questions for the authors.\n- In **Recommendation**, end with exactly one of: **Accept**, **Minor Revision**, **Major Revision**, or **Reject**, followed by 1\u20132 sentences justifying that recommendation based on the above analysis.\n\nFormatting:\n- Use concise prose or bullets within sections.\n- Keep the review focused and evidence-based.\n- If information is unavailable in the text, say \u201cnot reported\u201d rather than guessing."
+        },
+        "gold": {
+          "scores": [
+            1.0,
+            0.75,
+            0.75,
+            0.85,
+            1.0,
+            0.83,
+            0.75,
+            0.75,
+            0.9,
+            0.75
+          ],
+          "mean": 0.833
+        }
+      },
+      {
+        "vague": {
+          "scores": [
+            0.4,
+            0.2,
+            0.35,
+            0.5,
+            0.57,
+            0.5,
+            0.57,
+            0.72,
+            0.25,
+            0.72
+          ],
+          "mean": 0.47800000000000004,
+          "pass_rates": {
+            "paper_summary": 0.1,
+            "methodology_assessment": 0.9,
+            "statistical_evaluation": 0.2,
+            "strengths_and_weaknesses": 0.9,
+            "constructive_tone": 0.7,
+            "structured_format": 0.0,
+            "specific_references": 0.4,
+            "concise_review": 1.0,
+            "clear_recommendation": 0.0,
+            "factual_misrepresentation": 0.2
+          }
+        },
+        "revised": {
+          "scores": [
+            1.0,
+            0.85,
+            0.85,
+            0.75,
+            1.0,
+            1.0,
+            0.75,
+            1.0,
+            0.85,
+            0.85
+          ],
+          "mean": 0.89,
+          "pass_rates": {
+            "paper_summary": 0.8,
+            "methodology_assessment": 1.0,
+            "statistical_evaluation": 1.0,
+            "strengths_and_weaknesses": 1.0,
+            "constructive_tone": 1.0,
+            "structured_format": 1.0,
+            "specific_references": 1.0,
+            "concise_review": 1.0,
+            "clear_recommendation": 1.0,
+            "factual_misrepresentation": 0.6
+          },
+          "skill": "Write a peer review under 800 words using exactly these section headers in this order:\n\n**Summary**  \n**Methodology**  \n**Statistics**  \n**Strengths**  \n**Weaknesses**  \n**Questions for the Authors**  \n**Recommendation**\n\nFollow these rules:\n\n- In **Summary**, write 2\u20133 sentences that state:\n  1. the paper\u2019s main contribution or research question,\n  2. the study design or methodology,\n  3. the key findings.\n- Base every claim only on the provided text. Do not infer missing details, invent results, or name methods/findings not explicitly stated.\n- In **Methodology**, evaluate whether the design matches the research question and note specific limitations.\n- In **Statistics**, explicitly address all 3:\n  - appropriateness of the statistical tests/models,\n  - sample size or power,\n  - effect sizes or magnitude/precision of results (e.g., HR, OR, beta, t, CI, p-values).  \n  If any of these are missing from the paper, say so directly and explain why that limits evaluation.\n- In **Strengths**, list at least 2 numbered, specific strengths.\n- In **Weaknesses**, list at least 2 numbered, specific weaknesses, and for each weakness include one actionable suggestion.\n- In **Questions for the Authors**, include at least 2 numbered questions.\n- In **Recommendation**, give exactly one definitive verdict: **Accept**, **Minor Revision**, **Major Revision**, or **Reject**, followed by 1\u20132 sentences tying the verdict to the main methodological/statistical points.\n\nUse specific references from the paper whenever available: section names/numbers, figure/table numbers, quoted numerical results, sample sizes, datasets, or model names.\n\nBe concise, concrete, and evidence-based. Avoid generic praise, padding, and factual misrepresentation."
+        },
+        "gold": {
+          "scores": [
+            0.6,
+            0.65,
+            1.0,
+            1.0,
+            1.0,
+            0.75,
+            0.75,
+            0.75,
+            0.8,
+            0.75
+          ],
+          "mean": 0.805
+        }
+      },
+      {
+        "vague": {
+          "scores": [
+            0.25,
+            0.5,
+            0.57,
+            0.47,
+            0.4,
+            0.5,
+            0.32,
+            0.35,
+            0.72,
+            0.72
+          ],
+          "mean": 0.48,
+          "pass_rates": {
+            "paper_summary": 0.1,
+            "methodology_assessment": 1.0,
+            "statistical_evaluation": 0.2,
+            "strengths_and_weaknesses": 1.0,
+            "constructive_tone": 0.5,
+            "structured_format": 0.0,
+            "specific_references": 0.5,
+            "concise_review": 1.0,
+            "clear_recommendation": 0.0,
+            "factual_misrepresentation": 0.3
+          }
+        },
+        "revised": {
+          "scores": [
+            1.0,
+            0.9,
+            0.75,
+            0.75,
+            0.75,
+            1.0,
+            0.85,
+            0.85,
+            0.75,
+            1.0
+          ],
+          "mean": 0.86,
+          "pass_rates": {
+            "paper_summary": 0.5,
+            "methodology_assessment": 1.0,
+            "statistical_evaluation": 1.0,
+            "strengths_and_weaknesses": 1.0,
+            "constructive_tone": 1.0,
+            "structured_format": 1.0,
+            "specific_references": 1.0,
+            "concise_review": 1.0,
+            "clear_recommendation": 1.0,
+            "factual_misrepresentation": 0.6
+          },
+          "skill": "Write a peer review of the provided paper in under 800 words using exactly these section headers in this order:\n\n1. **Summary**\n2. **Methodology**\n3. **Statistics**\n4. **Strengths**\n5. **Weaknesses and Actionable Suggestions**\n6. **Questions for the Authors**\n7. **Recommendation**\n\nRequirements for each section:\n\n**Summary**\n- Write 2\u20133 sentences only.\n- State the paper\u2019s main contribution, study design/methodology, and principal findings.\n- Include at least 2 concrete details such as sample size, duration, model type, outcome, figure/table reference, or a quoted numerical result.\n\n**Methodology**\n- Assess whether the design matches the research question.\n- Name specific methods used and at least 2 limitations.\n- Tie each limitation to a concrete improvement.\n\n**Statistics**\n- Evaluate all 3 of these explicitly:\n  - appropriateness of the statistical tests/models\n  - adequacy of sample size/power\n  - effect sizes or magnitude/clinical relevance of results\n- If the paper does not report one of these, say explicitly: \u201cThe paper does not report ___, which limits interpretation.\u201d\n- Reference specific numerical results when available.\n\n**Strengths**\n- List at least 2 bullet points.\n- Each bullet must cite a specific paper detail (sample size, section, figure, table, reported estimate, dataset, follow-up time, etc.).\n\n**Weaknesses and Actionable Suggestions**\n- List at least 2 bullet points.\n- Each bullet must identify a specific weakness and immediately give a concrete fix using wording like \u201cTo strengthen the paper, \u2026\u201d\n- Do not give generic criticism.\n\n**Questions for the Authors**\n- List 2\u20134 specific questions grounded in the text.\n\n**Recommendation**\n- End with exactly one of: **Accept**, **Minor Revision**, **Major Revision**, or **Reject**.\n- Add 1\u20132 sentences justifying the recommendation based on the issues above.\n\nAccuracy rules:\n- Do not invent details.\n- Do not mention section numbers, figures, tables, effect sizes, power analyses, or limitations unless they are present in the provided text.\n- If information is missing, say \u201cnot provided in the excerpt\u201d or equivalent instead of guessing.\n- Do not misstate findings, methods, or sample sizes.\n\nStyle rules:\n- Be concise, specific, and constructive.\n- Prefer direct references to quoted numbers/results over generic statements.\n- Keep a professional tone throughout."
+        },
+        "gold": {
+          "scores": [
+            0.85,
+            0.75,
+            0.9,
+            0.85,
+            1.0,
+            1.0,
+            1.0,
+            0.85,
+            0.75,
+            0.75
+          ],
+          "mean": 0.8699999999999999
+        }
+      }
+    ]
+  },
+  "elapsed_seconds": 1834.6501319408417
+}
