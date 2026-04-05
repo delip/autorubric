@@ -1,3 +1,9 @@
+data/autorubriclm/raw/
+data/autorubriclm/converted/
+
+data/autorubriclm/splits/
+!data/autorubriclm/splits/manifest.json
+
 future-work/
 CLAUDE.md
 AGENTS.md

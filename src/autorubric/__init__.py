@@ -88,6 +88,11 @@ from autorubric.metrics import (
     verdict_to_binary,
     verdict_to_string,
 )
+from autorubric.generation import (
+    CriterionMix,
+    RubricGenerationDataset,
+    RubricGenerationExample,
+)
 from autorubric.meta import (
     ImprovementConfig,
     ImprovementResult,
@@ -198,6 +203,10 @@ __all__ = [
     "filter_cannot_assess",
     "verdict_to_binary",
     "verdict_to_string",
+    # Rubric generation
+    "CriterionMix",
+    "RubricGenerationDataset",
+    "RubricGenerationExample",
     # Meta-rubric evaluation
     "evaluate_rubric_in_context",
     "evaluate_rubric_standalone",

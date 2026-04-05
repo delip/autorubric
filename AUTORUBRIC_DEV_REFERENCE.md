@@ -21,6 +21,9 @@ src/autorubric/
 │   ├── __init__.py          # Grader exports
 │   ├── base.py              # Abstract Grader base class
 │   └── criterion_grader.py  # Unified grader (single/ensemble/few-shot)
+├── generation/
+│   ├── __init__.py          # Rubric generation exports
+│   └── dataset.py           # RubricGenerationExample, RubricGenerationDataset
 ├── meta/
 │   ├── __init__.py          # Meta-rubric evaluation exports
 │   ├── _evaluate.py         # evaluate_rubric_standalone, evaluate_rubric_in_context
@@ -65,6 +68,14 @@ Note: `FewShotConfig` is listed in the Core Types table above (defined in `src/a
 | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `DataItem`      | submission, description, optional ground_truth verdicts, optional per-item rubric, optional per-item prompt, optional reference_submission                                                    |
 | `RubricDataset` | optional prompt, optional global rubric, items, name, optional reference_submission; methods: get_item_rubric, get_item_prompt, get_item_reference_submission, split_train_test, to/from_file |
+
+### Rubric Generation Types (src/autorubric/generation/dataset.py)
+
+| Type                       | Purpose                                                                                       |
+| -------------------------- | --------------------------------------------------------------------------------------------- |
+| `RubricGenerationExample`  | Single (input, output) training example: grading problem → list[Criterion] rubric             |
+| `RubricGenerationDataset`  | Collection of examples with JSONL serialization for training pipelines                        |
+| `CriterionMix`             | Literal type: "binary", "ordinal", "nominal", "heterogeneous"                                 |
 
 ### LLM Types (src/autorubric/llm.py)
 
