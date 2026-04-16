@@ -84,9 +84,8 @@ These anti-patterns hurt grading quality in different ways:
 | Anti-Pattern | Impact |
 |--------------|--------|
 | Double-barreled | Unclear what verdict to give when only some aspects are met |
-| Vague wording | Different judges interpret differently, reducing consistency |
+| Imprecise wording | Different judges interpret differently, reducing consistency |
 | Generic boilerplate | Doesn't capture task-specific quality dimensions |
-| Hedging language | Judges can't give definitive MET/UNMET verdicts |
 
 ### Step 2: Standalone Evaluation
 
@@ -120,7 +119,7 @@ Evaluating rubric with 5 criteria
 
 Section: Clarity & Precision
 ─────────────────────────────────────────────────────────────────
-[UNMET] clear_requirements (weight: 10)
+[UNMET] unambiguous_requirements (weight: 10)
   Several criteria use vague language that different raters would
   interpret differently (e.g., "good", "professional").
 
@@ -134,10 +133,8 @@ Section: Anti-Patterns
   "thoroughness" and "strengths_weaknesses" both combine multiple
   assessments into single criteria.
 
-[MET] vague_wording (weight: -8)
-  "methodology" uses "good" without defining what constitutes good.
-
-[MET] hedging_language (weight: -6)
+[MET] imprecise_wording (weight: -8)
+  "methodology" uses "good" without defining what constitutes good;
   "factual_errors" uses "may" which makes definitive assessment impossible.
 
 ═══════════════════════════════════════════════════════════════
@@ -151,7 +148,7 @@ The standalone meta-rubric evaluates four areas:
 
 | Section | What It Checks |
 |---------|---------------|
-| **Clarity & Precision** | Clear requirements, specific language, single-dimension criteria, behavioral language |
+| **Clarity & Precision** | Unambiguous requirements, specific language, single-dimension criteria |
 | **Structure & Design** | Reasonable criteria count, balanced weights, non-overlapping criteria |
 | **LLM-Friendliness** | Independent verification, objectivity, well-defined multi-choice options |
 | **Anti-Patterns** | Double-barreled, vague, circular, overlapping, verbose, hedging, generic (negative weights) |
@@ -171,11 +168,10 @@ for criterion in meta_rubric.rubric:
 
 ```
   [-8] double_barreled
-  [-8] vague_wording
+  [-8] imprecise_wording
   [-6] circular_tautological
   [-6] excessive_overlap
   [-6] overly_verbose
-  [-6] hedging_language
   [-8] generic_boilerplate
 ```
 
@@ -241,14 +237,14 @@ Section: Anti-Patterns (In-Context)
 
 | Mode | What It Catches | When to Use |
 |------|-----------------|-------------|
-| **Standalone** | Intrinsic issues: vague wording, double-barreled, hedging, structure | Early rubric development, reusable rubric libraries |
+| **Standalone** | Intrinsic issues: imprecise wording, double-barreled, structure | Early rubric development, reusable rubric libraries |
 | **In-Context** | Task alignment: missing critical aspects, irrelevant criteria, discriminative power | Before deployment for a specific task |
 
 Some issues only surface with task context:
 
 | Issue | Standalone | In-Context |
 |-------|------------|------------|
-| Vague wording | Detects | Detects |
+| Imprecise wording | Detects | Detects |
 | Double-barreled criteria | Detects | Detects |
 | Missing critical task requirements | Cannot detect | **Detects** |
 | Irrelevant criteria for task | Cannot detect | **Detects** |
@@ -477,7 +473,7 @@ In your CI configuration:
 - **Standalone evaluation** checks intrinsic quality: clarity, structure, LLM-friendliness
 - **In-context evaluation** checks task alignment and discriminative power
 - **Anti-pattern criteria have negative weights**—MET means the issue was detected
-- **Common anti-patterns**: double-barreled, vague wording, hedging language, generic boilerplate
+- **Common anti-patterns**: double-barreled, imprecise wording, generic boilerplate
 - **Iterate based on feedback**: fix one issue at a time, re-evaluate
 - **HTML reports** are useful for documentation, stakeholder review, and audit trails
 - **Automated quality gates** in CI/CD prevent deploying flawed rubrics

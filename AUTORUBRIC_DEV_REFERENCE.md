@@ -25,6 +25,7 @@ src/autorubric/
 │   ├── __init__.py          # Meta-rubric evaluation exports
 │   ├── _evaluate.py         # evaluate_rubric_standalone, evaluate_rubric_in_context
 │   ├── _improve.py          # ImprovementRunner, improve_rubric, building blocks
+│   ├── _signals.py          # compute_reward_variance (behavioral signal computation)
 │   ├── _display.py          # Rich display utilities
 │   └── data/                # Meta-rubric JSON files
 └── metrics/
@@ -95,29 +96,31 @@ Note: `FewShotConfig` is listed in the Core Types table above (defined in `src/a
 
 | Type                          | Purpose                                                                              |
 | ----------------------------- | ------------------------------------------------------------------------------------ |
-| `ImprovementConfig`           | Configuration: eval_llm, revision_llm, mode, strategy (`"meta_rubric"` or `"held_out"`), validation_data, convergence_fn, custom prompts |
+| `ImprovementConfig`           | Configuration: eval_llm, revision_llm, mode, strategy (`"meta_rubric"` or `"held_out"`), validation_data, convergence_fn, custom prompts, `evidence_fn` (async callable for behavioral evidence), `behavioral_signal_frequency` (`"every_iter"`, `"first_and_last"`, `"on_demand"`) |
 | `ImprovementResult`           | Final result: original/final/best rubric, iterations, best_iteration, convergence_reason, total_completion_cost |
 | `ImprovementRunner`           | Full-control runner class following the EvalRunner pattern                            |
 | `ImprovementProgressDisplay`  | Rich-based progress display with bar, issues table, rubric panel, and summary table  |
-| `IterationResult`             | Per-iteration: iteration, rubric, quality_score, agreement, per_criterion_agreement, issues, issues_fixed, issues_introduced, accepted, rejection_reason, quality_report, token_usage, completion_cost |
-| `IssueDetail`                 | Single issue: criterion_name, requirement, weight, is_antipattern, feedback           |
+| `IterationResult`             | Per-iteration: iteration, rubric, quality_score, agreement, per_criterion_agreement, issues, issues_fixed, issues_introduced, accepted, rejection_reason, quality_report, token_usage, completion_cost, `evidence` (behavioral signal dict, if computed) |
+| `IssueDetail`                 | Single issue: criterion_name, requirement, weight, is_antipattern, feedback, `signal_source` (`"text"` or behavioral signal key) |
 | `CriterionExemplar`           | A single grading case for a criterion (item_index, submission_snippet, verdicts, reason, is_disagreement) |
 | `CriterionErrorReport`        | Per-criterion error analysis from held-out grading (accuracy, FP/FN rates, exemplars) |
 | `HeldOutValidationResult`     | Result from held-out validation with per-criterion diagnostics                       |
 | `ConvergenceFn`               | Custom convergence callback type alias                                               |
+| `EvidenceFn`                  | `Callable[[Rubric], Awaitable[dict]]` — async callable for computing behavioral evidence |
 
 ### Meta-Rubric Types (src/autorubric/meta/_evaluate.py)
 
 | Type                       | Purpose                                                                    |
 | -------------------------- | -------------------------------------------------------------------------- |
-| `MetaCriterionJudgment`    | Extends `CriterionJudgment` with `affected_criteria: list[int]` field for structured criterion references (internal — not exported from `meta.__init__`) |
+| `MetaCriterionJudgment`    | Extends `CriterionJudgment` with `affected_criteria: list[int]` for structured criterion references and `evidence_cited: list[str]` for tracking which behavioral signals informed the judgment (internal — not exported from `meta.__init__`) |
 
 ### Meta-Rubric Functions (src/autorubric/meta/)
 
 | Function                       | Purpose                                                         |
 | ------------------------------ | --------------------------------------------------------------- |
-| `evaluate_rubric_standalone`   | Evaluate rubric quality in isolation (clarity, structure, etc.) |
-| `evaluate_rubric_in_context`   | Evaluate rubric quality relative to a task prompt               |
+| `evaluate_rubric_standalone`   | Evaluate rubric quality in isolation; optional `evidence` dict for behavioral signals |
+| `evaluate_rubric_in_context`   | Evaluate rubric quality relative to a task prompt; optional `evidence` dict for behavioral signals |
+| `compute_reward_variance`      | Measure per-criterion verdict variance across repeated evaluations (in `_signals.py`) |
 | `get_standalone_meta_rubric`   | Load the standalone meta-rubric as a Rubric object              |
 | `get_in_context_meta_rubric`   | Load the in-context meta-rubric as a Rubric object              |
 | `improve_rubric`               | Convenience wrapper for iterative rubric improvement            |
@@ -130,6 +133,7 @@ Note: `FewShotConfig` is listed in the Core Types table above (defined in `src/a
 | `validate_agreement`           | Test inter-judge agreement; returns (mean, per_criterion, cost) |
 | `validate_ground_truth`        | Grade validation items and compute Spearman rho against expected scores |
 | `compute_expected_scores`      | Compute expected scores from ground-truth verdicts and rubric weights |
+| `behavioral_plateau_converged` | Convergence function considering both quality and evidence stability |
 | `pareto_accept`                | Check revision acceptance under the Pareto constraint           |
 | `validate_held_out`            | Grade held-out items, compare per-criterion verdicts against ground truth |
 | `format_held_out_for_prompt`   | Format held-out validation result into revision prompt text     |
@@ -146,7 +150,7 @@ Note: `FewShotConfig` is listed in the Core Types table above (defined in `src/a
 2. `CriterionGrader` treats single LLM as "ensemble of 1"
 3. Makes concurrent LLM calls per criterion per judge via `asyncio.gather()`
 4. Binary criteria use `binary_response_format` (default: `CriterionJudgment`); meta-rubric evals use `MetaCriterionJudgment` which adds structured `affected_criteria` field
-5. If the response includes `affected_criteria`, grader injects `[Affects: #1, #3]` tag into the reason string
+5. If the response includes `affected_criteria`, grader injects `[Affects: #1, #3]` tag into the reason string; if `evidence_cited` is present, injects `[Cited: ...]` tag
 6. Aggregates votes using strategy (majority/weighted/unanimous/any)
 7. Returns `EnsembleEvaluationReport` (consistent interface)
 
@@ -181,7 +185,7 @@ Strategies: `SKIP` (adjust denominator), `ZERO`, `PARTIAL` (configurable), `FAIL
 When `save_artifacts=True` and `artifacts_dir` is set, the improvement loop writes:
 - `rubric-iter-{NN}.json` — criteria array per iteration
 - `eval-iter-{NN}.html` — meta-rubric eval report (always generated, regardless of `display` setting)
-- `iter-{NN}.json` — rich per-iteration JSON (quality report, issues, validation samples, revision prompts/response)
+- `iter-{NN}.json` — rich per-iteration JSON (quality report, issues, validation samples, revision prompts/response, `evidence` dict when behavioral signals were computed)
 - `improvement_report.html` — consolidated report (always generated, regardless of `display` setting)
 - `summary.json` — full run metadata, config snapshot, and per-iteration summary
 

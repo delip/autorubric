@@ -129,8 +129,12 @@ nav:
           - Length Penalty: cookbook/length-penalty.md
       - Validation & Production:
           - Evaluating Rubric Quality: cookbook/rubric-evaluation.md
+          - Writing a Metarubric: cookbook/writing-a-metarubric.md
+          - Grounded Rubrics: cookbook/grounded-rubrics.md
           - Automated Rubric Improvement: cookbook/automated-rubric-improvement.md
           - Held-Out Rubric Improvement: cookbook/held-out-rubric-improvement.md
+          - Behavioral Signals: cookbook/behavioral-signals.md
+          - Behavioral Improvement Loop: cookbook/behavioral-improvement-loop.md
           - Judge Validation: cookbook/judge-validation.md
           - Synthetic Ground Truth: cookbook/synthetic-ground-truth.md
           - Batch Evaluation: cookbook/batch-evaluation.md
@@ -140,6 +144,8 @@ nav:
           - Configuration Management: cookbook/configuration-management.md
           - Evaluating Agent Skills: cookbook/agent-skill-evaluation.md
           - Improving Agent Skills: cookbook/improving-agent-skills.md
+  - Design:
+      - Metarubric Design Commitments: design/metarubric-design-commitments.md
   - API Reference:
       - api/index.md
       - CANNOT_ASSESS Handling: api/cannot-assess.md

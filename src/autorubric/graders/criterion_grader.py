@@ -559,6 +559,11 @@ class CriterionGrader(Grader):
                 tag = ", ".join(f"#{i}" for i in judgment.affected_criteria)
                 reason = f"{reason} [Affects: {tag}]"
 
+            # Inject [Cited: ...] tag if the response model includes evidence_cited
+            if hasattr(judgment, "evidence_cited") and judgment.evidence_cited:
+                cited_tag = ", ".join(judgment.evidence_cited)
+                reason = f"{reason} [Cited: {cited_tag}]"
+
             report = CriterionReport(
                 requirement=criterion.requirement,
                 verdict=judgment.criterion_status,

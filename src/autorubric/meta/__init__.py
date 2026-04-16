@@ -47,6 +47,7 @@ from ._improve import (
     ConvergenceFn,
     CriterionErrorReport,
     CriterionExemplar,
+    EvidenceFn,
     HeldOutValidationResult,
     ImprovementConfig,
     ImprovementProgressDisplay,
@@ -54,6 +55,7 @@ from ._improve import (
     ImprovementRunner,
     IssueDetail,
     IterationResult,
+    behavioral_plateau_converged,
     build_revision_history,
     compute_expected_scores,
     diff_issues,
@@ -71,8 +73,10 @@ from ._improve import (
     validate_ground_truth,
     validate_held_out,
 )
+from ._signals import compute_reward_variance
 
 __all__ = [
+    "compute_reward_variance",
     "evaluate_rubric_in_context",
     "evaluate_rubric_standalone",
     "get_in_context_meta_rubric",
@@ -83,6 +87,7 @@ __all__ = [
     "ImprovementRunner",
     # Improvement - types
     "ConvergenceFn",
+    "EvidenceFn",
     "CriterionErrorReport",
     "CriterionExemplar",
     "HeldOutValidationResult",
@@ -92,6 +97,7 @@ __all__ = [
     "IssueDetail",
     "IterationResult",
     # Improvement - building blocks
+    "behavioral_plateau_converged",
     "build_revision_history",
     "compute_expected_scores",
     "diff_issues",

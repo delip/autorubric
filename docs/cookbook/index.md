@@ -43,8 +43,12 @@ Deploy with confidence.
 | Recipe | Domain | What You'll Learn |
 |--------|--------|-------------------|
 | [Evaluating Rubric Quality](rubric-evaluation.md) | Peer Review | Meta-rubrics to validate and improve rubrics |
+| [Writing a Metarubric](writing-a-metarubric.md) | Reference | Built-in criterion set and how to author custom metarubrics |
+| [Grounded Rubrics](grounded-rubrics.md) | Factual Claims | Ensuring criteria specify where factual claims should be grounded |
 | [Automated Rubric Improvement](automated-rubric-improvement.md) | EV Analysis | LLM-driven iterative refinement of rubrics |
 | [Held-Out Rubric Improvement](held-out-rubric-improvement.md) | Peer Review | Data-driven criterion refinement using grading errors |
+| [Behavioral Signals](behavioral-signals.md) | Customer Support | Measuring per-criterion verdict variance |
+| [Behavioral Improvement Loop](behavioral-improvement-loop.md) | Customer Support | Variance-informed automated rubric refinement |
 | [Judge Validation](judge-validation.md) | Content Moderation | Measuring agreement with human labels |
 | [Synthetic Ground Truth](synthetic-ground-truth.md) | Product Descriptions | Bootstrapping labels from strong models |
 | [Batch Evaluation](batch-evaluation.md) | Customer Feedback | Checkpointing, resumption, and cost tracking |

@@ -5,9 +5,9 @@
         "name": "Clarity & Precision",
         "criteria": [
           {
-            "name": "clear_requirements",
+            "name": "unambiguous_requirements",
             "weight": 10,
-            "requirement": "Each criterion has a clear, unambiguous requirement that a rater could apply consistently"
+            "requirement": "Each criterion has a clear, unambiguous requirement that a rater could apply consistently, using concrete behavioral language that describes observable qualities rather than vague evaluative adjectives (e.g., 'good', 'excellent')"
           },
           {
             "name": "specific_actionable",
@@ -18,11 +18,6 @@
             "name": "unidimensional",
             "weight": 10,
             "requirement": "Each criterion assesses exactly one construct/attribute (not multiple conflated together)"
-          },
-          {
-            "name": "behavioral_language",
-            "weight": 8,
-            "requirement": "Criteria use concrete, behavioral language describing observable qualities (not vague adjectives like 'good' or 'excellent')"
           }
         ]
       },
@@ -62,7 +57,7 @@
           {
             "name": "well_defined_options",
             "weight": 6,
-            "requirement": "For multi-choice criteria, options are clearly differentiated with unambiguous boundaries"
+            "requirement": "For multi-choice criteria, options are clearly differentiated from each other — each option describes a distinct level or category that does not overlap with adjacent options"
           }
         ]
       },
@@ -77,12 +72,17 @@
           {
             "name": "deterministic_assessability",
             "weight": 8,
-            "requirement": "Criteria can be assessed deterministically from the submission text alone, without requiring external knowledge, subjective taste, or unstated assumptions"
+            "requirement": "Criteria can be assessed deterministically from the submission text alone, without requiring subjective taste or unstated assumptions about quality standards"
           },
           {
             "name": "consistent_granularity",
             "weight": 6,
             "requirement": "Criteria operate at a consistent level of granularity — not mixing high-level holistic judgments with fine-grained detail checks"
+          },
+          {
+            "name": "grounding_specified",
+            "weight": 8,
+            "requirement": "If the rubric evaluates factual claims, it specifies where those claims must be grounded (provided context, cited sources, or explicit reference text). Criteria that ask about correctness without stating the source of truth are under-specified."
           }
         ]
       },
@@ -95,9 +95,9 @@
             "requirement": "Contains criteria that assess multiple distinct things in a single requirement (e.g., 'clear AND concise AND accurate')"
           },
           {
-            "name": "vague_wording",
+            "name": "imprecise_wording",
             "weight": -8,
-            "requirement": "Contains criteria with vague, undefined terms that different raters would interpret differently"
+            "requirement": "Contains criteria with vague, undefined terms that different raters would interpret differently, or hedging words ('may', 'could', 'might', 'possibly') that make definitive assessment impossible"
           },
           {
             "name": "circular_tautological",
@@ -115,14 +115,14 @@
             "requirement": "Criteria requirements are unnecessarily long-winded when they could be stated more concisely"
           },
           {
-            "name": "hedging_language",
-            "weight": -6,
-            "requirement": "Contains criteria with hedging words ('may', 'could', 'might', 'possibly') that make definitive assessment difficult"
-          },
-          {
             "name": "generic_boilerplate",
             "weight": -8,
             "requirement": "Contains generic, cookie-cutter criteria that could apply to any task rather than being tailored to this specific task"
+          },
+          {
+            "name": "unverifiable_claim",
+            "weight": -8,
+            "requirement": "One or more criteria require verifying claims against information that is neither in the submission nor in provided context nor in a named reference source. Such criteria force the judge to rely on its own knowledge, producing inconsistent and often incorrect verdicts."
           }
         ]
       },

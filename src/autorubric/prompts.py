@@ -561,6 +561,8 @@ You are revising an evaluation rubric to improve its quality and reliability.
 
 {validation_text}
 
+{evidence_text}
+
 ## Revision History
 {history_text}
 Do NOT reintroduce issues that were fixed in previous iterations.

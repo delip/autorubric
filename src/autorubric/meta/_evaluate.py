@@ -26,6 +26,18 @@ _CRITERIA_REF_INSTRUCTION = (
 )
 
 
+def _format_evidence_section(evidence: dict) -> str:
+    """Format behavioral evidence as a supplementary section for the meta-judge."""
+    return (
+        "\n\n## Supplementary Behavioral Signals\n\n"
+        "The candidate rubric has been applied to a probe set of submissions. "
+        "The following per-criterion signals were observed. Use them as additional "
+        "evidence when evaluating criteria. When a signal informs your judgment, "
+        "include its key in evidence_cited.\n\n"
+        + json.dumps(evidence, indent=2)
+    )
+
+
 class MetaCriterionJudgment(CriterionJudgment):
     """Extended judgment for meta-rubric evaluation with structured criterion references."""
 
@@ -37,6 +49,14 @@ class MetaCriterionJudgment(CriterionJudgment):
             "1-based indices of the rubric criteria this evaluation pertains to. "
             "Use the index field from the criteria list. "
             "Return an empty list for rubric-wide issues not specific to any criterion."
+        ),
+    )
+    evidence_cited: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Keys from the supplementary evidence dict that informed this judgment "
+            "(e.g., 'variance', 'agreement', 'discrimination'). "
+            "Return an empty list if no supplementary evidence was provided or consulted."
         ),
     )
 
@@ -55,6 +75,7 @@ async def evaluate_rubric_standalone(
     rubric: Rubric,
     llm_config: LLMConfig,
     *,
+    evidence: dict | None = None,
     display: DisplayMode | None = None,
     output_html_path: Path | str | None = None,
 ) -> EnsembleEvaluationReport:
@@ -67,6 +88,9 @@ async def evaluate_rubric_standalone(
     Args:
         rubric: The rubric to evaluate.
         llm_config: LLM configuration for the evaluation.
+        evidence: Optional dict of behavioral signals (variance, agreement,
+            discrimination) to include as supplementary evidence in the
+            meta-judge prompt. When None, evaluation is purely text-based.
         display: Output format - None for no display, "stdout" for terminal,
             "html" for HTML file.
         output_html_path: Path for HTML output (required when display="html").
@@ -100,6 +124,9 @@ async def evaluate_rubric_standalone(
     }
     submission = _CRITERIA_REF_INSTRUCTION + json.dumps(rubric_data, indent=2)
 
+    if evidence is not None:
+        submission += _format_evidence_section(evidence)
+
     result = await meta_rubric.grade(to_grade=submission, grader=grader)
 
     if display is not None:
@@ -121,6 +148,7 @@ async def evaluate_rubric_in_context(
     task_prompt: str,
     llm_config: LLMConfig,
     *,
+    evidence: dict | None = None,
     display: DisplayMode | None = None,
     output_html_path: Path | str | None = None,
 ) -> EnsembleEvaluationReport:
@@ -134,6 +162,9 @@ async def evaluate_rubric_in_context(
         rubric: The rubric to evaluate.
         task_prompt: The task prompt the rubric is designed to evaluate.
         llm_config: LLM configuration for the evaluation.
+        evidence: Optional dict of behavioral signals (variance, agreement,
+            discrimination) to include as supplementary evidence in the
+            meta-judge prompt. When None, evaluation is purely text-based.
         display: Output format - None for no display, "stdout" for terminal,
             "html" for HTML file.
         output_html_path: Path for HTML output (required when display="html").
@@ -172,6 +203,9 @@ async def evaluate_rubric_in_context(
         },
         indent=2,
     )
+
+    if evidence is not None:
+        submission += _format_evidence_section(evidence)
 
     result = await meta_rubric.grade(to_grade=submission, grader=grader)
 

@@ -68,11 +68,11 @@ Recent meta-evaluation studies have quantified systematic failures in LLM-as-a-J
 
 | LaaJ Failure Mode | Quantitative Evidence | Meta-Rubric Criterion Addressing It |
 |------------------|----------------------|-------------------------------------|
-| Self-inconsistency | ~18% of papers report agreement (Haldar & Hockenmaier, 2025) | `objective_assessable`, `clear_requirements` |
+| Self-inconsistency | ~18% of papers report agreement (Haldar & Hockenmaier, 2025) | `rater_consistency`, `unambiguous_requirements` |
 | Unexplained variance | 55% average, >90% for some models (Feuer et al., 2025) | `orthogonal_criteria`, `unidimensional` |
 | Poor discriminant validity | Factor correlations >0.93 (Feuer et al., 2025) | `orthogonal_criteria`, `excessive_overlap` |
-| Rubric instability | Prompt sensitivity (Hong et al., 2026) | `clear_requirements`, `specific_actionable` |
-| Unverifiable reasoning | Free-form rationales lack evidence links | `behavioral_language`, `independently_verifiable` |
+| Rubric instability | Prompt sensitivity (Hong et al., 2026) | `unambiguous_requirements`, `specific_actionable` |
+| Unverifiable reasoning | Free-form rationales lack evidence links | `unambiguous_requirements`, `independently_verifiable` |
 | Scale misalignment | QWK drops from 0.73 to 0.26 without calibration | `balanced_weights`, `well_defined_options` |
 
 These findings provide empirical motivation for meta-rubric criteria: rubrics that fail clarity, orthogonality, or specificity requirements will produce unreliable LaaJ evaluations regardless of judge capability.
@@ -178,7 +178,7 @@ The standalone meta-rubric comprises four sections totaling 17 criteria: Clarity
 
 This section addresses the requirement that rubric criteria be interpretable and consistently applicable.
 
-#### 4.1.1 Clear Requirements (weight: +10)
+#### 4.1.1 Unambiguous Requirements (weight: +10)
 
 **Definition:** Each criterion has a clear, unambiguous requirement that a rater could apply consistently.
 
@@ -219,35 +219,22 @@ Panadero and Jonsson (2020) note that analytic rubrics are specifically designed
 - "Demonstrates both creativity and technical precision"
 - "Shows understanding and communicates effectively"
 
-#### 4.1.4 Behavioral Language (weight: +8)
+#### 4.1.4 Behavioral Language (merged into `unambiguous_requirements`)
 
-**Definition:** Criteria use concrete, behavioral language describing observable qualities rather than vague evaluative adjectives.
+**Note:** This criterion has been merged into `unambiguous_requirements`. The requirement for concrete, behavioral language describing observable qualities is now assessed as part of the broader unambiguous requirements check, since behavioral specificity is a necessary condition for unambiguous assessment.
 
-**Theoretical grounding:** Brookhart (2018) specifically advises "using descriptive rather than evaluative language" because "descriptive descriptors help students envision next steps; by contrast, rubrics that use rating-scale language... tend to be more useful for grading than for learning." Brookhart and Loureiro (2024) recommend "student-friendly language and concrete nouns."
+**Theoretical grounding (retained for reference):** Brookhart (2018) specifically advises "using descriptive rather than evaluative language" because "descriptive descriptors help students envision next steps; by contrast, rubrics that use rating-scale language... tend to be more useful for grading than for learning." Brookhart and Loureiro (2024) recommend "student-friendly language and concrete nouns."
 
 Panadero and Jonsson (2020) emphasize preferring "descriptive (not evaluative) language so descriptors guide performance and self-assessment." McKeown and Biss (2018) suggest "objective quantitative wording (e.g., all/most/none)" where appropriate.
-
-**Operationalization:** The judge assesses whether criteria describe observable behaviors or features rather than relying on abstract quality judgments. Terms like "excellent," "good," "poor," "adequate" without behavioral anchors indicate failure.
-
-**Failure examples:**
-- "Excellent use of evidence" (what makes it excellent?)
-- "Good organization" (what constitutes good?)
-- "Quality is satisfactory" (no behavioral specification)
-
-**Success examples:**
-- "Uses at least three distinct pieces of evidence to support the main claim"
-- "Presents information in chronological order with clear transitions"
-- "Addresses all components of the prompt"
 
 **Section 4.1 Summary: Clarity & Precision Criteria**
 
 | Criterion | Weight | Core Question | Key Sources |
 |-----------|--------|---------------|-------------|
-| `clear_requirements` | +10 | Can a rater apply this consistently? | Mrangu (2022); McKeown & Biss (2018) |
+| `unambiguous_requirements` | +10 | Can a rater apply this consistently? (subsumes former `behavioral_language`) | Mrangu (2022); McKeown & Biss (2018); Brookhart (2018) |
 | `specific_actionable` | +10 | Does it guide assessment concretely? | Jönsson & Panadero (2017); Gunjal et al. (2025) |
 | `unidimensional` | +10 | Does it assess exactly one thing? | Brookhart (2018); Panadero & Jonsson (2020) |
-| `behavioral_language` | +8 | Are qualities observable, not abstract? | Brookhart (2018); Brookhart & Loureiro (2024) |
-| **Section Total** | **+38** | | |
+| **Section Total** | **+30** | | |
 
 ### 4.2 Structure & Design
 
@@ -329,9 +316,9 @@ This is essential for parallelized evaluation pipelines where criteria are asses
 - "Better than average across all dimensions"
 - "Consistent with the tone established in other sections"
 
-#### 4.3.2 Objective Assessability (weight: +8)
+#### 4.3.2 Rater Consistency (weight: +8)
 
-**Definition:** Criteria are objective enough that different raters would reach similar conclusions.
+**Definition:** Criteria are objective enough that different raters would reach similar conclusions. (Renamed from `objective_assessable`; in the in-context meta-rubric, this also subsumes the former `low_interpretation_variance` criterion.)
 
 **Theoretical grounding:** Inter-rater reliability is a central concern in rubric design. McKeown and Biss (2018) emphasize "testing relevant types of reliability" and engaging in "recursive testing and calibration" to achieve consistency. Comer (2009) reports that rater groups typically achieve consistency within 2–3 calibration sessions.
 
@@ -366,7 +353,7 @@ The LLM-as-a-judge literature recommends "behaviorally anchored score descriptio
 | Criterion | Weight | Core Question | Key Sources |
 |-----------|--------|---------------|-------------|
 | `independently_verifiable` | +10 | Can each criterion be judged alone? | He et al. (2025); Gunjal et al. (2025) |
-| `objective_assessable` | +8 | Would different raters agree? | McKeown & Biss (2018); Casabianca et al. (2025) |
+| `rater_consistency` | +8 | Would different raters agree? (renamed from `objective_assessable`; in-context variant also subsumes `low_interpretation_variance`) | McKeown & Biss (2018); Casabianca et al. (2025) |
 | `well_defined_options` | +6 | Are multi-choice boundaries clear? | Panadero & Jonsson (2020); He et al. (2025) |
 | **Section Total** | **+24** | | |
 
@@ -389,9 +376,9 @@ When a criterion assesses "A AND B AND C," a submission meeting A and B but not 
 
 **Severity:** Weight -8 reflects that this is a moderate-severity defect. The information loss from conflation degrades diagnostic utility but may not render the rubric useless for coarse assessment.
 
-#### 4.4.2 Vague Wording (weight: -8)
+#### 4.4.2 Imprecise Wording (weight: -8)
 
-**Definition:** Contains criteria with vague, undefined terms that different raters would interpret differently.
+**Definition:** Contains criteria with vague, undefined, or hedging language that different raters would interpret differently. This criterion consolidates the former `vague_wording` and `hedging_language` criteria.
 
 **Theoretical grounding:** Mrangu (2022) explicitly warns that "a vague rubric cannot be interpreted accurately or consistently." McKeown and Biss (2018) recommend engaging front-line users to identify interpretation differences during piloting.
 
@@ -403,8 +390,11 @@ Casabianca et al. (2025) document that stakeholders vary substantially in rubric
 - Undefined qualitative terms (appropriate, suitable, sufficient)
 - Relative comparisons without anchors (better, improved, enhanced)
 - Domain-specific jargon without definitions
+- Modal verbs suggesting possibility rather than requirement (may, might, could)
+- Qualifiers that soften requirements (somewhat, partially, to some extent)
+- Conditional language without clear trigger conditions
 
-**Severity:** Weight -8 reflects moderate severity. Vague criteria may still permit rough assessment but introduce substantial noise.
+**Severity:** Weight -8 reflects moderate severity. Imprecise criteria may still permit rough assessment but introduce substantial noise.
 
 #### 4.4.3 Circular or Tautological (weight: -6)
 
@@ -449,20 +439,11 @@ Brookhart (2018) advocates for "concise" descriptors. For LLM judges, excessivel
 
 **Severity:** Weight -6 reflects that verbosity is a stylistic issue that increases cognitive load but doesn't fundamentally undermine assessment validity.
 
-#### 4.4.6 Hedging Language (weight: -6)
+#### 4.4.6 Hedging Language (merged into `imprecise_wording`)
 
-**Definition:** Contains criteria with hedging words that make definitive assessment difficult.
+**Note:** This criterion has been merged into `imprecise_wording`. Hedging language (modal verbs, softening qualifiers) is now detected as a subtype of imprecise wording, since both produce the same downstream effect: inconsistent rater judgments due to ambiguous requirements.
 
-**Theoretical grounding:** Hedging words like "may," "could," "might," and "possibly" introduce ambiguity about whether a quality is required or optional. This undermines the binary MET/UNMET determination rubric-based evaluation requires.
-
-Brookhart (2018) recommends descriptive language that clearly specifies required qualities. The LLM-as-a-judge literature recommends "low-precision ordinal scales" with clear boundaries rather than hedged continuous assessments.
-
-**Detection signals:**
-- Modal verbs suggesting possibility rather than requirement (may, might, could)
-- Qualifiers that soften requirements (somewhat, partially, to some extent)
-- Conditional language without clear trigger conditions
-
-**Severity:** Weight -6 reflects that hedging creates assessment uncertainty but may reflect legitimate qualification in some contexts.
+**Theoretical grounding (retained for reference):** Hedging words like "may," "could," "might," and "possibly" introduce ambiguity about whether a quality is required or optional. This undermines the binary MET/UNMET determination rubric-based evaluation requires.
 
 #### 4.4.7 Generic Boilerplate (weight: -8)
 
@@ -484,13 +465,12 @@ He et al. (2025) emphasize task-specific rubrics "by default," including questio
 | Anti-Pattern | Weight | Detects | Detection Signals |
 |--------------|--------|---------|-------------------|
 | `double_barreled` | -8 | Multiple constructs in one criterion | AND, conjunctions, lists |
-| `vague_wording` | -8 | Undefined/ambiguous terms | "appropriate," "suitable," jargon |
+| `imprecise_wording` | -8 | Undefined/ambiguous terms, hedging language (consolidates former `vague_wording` and `hedging_language`) | "appropriate," "suitable," jargon, "may," "might," "could" |
 | `circular_tautological` | -6 | Self-referential definitions | "good because high quality" |
 | `excessive_overlap` | -6 | Redundant criteria | Criteria always agree |
 | `overly_verbose` | -6 | Unnecessarily long requirements | Could say in half the words |
-| `hedging_language` | -6 | Modal uncertainty | "may," "might," "could" |
 | `generic_boilerplate` | -8 | Non-task-specific criteria | Copy-paste to any task |
-| **Section Total** | **-48** | | |
+| **Section Total** | **-42** | | |
 
 ## 5. In-Context Meta-Rubric Extensions
 
@@ -715,7 +695,7 @@ This feedback loop enables automated rubric generation pipelines to iteratively 
 
 2. **Task alignment receives the single highest weight** (+12) in the in-context rubric because misalignment to task purpose is the most fundamental validity threat.
 
-3. **Anti-pattern weights are calibrated to severity**: critical defects like `irrelevant_criteria` and `missing_critical` receive -10, moderate defects like `double_barreled` and `vague_wording` receive -8, stylistic issues like `overly_verbose` receive -6.
+3. **Anti-pattern weights are calibrated to severity**: critical defects like `irrelevant_criteria` and `missing_critical` receive -10, moderate defects like `double_barreled` and `imprecise_wording` receive -8, stylistic issues like `overly_verbose` receive -6.
 
 4. **Total negative weight is substantial but not dominant**: At -48 standalone and -68 in-context, anti-patterns can significantly reduce scores but a rubric with many positive qualities can still score well despite some defects.
 
@@ -723,12 +703,12 @@ This feedback loop enables automated rubric generation pipelines to iteratively 
 
 | Tier | Weights | Criteria | Rationale |
 |------|---------|----------|-----------|
-| **Critical positive** | +10 to +12 | `task_aligned`, `clear_requirements`, `specific_actionable`, `unidimensional`, `independently_verifiable`, `covers_key_aspects`, `distinguishes_quality` | Fundamental validity requirements |
-| **Important positive** | +8 | `behavioral_language`, `orthogonal_criteria`, `objective_assessable`, `appropriate_emphasis` | Strongly supports quality |
+| **Critical positive** | +10 to +12 | `task_aligned`, `unambiguous_requirements`, `specific_actionable`, `unidimensional`, `independently_verifiable`, `covers_key_aspects`, `distinguishes_quality` | Fundamental validity requirements |
+| **Important positive** | +8 | `orthogonal_criteria`, `rater_consistency`, `appropriate_emphasis` | Strongly supports quality |
 | **Moderate positive** | +6 | `reasonable_count`, `balanced_weights`, `well_defined_options`, `avoids_trivial` | Useful but not essential |
 | **Severe anti-pattern** | -10 | `irrelevant_criteria`, `missing_critical` | Directly invalidates scores |
-| **Moderate anti-pattern** | -8 | `double_barreled`, `vague_wording`, `generic_boilerplate` | Substantially degrades quality |
-| **Minor anti-pattern** | -6 | `circular_tautological`, `excessive_overlap`, `overly_verbose`, `hedging_language` | Reduces quality, not fatal |
+| **Moderate anti-pattern** | -8 | `double_barreled`, `imprecise_wording`, `generic_boilerplate` | Substantially degrades quality |
+| **Minor anti-pattern** | -6 | `circular_tautological`, `excessive_overlap`, `overly_verbose` | Reduces quality, not fatal |
 
 ## 8. Best Practices: Meta-Rubric-Informed Rubric Development
 
@@ -897,7 +877,7 @@ These criteria are added to **both** the standalone and in-context meta-rubrics.
 **Requirement:**
 > One or more criteria lack clear decision boundaries -- it is ambiguous exactly when the criterion transitions from UNMET to MET. Criteria use comparative terms without a reference point ("sufficient", "adequate", "appropriate amount of", "reasonable") or require implicit threshold judgments ("enough evidence", "demonstrates understanding") that force different raters to impose their own standards, producing inconsistent judgments.
 
-**Distinctiveness:** `vague_wording` catches undefined adjectives at the word level (e.g., "good", "nice"). `boundary_ambiguity` catches structurally ambiguous thresholds where individual words have operational meaning but the MET/UNMET decision point is indeterminate. A criterion like "provides sufficient evidence to support the claim" uses no vague words -- "sufficient" and "evidence" are precise -- but the threshold for "sufficient" is undefined.
+**Distinctiveness:** `imprecise_wording` catches undefined adjectives at the word level (e.g., "good", "nice"). `boundary_ambiguity` catches structurally ambiguous thresholds where individual words have operational meaning but the MET/UNMET decision point is indeterminate. A criterion like "provides sufficient evidence to support the claim" uses no vague words -- "sufficient" and "evidence" are precise -- but the threshold for "sufficient" is undefined.
 
 ---
 
@@ -908,7 +888,7 @@ These criteria are added to **both** the standalone and in-context meta-rubrics.
 **Requirement:**
 > One or more criteria implicitly reward longer responses by equating quantity with quality -- using words like "comprehensive", "thorough", "detailed", "extensive", "in-depth", or "exhaustive" without specifying what specific content constitutes satisfaction. This enables the well-documented verbosity bias in LLM judges, where longer responses receive higher scores regardless of information density or quality.
 
-**Distinctiveness:** `vague_wording` targets words that lack clear meaning. "Comprehensive" is not vague -- it clearly means "covering all aspects." The problem is that it conflates quantity with quality, rewarding longer responses that touch more topics regardless of depth or correctness.
+**Distinctiveness:** `imprecise_wording` targets words that lack clear meaning. "Comprehensive" is not vague -- it clearly means "covering all aspects." The problem is that it conflates quantity with quality, rewarding longer responses that touch more topics regardless of depth or correctness.
 
 ---
 
@@ -940,8 +920,8 @@ These criteria are added to **both** the standalone and in-context meta-rubrics.
 |--------------|--------|---------|---------------|
 | `no_negative_criteria` | -6 | All-positive rubrics enabling sycophantic bias | `balanced_weights` (checks importance, not sign) |
 | `unfalsifiable_criteria` | -8 | Low-bar criteria any submission satisfies | `avoids_trivial` (both directions, in-context only) |
-| `boundary_ambiguity` | -8 | Indeterminate MET/UNMET thresholds | `vague_wording` (word-level vs. threshold-level) |
-| `verbosity_rewarding` | -6 | Quantity-as-quality conflation | `vague_wording` ("comprehensive" isn't vague) |
+| `boundary_ambiguity` | -8 | Indeterminate MET/UNMET thresholds | `imprecise_wording` (word-level vs. threshold-level) |
+| `verbosity_rewarding` | -6 | Quantity-as-quality conflation | `imprecise_wording` ("comprehensive" isn't vague) |
 | `poorly_anchored_ordinal` | -6 | Evaluative labels without behavioral anchors | `well_defined_options` (differentiated != anchored) |
 | `counting_dependent` | -4 | Precise counting LLMs can't reliably perform | (no overlap) |
 | **Section Total** | **-38** | | |
@@ -960,7 +940,7 @@ Added to **in-context meta-rubric only** (LLM-Friendliness section):
 
 | Criterion | Weight | Requirement |
 |-----------|--------|-------------|
-| `low_interpretation_variance` | +8 | Criteria minimize the need for subjective interpretation by grounding requirements in task-specific observables (e.g., "mentions X" rather than "demonstrates understanding of X"). |
+| `low_interpretation_variance` | +8 | Merged into `rater_consistency`. Criteria minimize the need for subjective interpretation by grounding requirements in task-specific observables (e.g., "mentions X" rather than "demonstrates understanding of X"). |
 
 ### 11.4 Weight Budget Analysis
 

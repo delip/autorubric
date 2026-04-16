@@ -29,7 +29,7 @@ import difflib
 import json
 import logging
 import re
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
@@ -72,6 +72,17 @@ Returns a convergence reason string to stop, or None to continue.
 When provided in ImprovementConfig, replaces the built-in convergence logic.
 """
 
+EvidenceFn = Callable[[Rubric], Awaitable[dict]]
+"""Async callable that computes behavioral evidence for a rubric.
+
+Called periodically during the improvement loop based on
+``behavioral_signal_frequency``. The returned dict is passed to
+meta-evaluation as the ``evidence`` parameter and stored in
+``IterationResult.evidence``.
+"""
+
+SignalFrequency = Literal["every_iter", "first_and_last", "on_demand"]
+
 
 # ============================================================================
 # Types
@@ -88,6 +99,9 @@ class IssueDetail:
         weight: Weight of the meta-rubric criterion.
         is_antipattern: True if this is a negative criterion (anti-pattern detected).
         feedback: The judge's explanation for why this issue was flagged.
+        signal_source: Source of the signal that produced this issue. "text" for
+            standard meta-rubric text evaluation; signal keys (e.g. "variance",
+            "agreement") when behavioral evidence was cited.
     """
 
     criterion_name: str
@@ -95,6 +109,7 @@ class IssueDetail:
     weight: float
     is_antipattern: bool
     feedback: str
+    signal_source: str = "text"
 
 
 @dataclass
@@ -169,6 +184,7 @@ class IterationResult:
     token_usage: TokenUsage | None
     completion_cost: float | None
     held_out_diagnostics: HeldOutValidationResult | None = None
+    evidence: dict | None = None
 
 
 @dataclass
@@ -238,9 +254,19 @@ class ImprovementConfig:
         revision_user_prompt_template: Custom user prompt template for revision.
             For meta_rubric: must contain {task_prompt}, {original_criteria},
             {issues_text}, {validation_text}, {history_text} placeholders.
+            Optionally {evidence_text} for behavioral signals.
             For held_out: must contain {task_prompt}, {original_criteria},
             {diagnostics_text}, {history_text}, {num_criteria} placeholders.
             Falls back to the default from prompts.py if None.
+        evidence_fn: Async callable that computes behavioral evidence for a
+            rubric. Called periodically based on ``behavioral_signal_frequency``.
+            The returned dict is passed to meta-evaluation and stored in
+            ``IterationResult.evidence``. Typical usage: wraps
+            ``compute_reward_variance`` with a fixed set of probe items.
+        behavioral_signal_frequency: How often to call ``evidence_fn``.
+            "every_iter" calls it every iteration; "first_and_last" calls it
+            only on the first and final iterations; "on_demand" never calls
+            it automatically (caller passes evidence manually).
     """
 
     eval_llm: LLMConfig | list[JudgeSpec]
@@ -270,6 +296,9 @@ class ImprovementConfig:
     convergence_fn: ConvergenceFn | None = None
     revision_system_prompt: str | None = None
     revision_user_prompt_template: str | None = None
+
+    evidence_fn: EvidenceFn | None = None
+    behavioral_signal_frequency: SignalFrequency = "first_and_last"
 
 
 # ============================================================================
@@ -665,6 +694,14 @@ def extract_issues(report: EnsembleEvaluationReport) -> list[IssueDetail]:
         )
 
         if is_issue:
+            # Parse [Cited: ...] tag from reason to determine signal source
+            signal_source = "text"
+            cited_match = re.search(
+                r"\[Cited:\s*([^\]]+)\]", criterion_report.final_reason
+            )
+            if cited_match:
+                signal_source = cited_match.group(1).strip()
+
             issues.append(
                 IssueDetail(
                     criterion_name=criterion_report.criterion.name or "unnamed",
@@ -672,6 +709,7 @@ def extract_issues(report: EnsembleEvaluationReport) -> list[IssueDetail]:
                     weight=weight,
                     is_antipattern=weight < 0,
                     feedback=criterion_report.final_reason,
+                    signal_source=signal_source,
                 )
             )
 
@@ -704,7 +742,12 @@ def format_issues_for_prompt(issues: list[IssueDetail]) -> str:
         issue_type = (
             "ANTI-PATTERN DETECTED" if issue.is_antipattern else "QUALITY GAP"
         )
-        lines.append(f"{i}. [{issue_type}] {issue.criterion_name}")
+        source_tag = (
+            f" [source: {issue.signal_source}]"
+            if issue.signal_source != "text"
+            else ""
+        )
+        lines.append(f"{i}. [{issue_type}]{source_tag} {issue.criterion_name}")
         lines.append(f"   Feedback: {issue.feedback}")
         lines.append("")
 
@@ -1136,6 +1179,7 @@ async def revise_rubric(
     history_text: str,
     config: ImprovementConfig,
     *,
+    evidence: dict | None = None,
     system_prompt: str | None = None,
     user_prompt_template: str | None = None,
     _capture: dict | None = None,
@@ -1149,6 +1193,9 @@ async def revise_rubric(
         validation_text: Formatted validation data (ground-truth or agreement).
         history_text: Formatted revision history.
         config: Improvement configuration (provides revision_llm).
+        evidence: Optional behavioral evidence dict. When provided, formatted
+            as a section in the revision prompt so the model can propose
+            edits that address behavioral failures.
         system_prompt: Override system prompt. Falls back to
             config.revision_system_prompt, then the default from prompts.py.
         user_prompt_template: Override user prompt template. Falls back to
@@ -1187,13 +1234,35 @@ async def revise_rubric(
         indent=2,
     )
 
-    user_prompt = effective_user_template.format(
-        task_prompt=task_prompt or "(No specific task — standalone evaluation)",
-        original_criteria=original_criteria,
-        issues_text=format_issues_for_prompt(issues),
-        validation_text=validation_text,
-        history_text=history_text,
-    )
+    evidence_text = ""
+    if evidence is not None:
+        evidence_text = (
+            "## Behavioral Signals\n"
+            "The following empirical signals were computed by grading sample "
+            "submissions. Use these to identify criteria that need rewording "
+            "for consistency. Do not hallucinate numbers — reference only "
+            "numbers present below.\n\n"
+            + json.dumps(evidence, indent=2)
+        )
+
+    try:
+        user_prompt = effective_user_template.format(
+            task_prompt=task_prompt or "(No specific task — standalone evaluation)",
+            original_criteria=original_criteria,
+            issues_text=format_issues_for_prompt(issues),
+            validation_text=validation_text,
+            evidence_text=evidence_text,
+            history_text=history_text,
+        )
+    except KeyError:
+        # Custom template without {evidence_text} placeholder
+        user_prompt = effective_user_template.format(
+            task_prompt=task_prompt or "(No specific task — standalone evaluation)",
+            original_criteria=original_criteria,
+            issues_text=format_issues_for_prompt(issues),
+            validation_text=validation_text,
+            history_text=history_text,
+        )
 
     client = LLMClient(config.revision_llm)
     gen_result = await client.generate(
@@ -1591,6 +1660,73 @@ def _check_held_out_convergence(
     return None
 
 
+def behavioral_plateau_converged(
+    current: IterationResult,
+    history: list[IterationResult],
+    *,
+    variance_threshold: float = 0.01,
+    quality_threshold: float = 0.02,
+    patience: int = 2,
+) -> str | None:
+    """Convergence function that considers behavioral signal stability.
+
+    Returns ``"behavioral_plateau"`` when both quality score and evidence
+    variance have stabilized for ``patience`` consecutive iterations.
+    Returns ``None`` to continue iterating.
+
+    To use with ``ImprovementConfig``, wrap with ``functools.partial``::
+
+        from functools import partial
+        config.convergence_fn = partial(
+            behavioral_plateau_converged, patience=3, quality_threshold=0.01
+        )
+
+    Args:
+        current: Current iteration result.
+        history: All iteration results so far (including current).
+        variance_threshold: Maximum change in mean evidence variance between
+            consecutive iterations to count as stable.
+        quality_threshold: Maximum quality score improvement to count as stable.
+        patience: Number of consecutive stable iterations before converging.
+
+    Returns:
+        ``"behavioral_plateau"`` if converged, else ``None``.
+    """
+    if len(history) < patience + 1:
+        return None
+
+    recent = history[-(patience + 1):]
+
+    # Check quality plateau
+    for i in range(1, len(recent)):
+        if abs(recent[i].quality_score - recent[i - 1].quality_score) >= quality_threshold:
+            return None
+
+    # Check evidence variance plateau (if evidence is present)
+    recent_with_evidence = [r for r in recent if r.evidence is not None]
+    if len(recent_with_evidence) >= 2:
+        def _mean_variance(ev: dict) -> float:
+            all_vals: list[float] = []
+            for v in ev.values():
+                if isinstance(v, dict):
+                    all_vals.extend(
+                        val for val in v.values() if isinstance(val, int | float)
+                    )
+                elif isinstance(v, int | float):
+                    all_vals.append(v)
+            return sum(all_vals) / len(all_vals) if all_vals else 0.0
+
+        for i in range(1, len(recent_with_evidence)):
+            delta = abs(
+                _mean_variance(recent_with_evidence[i].evidence)
+                - _mean_variance(recent_with_evidence[i - 1].evidence)
+            )
+            if delta >= variance_threshold:
+                return None
+
+    return "behavioral_plateau"
+
+
 # Backward-compatible private aliases
 _extract_issues = extract_issues
 _diff_issues = diff_issues
@@ -1670,6 +1806,7 @@ async def _evaluate_quality(
     config: ImprovementConfig,
     *,
     html_path: str | None = None,
+    evidence: dict | None = None,
 ) -> EnsembleEvaluationReport:
     """Evaluate rubric quality using the appropriate meta-rubric."""
     display = "html" if html_path else config.display
@@ -1681,6 +1818,7 @@ async def _evaluate_quality(
             rubric,
             task_prompt,
             llm_config,
+            evidence=evidence,
             display=display,
             output_html_path=html_path,
         )
@@ -1688,6 +1826,7 @@ async def _evaluate_quality(
         return await evaluate_rubric_standalone(
             rubric,
             llm_config,
+            evidence=evidence,
             display=display,
             output_html_path=html_path,
         )
@@ -1840,6 +1979,8 @@ def _serialize_iteration(iter_result: IterationResult) -> dict:
         result["quality_report"] = quality_report_data
     if held_out_data is not None:
         result["held_out_diagnostics"] = held_out_data
+    if iter_result.evidence is not None:
+        result["evidence"] = iter_result.evidence
 
     return result
 
@@ -1976,6 +2117,22 @@ class ImprovementRunner:
                 print(f"ITERATION {iteration}: EVALUATING RUBRIC...")
                 print(f"{'=' * 60}")
 
+            # --- Compute behavioral evidence (periodic) ---
+            evidence: dict | None = None
+            if config.evidence_fn is not None:
+                should_compute = (
+                    config.behavioral_signal_frequency == "every_iter"
+                    or (
+                        config.behavioral_signal_frequency == "first_and_last"
+                        and (
+                            iteration == 0
+                            or iteration == config.max_iterations - 1
+                        )
+                    )
+                )
+                if should_compute:
+                    evidence = await config.evidence_fn(current_rubric)
+
             # --- Evaluate quality ---
             html_path = (
                 str(artifacts_dir / f"eval-iter-{iteration:02d}.html")
@@ -1995,6 +2152,7 @@ class ImprovementRunner:
                 self.task_prompt,
                 config,
                 html_path=html_path,
+                evidence=evidence,
             )
 
             issues = extract_issues(quality_report)
@@ -2094,6 +2252,7 @@ class ImprovementRunner:
                 quality_report=quality_report,
                 token_usage=iter_usage,
                 completion_cost=iter_cost if iter_cost else None,
+                evidence=evidence,
             )
             iterations.append(iter_result)
             total_cost += iter_cost
@@ -2222,6 +2381,7 @@ class ImprovementRunner:
                         validation_text,
                         history_text,
                         config,
+                        evidence=evidence,
                         _capture=revision_capture,
                     )
             else:
@@ -2232,6 +2392,7 @@ class ImprovementRunner:
                     validation_text,
                     history_text,
                     config,
+                    evidence=evidence,
                     _capture=revision_capture,
                 )
             total_cost += revision_cost or 0.0
@@ -2731,6 +2892,8 @@ def _build_config(
     mode: Literal["standalone", "in_context"] | None = None,
     max_total_cost: float | None = None,
     strategy: Literal["meta_rubric", "held_out"] | None = None,
+    evidence_fn: EvidenceFn | None = None,
+    behavioral_signal_frequency: SignalFrequency | None = None,
 ) -> ImprovementConfig:
     """Build an ImprovementConfig by merging kwargs over an optional base config.
 
@@ -2750,6 +2913,8 @@ def _build_config(
         "mode": mode,
         "max_total_cost": max_total_cost,
         "strategy": strategy,
+        "evidence_fn": evidence_fn,
+        "behavioral_signal_frequency": behavioral_signal_frequency,
     }
     overrides = {k: v for k, v in overrides_map.items() if v is not None}
 
@@ -2779,6 +2944,8 @@ async def improve_rubric(
     mode: Literal["standalone", "in_context"] | None = None,
     max_total_cost: float | None = None,
     strategy: Literal["meta_rubric", "held_out"] | None = None,
+    evidence_fn: EvidenceFn | None = None,
+    behavioral_signal_frequency: SignalFrequency | None = None,
 ) -> ImprovementResult:
     """Iteratively improve a rubric using meta-rubric evaluation and validation.
 
@@ -2807,6 +2974,10 @@ async def improve_rubric(
         mode: Evaluation mode - "standalone" or "in_context".
         max_total_cost: Stop if total cost exceeds this amount (USD).
         strategy: Improvement strategy - "meta_rubric" or "held_out".
+        evidence_fn: Async callable that computes behavioral evidence for a
+            rubric. See ``ImprovementConfig.evidence_fn``.
+        behavioral_signal_frequency: How often to call ``evidence_fn``.
+            See ``ImprovementConfig.behavioral_signal_frequency``.
 
     Returns:
         ImprovementResult with the original, final, and best rubrics plus
@@ -2828,6 +2999,8 @@ async def improve_rubric(
         mode=mode,
         max_total_cost=max_total_cost,
         strategy=strategy,
+        evidence_fn=evidence_fn,
+        behavioral_signal_frequency=behavioral_signal_frequency,
     )
     runner = ImprovementRunner(rubric, task_prompt, config=cfg)
     return await runner.run()

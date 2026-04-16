@@ -100,6 +100,7 @@ Full documentation, API reference, and a cookbook with several dozen recipes are
 | Dataset support            | Structured datasets with per-item rubrics, prompts, and ground truth     |
 | YAML configuration         | Define rubrics, LLM configs, and datasets in YAML                        |
 | Meta-rubric evaluation     | Evaluate and automatically improve rubric quality                        |
+| Behavioral signals         | Optional reward-variance and judge-agreement evidence to supplement text-based meta-evaluation |
 
 ## License
 
