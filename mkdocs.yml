@@ -127,14 +127,15 @@ nav:
           - Multi-Choice Rubrics: cookbook/multi-choice-rubrics.md
           - Extended Thinking: cookbook/extended-thinking.md
           - Length Penalty: cookbook/length-penalty.md
-      - Validation & Production:
+      - Metarubric:
           - Evaluating Rubric Quality: cookbook/rubric-evaluation.md
-          - Writing a Metarubric: cookbook/writing-a-metarubric.md
-          - Grounded Rubrics: cookbook/grounded-rubrics.md
           - Automated Rubric Improvement: cookbook/automated-rubric-improvement.md
           - Held-Out Rubric Improvement: cookbook/held-out-rubric-improvement.md
+          - Writing a Metarubric: cookbook/writing-a-metarubric.md
+          - Grounded Rubrics: cookbook/grounded-rubrics.md
           - Behavioral Signals: cookbook/behavioral-signals.md
           - Behavioral Improvement Loop: cookbook/behavioral-improvement-loop.md
+      - Validation & Production:
           - Judge Validation: cookbook/judge-validation.md
           - Synthetic Ground Truth: cookbook/synthetic-ground-truth.md
           - Batch Evaluation: cookbook/batch-evaluation.md
