@@ -2,7 +2,16 @@
 
 ## Abstract
 
-We present a principled framework for evaluating the quality of grading rubrics through *meta-rubrics*—structured evaluation instruments that assess rubrics themselves rather than student submissions. This work addresses a critical gap in automated evaluation pipelines: while substantial research has focused on using rubrics to evaluate outputs, comparatively little attention has been paid to systematically validating rubric quality prior to deployment. We introduce two complementary meta-rubric variants implemented in AutoRubric: (1) a **standalone meta-rubric** comprising 17 criteria for evaluating rubric quality in isolation, and (2) an **in-context meta-rubric** with 24 criteria that additionally assesses alignment between rubrics and their intended task prompts. Our design draws on evidence-based practices from educational measurement, psychometrics, and emerging LLM-as-a-judge literature. We detail each criterion's theoretical grounding, describe the scoring architecture (including novel use of negative weights for anti-pattern detection), and discuss applications to rubric validation, iterative refinement, and comparative benchmarking.
+We present a principled framework for evaluating the quality of grading rubrics through *meta-rubrics*—structured evaluation instruments that assess rubrics themselves rather than student submissions. This work addresses a critical gap in automated evaluation pipelines: while substantial research has focused on using rubrics to evaluate outputs, comparatively little attention has been paid to systematically validating rubric quality prior to deployment. We introduce two complementary meta-rubric variants implemented in AutoRubric: (1) a **standalone meta-rubric** (currently 22 criteria after the consistency-passing redundancy cleanup) for evaluating rubric quality in isolation, and (2) an **in-context meta-rubric** (31 criteria) that additionally assesses alignment between rubrics and their intended task prompts. A separate `evaluate_rubric_discrimination` evaluator handles whole-rubric quality-spread assessment that does not fit a per-criterion binary contract. Our design draws on evidence-based practices from educational measurement, psychometrics, and emerging LLM-as-a-judge literature. We detail each criterion's theoretical grounding, describe the scoring architecture (including novel use of negative weights for anti-pattern detection), and discuss applications to rubric validation, iterative refinement, and comparative benchmarking.
+
+> **Note on counts.** Earlier drafts of this document stated the meta-rubrics
+> contained 17 / 24 criteria. The shipped JSON files have evolved since: the
+> set was first expanded with reliability-predictor and LLM-judge anti-pattern
+> sections, and most recently consolidated to 22 / 31 via redundancy cleanup
+> and the addition of three new failure-detection criteria
+> (`unanchored_grounding`, `proxy_gameable`, `over_constrained`). Read the
+> JSON files in `src/autorubric/meta/data/` for the current authoritative
+> list.
 
 ## 1. Introduction
 
@@ -151,12 +160,12 @@ This allows anti-patterns to drive scores below zero before normalization clampi
 
 ### 3.4 Two-Mode Evaluation
 
-**Standalone mode** evaluates rubric quality without access to the task prompt. This mode applies 17 criteria assessing intrinsic properties: clarity, structure, and common anti-patterns. Use cases include:
+**Standalone mode** evaluates rubric quality without access to the task prompt. This mode applies the standalone meta-rubric (currently 22 criteria) assessing intrinsic properties: clarity, structure, common anti-patterns, reliability predictors, and LLM-judge anti-patterns. Use cases include:
 - Validating rubrics from unknown or unavailable task contexts
 - Comparing rubric quality across different sources
 - Initial screening before detailed in-context evaluation
 
-**In-context mode** evaluates rubric quality given the task prompt (and optionally reference submissions or sample outputs). This mode applies all 17 standalone criteria plus 7 additional context-dependent criteria (24 total). Use cases include:
+**In-context mode** evaluates rubric quality given the task prompt (and optionally reference submissions or sample outputs). This mode applies the in-context meta-rubric (currently 31 criteria) — the standalone criteria plus context-dependent additions (construct alignment, discriminative power, and the in-context anti-patterns including `over_constrained`). Use cases include:
 - Full validation before deployment
 - Iterative refinement with task-specific feedback
 - Detecting construct misalignment and coverage gaps
@@ -632,40 +641,61 @@ Casabianca et al. (2025) recommend validity checks including whether the rubric 
 
 The meta-rubrics are implemented as standard AutoRubric JSON rubric files:
 
-- `examples/data/meta_rubric_standalone.json`: 17 criteria for isolated rubric evaluation
-- `examples/data/meta_rubric_in_context.json`: 24 criteria for rubric + task evaluation
+- `src/autorubric/meta/data/meta_rubric_standalone.json`: 22 criteria for isolated rubric evaluation
+- `src/autorubric/meta/data/meta_rubric_in_context.json`: 31 criteria for rubric + task evaluation
+- `src/autorubric/meta/data/meta_rubric_examples_standalone.json`: bundled few-shot dataset (8 target rubrics with verdicts on every meta-criterion)
+- `src/autorubric/meta/data/meta_rubric_examples_in_context.json`: bundled few-shot dataset for in-context mode (8 target rubrics)
 
-Both files use AutoRubric's section-based format, enabling logical grouping while maintaining a flat criterion list.
+Both meta-rubric files use AutoRubric's section-based format, enabling logical grouping while maintaining a flat criterion list.
 
 | File | Criteria | Purpose | Input Format |
 |------|----------|---------|--------------|
-| `meta_rubric_standalone.json` | 17 | Isolated rubric evaluation | `json.dumps(rubric)` |
-| `meta_rubric_in_context.json` | 24 | Rubric + task evaluation | `json.dumps({"task_prompt": ..., "rubric": ...})` |
+| `meta_rubric_standalone.json` | 22 | Isolated rubric evaluation | `json.dumps(rubric)` |
+| `meta_rubric_in_context.json` | 31 | Rubric + task evaluation | `json.dumps({"task_prompt": ..., "rubric": ...})` |
 
 ### 6.2 Usage Patterns
 
-**Standalone evaluation:**
+**Standalone evaluation (high-level entrypoint):**
 ```python
-from autorubric import Rubric, CriterionGrader, LLMConfig
+from autorubric import LLMConfig
+from autorubric.meta import evaluate_rubric_standalone
+from autorubric.graders.criterion_grader import FewShotConfig
 
-meta_rubric = Rubric.from_file("meta_rubric_standalone.json")
-grader = CriterionGrader(llm_config=LLMConfig(model="gpt-4o"))
+# Without few-shot (legacy default behavior)
+report = await evaluate_rubric_standalone(rubric_under_test, LLMConfig(model="gpt-4o"))
 
-# Rubric to evaluate is serialized as JSON
-submission = json.dumps(rubric_under_test)
-result = await meta_rubric.grade(to_grade=submission, grader=grader)
+# With few-shot using the bundled example dataset
+report = await evaluate_rubric_standalone(
+    rubric_under_test,
+    LLMConfig(model="gpt-4o"),
+    few_shot_config=FewShotConfig(n_examples=3, balance_verdicts=True, include_reason=True),
+)
 ```
 
 **In-context evaluation:**
 ```python
-meta_rubric = Rubric.from_file("meta_rubric_in_context.json")
+from autorubric.meta import evaluate_rubric_in_context
 
-# Include task prompt in the submission
-submission = json.dumps({
-    "task_prompt": "Write a persuasive essay about...",
-    "rubric": rubric_under_test
-})
-result = await meta_rubric.grade(to_grade=submission, grader=grader)
+report = await evaluate_rubric_in_context(
+    rubric_under_test,
+    task_prompt="Write a persuasive essay about ...",
+    llm_config=LLMConfig(model="gpt-4o"),
+    few_shot_config=FewShotConfig(n_examples=3),  # opt-in; bundled dataset auto-loads
+)
+```
+
+**Whole-rubric discrimination (separate evaluator):**
+```python
+from autorubric.meta import evaluate_rubric_discrimination
+
+report = await evaluate_rubric_discrimination(
+    rubric_under_test,
+    task_prompt="Write a persuasive essay about ...",
+    gen_llm=LLMConfig(model="gpt-4o-mini"),     # generates synthetic submissions
+    grader_llm=LLMConfig(model="gpt-4o"),       # grades them with the rubric
+    n_levels=5,
+)
+print(report.score_range, report.score_std, report.monotonicity)
 ```
 
 ### 6.3 Pipeline Integration
@@ -688,6 +718,14 @@ feedback_prompt = f"Fix these rubric issues: {failing}"
 This feedback loop enables automated rubric generation pipelines to iteratively improve rubric quality based on specific defect identification.
 
 ## 7. Weight Summary and Design Rationale
+
+> **Authoritative weights live in the JSON files.** The tables below capture
+> the original 17/24-criterion design from earlier drafts and have not been
+> regenerated against the current 22 / 31 layout (which dropped redundant
+> criteria like `boundary_clarity`, `well_defined_options`,
+> `consistent_granularity`, `circular_tautological` and merged
+> `vague_wording` + `boundary_ambiguity` → `unanchored_subjectivity`). For
+> current weights, read `src/autorubric/meta/data/meta_rubric_*.json`.
 
 ### 7.1 Standalone Weights
 
@@ -798,7 +836,7 @@ Drawing from Gu et al. (2024), Hong et al. (2026), Wei et al. (2025), and Pan et
 
 ## 10. Conclusion
 
-We have presented a framework for meta-rubric evaluation of grading rubrics, grounded in evidence-based practices from educational measurement and LLM-as-a-judge research. The framework operationalizes rubric quality across 24 criteria organized into seven sections, supporting both standalone and in-context evaluation modes.
+We have presented a framework for meta-rubric evaluation of grading rubrics, grounded in evidence-based practices from educational measurement and LLM-as-a-judge research. The framework operationalizes rubric quality across 22 (standalone) / 31 (in-context) criteria organized into multiple sections, supporting both standalone and in-context evaluation modes, with a separate evaluator for whole-rubric discrimination.
 
 Key contributions: (1) systematic synthesis of rubric quality dimensions from disparate literature; (2) novel use of negative weights for anti-pattern detection; (3) practical implementation in AutoRubric enabling pipeline integration; (4) detailed theoretical grounding for each criterion.
 

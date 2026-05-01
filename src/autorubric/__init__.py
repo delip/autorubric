@@ -89,11 +89,13 @@ from autorubric.metrics import (
     verdict_to_string,
 )
 from autorubric.meta import (
+    DiscriminationReport,
     ImprovementConfig,
     ImprovementResult,
     ImprovementRunner,
     IssueDetail,
     IterationResult,
+    evaluate_rubric_discrimination,
     evaluate_rubric_in_context,
     evaluate_rubric_standalone,
     get_in_context_meta_rubric,
@@ -203,6 +205,9 @@ __all__ = [
     "evaluate_rubric_standalone",
     "get_in_context_meta_rubric",
     "get_standalone_meta_rubric",
+    # Meta-rubric discrimination
+    "DiscriminationReport",
+    "evaluate_rubric_discrimination",
     # Meta-rubric improvement
     "improve_rubric",
     "ImprovementConfig",

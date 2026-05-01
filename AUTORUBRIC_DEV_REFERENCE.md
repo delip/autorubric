@@ -24,9 +24,10 @@ src/autorubric/
 ├── meta/
 │   ├── __init__.py          # Meta-rubric evaluation exports
 │   ├── _evaluate.py         # evaluate_rubric_standalone, evaluate_rubric_in_context
+│   ├── _discrimination.py   # evaluate_rubric_discrimination (whole-rubric spread)
 │   ├── _improve.py          # ImprovementRunner, improve_rubric, building blocks
 │   ├── _display.py          # Rich display utilities
-│   └── data/                # Meta-rubric JSON files
+│   └── data/                # Meta-rubric JSON files + bundled few-shot example datasets
 └── metrics/
     ├── __init__.py          # compute_metrics, result types
     ├── _compute.py          # Main compute_metrics implementation
@@ -44,7 +45,9 @@ src/autorubric/
 | `Criterion`                | Single evaluation criterion with weight, requirement, optional multi-choice options |
 | `CriterionOption`          | Multi-choice option with label, value (0-1), optional `na` flag                     |
 | `CriterionVerdict`         | Enum: `MET`, `UNMET`, `CANNOT_ASSESS`                                               |
-| `CriterionReport`          | Criterion + verdict + reason                                                        |
+| `CriterionReport`          | Criterion + verdict + reason + optional `evidence_quote` (verbatim span propagated from judgment models that expose one) |
+| `JudgeVote`                | Single judge's binary vote: judge_id, verdict, reason, weight, optional `evidence_quote` |
+| `EnsembleCriterionReport`  | Aggregated per-criterion ensemble result: criterion, final_verdict, final_reason, votes, agreement, optional `evidence_quote` (picked from a vote whose verdict matches the final) |
 | `EvaluationReport`         | Full grading result with score, raw_score, report, token_usage, cost                |
 | `EnsembleEvaluationReport` | Adds judge_scores, mean_agreement, per-criterion votes                              |
 | `LengthPenalty`            | Config: free_budget, max_cap, penalty_at_cap, exponent, penalty_type                |
@@ -100,26 +103,28 @@ Note: `FewShotConfig` is listed in the Core Types table above (defined in `src/a
 | `ImprovementRunner`           | Full-control runner class following the EvalRunner pattern                            |
 | `ImprovementProgressDisplay`  | Rich-based progress display with bar, issues table, rubric panel, and summary table  |
 | `IterationResult`             | Per-iteration: iteration, rubric, quality_score, agreement, per_criterion_agreement, issues, issues_fixed, issues_introduced, accepted, rejection_reason, quality_report, token_usage, completion_cost |
-| `IssueDetail`                 | Single issue: criterion_name, requirement, weight, is_antipattern, feedback           |
+| `IssueDetail`                 | Single issue: criterion_name, requirement, weight, is_antipattern, feedback, optional `evidence_quote` (verbatim span from the rubric being evaluated, when the meta-judge supplies one) |
 | `CriterionExemplar`           | A single grading case for a criterion (item_index, submission_snippet, verdicts, reason, is_disagreement) |
 | `CriterionErrorReport`        | Per-criterion error analysis from held-out grading (accuracy, FP/FN rates, exemplars) |
 | `HeldOutValidationResult`     | Result from held-out validation with per-criterion diagnostics                       |
 | `ConvergenceFn`               | Custom convergence callback type alias                                               |
 
-### Meta-Rubric Types (src/autorubric/meta/_evaluate.py)
+### Meta-Rubric Types (src/autorubric/meta/)
 
 | Type                       | Purpose                                                                    |
 | -------------------------- | -------------------------------------------------------------------------- |
-| `MetaCriterionJudgment`    | Extends `CriterionJudgment` with `affected_criteria: list[int]` field for structured criterion references (internal — not exported from `meta.__init__`) |
+| `MetaCriterionJudgment`    | Extends `CriterionJudgment` with `affected_criteria: list[int]` and `evidence_quote: str \| None` for structured criterion references and verbatim-span evidence (internal — not exported from `meta.__init__`) |
+| `DiscriminationReport`     | Whole-rubric discrimination diagnostics: `score_range`, `score_std`, `monotonicity` (Spearman ρ between intended quality level and observed score), `n_levels`, `per_level_scores`, `submissions`, `total_cost` |
 
 ### Meta-Rubric Functions (src/autorubric/meta/)
 
 | Function                       | Purpose                                                         |
 | ------------------------------ | --------------------------------------------------------------- |
-| `evaluate_rubric_standalone`   | Evaluate rubric quality in isolation (clarity, structure, etc.) |
-| `evaluate_rubric_in_context`   | Evaluate rubric quality relative to a task prompt               |
-| `get_standalone_meta_rubric`   | Load the standalone meta-rubric as a Rubric object              |
-| `get_in_context_meta_rubric`   | Load the in-context meta-rubric as a Rubric object              |
+| `evaluate_rubric_standalone`   | Evaluate rubric quality in isolation (clarity, structure, etc.). Optional `examples: RubricDataset` and `few_shot_config: FewShotConfig` enable few-shot anchoring; bundled dataset at `meta/data/meta_rubric_examples_standalone.json` loads automatically when `few_shot_config` is set without `examples` |
+| `evaluate_rubric_in_context`   | Evaluate rubric quality relative to a task prompt; same `examples`/`few_shot_config` parameters as `evaluate_rubric_standalone`, with the bundled dataset at `meta/data/meta_rubric_examples_in_context.json` |
+| `evaluate_rubric_discrimination` | Whole-rubric discrimination assessment. Generates synthetic submissions across a quality range with `gen_llm`, grades with `grader_llm`, returns `DiscriminationReport`. Pass distinct gen/grader models to avoid calibration-circular results |
+| `get_standalone_meta_rubric`   | Load the standalone meta-rubric as a Rubric object (22 criteria) |
+| `get_in_context_meta_rubric`   | Load the in-context meta-rubric as a Rubric object (31 criteria) |
 | `improve_rubric`               | Convenience wrapper for iterative rubric improvement            |
 | `extract_issues`               | Extract actionable issues from a meta-rubric eval report        |
 | `diff_issues`                  | Track fixed/introduced issues between iterations                |
@@ -145,8 +150,8 @@ Note: `FewShotConfig` is listed in the Core Types table above (defined in `src/a
 1. `Rubric.grade()` delegates to grader's `grade()` method
 2. `CriterionGrader` treats single LLM as "ensemble of 1"
 3. Makes concurrent LLM calls per criterion per judge via `asyncio.gather()`
-4. Binary criteria use `binary_response_format` (default: `CriterionJudgment`); meta-rubric evals use `MetaCriterionJudgment` which adds structured `affected_criteria` field
-5. If the response includes `affected_criteria`, grader injects `[Affects: #1, #3]` tag into the reason string
+4. Binary criteria use `binary_response_format` (default: `CriterionJudgment`); meta-rubric evals use `MetaCriterionJudgment` which adds `affected_criteria: list[int]` and `evidence_quote: str | None`
+5. If the response includes `affected_criteria`, grader injects `[Affects: #1, #3]` tag into the reason string. If `evidence_quote` is non-None, it is plumbed via `CriterionReport.evidence_quote` → `JudgeVote.evidence_quote` → `EnsembleCriterionReport.evidence_quote` (single quote per criterion, picked from a vote matching the final verdict)
 6. Aggregates votes using strategy (majority/weighted/unanimous/any)
 7. Returns `EnsembleEvaluationReport` (consistent interface)
 

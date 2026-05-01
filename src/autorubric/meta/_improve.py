@@ -88,6 +88,10 @@ class IssueDetail:
         weight: Weight of the meta-rubric criterion.
         is_antipattern: True if this is a negative criterion (anti-pattern detected).
         feedback: The judge's explanation for why this issue was flagged.
+        evidence_quote: Optional verbatim span from the rubric being evaluated that
+            anchors the issue. Forwarded from ``MetaCriterionJudgment.evidence_quote``
+            when the meta-rubric judge supplies one. ``None`` for legacy reports or
+            rubric-wide structural issues without a specific span.
     """
 
     criterion_name: str
@@ -95,6 +99,7 @@ class IssueDetail:
     weight: float
     is_antipattern: bool
     feedback: str
+    evidence_quote: str | None = None
 
 
 @dataclass
@@ -672,6 +677,7 @@ def extract_issues(report: EnsembleEvaluationReport) -> list[IssueDetail]:
                     weight=weight,
                     is_antipattern=weight < 0,
                     feedback=criterion_report.final_reason,
+                    evidence_quote=getattr(criterion_report, "evidence_quote", None),
                 )
             )
 
@@ -1610,10 +1616,12 @@ _revise_rubric = revise_rubric
 def _match_issue_to_criteria(issue: IssueDetail, rubric: Rubric) -> list[int]:
     """Best-effort match of a meta-rubric issue to specific rubric criteria.
 
-    Primary method: parse the structured ``[Affects: #1, #3]`` tag that the
-    meta-rubric judge is instructed to append.  Falls back to text heuristics
-    (name matching, requirement substring, ``#N`` patterns) when the tag is
-    absent.
+    Resolution order:
+    1. ``issue.evidence_quote`` — if the meta-rubric judge supplied a verbatim span,
+       find criteria whose ``requirement`` contains it (or the inverse for long quotes).
+    2. The structured ``[Affects: #1, #3]`` tag the judge is instructed to append.
+    3. Free-text heuristics (criterion name, requirement substring window, ``#N`` /
+       "criterion N" patterns in the feedback).
 
     Returns:
         Sorted list of 1-based criterion indices the issue likely refers to.
@@ -1621,7 +1629,21 @@ def _match_issue_to_criteria(issue: IssueDetail, rubric: Rubric) -> list[int]:
     n = len(rubric.rubric)
     feedback_lower = issue.feedback.lower()
 
-    # --- Primary: structured [Affects: ...] tag ---
+    # --- Primary: verbatim quote from the judge ---
+    if issue.evidence_quote:
+        quote_lower = issue.evidence_quote.lower().strip()
+        if quote_lower:
+            quote_matches: set[int] = set()
+            for i, criterion in enumerate(rubric.rubric, 1):
+                req_lower = criterion.requirement.lower()
+                if quote_lower in req_lower or (
+                    len(quote_lower) >= 30 and req_lower in quote_lower
+                ):
+                    quote_matches.add(i)
+            if quote_matches:
+                return sorted(quote_matches)
+
+    # --- Secondary: structured [Affects: ...] tag ---
     affects_match = re.search(r"\[affects:\s*(.+?)\]", feedback_lower)
     if affects_match:
         content = affects_match.group(1).strip()

@@ -1,0 +1,126 @@
+{
+  "name": "meta_rubric_examples_in_context",
+  "prompt": "Evaluate the quality of the rubric below for grading responses to the given task prompt.",
+  "rubric": {
+    "sections": [
+      {
+        "name": "Clarity & Precision",
+        "criteria": [
+          {"name": "clear_requirements", "weight": 10, "requirement": "Each criterion has a clear, unambiguous requirement that a rater could apply consistently"},
+          {"name": "specific_actionable", "weight": 10, "requirement": "Criteria are specific enough to guide assessment (not generic boilerplate)"},
+          {"name": "unidimensional", "weight": 10, "requirement": "Each criterion assesses exactly one construct/attribute (not multiple conflated together)"},
+          {"name": "behavioral_language", "weight": 8, "requirement": "Criteria use concrete, behavioral language describing observable qualities (not vague adjectives like 'good' or 'excellent')"}
+        ]
+      },
+      {
+        "name": "Structure & Design",
+        "criteria": [
+          {"name": "reasonable_count", "weight": 6, "requirement": "Number of criteria is appropriate — typically 3-15 for task rubrics, or up to ~30 for instruments designed to comprehensively assess rubric quality (meta-rubrics). Not too few to be meaningful, nor so many that the rubric becomes unmanageable for its purpose."},
+          {"name": "balanced_weights", "weight": 6, "requirement": "Weights reflect relative importance and sum to a meaningful total"},
+          {"name": "orthogonal_criteria", "weight": 8, "requirement": "Criteria are distinct and non-overlapping (no redundancy)"}
+        ]
+      },
+      {
+        "name": "LLM-Friendliness",
+        "criteria": [
+          {"name": "independently_verifiable", "weight": 10, "requirement": "Each criterion can be evaluated independently without requiring cross-referencing other criteria"},
+          {"name": "objective_assessable", "weight": 8, "requirement": "Criteria are objective enough that different raters would reach similar conclusions"},
+          {"name": "low_interpretation_variance", "weight": 8, "requirement": "Criteria minimize the need for subjective interpretation by grounding requirements in task-specific observables (e.g., 'mentions X' rather than 'demonstrates understanding of X')"}
+        ]
+      },
+      {
+        "name": "Reliability Predictors",
+        "criteria": [
+          {"name": "deterministic_assessability", "weight": 8, "requirement": "Criteria can be assessed deterministically from the submission text alone, without requiring external knowledge, subjective taste, or unstated assumptions Does NOT apply when the criterion legitimately needs external reference data but the rubric fails to provide it — use unanchored_grounding."}
+        ]
+      },
+      {
+        "name": "Anti-Patterns (Standalone)",
+        "criteria": [
+          {"name": "double_barreled", "weight": -8, "requirement": "Contains criteria that assess multiple distinct things in a single requirement (e.g., 'clear AND concise AND accurate')"},
+          {"name": "excessive_overlap", "weight": -6, "requirement": "Multiple criteria substantially overlap, causing double-counting of the same qualities"},
+          {"name": "overly_verbose", "weight": -6, "requirement": "Criteria requirements are unnecessarily long-winded when they could be stated more concisely"},
+          {"name": "hedging_language", "weight": -6, "requirement": "Contains criteria with hedging words ('may', 'could', 'might', 'possibly') that make definitive assessment difficult"},
+          {"name": "generic_boilerplate", "weight": -8, "requirement": "Contains generic, cookie-cutter criteria that could apply to any task rather than being tailored to this specific task"},
+          {"name": "unanchored_subjectivity", "weight": -8, "requirement": "One or more criteria use unanchored subjective or comparative language that produces inconsistent verdicts across raters. Two manifestations: (1) undefined evaluative terms ('appropriate', 'suitable', 'good', 'professional') that different raters interpret differently; (2) comparative or threshold terms ('sufficient', 'adequate', 'reasonable amount of', 'enough') without a reference point or operational threshold. In either case the MET/UNMET decision depends on the rater's personal standard rather than an observable signal in the submission."}
+        ]
+      },
+      {
+        "name": "Construct Alignment (In-Context)",
+        "criteria": [
+          {"name": "task_aligned", "weight": 12, "requirement": "Criteria directly map to the requirements and objectives stated in the task prompt"},
+          {"name": "covers_key_aspects", "weight": 10, "requirement": "Rubric covers all important aspects of what the task asks for"},
+          {"name": "appropriate_emphasis", "weight": 8, "requirement": "Weight distribution matches what matters most for the task (core requirements weighted higher than nice-to-haves)"}
+        ]
+      },
+      {
+        "name": "Discriminative Power (In-Context)",
+        "criteria": [
+          {"name": "distinguishes_quality", "weight": 10, "requirement": "Criteria would meaningfully distinguish between good and poor submissions This criterion judges per-criterion discriminative wording. Whole-rubric discrimination (would the aggregate score separate weak from strong submissions?) is not assessed here; use the separate evaluate_rubric_discrimination evaluator."},
+          {"name": "avoids_trivial", "weight": 6, "requirement": "Does not include criteria that any reasonable submission would trivially satisfy or fail"}
+        ]
+      },
+      {
+        "name": "Anti-Patterns (In-Context)",
+        "criteria": [
+          {"name": "irrelevant_criteria", "weight": -10, "requirement": "Contains criteria that assess aspects not relevant to the task Do NOT apply when the criterion is task-related but adds unrequested specifics — use over_constrained."},
+          {"name": "missing_critical", "weight": -10, "requirement": "Fails to assess one or more critical aspects explicitly required by the task Does NOT apply when the requirement is mentioned but lacks reference data needed to verify it — use unanchored_grounding."},
+          {"name": "over_constrained", "weight": -8, "requirement": "A criterion mandates specifics not stated in the task prompt or any provided requirement. Manifestations: unrequested tools/methods/formats (e.g., 'must use pandas' for a CSV task that says only 'parse the data'), embedded context assumptions (jurisdiction, audience, available libraries) not given by the prompt, and penalizing reasonable caveats or safety practices the prompt does not forbid. Do NOT apply when the criterion is unrelated to the task (use irrelevant_criteria), when the prompt itself imposes the strictness, or when the criterion is missing entirely (use missing_critical)."}
+        ]
+      },
+      {
+        "name": "LLM-Judge Anti-Patterns",
+        "criteria": [
+          {"name": "no_negative_criteria", "weight": -6, "requirement": "The rubric contains only positive-weight criteria with no negative-weight (penalty) criteria. When used with LLM judges, the absence of negative criteria enables sycophantic bias — judges tend to assess positive criteria as MET regardless of submission quality, inflating scores and reducing discrimination across the quality spectrum."},
+          {"name": "unfalsifiable_criteria", "weight": -8, "requirement": "One or more criteria set such a low bar that virtually any non-trivial submission would satisfy them (e.g., 'attempts to address the topic', 'provides some information', 'contains content related to the question', 'makes an effort to respond'). Unfalsifiable criteria contribute nothing to discrimination and inflate scores, especially with LLM judges whose sycophantic bias defaults to MET."},
+          {"name": "poorly_anchored_ordinal", "weight": -6, "requirement": "Multi-choice criteria with ordinal scales define levels using evaluative adjectives ('Excellent/Good/Fair/Poor', 'Very/Somewhat/Slightly') rather than behavioral descriptions of what each level looks like in practice. Without concrete anchors, ordinal criteria produce the 'middle-category collapse' phenomenon where judges cluster predictions at scale extremes and avoid intermediate levels, reducing the effective scale to binary."},
+          {"name": "counting_dependent", "weight": -4, "requirement": "One or more criteria depend on precise counting or numerical measurement that LLM judges perform unreliably (e.g., 'contains exactly 5 paragraphs', 'uses no more than 3 sentences per point', 'includes between 200-300 words'). Such criteria produce inconsistent judgments because LLMs cannot reliably count tokens, sentences, paragraphs, or other discrete textual units."},
+          {"name": "unanchored_grounding", "weight": -8, "requirement": "A criterion requires verification against an external reference, but the rubric provides no such reference. Three manifestations: (A) determinate task (extraction, classification, math, code) where the rubric provides no gold answers, acceptable variants, or tolerances; (B) open-world claim ('all facts are true', 'links work') without a bounded audit procedure (scope, allowed sources, conflict resolution); (C) measurement standard ('exactly 20 pages') without a defined yardstick. Do NOT apply when the requirement is missing entirely from the rubric (use missing_critical) or when the issue is unanchored subjectivity without an external-reference need (use unanchored_subjectivity)."},
+          {"name": "proxy_gameable", "weight": -8, "requirement": "Top scores are achievable by satisfying surface-level proxies the rubric explicitly rewards, without satisfying any criterion that requires task-specific correctness. Manifestations: counting proxies (>=N items/citations/sections rewarded regardless of relevance or correctness), assertion-without-evidence (rewards merely claiming attributes like 'fast' or 'safe' without verification), missing quality gates (no criterion ties points to substantive task success), and verbosity rewards (criteria use 'comprehensive', 'thorough', 'detailed', 'extensive' without specifying what content counts as enough). Do NOT apply when the issue is whole-rubric non-discrimination unrelated to gameable proxies — assess that via the evaluate_rubric_discrimination evaluator instead of as a criterion here."}
+        ]
+      }
+    ]
+  },
+  "items": [
+    {
+      "submission": "{\"task_prompt\": \"Write a Python function `compute_mean(values: list[float]) -> float` that returns the arithmetic mean of the input list. Raise a ValueError if the list is empty.\", \"rubric\": {\"criteria\": [{\"index\": 1, \"name\": \"signature_matches\", \"weight\": 10, \"requirement\": \"The submitted code defines a function named 'compute_mean' whose single parameter is annotated 'list[float]' and whose return is annotated 'float'.\"}, {\"index\": 2, \"name\": \"empty_raises_value_error\", \"weight\": 12, \"requirement\": \"When called with an empty list, the function raises ValueError (and not a different exception type or a silent return).\"}, {\"index\": 3, \"name\": \"returns_arithmetic_mean\", \"weight\": 12, \"requirement\": \"For a non-empty input, the function returns sum(values)/len(values).\"}, {\"index\": 4, \"name\": \"no_external_dependencies\", \"weight\": 4, \"requirement\": \"The function body uses only built-in operations and does not import third-party packages such as numpy or pandas.\"}, {\"index\": 5, \"name\": \"mutates_input\", \"weight\": -6, \"requirement\": \"Penalize when the function reorders, sorts, or otherwise mutates the input list.\"}]}}",
+      "description": "Mostly clean rubric for a small Python function; well-aligned with the task and includes a penalty.",
+      "ground_truth": ["MET", "MET", "MET", "MET", "MET", "MET", "MET", "MET", "MET", "MET", "MET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "MET", "MET", "MET", "MET", "MET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET"]
+    },
+    {
+      "submission": "{\"task_prompt\": \"Summarize the attached research paper in approximately 200 words. The summary must convey the research question, the method used, and the key finding.\", \"rubric\": {\"criteria\": [{\"index\": 1, \"name\": \"oxford_comma\", \"weight\": 10, \"requirement\": \"Every list of three or more items in the summary uses the Oxford (serial) comma.\"}, {\"index\": 2, \"name\": \"no_passive_voice\", \"weight\": 8, \"requirement\": \"The summary contains no passive-voice constructions.\"}, {\"index\": 3, \"name\": \"paragraph_indent\", \"weight\": 6, \"requirement\": \"Each paragraph in the summary is indented with exactly four spaces.\"}, {\"index\": 4, \"name\": \"title_case\", \"weight\": 6, \"requirement\": \"If the summary includes a title, the title uses Title Case capitalization.\"}, {\"index\": 5, \"name\": \"word_count_window\", \"weight\": 10, \"requirement\": \"The summary contains between 195 and 205 words.\"}]}}",
+      "description": "Paper-summary task graded on stylistic trivia; misses research question / method / finding (missing critical, over-constrained).",
+      "ground_truth": ["MET", "MET", "MET", "MET", "MET", "MET", "MET", "MET", "MET", "MET", "MET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "MET", "MET", "MET", "UNMET", "UNMET", "MET", "UNMET", "UNMET"]
+    },
+    {
+      "submission": "{\"task_prompt\": \"Parse the data from data.csv and return a list of records.\", \"rubric\": {\"criteria\": [{\"index\": 1, \"name\": \"uses_pandas_read_csv\", \"weight\": 10, \"requirement\": \"The solution calls pandas.read_csv() to load the file.\"}, {\"index\": 2, \"name\": \"jupyter_notebook_format\", \"weight\": 8, \"requirement\": \"The solution is delivered as a Jupyter notebook (.ipynb file) with at least one markdown cell.\"}, {\"index\": 3, \"name\": \"python_311_syntax\", \"weight\": 6, \"requirement\": \"The solution uses Python 3.11+ syntax features such as the | union type or match statements.\"}, {\"index\": 4, \"name\": \"returns_dataframe\", \"weight\": 8, \"requirement\": \"The function returns a pandas DataFrame, not a list of dicts.\"}, {\"index\": 5, \"name\": \"type_hints\", \"weight\": 6, \"requirement\": \"The function signature includes type hints for every parameter and the return value.\"}]}}",
+      "description": "Minimal CSV task pinned with unrequested tools, file formats, and language version (over-constrained).",
+      "ground_truth": ["MET", "MET", "MET", "MET", "MET", "MET", "MET", "MET", "MET", "MET", "MET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "MET", "MET", "UNMET", "UNMET", "MET", "MET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET"]
+    },
+    {
+      "submission": "{\"task_prompt\": \"Translate the following English paragraph into French while preserving meaning, register, and idiomatic phrasing.\", \"rubric\": {\"criteria\": [{\"index\": 1, \"name\": \"word_count_range\", \"weight\": 8, \"requirement\": \"The French translation contains between 100 and 150 words.\"}, {\"index\": 2, \"name\": \"sentences_end_in_period\", \"weight\": 6, \"requirement\": \"Every sentence in the translation ends with a period.\"}, {\"index\": 3, \"name\": \"no_english_words\", \"weight\": 8, \"requirement\": \"The output contains no English words other than proper nouns.\"}, {\"index\": 4, \"name\": \"begins_with_capital\", \"weight\": 4, \"requirement\": \"The translation begins with a capital letter.\"}]}}",
+      "description": "Translation rubric that never assesses meaning, register, or idiomatic phrasing (missing critical).",
+      "ground_truth": ["MET", "MET", "MET", "MET", "MET", "MET", "MET", "MET", "MET", "MET", "MET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "MET", "UNMET", "MET", "UNMET", "UNMET", "MET", "UNMET", "UNMET"]
+    },
+    {
+      "submission": "{\"task_prompt\": \"Write a persuasive essay arguing for or against universal basic income, citing real evidence to support your claims.\", \"rubric\": {\"criteria\": [{\"index\": 1, \"name\": \"comprehensive_coverage\", \"weight\": 12, \"requirement\": \"The essay provides comprehensive coverage of universal basic income.\"}, {\"index\": 2, \"name\": \"thorough_analysis\", \"weight\": 10, \"requirement\": \"The essay offers a thorough analysis of multiple perspectives.\"}, {\"index\": 3, \"name\": \"detailed_arguments\", \"weight\": 8, \"requirement\": \"The arguments are detailed.\"}, {\"index\": 4, \"name\": \"five_citations\", \"weight\": 8, \"requirement\": \"The essay includes at least five citations, regardless of source.\"}, {\"index\": 5, \"name\": \"extensive_evidence\", \"weight\": 8, \"requirement\": \"The essay makes extensive use of supporting evidence.\"}, {\"index\": 6, \"name\": \"overall_quality\", \"weight\": 8, \"requirement\": \"The essay should generally demonstrate the kind of overall quality that a reader might possibly expect from a piece of persuasive writing on a topic of contemporary public interest such as the one under discussion.\"}, {\"index\": 7, \"name\": \"author_bio_block\", \"weight\": 4, \"requirement\": \"The submission ends with a one-paragraph biography of the essay's author including their education and current job title.\"}]}}",
+      "description": "Persuasive essay rubric loaded with verbosity proxies, hedging boilerplate, an irrelevant author-bio criterion, and no quality gate.",
+      "ground_truth": ["UNMET", "UNMET", "MET", "UNMET", "MET", "MET", "UNMET", "MET", "UNMET", "UNMET", "MET", "UNMET", "MET", "MET", "MET", "MET", "MET", "MET", "UNMET", "UNMET", "UNMET", "MET", "MET", "MET", "UNMET", "MET", "MET", "UNMET", "UNMET", "UNMET", "MET"]
+    },
+    {
+      "submission": "{\"task_prompt\": \"Compose an apology email to a customer whose order shipped to the wrong address. Acknowledge the error, propose a resolution, and offer a goodwill gesture.\", \"rubric\": {\"criteria\": [{\"index\": 1, \"name\": \"clear_empathetic_professional\", \"weight\": 10, \"requirement\": \"The email is clear AND empathetic AND professional in tone.\"}, {\"index\": 2, \"name\": \"acknowledges_and_resolves\", \"weight\": 10, \"requirement\": \"The email acknowledges the shipping error AND proposes a concrete resolution.\"}, {\"index\": 3, \"name\": \"goodwill_and_next_steps\", \"weight\": 8, \"requirement\": \"The email offers a goodwill gesture AND maintains professional tone AND explains the next steps the customer should take.\"}]}}",
+      "description": "Apology-email rubric whose criteria conflate distinct attributes (double-barreled).",
+      "ground_truth": ["UNMET", "MET", "UNMET", "UNMET", "MET", "MET", "MET", "MET", "UNMET", "UNMET", "MET", "MET", "UNMET", "UNMET", "UNMET", "UNMET", "MET", "MET", "MET", "MET", "UNMET", "MET", "UNMET", "UNMET", "UNMET", "MET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET"]
+    },
+    {
+      "submission": "{\"task_prompt\": \"Solve this word problem and show your work: A train travels 60 mph for 2.5 hours, then 40 mph for 1 hour. How far did it travel?\", \"rubric\": {\"criteria\": [{\"index\": 1, \"name\": \"final_answer_correct\", \"weight\": 12, \"requirement\": \"The student's final numeric answer for total distance is correct.\"}, {\"index\": 2, \"name\": \"arithmetic_steps_correct\", \"weight\": 10, \"requirement\": \"All arithmetic steps shown by the student produce correct intermediate values.\"}, {\"index\": 3, \"name\": \"shows_work\", \"weight\": 6, \"requirement\": \"The student shows the calculation steps used to reach the final answer (not just the final number).\"}, {\"index\": 4, \"name\": \"correct_units\", \"weight\": 6, \"requirement\": \"The final answer includes the correct distance unit (miles).\"}, {\"index\": 5, \"name\": \"presentation_quality\", \"weight\": 6, \"requirement\": \"Rate the overall presentation quality of the student's solution on a four-point scale: Excellent, Good, Fair, or Poor.\"}]}}",
+      "description": "Math word problem rubric judging correctness without supplying gold answer or tolerance (unanchored grounding) plus a poorly-anchored ordinal scale.",
+      "ground_truth": ["MET", "MET", "MET", "MET", "MET", "MET", "MET", "MET", "MET", "MET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "MET", "MET", "MET", "MET", "MET", "UNMET", "UNMET", "UNMET", "MET", "UNMET", "MET", "UNMET", "MET", "UNMET"]
+    },
+    {
+      "submission": "{\"task_prompt\": \"Respond to the user's greeting in a friendly, conversational way.\", \"rubric\": {\"criteria\": [{\"index\": 1, \"name\": \"addresses_user\", \"weight\": 8, \"requirement\": \"The response addresses the user.\"}, {\"index\": 2, \"name\": \"english_us_locale\", \"weight\": 6, \"requirement\": \"The response is written in US English (no British spellings such as 'colour' or 'realise').\"}, {\"index\": 3, \"name\": \"includes_emoji\", \"weight\": 4, \"requirement\": \"The response contains at least one emoji.\"}, {\"index\": 4, \"name\": \"effort_friendly\", \"weight\": 8, \"requirement\": \"The response makes an effort to be friendly.\"}, {\"index\": 5, \"name\": \"references_mood\", \"weight\": 6, \"requirement\": \"The response explicitly references the user's mood as happy, sad, or neutral.\"}]}}",
+      "description": "Greeting-response rubric stuffed with low-bar and unrequested constraints (unfalsifiable + over-constrained).",
+      "ground_truth": ["MET", "UNMET", "MET", "UNMET", "MET", "MET", "MET", "MET", "UNMET", "UNMET", "MET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "MET", "MET", "MET", "UNMET", "UNMET", "UNMET", "UNMET"]
+    }
+  ]
+}

@@ -482,12 +482,16 @@ class CriterionReport(Criterion):
         shuffle_order: Permutation used when presenting multi-choice options to the LLM.
             Maps shuffled position → original index. None for binary criteria or when
             shuffle_options is disabled.
+        evidence_quote: Optional verbatim span the judge copied from the submission to
+            anchor the verdict. Populated when the judgment model exposes an
+            ``evidence_quote`` field (e.g., ``MetaCriterionJudgment``); otherwise None.
     """
 
     verdict: CriterionVerdict | None = None
     multi_choice_verdict: MultiChoiceVerdict | AggregatedMultiChoiceVerdict | None = None
     reason: str
     shuffle_order: list[int] | None = None
+    evidence_quote: str | None = None
 
     @property
     def score_value(self) -> float:
@@ -642,12 +646,15 @@ class JudgeVote:
         verdict: The judge's verdict (MET/UNMET).
         reason: The judge's explanation for the verdict.
         weight: Judge's voting weight (default 1.0).
+        evidence_quote: Optional verbatim span this judge copied from the submission.
+            Populated when the judgment model exposes ``evidence_quote``; None otherwise.
     """
 
     judge_id: str
     verdict: CriterionVerdict
     reason: str
     weight: float = 1.0
+    evidence_quote: str | None = None
 
 
 @dataclass
@@ -666,6 +673,9 @@ class EnsembleCriterionReport:
         agreement: Proportion of judges agreeing with final verdict (0-1).
         final_multi_choice_verdict: Aggregated multi-choice verdict. None for binary.
         multi_choice_votes: Individual multi-choice votes. Empty for binary.
+        evidence_quote: Representative verbatim span from the submission that anchors
+            the final verdict. Picked from the first vote whose verdict matches
+            ``final_verdict`` and that carries a quote; None if no judge provided one.
     """
 
     criterion: Criterion
@@ -676,6 +686,7 @@ class EnsembleCriterionReport:
     # Multi-choice support
     final_multi_choice_verdict: AggregatedMultiChoiceVerdict | None = field(default=None)
     multi_choice_votes: list[MultiChoiceJudgeVote] = field(default_factory=list)
+    evidence_quote: str | None = field(default=None)
 
     def __post_init__(self) -> None:
         """Compute agreement if not set."""

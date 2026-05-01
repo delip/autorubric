@@ -559,6 +559,8 @@ class CriterionGrader(Grader):
                 tag = ", ".join(f"#{i}" for i in judgment.affected_criteria)
                 reason = f"{reason} [Affects: {tag}]"
 
+            evidence_quote = getattr(judgment, "evidence_quote", None)
+
             report = CriterionReport(
                 requirement=criterion.requirement,
                 verdict=judgment.criterion_status,
@@ -568,6 +570,7 @@ class CriterionGrader(Grader):
                 options=criterion.options,
                 scale_type=criterion.scale_type,
                 aggregation=criterion.aggregation,
+                evidence_quote=evidence_quote,
             )
             return CriterionResult(report=report, usage=result.usage, cost=result.cost)
 
@@ -866,10 +869,21 @@ class CriterionGrader(Grader):
                             verdict=cr.report.verdict,
                             reason=cr.report.reason,
                             weight=judge_result.weight,
+                            evidence_quote=cr.report.evidence_quote,
                         )
                     )
 
                 final_verdict, final_reason = self._aggregate_votes(votes)
+
+                # Pick a representative quote from a judge whose verdict matches the final.
+                ensemble_quote: str | None = next(
+                    (
+                        v.evidence_quote
+                        for v in votes
+                        if v.verdict == final_verdict and v.evidence_quote
+                    ),
+                    None,
+                )
 
                 ensemble_reports.append(
                     EnsembleCriterionReport(
@@ -881,6 +895,7 @@ class CriterionGrader(Grader):
                         final_verdict=final_verdict,
                         final_reason=final_reason,
                         votes=votes,
+                        evidence_quote=ensemble_quote,
                     )
                 )
 

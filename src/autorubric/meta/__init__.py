@@ -37,6 +37,10 @@ Example usage:
     )
 """
 
+from ._discrimination import (
+    DiscriminationReport,
+    evaluate_rubric_discrimination,
+)
 from ._evaluate import (
     evaluate_rubric_in_context,
     evaluate_rubric_standalone,
@@ -73,6 +77,8 @@ from ._improve import (
 )
 
 __all__ = [
+    "DiscriminationReport",
+    "evaluate_rubric_discrimination",
     "evaluate_rubric_in_context",
     "evaluate_rubric_standalone",
     "get_in_context_meta_rubric",

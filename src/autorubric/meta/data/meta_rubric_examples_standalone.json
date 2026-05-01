@@ -1,0 +1,102 @@
+{
+  "name": "meta_rubric_examples_standalone",
+  "prompt": "",
+  "rubric": {
+    "sections": [
+      {
+        "name": "Clarity & Precision",
+        "criteria": [
+          {"name": "clear_requirements", "weight": 10, "requirement": "Each criterion has a clear, unambiguous requirement that a rater could apply consistently"},
+          {"name": "specific_actionable", "weight": 10, "requirement": "Criteria are specific enough to guide assessment (not generic boilerplate)"},
+          {"name": "unidimensional", "weight": 10, "requirement": "Each criterion assesses exactly one construct/attribute (not multiple conflated together)"},
+          {"name": "behavioral_language", "weight": 8, "requirement": "Criteria use concrete, behavioral language describing observable qualities (not vague adjectives like 'good' or 'excellent')"}
+        ]
+      },
+      {
+        "name": "Structure & Design",
+        "criteria": [
+          {"name": "reasonable_count", "weight": 6, "requirement": "Number of criteria is appropriate — typically 3-15 for task rubrics, or up to ~30 for instruments designed to comprehensively assess rubric quality (meta-rubrics). Not too few to be meaningful, nor so many that the rubric becomes unmanageable for its purpose."},
+          {"name": "balanced_weights", "weight": 6, "requirement": "Weights reflect relative importance and sum to a meaningful total"},
+          {"name": "orthogonal_criteria", "weight": 8, "requirement": "Criteria are distinct and non-overlapping (no redundancy)"}
+        ]
+      },
+      {
+        "name": "LLM-Friendliness",
+        "criteria": [
+          {"name": "independently_verifiable", "weight": 10, "requirement": "Each criterion can be evaluated independently without requiring cross-referencing other criteria"},
+          {"name": "objective_assessable", "weight": 8, "requirement": "Criteria are objective enough that different raters would reach similar conclusions"}
+        ]
+      },
+      {
+        "name": "Reliability Predictors",
+        "criteria": [
+          {"name": "deterministic_assessability", "weight": 8, "requirement": "Criteria can be assessed deterministically from the submission text alone, without requiring external knowledge, subjective taste, or unstated assumptions Does NOT apply when the criterion legitimately needs external reference data but the rubric fails to provide it — use unanchored_grounding."}
+        ]
+      },
+      {
+        "name": "Anti-Patterns",
+        "criteria": [
+          {"name": "double_barreled", "weight": -8, "requirement": "Contains criteria that assess multiple distinct things in a single requirement (e.g., 'clear AND concise AND accurate')"},
+          {"name": "excessive_overlap", "weight": -6, "requirement": "Multiple criteria substantially overlap, causing double-counting of the same qualities"},
+          {"name": "overly_verbose", "weight": -6, "requirement": "Criteria requirements are unnecessarily long-winded when they could be stated more concisely"},
+          {"name": "hedging_language", "weight": -6, "requirement": "Contains criteria with hedging words ('may', 'could', 'might', 'possibly') that make definitive assessment difficult"},
+          {"name": "generic_boilerplate", "weight": -8, "requirement": "Contains generic, cookie-cutter criteria that could apply to any task rather than being tailored to this specific task"},
+          {"name": "unanchored_subjectivity", "weight": -8, "requirement": "One or more criteria use unanchored subjective or comparative language that produces inconsistent verdicts across raters. Two manifestations: (1) undefined evaluative terms ('appropriate', 'suitable', 'good', 'professional') that different raters interpret differently; (2) comparative or threshold terms ('sufficient', 'adequate', 'reasonable amount of', 'enough') without a reference point or operational threshold. In either case the MET/UNMET decision depends on the rater's personal standard rather than an observable signal in the submission."}
+        ]
+      },
+      {
+        "name": "LLM-Judge Anti-Patterns",
+        "criteria": [
+          {"name": "no_negative_criteria", "weight": -6, "requirement": "The rubric contains only positive-weight criteria with no negative-weight (penalty) criteria. When used with LLM judges, the absence of negative criteria enables sycophantic bias — judges tend to assess positive criteria as MET regardless of submission quality, inflating scores and reducing discrimination across the quality spectrum."},
+          {"name": "unfalsifiable_criteria", "weight": -8, "requirement": "One or more criteria set such a low bar that virtually any non-trivial submission would satisfy them (e.g., 'attempts to address the topic', 'provides some information', 'contains content related to the question', 'makes an effort to respond'). Unfalsifiable criteria contribute nothing to discrimination and inflate scores, especially with LLM judges whose sycophantic bias defaults to MET."},
+          {"name": "poorly_anchored_ordinal", "weight": -6, "requirement": "Multi-choice criteria with ordinal scales define levels using evaluative adjectives ('Excellent/Good/Fair/Poor', 'Very/Somewhat/Slightly') rather than behavioral descriptions of what each level looks like in practice. Without concrete anchors, ordinal criteria produce the 'middle-category collapse' phenomenon where judges cluster predictions at scale extremes and avoid intermediate levels, reducing the effective scale to binary."},
+          {"name": "counting_dependent", "weight": -4, "requirement": "One or more criteria depend on precise counting or numerical measurement that LLM judges perform unreliably (e.g., 'contains exactly 5 paragraphs', 'uses no more than 3 sentences per point', 'includes between 200-300 words'). Such criteria produce inconsistent judgments because LLMs cannot reliably count tokens, sentences, paragraphs, or other discrete textual units."},
+          {"name": "unanchored_grounding", "weight": -8, "requirement": "A criterion requires verification against an external reference, but the rubric provides no such reference. Three manifestations: (A) determinate task (extraction, classification, math, code) where the rubric provides no gold answers, acceptable variants, or tolerances; (B) open-world claim ('all facts are true', 'links work') without a bounded audit procedure (scope, allowed sources, conflict resolution); (C) measurement standard ('exactly 20 pages') without a defined yardstick. Do NOT apply when the requirement is missing entirely from the rubric (use missing_critical) or when the issue is unanchored subjectivity without an external-reference need (use unanchored_subjectivity)."},
+          {"name": "proxy_gameable", "weight": -8, "requirement": "Top scores are achievable by satisfying surface-level proxies the rubric explicitly rewards, without satisfying any criterion that requires task-specific correctness. Manifestations: counting proxies (>=N items/citations/sections rewarded regardless of relevance or correctness), assertion-without-evidence (rewards merely claiming attributes like 'fast' or 'safe' without verification), missing quality gates (no criterion ties points to substantive task success), and verbosity rewards (criteria use 'comprehensive', 'thorough', 'detailed', 'extensive' without specifying what content counts as enough). Do NOT apply when the issue is whole-rubric non-discrimination unrelated to gameable proxies — assess that via the evaluate_rubric_discrimination evaluator instead of as a criterion here."}
+        ]
+      }
+    ]
+  },
+  "items": [
+    {
+      "submission": "{\"criteria\": [{\"index\": 1, \"name\": \"thesis_present\", \"weight\": 10, \"requirement\": \"The essay states a thesis in the introduction that names the position the writer will defend.\"}, {\"index\": 2, \"name\": \"three_supporting_paragraphs\", \"weight\": 8, \"requirement\": \"Body contains at least three paragraphs, each opening with a topic sentence that names a distinct supporting point.\"}, {\"index\": 3, \"name\": \"evidence_per_point\", \"weight\": 10, \"requirement\": \"Each body paragraph cites at least one specific source (named author, work, or dataset) used to support the topic sentence.\"}, {\"index\": 4, \"name\": \"counterargument_addressed\", \"weight\": 8, \"requirement\": \"The essay names at least one opposing view and gives a written response to it.\"}, {\"index\": 5, \"name\": \"conclusion_restates_thesis\", \"weight\": 6, \"requirement\": \"The conclusion paragraph repeats or paraphrases the thesis stated in the introduction.\"}, {\"index\": 6, \"name\": \"unsupported_claims\", \"weight\": -6, \"requirement\": \"Penalize when a body paragraph makes a factual claim with no source, citation, or quoted evidence.\"}]}",
+      "description": "Mostly clean essay-grading rubric: behavioral, distinct, includes a negative penalty.",
+      "ground_truth": ["MET", "MET", "MET", "MET", "MET", "MET", "MET", "MET", "MET", "MET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET"]
+    },
+    {
+      "submission": "{\"criteria\": [{\"index\": 1, \"name\": \"correctness_and_tests\", \"weight\": 10, \"requirement\": \"Code is correct AND has tests AND tests pass AND covers edge cases.\"}, {\"index\": 2, \"name\": \"readability_and_style\", \"weight\": 8, \"requirement\": \"Code is readable AND well-formatted AND follows project style conventions.\"}, {\"index\": 3, \"name\": \"comments_and_docs\", \"weight\": 8, \"requirement\": \"Comments are clear AND complete AND public APIs have docstrings AND examples are provided.\"}, {\"index\": 4, \"name\": \"performance\", \"weight\": 6, \"requirement\": \"Functions complete in O(n) time or better and avoid quadratic loops over the input.\"}, {\"index\": 5, \"name\": \"no_secrets\", \"weight\": -8, \"requirement\": \"Penalize when the diff introduces hardcoded API keys, tokens, or passwords.\"}]}",
+      "description": "Code review rubric where multiple criteria conflate distinct attributes (double-barreled).",
+      "ground_truth": ["UNMET", "MET", "UNMET", "MET", "MET", "MET", "MET", "MET", "UNMET", "MET", "MET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET"]
+    },
+    {
+      "submission": "{\"criteria\": [{\"index\": 1, \"name\": \"good_organization\", \"weight\": 10, \"requirement\": \"Writing demonstrates good organization throughout.\"}, {\"index\": 2, \"name\": \"appropriate_style\", \"weight\": 10, \"requirement\": \"Style is appropriate for the intended audience.\"}, {\"index\": 3, \"name\": \"professional_tone\", \"weight\": 8, \"requirement\": \"Tone is professional.\"}, {\"index\": 4, \"name\": \"sufficient_detail\", \"weight\": 8, \"requirement\": \"The piece provides a sufficient amount of detail.\"}, {\"index\": 5, \"name\": \"strong_writing\", \"weight\": 6, \"requirement\": \"Writing is strong overall.\"}]}",
+      "description": "Writing rubric saturated with vague evaluative adjectives (unanchored subjectivity).",
+      "ground_truth": ["UNMET", "UNMET", "MET", "UNMET", "MET", "MET", "UNMET", "MET", "UNMET", "UNMET", "UNMET", "MET", "UNMET", "UNMET", "MET", "MET", "MET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET"]
+    },
+    {
+      "submission": "{\"criteria\": [{\"index\": 1, \"name\": \"comprehensive_coverage\", \"weight\": 10, \"requirement\": \"The summary provides comprehensive coverage of the source paper.\"}, {\"index\": 2, \"name\": \"thorough_methodology_section\", \"weight\": 8, \"requirement\": \"The summary includes a thorough description of the paper's methodology.\"}, {\"index\": 3, \"name\": \"detailed_results\", \"weight\": 8, \"requirement\": \"The summary gives a detailed account of the results.\"}, {\"index\": 4, \"name\": \"five_or_more_citations\", \"weight\": 8, \"requirement\": \"The summary includes at least five citations to related work, regardless of which works are cited.\"}, {\"index\": 5, \"name\": \"three_section_structure\", \"weight\": 6, \"requirement\": \"The summary has a Background, Methods, and Results section header.\"}, {\"index\": 6, \"name\": \"extensive_discussion\", \"weight\": 6, \"requirement\": \"The summary contains an extensive discussion section.\"}]}",
+      "description": "Research-summary rubric that rewards verbosity and citation counts without any task-correctness gate.",
+      "ground_truth": ["MET", "MET", "MET", "UNMET", "MET", "MET", "MET", "MET", "UNMET", "MET", "UNMET", "MET", "UNMET", "UNMET", "UNMET", "MET", "MET", "UNMET", "UNMET", "MET", "UNMET", "MET"]
+    },
+    {
+      "submission": "{\"criteria\": [{\"index\": 1, \"name\": \"valid_json_output\", \"weight\": 8, \"requirement\": \"The model output parses as valid JSON.\"}, {\"index\": 2, \"name\": \"required_keys_present\", \"weight\": 8, \"requirement\": \"The output object contains the keys 'name', 'date', and 'amount'.\"}, {\"index\": 3, \"name\": \"date_iso_format\", \"weight\": 6, \"requirement\": \"The 'date' field is a string matching the pattern YYYY-MM-DD.\"}, {\"index\": 4, \"name\": \"amount_numeric\", \"weight\": 6, \"requirement\": \"The 'amount' field is a JSON number, not a string.\"}, {\"index\": 5, \"name\": \"all_fields_correct\", \"weight\": 12, \"requirement\": \"Every extracted field value matches the value found in the source receipt.\"}, {\"index\": 6, \"name\": \"all_facts_accurate\", \"weight\": 8, \"requirement\": \"All factual claims implied by the extraction are accurate.\"}]}",
+      "description": "Receipt-extraction rubric with a determinate task but no gold answers or tolerances.",
+      "ground_truth": ["MET", "MET", "MET", "MET", "MET", "MET", "MET", "MET", "MET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "MET", "UNMET", "UNMET", "UNMET", "MET", "UNMET"]
+    },
+    {
+      "submission": "{\"criteria\": [{\"index\": 1, \"name\": \"addresses_concern\", \"weight\": 10, \"requirement\": \"The reply attempts to address the customer's concern.\"}, {\"index\": 2, \"name\": \"is_polite\", \"weight\": 8, \"requirement\": \"The reply is polite.\"}, {\"index\": 3, \"name\": \"provides_information\", \"weight\": 8, \"requirement\": \"The reply provides some information related to the question.\"}, {\"index\": 4, \"name\": \"appropriate_tone\", \"weight\": 6, \"requirement\": \"The reply uses an appropriate tone.\"}, {\"index\": 5, \"name\": \"signs_off\", \"weight\": 4, \"requirement\": \"The reply ends with a closing line such as 'Best regards' or the agent's name.\"}]}",
+      "description": "Customer-service rubric stuffed with low-bar, all-positive criteria (unfalsifiable + no negatives).",
+      "ground_truth": ["MET", "UNMET", "MET", "UNMET", "MET", "MET", "MET", "MET", "UNMET", "MET", "UNMET", "UNMET", "UNMET", "UNMET", "MET", "MET", "MET", "MET", "UNMET", "UNMET", "UNMET", "UNMET"]
+    },
+    {
+      "submission": "{\"criteria\": [{\"index\": 1, \"name\": \"answer_word_count\", \"weight\": 6, \"requirement\": \"The answer contains between 100 and 200 words.\"}, {\"index\": 2, \"name\": \"three_supporting_points\", \"weight\": 8, \"requirement\": \"The answer presents exactly three supporting points, no more and no fewer.\"}, {\"index\": 3, \"name\": \"clarity_rating\", \"weight\": 8, \"requirement\": \"Rate the clarity of the answer on a four-point scale: Excellent, Good, Fair, or Poor.\"}, {\"index\": 4, \"name\": \"depth_rating\", \"weight\": 6, \"requirement\": \"Rate the depth of analysis as Very deep, Somewhat deep, Slightly deep, or Not deep.\"}, {\"index\": 5, \"name\": \"answers_question\", \"weight\": 10, \"requirement\": \"The answer directly addresses the question that was asked.\"}, {\"index\": 6, \"name\": \"off_topic_content\", \"weight\": -6, \"requirement\": \"Penalize when the answer contains paragraphs unrelated to the asked question.\"}]}",
+      "description": "Q&A rubric leaning on word counts and unanchored ordinal scales.",
+      "ground_truth": ["MET", "MET", "MET", "UNMET", "MET", "MET", "MET", "MET", "UNMET", "MET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "UNMET", "MET", "MET", "UNMET", "UNMET"]
+    },
+    {
+      "submission": "{\"criteria\": [{\"index\": 1, \"name\": \"good_quality\", \"weight\": 10, \"requirement\": \"The response may demonstrate a good understanding of the topic and could provide useful insight that the reader might find informative and possibly engaging across the full length of the answer.\"}, {\"index\": 2, \"name\": \"overall_content\", \"weight\": 10, \"requirement\": \"Overall content of the response should generally be of acceptable quality and could possibly meet the typical expectations a reader might reasonably hold for this kind of writing.\"}, {\"index\": 3, \"name\": \"addresses_topic\", \"weight\": 8, \"requirement\": \"The response possibly addresses the topic and may include content that is at least somewhat related to the question being asked.\"}, {\"index\": 4, \"name\": \"writing_quality\", \"weight\": 8, \"requirement\": \"Writing quality is reasonable and the response might exhibit traits commonly associated with strong writing.\"}, {\"index\": 5, \"name\": \"useful_information\", \"weight\": 6, \"requirement\": \"The response could provide some information that may be useful to the reader.\"}]}",
+      "description": "Generic boilerplate rubric: hedging, overlapping, verbose, unfalsifiable, all positive.",
+      "ground_truth": ["UNMET", "UNMET", "MET", "UNMET", "MET", "MET", "UNMET", "MET", "UNMET", "UNMET", "UNMET", "MET", "MET", "MET", "MET", "MET", "MET", "MET", "UNMET", "UNMET", "UNMET", "UNMET"]
+    }
+  ]
+}

@@ -32,7 +32,7 @@
           {
             "name": "reasonable_count",
             "weight": 6,
-            "requirement": "The number of criteria is appropriate (typically 3-15; not too few to be meaningful or too many to be manageable)"
+            "requirement": "Number of criteria is appropriate \u2014 typically 3-15 for task rubrics, or up to ~30 for instruments designed to comprehensively assess rubric quality (meta-rubrics). Not too few to be meaningful, nor so many that the rubric becomes unmanageable for its purpose."
           },
           {
             "name": "balanced_weights",
@@ -58,11 +58,6 @@
             "name": "objective_assessable",
             "weight": 8,
             "requirement": "Criteria are objective enough that different raters would reach similar conclusions"
-          },
-          {
-            "name": "well_defined_options",
-            "weight": 6,
-            "requirement": "For multi-choice criteria, options are clearly differentiated with unambiguous boundaries"
           }
         ]
       },
@@ -70,19 +65,9 @@
         "name": "Reliability Predictors",
         "criteria": [
           {
-            "name": "boundary_clarity",
-            "weight": 8,
-            "requirement": "Each criterion has clear decision boundaries — it is unambiguous when the criterion is MET vs. UNMET, with no gray area that would cause raters to disagree"
-          },
-          {
             "name": "deterministic_assessability",
             "weight": 8,
-            "requirement": "Criteria can be assessed deterministically from the submission text alone, without requiring external knowledge, subjective taste, or unstated assumptions"
-          },
-          {
-            "name": "consistent_granularity",
-            "weight": 6,
-            "requirement": "Criteria operate at a consistent level of granularity — not mixing high-level holistic judgments with fine-grained detail checks"
+            "requirement": "Criteria can be assessed deterministically from the submission text alone, without requiring external knowledge, subjective taste, or unstated assumptions Does NOT apply when the criterion legitimately needs external reference data but the rubric fails to provide it \u2014 use unanchored_grounding."
           }
         ]
       },
@@ -93,16 +78,6 @@
             "name": "double_barreled",
             "weight": -8,
             "requirement": "Contains criteria that assess multiple distinct things in a single requirement (e.g., 'clear AND concise AND accurate')"
-          },
-          {
-            "name": "vague_wording",
-            "weight": -8,
-            "requirement": "Contains criteria with vague, undefined terms that different raters would interpret differently"
-          },
-          {
-            "name": "circular_tautological",
-            "weight": -6,
-            "requirement": "Contains criteria that are tautological or circular (e.g., 'response is good because it's high quality')"
           },
           {
             "name": "excessive_overlap",
@@ -123,6 +98,11 @@
             "name": "generic_boilerplate",
             "weight": -8,
             "requirement": "Contains generic, cookie-cutter criteria that could apply to any task rather than being tailored to this specific task"
+          },
+          {
+            "name": "unanchored_subjectivity",
+            "weight": -8,
+            "requirement": "One or more criteria use unanchored subjective or comparative language that produces inconsistent verdicts across raters. Two manifestations: (1) undefined evaluative terms ('appropriate', 'suitable', 'good', 'professional') that different raters interpret differently; (2) comparative or threshold terms ('sufficient', 'adequate', 'reasonable amount of', 'enough') without a reference point or operational threshold. In either case the MET/UNMET decision depends on the rater's personal standard rather than an observable signal in the submission."
           }
         ]
       },
@@ -132,22 +112,12 @@
           {
             "name": "no_negative_criteria",
             "weight": -6,
-            "requirement": "The rubric contains only positive-weight criteria with no negative-weight (penalty) criteria. When used with LLM judges, the absence of negative criteria enables sycophantic bias — judges tend to assess positive criteria as MET regardless of submission quality, inflating scores and reducing discrimination across the quality spectrum."
+            "requirement": "The rubric contains only positive-weight criteria with no negative-weight (penalty) criteria. When used with LLM judges, the absence of negative criteria enables sycophantic bias \u2014 judges tend to assess positive criteria as MET regardless of submission quality, inflating scores and reducing discrimination across the quality spectrum."
           },
           {
             "name": "unfalsifiable_criteria",
             "weight": -8,
             "requirement": "One or more criteria set such a low bar that virtually any non-trivial submission would satisfy them (e.g., 'attempts to address the topic', 'provides some information', 'contains content related to the question', 'makes an effort to respond'). Unfalsifiable criteria contribute nothing to discrimination and inflate scores, especially with LLM judges whose sycophantic bias defaults to MET."
-          },
-          {
-            "name": "boundary_ambiguity",
-            "weight": -8,
-            "requirement": "One or more criteria lack clear decision boundaries — it is ambiguous exactly when the criterion transitions from UNMET to MET. Criteria use comparative terms without a reference point ('sufficient', 'adequate', 'appropriate amount of', 'reasonable') or require implicit threshold judgments ('enough evidence', 'demonstrates understanding') that force different raters to impose their own standards, producing inconsistent judgments."
-          },
-          {
-            "name": "verbosity_rewarding",
-            "weight": -6,
-            "requirement": "One or more criteria implicitly reward longer responses by equating quantity with quality — using words like 'comprehensive', 'thorough', 'detailed', 'extensive', 'in-depth', or 'exhaustive' without specifying what specific content constitutes satisfaction. This enables the well-documented verbosity bias in LLM judges, where longer responses receive higher scores regardless of information density or quality."
           },
           {
             "name": "poorly_anchored_ordinal",
@@ -158,6 +128,16 @@
             "name": "counting_dependent",
             "weight": -4,
             "requirement": "One or more criteria depend on precise counting or numerical measurement that LLM judges perform unreliably (e.g., 'contains exactly 5 paragraphs', 'uses no more than 3 sentences per point', 'includes between 200-300 words'). Such criteria produce inconsistent judgments because LLMs cannot reliably count tokens, sentences, paragraphs, or other discrete textual units."
+          },
+          {
+            "name": "unanchored_grounding",
+            "weight": -8,
+            "requirement": "A criterion requires verification against an external reference, but the rubric provides no such reference. Three manifestations: (A) determinate task (extraction, classification, math, code) where the rubric provides no gold answers, acceptable variants, or tolerances; (B) open-world claim ('all facts are true', 'links work') without a bounded audit procedure (scope, allowed sources, conflict resolution); (C) measurement standard ('exactly 20 pages') without a defined yardstick. Do NOT apply when the requirement is missing entirely from the rubric (use missing_critical) or when the issue is unanchored subjectivity without an external-reference need (use unanchored_subjectivity)."
+          },
+          {
+            "name": "proxy_gameable",
+            "weight": -8,
+            "requirement": "Top scores are achievable by satisfying surface-level proxies the rubric explicitly rewards, without satisfying any criterion that requires task-specific correctness. Manifestations: counting proxies (>=N items/citations/sections rewarded regardless of relevance or correctness), assertion-without-evidence (rewards merely claiming attributes like 'fast' or 'safe' without verification), missing quality gates (no criterion ties points to substantive task success), and verbosity rewards (criteria use 'comprehensive', 'thorough', 'detailed', 'extensive' without specifying what content counts as enough). Do NOT apply when the issue is whole-rubric non-discrimination unrelated to gameable proxies \u2014 assess that via the evaluate_rubric_discrimination evaluator instead of as a criterion here."
           }
         ]
       }

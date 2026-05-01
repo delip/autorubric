@@ -409,6 +409,155 @@ class TestMatchIssueToCriteria:
 
 
 # ============================================================================
+# evidence_quote plumbing
+# ============================================================================
+
+
+class TestEvidenceQuotePlumbing:
+    def _rubric(self) -> Rubric:
+        return Rubric([
+            Criterion(
+                name="clarity",
+                weight=1.0,
+                requirement="The rubric must be written clearly with concrete anchors",
+            ),
+            Criterion(
+                name="coverage",
+                weight=1.0,
+                requirement="All aspects implied by the prompt should be covered",
+            ),
+            Criterion(name="overlap", weight=-1.0, requirement="Short req"),
+        ])
+
+    def test_extract_issues_populates_evidence_quote(self):
+        """When the ensemble report carries an evidence_quote, IssueDetail receives it."""
+        report = EnsembleEvaluationReport(
+            score=0.5,
+            raw_score=0.5,
+            report=[
+                EnsembleCriterionReport(
+                    criterion=_make_criterion("vague_wording", weight=-1.0),
+                    final_verdict=CriterionVerdict.MET,
+                    final_reason="anti-pattern detected",
+                    votes=[
+                        JudgeVote(
+                            judge_id="judge_0",
+                            verdict=CriterionVerdict.MET,
+                            reason="anti-pattern detected",
+                            evidence_quote="response is appropriate",
+                        )
+                    ],
+                    evidence_quote="response is appropriate",
+                )
+            ],
+        )
+        issues = _extract_issues(report)
+        assert len(issues) == 1
+        assert issues[0].evidence_quote == "response is appropriate"
+
+    def test_extract_issues_evidence_quote_none_when_absent(self):
+        """Backward-compatible: legacy reports without an evidence_quote yield None."""
+        report = _make_ensemble_report(
+            [
+                _make_ensemble_criterion_report(
+                    "clarity", 1.0, CriterionVerdict.UNMET, reason="not clear"
+                )
+            ]
+        )
+        issues = _extract_issues(report)
+        assert issues[0].evidence_quote is None
+
+    def test_match_issue_uses_evidence_quote_substring(self):
+        """A verbatim quote that is a substring of a criterion's requirement matches."""
+        rubric = self._rubric()
+        issue = IssueDetail(
+            criterion_name="meta_crit",
+            requirement="req",
+            weight=1.0,
+            is_antipattern=False,
+            feedback="explanatory text [Affects: #2]",
+            evidence_quote="written clearly with concrete anchors",
+        )
+        result = _match_issue_to_criteria(issue, rubric)
+        # Quote substring matches criterion #1 (clarity), takes precedence over the
+        # [Affects: #2] tag in the feedback.
+        assert result == [1]
+
+    def test_match_issue_quote_takes_precedence_over_affects_tag(self):
+        """When both a quote and an [Affects: ...] tag are present, quote wins."""
+        rubric = self._rubric()
+        issue = IssueDetail(
+            criterion_name="meta_crit",
+            requirement="req",
+            weight=1.0,
+            is_antipattern=False,
+            feedback="Issue here [Affects: #3]",
+            evidence_quote="all aspects implied by the prompt",
+        )
+        result = _match_issue_to_criteria(issue, rubric)
+        assert result == [2]
+
+    def test_match_issue_falls_back_when_quote_no_match(self):
+        """If the quote doesn't substring-match any criterion, fall through to tag."""
+        rubric = self._rubric()
+        issue = IssueDetail(
+            criterion_name="meta_crit",
+            requirement="req",
+            weight=1.0,
+            is_antipattern=False,
+            feedback="Issue here [Affects: #2]",
+            evidence_quote="text not present in any criterion requirement",
+        )
+        result = _match_issue_to_criteria(issue, rubric)
+        assert result == [2]
+
+    def test_match_issue_quote_empty_uses_fallback(self):
+        """Empty / None quote behaves identically to legacy issues."""
+        rubric = self._rubric()
+        issue = IssueDetail(
+            criterion_name="meta_crit",
+            requirement="req",
+            weight=1.0,
+            is_antipattern=False,
+            feedback="Issue here [Affects: #1]",
+            evidence_quote="",
+        )
+        result = _match_issue_to_criteria(issue, rubric)
+        assert result == [1]
+
+    def test_iteration_artifact_round_trips_evidence_quote(self):
+        """_serialize_iteration must include evidence_quote on each issue."""
+        rubric = Rubric([_make_criterion("test_criterion")])
+        issue = IssueDetail(
+            criterion_name="meta_crit",
+            requirement="req",
+            weight=-1.0,
+            is_antipattern=True,
+            feedback="anti-pattern detected",
+            evidence_quote="exact span from the rubric",
+        )
+        iter_result = IterationResult(
+            iteration=0,
+            rubric=rubric,
+            quality_score=0.5,
+            agreement=None,
+            per_criterion_agreement=None,
+            issues=[issue],
+            issues_fixed=[],
+            issues_introduced=[],
+            accepted=True,
+            rejection_reason=None,
+            quality_report=None,
+            token_usage=None,
+            completion_cost=None,
+        )
+        data = _serialize_iteration(iter_result)
+        serialized_issues = data["issues"]
+        assert len(serialized_issues) == 1
+        assert serialized_issues[0]["evidence_quote"] == "exact span from the rubric"
+
+
+# ============================================================================
 # MetaCriterionJudgment structured output
 # ============================================================================
 
