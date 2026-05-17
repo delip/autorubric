@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meta-Rubric Evaluation Report</title>
+    <style>
+        :root {
+            --bg-primary: #0f172a;
+            --bg-secondary: #1e293b;
+            --bg-tertiary: #334155;
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --border-color: #475569;
+            --green: #22c55e;
+            --red: #ef4444;
+            --yellow: #eab308;
+            --cyan: #06b6d4;
+            --magenta: #d946ef;
+            --blue: #3b82f6;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            padding: 2rem;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        .panel {
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            margin-bottom: 1.5rem;
+            overflow: hidden;
+        }
+        .panel-header {
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+            background: var(--bg-secondary);
+        }
+        .panel-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+        }
+        .panel-subtitle {
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+            margin-top: 0.5rem;
+        }
+        .panel-body { padding: 1.5rem; }
+        .results-grid {
+            display: grid;
+            grid-template-columns: auto 1fr;
+            gap: 0.5rem 1.5rem;
+        }
+        .results-label { font-weight: 600; }
+        .section-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 1.5rem;
+        }
+        .section-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            padding: 0.75rem 1rem;
+            background: var(--bg-secondary);
+            border-radius: 6px 6px 0 0;
+        }
+        .section-title.anti-pattern { color: var(--magenta); }
+        .section-title.normal { color: var(--blue); }
+        .section-table th, .section-table td {
+            padding: 0.75rem 1rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .section-table th {
+            background: var(--bg-tertiary);
+            font-weight: 600;
+        }
+        .section-table td:first-child { color: var(--cyan); }
+        .section-table td:nth-child(2) { text-align: center; }
+        .section-table td:nth-child(3) { text-align: right; }
+        .status { font-weight: 600; padding: 0.25rem 0.75rem; border-radius: 4px; }
+        .status-met { color: var(--green); background: rgba(34, 197, 94, 0.1); }
+        .status-unmet { color: var(--red); background: rgba(239, 68, 68, 0.1); }
+        .status-detected { color: var(--red); background: rgba(239, 68, 68, 0.1); }
+        .status-clear { color: var(--green); background: rgba(34, 197, 94, 0.1); }
+        .status-na { color: var(--yellow); background: rgba(234, 179, 8, 0.1); }
+        .issues-header {
+            background: var(--bg-secondary);
+            border-left: 4px solid var(--red);
+            padding: 1rem 1.5rem;
+            margin-bottom: 1rem;
+            border-radius: 0 6px 6px 0;
+        }
+        .issues-header h3 { color: var(--red); }
+        .issues-header p { color: var(--text-secondary); font-size: 0.875rem; }
+        .issue-card {
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            margin-bottom: 1rem;
+            overflow: hidden;
+        }
+        .issue-card.anti-pattern { border-left: 4px solid var(--red); }
+        .issue-card.normal { border-left: 4px solid var(--yellow); }
+        .issue-card-header {
+            padding: 0.75rem 1rem;
+            background: var(--bg-secondary);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .issue-name { color: var(--cyan); font-weight: 600; }
+        .issue-section { color: var(--text-secondary); font-size: 0.875rem; }
+        .issue-reason { padding: 1rem; white-space: pre-wrap; }
+        .success-panel {
+            background: rgba(34, 197, 94, 0.1);
+            border: 1px solid var(--green);
+            border-radius: 6px;
+            padding: 1.5rem;
+            text-align: center;
+            color: var(--green);
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="panel" style="border-color: var(--blue);">
+        <div class="panel-body">
+            <div class="panel-title">In-Context Evaluation (rubric + task prompt)</div>
+            <div class='panel-subtitle'>Evaluating rubric with 4 criteria
+Task: You are asked to author a scientific feasibility CLAIM — a single, well-formed assertion about wheth...</div>
+        </div>
+    </div>
+
+    <div class="panel" style="border-color: var(--cyan);">
+        <div class="panel-header">
+            <div class="panel-title">Results</div>
+        </div>
+        <div class="panel-body">
+            <div class="results-grid">
+                <span class="results-label">Score</span>
+                <span style="color: #eab308; font-weight: 600;">0.61</span>
+                <span class="results-label">Raw Score</span>
+                <span>84.00</span>
+                <span class='results-label'>Cost</span><span>$0.194744</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="section-title normal">Clarity &amp; Precision</div>
+    <table class="section-table">
+        <thead>
+            <tr><th>Criterion</th><th>Status</th><th>Weight</th></tr>
+        </thead>
+        <tbody>
+
+            <tr>
+                <td>clear_requirements</td>
+                <td><span class="status status-met">MET</span></td>
+                <td>+10.0</td>
+            </tr>
+
+            <tr>
+                <td>specific_actionable</td>
+                <td><span class="status status-met">MET</span></td>
+                <td>+10.0</td>
+            </tr>
+
+            <tr>
+                <td>unidimensional</td>
+                <td><span class="status status-unmet">UNMET</span></td>
+                <td>+10.0</td>
+            </tr>
+
+            <tr>
+                <td>behavioral_language</td>
+                <td><span class="status status-met">MET</span></td>
+                <td>+8.0</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <div class="section-title normal">Structure &amp; Design</div>
+    <table class="section-table">
+        <thead>
+            <tr><th>Criterion</th><th>Status</th><th>Weight</th></tr>
+        </thead>
+        <tbody>
+
+            <tr>
+                <td>reasonable_count</td>
+                <td><span class="status status-met">MET</span></td>
+                <td>+6.0</td>
+            </tr>
+
+            <tr>
+                <td>balanced_weights</td>
+                <td><span class="status status-met">MET</span></td>
+                <td>+6.0</td>
+            </tr>
+
+            <tr>
+                <td>orthogonal_criteria</td>
+                <td><span class="status status-met">MET</span></td>
+                <td>+8.0</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <div class="section-title normal">LLM-Friendliness</div>
+    <table class="section-table">
+        <thead>
+            <tr><th>Criterion</th><th>Status</th><th>Weight</th></tr>
+        </thead>
+        <tbody>
+
+            <tr>
+                <td>independently_verifiable</td>
+                <td><span class="status status-met">MET</span></td>
+                <td>+10.0</td>
+            </tr>
+
+            <tr>
+                <td>objective_assessable</td>
+                <td><span class="status status-met">MET</span></td>
+                <td>+8.0</td>
+            </tr>
+
+            <tr>
+                <td>low_interpretation_variance</td>
+                <td><span class="status status-met">MET</span></td>
+                <td>+8.0</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <div class="section-title normal">Reliability Predictors</div>
+    <table class="section-table">
+        <thead>
+            <tr><th>Criterion</th><th>Status</th><th>Weight</th></tr>
+        </thead>
+        <tbody>
+
+            <tr>
+                <td>deterministic_assessability</td>
+                <td><span class="status status-unmet">UNMET</span></td>
+                <td>+8.0</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <div class="section-title anti-pattern">Anti-Patterns (Standalone)</div>
+    <table class="section-table">
+        <thead>
+            <tr><th>Criterion</th><th>Status</th><th>Weight</th></tr>
+        </thead>
+        <tbody>
+
+            <tr>
+                <td>double_barreled</td>
+                <td><span class="status status-detected">DETECTED</span></td>
+                <td>-8.0</td>
+            </tr>
+
+            <tr>
+                <td>excessive_overlap</td>
+                <td><span class="status status-clear">CLEAR</span></td>
+                <td>-6.0</td>
+            </tr>
+
+            <tr>
+                <td>overly_verbose</td>
+                <td><span class="status status-detected">DETECTED</span></td>
+                <td>-6.0</td>
+            </tr>
+
+            <tr>
+                <td>hedging_language</td>
+                <td><span class="status status-clear">CLEAR</span></td>
+                <td>-6.0</td>
+            </tr>
+
+            <tr>
+                <td>generic_boilerplate</td>
+                <td><span class="status status-clear">CLEAR</span></td>
+                <td>-8.0</td>
+            </tr>
+
+            <tr>
+                <td>unanchored_subjectivity</td>
+                <td><span class="status status-detected">DETECTED</span></td>
+                <td>-8.0</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <div class="section-title normal">Construct Alignment (In-Context)</div>
+    <table class="section-table">
+        <thead>
+            <tr><th>Criterion</th><th>Status</th><th>Weight</th></tr>
+        </thead>
+        <tbody>
+
+            <tr>
+                <td>task_aligned</td>
+                <td><span class="status status-met">MET</span></td>
+                <td>+12.0</td>
+            </tr>
+
+            <tr>
+                <td>covers_key_aspects</td>
+                <td><span class="status status-met">MET</span></td>
+                <td>+10.0</td>
+            </tr>
+
+            <tr>
+                <td>appropriate_emphasis</td>
+                <td><span class="status status-met">MET</span></td>
+                <td>+8.0</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <div class="section-title normal">Discriminative Power (In-Context)</div>
+    <table class="section-table">
+        <thead>
+            <tr><th>Criterion</th><th>Status</th><th>Weight</th></tr>
+        </thead>
+        <tbody>
+
+            <tr>
+                <td>distinguishes_quality</td>
+                <td><span class="status status-met">MET</span></td>
+                <td>+10.0</td>
+            </tr>
+
+            <tr>
+                <td>avoids_trivial</td>
+                <td><span class="status status-met">MET</span></td>
+                <td>+6.0</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <div class="section-title anti-pattern">Anti-Patterns (In-Context)</div>
+    <table class="section-table">
+        <thead>
+            <tr><th>Criterion</th><th>Status</th><th>Weight</th></tr>
+        </thead>
+        <tbody>
+
+            <tr>
+                <td>irrelevant_criteria</td>
+                <td><span class="status status-clear">CLEAR</span></td>
+                <td>-10.0</td>
+            </tr>
+
+            <tr>
+                <td>missing_critical</td>
+                <td><span class="status status-clear">CLEAR</span></td>
+                <td>-10.0</td>
+            </tr>
+
+            <tr>
+                <td>over_constrained</td>
+                <td><span class="status status-clear">CLEAR</span></td>
+                <td>-8.0</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <div class="section-title anti-pattern">LLM-Judge Anti-Patterns</div>
+    <table class="section-table">
+        <thead>
+            <tr><th>Criterion</th><th>Status</th><th>Weight</th></tr>
+        </thead>
+        <tbody>
+
+            <tr>
+                <td>no_negative_criteria</td>
+                <td><span class="status status-detected">DETECTED</span></td>
+                <td>-6.0</td>
+            </tr>
+
+            <tr>
+                <td>unfalsifiable_criteria</td>
+                <td><span class="status status-clear">CLEAR</span></td>
+                <td>-8.0</td>
+            </tr>
+
+            <tr>
+                <td>poorly_anchored_ordinal</td>
+                <td><span class="status status-clear">CLEAR</span></td>
+                <td>-6.0</td>
+            </tr>
+
+            <tr>
+                <td>counting_dependent</td>
+                <td><span class="status status-clear">CLEAR</span></td>
+                <td>-4.0</td>
+            </tr>
+
+            <tr>
+                <td>unanchored_grounding</td>
+                <td><span class="status status-detected">DETECTED</span></td>
+                <td>-8.0</td>
+            </tr>
+
+            <tr>
+                <td>proxy_gameable</td>
+                <td><span class="status status-clear">CLEAR</span></td>
+                <td>-8.0</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <div class="issues-header">
+        <h3>Issues Found</h3>
+        <p>Feedback for rubric improvement</p>
+    </div>
+
+    <div class="issue-card normal">
+        <div class="issue-card-header">
+            <span class="issue-name">unidimensional</span>
+            <span class="issue-section">Clarity &amp; Precision</span>
+        </div>
+        <div class="issue-reason">default: The rubric criteria are multi-barreled, conflating several distinct attributes within single scoring dimensions. For example, Criterion 1 combines &#x27;atomicity&#x27; (single assertion) with &#x27;linguistic precision&#x27; (avoiding vague terms), while Criterion 4 conflates &#x27;scientific status&#x27; (not settled/impossible) with &#x27;reasoning type&#x27; (cross-domain or forward-in-time projection). [Affects: #1, #4]</div>
+    </div>
+
+    <div class="issue-card normal">
+        <div class="issue-card-header">
+            <span class="issue-name">deterministic_assessability</span>
+            <span class="issue-section">Reliability Predictors</span>
+        </div>
+        <div class="issue-reason">default: The rubric includes criteria that require subjective judgment and external knowledge not present in the submission text. Specifically, Criterion 1 relies on a subjective prediction of how &#x27;different SMEs would interpret&#x27; the claim, and Criterion 3 requires external knowledge to determine if a claim &#x27;depends on inaccessible proprietary information.&#x27; [Affects: #1, #3, #4]</div>
+    </div>
+
+    <div class="issue-card anti-pattern">
+        <div class="issue-card-header">
+            <span class="issue-name">double_barreled</span>
+            <span class="issue-section">Anti-Patterns (Standalone)</span>
+        </div>
+        <div class="issue-reason">default: The submission contains criteria that bundle multiple distinct requirements into a single assessment. For example, Criterion 4 requires a claim to be nontrivial, plausible, not settled by consensus, not impossible, not already achieved, and require specific types of reasoning and projection. [Affects: #1, #2, #4]</div>
+    </div>
+
+    <div class="issue-card anti-pattern">
+        <div class="issue-card-header">
+            <span class="issue-name">overly_verbose</span>
+            <span class="issue-section">Anti-Patterns (Standalone)</span>
+        </div>
+        <div class="issue-reason">default: Criteria 3 and 4 contain redundant phrasing and exhaustive lists that could be significantly condensed without losing meaning. For instance, criterion 4 uses multiple clauses to describe a &#x27;nontrivial&#x27; claim that are largely synonymous. [Affects: #3, #4]</div>
+    </div>
+
+    <div class="issue-card anti-pattern">
+        <div class="issue-card-header">
+            <span class="issue-name">unanchored_subjectivity</span>
+            <span class="issue-section">Anti-Patterns (Standalone)</span>
+        </div>
+        <div class="issue-reason">default: The rubric relies on subjective and comparative terms such as &#x27;enough technical detail&#x27; (Criterion 2), &#x27;nontrivial reasoning&#x27; (Criterion 4), and &#x27;substantive ambiguity&#x27; (Criterion 1) without providing objective thresholds or reference points, forcing raters to apply personal standards. [Affects: #1, #2, #3, #4]</div>
+    </div>
+
+    <div class="issue-card anti-pattern">
+        <div class="issue-card-header">
+            <span class="issue-name">no_negative_criteria</span>
+            <span class="issue-section">LLM-Judge Anti-Patterns</span>
+        </div>
+        <div class="issue-reason">default: The rubric consists of four criteria (clear, specified, automatable, and projective), all of which are assigned a positive weight of 5.0. There are no negative-weight or penalty criteria included in the structure.</div>
+    </div>
+
+    <div class="issue-card anti-pattern">
+        <div class="issue-card-header">
+            <span class="issue-name">unanchored_grounding</span>
+            <span class="issue-section">LLM-Judge Anti-Patterns</span>
+        </div>
+        <div class="issue-reason">default: The rubric requires evaluators to verify claims against &#x27;existing scientific consensus&#x27; (Criterion 4) and the capabilities of an &#x27;automated AI feasibility system&#x27; (Criterion 3) without providing any external references, gold standards, or bounded audit procedures to define these benchmarks. This forces the evaluator to rely on an undefined external body of knowledge (scientific consensus) and an undefined technical standard (AI system capabilities), fitting manifestations (B) and (C) of the criterion. [Affects: #3, #4]</div>
+    </div>
+
+</body>
+</html>
