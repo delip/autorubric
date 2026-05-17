@@ -1,0 +1,135 @@
+{
+  "name": "csap",
+  "prompt": "You are evaluating the quality of a scientific feasibility CLAIM that will be used as an input to an automated scientific feasibility-assessment system. Important: you are NOT judging whether the claim is feasible — only whether the claim itself is well-formed for use as a benchmark item. A high-quality claim is clear (different SMEs would interpret it similarly), specified (enough detail to support decomposition into verifiable subclaims), automatable (amenable to automated analysis, simulation, or quantitative grounding), and projective (requires nontrivial reasoning beyond existing scientific consensus). Score the claim on each of the four CSAP criteria from 0 (worst) to 5 (best).",
+  "rubric": [
+    {
+      "name": "clear",
+      "weight": 5.0,
+      "requirement": "The claim minimizes ambiguity and supports consistent interpretation by different SMEs and automated feasibility systems. It states a single primary capability or feasibility assertion, avoids bundling multiple unrelated claims, and avoids undefined vague or overloaded terms such as 'better', 'advanced', 'robust', 'safe', 'effective', or 'scalable'.",
+      "scale_type": "ordinal",
+      "options": [
+        {
+          "label": "0 — Multiple unrelated assertions bundled together; pervasive undefined vague or overloaded terms; the core scientific or technological assertion cannot be identified.",
+          "value": 0.0
+        },
+        {
+          "label": "1 — Core assertion is barely identifiable; heavy reliance on overloaded or subjective language; SMEs would interpret it very differently.",
+          "value": 0.2
+        },
+        {
+          "label": "2 — A single assertion is discernible but substantive ambiguity remains; several undefined qualitative terms; SMEs would diverge on key elements.",
+          "value": 0.4
+        },
+        {
+          "label": "3 — Mostly a single clear assertion; minor ambiguities or one or two undefined qualitative terms; SMEs would agree on intent but differ on specifics.",
+          "value": 0.6
+        },
+        {
+          "label": "4 — Single, well-formulated capability assertion with at most isolated minor ambiguity; SMEs would largely agree on interpretation.",
+          "value": 0.8
+        },
+        {
+          "label": "5 — Unambiguous single capability assertion; no vague or overloaded terms; SMEs would interpret it essentially identically.",
+          "value": 1.0
+        }
+      ]
+    },
+    {
+      "name": "specified",
+      "weight": 5.0,
+      "requirement": "The claim contains enough technical detail to support decomposition into verifiable subclaims while still requiring meaningful reasoning and analysis. As relevant, it identifies the target capability or scientific outcome, the system/model/algorithm/process being assessed, the application context, the operating domain and conditions, quantitative thresholds or benchmarks, measurable success criteria, and relevant constraints (e.g., time, scale, environment, data regime, safety limits, resource assumptions). Specificity does not require every experimental detail, but the claim must provide enough structure for a feasibility system to know what must be assessed.",
+      "scale_type": "ordinal",
+      "options": [
+        {
+          "label": "0 — No technical detail; cannot be decomposed; target capability, system, context, and any measurable criterion are all absent.",
+          "value": 0.0
+        },
+        {
+          "label": "1 — Names a capability but no system or method, no context, and no measurable criterion; decomposition is essentially impossible.",
+          "value": 0.2
+        },
+        {
+          "label": "2 — Identifies a capability and minimal context, but key specifiers (system, success criteria, or constraints) are missing or unstated.",
+          "value": 0.4
+        },
+        {
+          "label": "3 — Several specifiers present (e.g., capability plus system or domain), but at least one important dimension (success criteria, constraints, or operating regime) is absent.",
+          "value": 0.6
+        },
+        {
+          "label": "4 — Most relevant specifiers present (capability, system or method, context, and at least one quantitative threshold or constraint); decomposition is straightforward.",
+          "value": 0.8
+        },
+        {
+          "label": "5 — All relevant specifiers present and well-formed: target capability, system or method, application context, operating conditions, measurable success criteria, and relevant constraints.",
+          "value": 1.0
+        }
+      ]
+    },
+    {
+      "name": "automatable",
+      "weight": 5.0,
+      "requirement": "The claim is formulated so that an automated AI feasibility system could gather evidence, perform analyses, run code, conduct simulations, query databases, reproduce experiments, or otherwise generate quantitative grounding relevant to the feasibility judgment — assessable by more than literature summarization alone. The claim should decompose into subclaims that map to evidence-gathering or computational tasks with measurable outputs (benchmarks, datasets, simulations, calculations, models, or experiments). A weakly automatable claim requires purely subjective expert judgment, depends on inaccessible proprietary information, lacks measurable outputs, is answerable only by broad literature review, or is framed as a policy, preference, market, or normative claim rather than a scientific feasibility claim.",
+      "scale_type": "ordinal",
+      "options": [
+        {
+          "label": "0 — Policy, preference, market, or normative claim, or purely subjective; cannot generate any computational evidence.",
+          "value": 0.0
+        },
+        {
+          "label": "1 — Answerable only by broad literature review; no measurable outputs; or depends on proprietary or inaccessible information.",
+          "value": 0.2
+        },
+        {
+          "label": "2 — Mostly retrievable from existing summaries; minimal opportunity for analysis, simulation, or computation.",
+          "value": 0.4
+        },
+        {
+          "label": "3 — Partially automatable: some subclaims map to computation or experiment, but a substantial portion still requires literature synthesis or subjective expert judgment.",
+          "value": 0.6
+        },
+        {
+          "label": "4 — Largely automatable: decomposes into evidence-gathering or computational tasks with measurable outputs; only minor pieces rely on expert judgment.",
+          "value": 0.8
+        },
+        {
+          "label": "5 — Fully automatable: decomposes cleanly into evidence-gathering and computational tasks (benchmarks, datasets, simulations, calculations, models, or experiments) yielding quantitative grounding beyond literature summarization.",
+          "value": 1.0
+        }
+      ]
+    },
+    {
+      "name": "projective",
+      "weight": 5.0,
+      "requirement": "The claim requires a nontrivial feasibility judgment that goes beyond simply confirming what is already known. It asks whether a not-yet-demonstrated capability is scientifically plausible under stated or inferable conditions, is not already settled by existing consensus, and is neither obviously impossible nor trivially already achieved. The claim should require reasoning from current evidence to a plausible but undemonstrated capability — assessing technical gaps, missing enablers, or scientific advances that would change the feasibility judgment — and should require projection either across scientific domains (extending known principles, methods, or results into a new domain, model class, operating regime, or application context) or forward in time (capability not feasible today but potentially feasible as enabling technologies mature).",
+      "scale_type": "ordinal",
+      "options": [
+        {
+          "label": "0 — Already settled by existing scientific consensus, or obviously impossible, or trivially already achieved; no projection required.",
+          "value": 0.0
+        },
+        {
+          "label": "1 — Answer is essentially a lookup from existing literature; minimal extension of known results.",
+          "value": 0.2
+        },
+        {
+          "label": "2 — Requires only modest extrapolation from well-established results within the same domain and current conditions.",
+          "value": 0.4
+        },
+        {
+          "label": "3 — Requires nontrivial reasoning but only one of {cross-domain projection, forward-in-time projection, technical-gap analysis}; partial novelty.",
+          "value": 0.6
+        },
+        {
+          "label": "4 — Requires substantive projection across domains or forward in time, with assessment of technical gaps or missing enablers.",
+          "value": 0.8
+        },
+        {
+          "label": "5 — Requires substantive projection across domains and/or forward in time, plus assessment of technical gaps and missing enablers, and reasoning from current evidence to a plausible but undemonstrated capability.",
+          "value": 1.0
+        }
+      ]
+    }
+  ],
+  "items": []
+}

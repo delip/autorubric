@@ -1,0 +1,413 @@
+{
+  "rubric": "csap.json",
+  "judge_model": "gemini/gemini-3-flash-preview",
+  "standalone": {
+    "score": 0.2857142857142857,
+    "raw_score": 24.0,
+    "mean_agreement": 1.0,
+    "completion_cost_usd": 0.1530025,
+    "token_usage": {
+      "prompt_tokens": 85634,
+      "completion_tokens": 43429,
+      "total_tokens": 129063,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 44670
+    },
+    "verdict_counts": {
+      "MET": 14,
+      "UNMET": 8
+    },
+    "per_criterion": [
+      {
+        "name": "clear_requirements",
+        "weight": 10.0,
+        "verdict": "MET",
+        "agreement": 1.0,
+        "reason": "default: Each of the four criteria in the rubric provides a detailed requirement section with specific definitions, checklists of necessary components (e.g., target capability, system, context), and explicit exclusions of vague language. [Affects: #1, #2, #3, #4]"
+      },
+      {
+        "name": "specific_actionable",
+        "weight": 10.0,
+        "verdict": "MET",
+        "agreement": 1.0,
+        "reason": "default: The criteria are highly specialized for evaluating scientific feasibility claims, providing detailed requirements and graduated scales that use concrete indicators (e.g., specific components like 'system/model/algorithm/process' or 'quantitative thresholds') rather than generic boilerplate. [Affects: #1, #2, #3, #4]"
+      },
+      {
+        "name": "unidimensional",
+        "weight": 10.0,
+        "verdict": "UNMET",
+        "agreement": 1.0,
+        "reason": "default: Several criteria in the rubric conflate multiple distinct attributes into a single requirement, making it difficult to score them independently. For example, Criterion 1 ('clear') assesses both the structural singularity of the claim and the linguistic precision of the terms used. [Affects: #1, #4]"
+      },
+      {
+        "name": "behavioral_language",
+        "weight": 8.0,
+        "verdict": "MET",
+        "agreement": 1.0,
+        "reason": "default: The rubric avoids vague adjectives like 'good' or 'excellent' and instead uses concrete, observable indicators such as 'SMEs would interpret it essentially identically', 'decomposes cleanly into evidence-gathering and computational tasks', and 'identifies the target capability, system, context, and measurable criterion'. [Affects: #1, #2, #3, #4]"
+      },
+      {
+        "name": "reasonable_count",
+        "weight": 6.0,
+        "verdict": "MET",
+        "agreement": 1.0,
+        "reason": "default: The submission contains 4 criteria ('clear', 'specified', 'automatable', and 'projective'), which falls within the recommended range of 3-15 for task rubrics."
+      },
+      {
+        "name": "balanced_weights",
+        "weight": 6.0,
+        "verdict": "MET",
+        "agreement": 1.0,
+        "reason": "default: The rubric assigns an equal weight of 5.0 to each of the four criteria (clear, specified, automatable, and projective), reflecting their balanced importance. The total weight sums to 20.0, which is a standard and meaningful total for a scoring system. [Affects: #1, #2, #3, #4]"
+      },
+      {
+        "name": "orthogonal_criteria",
+        "weight": 8.0,
+        "verdict": "MET",
+        "agreement": 1.0,
+        "reason": "default: The four criteria (Clear, Specified, Automatable, and Projective) address distinct dimensions of claim quality: linguistic clarity, technical completeness, methodological verifiability, and intellectual novelty, respectively. While related, they do not redundantly measure the same attributes; for example, a claim can be linguistically 'Clear' but lack the technical 'Specification' (quantitative thresholds) required for the second criterion."
+      },
+      {
+        "name": "independently_verifiable",
+        "weight": 10.0,
+        "verdict": "MET",
+        "agreement": 1.0,
+        "reason": "default: Each of the four criteria (clear, specified, automatable, and projective) contains its own distinct requirements and scoring levels that do not reference or depend on the results of the other criteria. For example, the 'automatable' criterion defines its own scale based on computational tasks without requiring a specific score from the 'clear' or 'specified' criteria. [Affects: #1, #2, #3, #4]"
+      },
+      {
+        "name": "objective_assessable",
+        "weight": 8.0,
+        "verdict": "MET",
+        "agreement": 1.0,
+        "reason": "default: The rubric uses highly objective requirements, such as the explicit list of forbidden vague terms in Criterion 1 ('better', 'advanced', 'robust', etc.) and the specific list of required technical specifiers in Criterion 2 (system, context, quantitative thresholds, etc.). These concrete checklists ensure that different raters can independently verify the presence or absence of specific elements, leading to consistent conclusions. [Affects: #1, #2, #3, #4]"
+      },
+      {
+        "name": "deterministic_assessability",
+        "weight": 8.0,
+        "verdict": "UNMET",
+        "agreement": 1.0,
+        "reason": "default: The rubric relies on subjective qualitative descriptors and requires evaluators to predict SME consensus, preventing deterministic assessment from the text alone. [Affects: #1, #2, #3, #4]"
+      },
+      {
+        "name": "double_barreled",
+        "weight": -8.0,
+        "verdict": "MET",
+        "agreement": 1.0,
+        "reason": "default: Several criteria bundle multiple distinct evaluative dimensions into a single requirement or scoring level. For example, Criterion 4 requires projection, gap assessment, and reasoning from evidence simultaneously, while Criterion 2 requires the presence of six distinct technical specifiers to reach the top score. [Affects: #2, #4]"
+      },
+      {
+        "name": "excessive_overlap",
+        "weight": -6.0,
+        "verdict": "MET",
+        "agreement": 1.0,
+        "reason": "default: The rubric exhibits substantial overlap across all criteria, leading to double-counting. Specifically, 'Specified' and 'Automatable' both require 'measurable success criteria/outputs' and 'decomposition into subclaims,' while 'Automatable' and 'Projective' both penalize claims that are 'answerable only by broad literature review' or a 'lookup from existing literature.' [Affects: #1, #2, #3, #4]"
+      },
+      {
+        "name": "overly_verbose",
+        "weight": -6.0,
+        "verdict": "MET",
+        "agreement": 1.0,
+        "reason": "default: The requirements for criteria 3 and 4 are unnecessarily long-winded, featuring significant repetition and overlapping definitions. For instance, criterion 4 uses multiple synonymous phrases to define the same concept of 'projection' (e.g., 'goes beyond simply confirming what is already known', 'not-yet-demonstrated', 'not already settled', 'undemonstrated'). [Affects: #3, #4]"
+      },
+      {
+        "name": "hedging_language",
+        "weight": -6.0,
+        "verdict": "UNMET",
+        "agreement": 1.0,
+        "reason": "default: The submission does not use hedging words to describe its requirements or options in a way that makes assessment difficult. While the word 'could' appears in Criterion 3 ('an automated AI feasibility system could gather evidence'), it is used to define the functional capability required for a claim to be considered automatable, rather than as a hedge that introduces ambiguity into the evaluation process."
+      },
+      {
+        "name": "generic_boilerplate",
+        "weight": -8.0,
+        "verdict": "UNMET",
+        "agreement": 1.0,
+        "reason": "default: The criteria are highly specialized for evaluating scientific feasibility claims, using domain-specific language such as 'automated AI feasibility system', 'cross-domain projection', and 'technical-gap analysis'. They are not generic or 'cookie-cutter' as they could not be applied to general tasks outside of this specific scientific/technological assessment context."
+      },
+      {
+        "name": "unanchored_subjectivity",
+        "weight": -8.0,
+        "verdict": "MET",
+        "agreement": 1.0,
+        "reason": "default: The rubric relies on subjective and comparative terms such as 'enough', 'meaningful', 'substantial', and 'nontrivial' across all criteria without providing objective reference points or operational thresholds, which leads to inconsistent rater interpretation. [Affects: #1, #2, #3, #4]"
+      },
+      {
+        "name": "no_negative_criteria",
+        "weight": -6.0,
+        "verdict": "MET",
+        "agreement": 1.0,
+        "reason": "default: The rubric consists of four criteria (clear, specified, automatable, projective), all of which have a positive weight of 5.0. There are no negative-weight or penalty criteria present in the submission."
+      },
+      {
+        "name": "unfalsifiable_criteria",
+        "weight": -8.0,
+        "verdict": "UNMET",
+        "agreement": 1.0,
+        "reason": "default: The rubric criteria are rigorous and discriminative, requiring specific structural and technical qualities (e.g., technical detail for decomposition, suitability for automated analysis, and nontrivial projection). None of the criteria award points for mere participation or trivial effort like 'attempting to address the topic'."
+      },
+      {
+        "name": "poorly_anchored_ordinal",
+        "weight": -6.0,
+        "verdict": "UNMET",
+        "agreement": 1.0,
+        "reason": "default: The rubric levels are defined using behavioral descriptions and concrete anchors (e.g., SME agreement, presence of specific technical components, or types of computational tasks) rather than simple evaluative adjectives. [Affects: #1, #2, #3, #4]"
+      },
+      {
+        "name": "counting_dependent",
+        "weight": -4.0,
+        "verdict": "UNMET",
+        "agreement": 1.0,
+        "reason": "default: The rubric focuses on semantic content and the presence of specific technical components (e.g., 'single primary capability', 'at least one quantitative threshold') rather than requiring the LLM to perform unreliable structural counting of paragraphs, sentences, or words. While Criterion 1 mentions 'one or two undefined qualitative terms', this refers to identifying specific vocabulary types within a claim (typically a short text), which is a semantic evaluation task rather than the type of structural/length constraint (like paragraph or word counts) that LLMs find unreliable."
+      },
+      {
+        "name": "unanchored_grounding",
+        "weight": -8.0,
+        "verdict": "MET",
+        "agreement": 1.0,
+        "reason": "default: Criteria 3 and 4 require the evaluator to verify the claim against external states of knowledge (e.g., 'scientific consensus', 'existing literature', 'proprietary information') without providing any reference sources or a bounded audit procedure. [Affects: #3, #4]"
+      },
+      {
+        "name": "proxy_gameable",
+        "weight": -8.0,
+        "verdict": "UNMET",
+        "agreement": 1.0,
+        "reason": "default: The rubric explicitly guards against surface-level proxies and assertions-without-evidence by penalizing vague terms like 'safe' or 'effective' in Criterion 1. It also includes a substantive quality gate in Criterion 4, which requires claims to be 'scientifically plausible' and based on 'reasoning from current evidence,' preventing top scores for claims that are merely well-formatted but substantively incorrect."
+      }
+    ]
+  },
+  "in_context": {
+    "score": 0.6086956521739131,
+    "raw_score": 84.0,
+    "mean_agreement": 1.0,
+    "completion_cost_usd": 0.1947445,
+    "token_usage": {
+      "prompt_tokens": 129146,
+      "completion_tokens": 51771,
+      "total_tokens": 180917,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 55870
+    },
+    "verdict_counts": {
+      "MET": 19,
+      "UNMET": 12
+    },
+    "per_criterion": [
+      {
+        "name": "clear_requirements",
+        "weight": 10.0,
+        "verdict": "MET",
+        "agreement": 1.0,
+        "reason": "default: Each of the four criteria (Clear, Specified, Automatable, Projective) provides a detailed requirement description and a 0-5 scale with specific descriptors for each level, enabling consistent application by raters. [Affects: #1, #2, #3, #4]"
+      },
+      {
+        "name": "specific_actionable",
+        "weight": 10.0,
+        "verdict": "MET",
+        "agreement": 1.0,
+        "reason": "default: The rubric criteria are highly specific to the task of authoring scientific feasibility claims, providing detailed requirements and concrete examples of what to avoid (e.g., specific vague terms like 'robust' or 'scalable') and what to include (e.g., 'target capability', 'system/model/algorithm/process', 'quantitative thresholds'). [Affects: #1, #2, #3, #4]"
+      },
+      {
+        "name": "unidimensional",
+        "weight": 10.0,
+        "verdict": "UNMET",
+        "agreement": 1.0,
+        "reason": "default: The rubric criteria are multi-barreled, conflating several distinct attributes within single scoring dimensions. For example, Criterion 1 combines 'atomicity' (single assertion) with 'linguistic precision' (avoiding vague terms), while Criterion 4 conflates 'scientific status' (not settled/impossible) with 'reasoning type' (cross-domain or forward-in-time projection). [Affects: #1, #4]"
+      },
+      {
+        "name": "behavioral_language",
+        "weight": 8.0,
+        "verdict": "MET",
+        "agreement": 1.0,
+        "reason": "default: The rubric avoids vague adjectives like 'good' or 'excellent' and instead uses concrete, observable indicators such as the degree of agreement between Subject Matter Experts (SMEs), the presence or absence of specific technical components (e.g., 'system', 'context', 'constraints'), and the ability of an automated system to decompose the claim into computational tasks. [Affects: #1, #2, #3, #4]"
+      },
+      {
+        "name": "reasonable_count",
+        "weight": 6.0,
+        "verdict": "MET",
+        "agreement": 1.0,
+        "reason": "default: The submission contains 4 criteria ('clear', 'specified', 'automatable', and 'projective'), which falls within the recommended range of 3-15 for task rubrics."
+      },
+      {
+        "name": "balanced_weights",
+        "weight": 6.0,
+        "verdict": "MET",
+        "agreement": 1.0,
+        "reason": "default: The rubric assigns an equal weight of 5.0 to each of the four core criteria (Clear, Specified, Automatable, Projective), reflecting their equal importance as defined in the task prompt. The weights sum to a meaningful total of 20.0, which provides a clear and standard scoring scale. [Affects: #1, #2, #3, #4]"
+      },
+      {
+        "name": "orthogonal_criteria",
+        "weight": 8.0,
+        "verdict": "MET",
+        "agreement": 1.0,
+        "reason": "default: The four criteria (Clear, Specified, Automatable, and Projective) target distinct dimensions of the claim: linguistic clarity, technical completeness, computational feasibility, and intellectual novelty. While related, they do not overlap; for example, a claim can be linguistically 'Clear' but lack the technical 'Specified' details, or be highly 'Specified' but not 'Projective' if the capability is already settled. [Affects: #1, #2, #3, #4]"
+      },
+      {
+        "name": "independently_verifiable",
+        "weight": 10.0,
+        "verdict": "MET",
+        "agreement": 1.0,
+        "reason": "default: Each of the four criteria (Clear, Specified, Automatable, and Projective) focuses on a distinct attribute of the scientific claim\u2014linguistic clarity, technical detail, computational feasibility, and scientific novelty, respectively\u2014without any instructions or definitions that require checking the score or content of another criterion. [Affects: #1, #2, #3, #4]"
+      },
+      {
+        "name": "objective_assessable",
+        "weight": 8.0,
+        "verdict": "MET",
+        "agreement": 1.0,
+        "reason": "default: The rubric uses highly objective indicators, such as the presence or absence of specific technical elements (target capability, system, context, thresholds) and the exclusion of specific forbidden terms ('better', 'robust', 'scalable'), which ensures high inter-rater reliability. [Affects: #1, #2, #3, #4]"
+      },
+      {
+        "name": "low_interpretation_variance",
+        "weight": 8.0,
+        "verdict": "MET",
+        "agreement": 1.0,
+        "reason": "default: The rubric grounds its requirements in task-specific observables, such as the presence of specific technical components (capability, system, context, thresholds) and the absence of specific forbidden words ('better', 'robust', 'scalable'). [Affects: #1, #2, #3]"
+      },
+      {
+        "name": "deterministic_assessability",
+        "weight": 8.0,
+        "verdict": "UNMET",
+        "agreement": 1.0,
+        "reason": "default: The rubric includes criteria that require subjective judgment and external knowledge not present in the submission text. Specifically, Criterion 1 relies on a subjective prediction of how 'different SMEs would interpret' the claim, and Criterion 3 requires external knowledge to determine if a claim 'depends on inaccessible proprietary information.' [Affects: #1, #3, #4]"
+      },
+      {
+        "name": "double_barreled",
+        "weight": -8.0,
+        "verdict": "MET",
+        "agreement": 1.0,
+        "reason": "default: The submission contains criteria that bundle multiple distinct requirements into a single assessment. For example, Criterion 4 requires a claim to be nontrivial, plausible, not settled by consensus, not impossible, not already achieved, and require specific types of reasoning and projection. [Affects: #1, #2, #4]"
+      },
+      {
+        "name": "excessive_overlap",
+        "weight": -6.0,
+        "verdict": "UNMET",
+        "agreement": 1.0,
+        "reason": "default: The rubric criteria are well-differentiated and align with the four distinct pillars of a high-quality claim defined in the task prompt (Clear, Specified, Automatable, Projective). While some criteria are logically related (e.g., a claim must be 'Specified' to be 'Automatable'), they measure distinct qualities: Index 1 focuses on linguistic precision and singularity; Index 2 on the presence of technical parameters; Index 3 on the methodology of verification (computational vs. subjective); and Index 4 on intellectual novelty and reasoning."
+      },
+      {
+        "name": "overly_verbose",
+        "weight": -6.0,
+        "verdict": "MET",
+        "agreement": 1.0,
+        "reason": "default: Criteria 3 and 4 contain redundant phrasing and exhaustive lists that could be significantly condensed without losing meaning. For instance, criterion 4 uses multiple clauses to describe a 'nontrivial' claim that are largely synonymous. [Affects: #3, #4]"
+      },
+      {
+        "name": "hedging_language",
+        "weight": -6.0,
+        "verdict": "UNMET",
+        "agreement": 1.0,
+        "reason": "default: The submission does not contain hedging words that make definitive assessment difficult. While the word 'could' appears in Criterion 3, it is used to define the functional capability required for a claim to be 'automatable' ('system could gather evidence') rather than as a hedge to avoid a definitive assessment of the claim's quality."
+      },
+      {
+        "name": "generic_boilerplate",
+        "weight": -8.0,
+        "verdict": "UNMET",
+        "agreement": 1.0,
+        "reason": "default: The rubric criteria are highly specialized and tailored to the specific task of authoring scientific feasibility claims. For instance, the 'Automatable' and 'Projective' criteria directly address the unique requirements of generating inputs for an automated feasibility-assessment system and the necessity of forward-looking scientific reasoning."
+      },
+      {
+        "name": "unanchored_subjectivity",
+        "weight": -8.0,
+        "verdict": "MET",
+        "agreement": 1.0,
+        "reason": "default: The rubric relies on subjective and comparative terms such as 'enough technical detail' (Criterion 2), 'nontrivial reasoning' (Criterion 4), and 'substantive ambiguity' (Criterion 1) without providing objective thresholds or reference points, forcing raters to apply personal standards. [Affects: #1, #2, #3, #4]"
+      },
+      {
+        "name": "task_aligned",
+        "weight": 12.0,
+        "verdict": "MET",
+        "agreement": 1.0,
+        "reason": "default: The rubric criteria (clear, specified, automatable, and projective) directly correspond to the four bulleted requirements and the negative constraints listed in the task prompt. [Affects: #1, #2, #3, #4]"
+      },
+      {
+        "name": "covers_key_aspects",
+        "weight": 10.0,
+        "verdict": "MET",
+        "agreement": 1.0,
+        "reason": "default: The rubric directly maps to the four primary requirements outlined in the task prompt: Clear (Criterion 1), Specified (Criterion 2), Automatable (Criterion 3), and Projective (Criterion 4). It also incorporates the 'Avoid' constraints, such as excluding bundled claims in Criterion 1 and policy/preference statements in Criterion 3. [Affects: #1, #2, #3, #4]"
+      },
+      {
+        "name": "appropriate_emphasis",
+        "weight": 8.0,
+        "verdict": "MET",
+        "agreement": 1.0,
+        "reason": "default: The task prompt defines four essential pillars for a high-quality claim (Clear, Specified, Automatable, and Projective). The rubric assigns an equal weight of 5.0 to each of these, correctly reflecting that they are all core requirements for the intended use case as a benchmark for automated systems. [Affects: #1, #2, #3, #4]"
+      },
+      {
+        "name": "distinguishes_quality",
+        "weight": 10.0,
+        "verdict": "MET",
+        "agreement": 1.0,
+        "reason": "default: Each criterion in the rubric uses specific, incremental descriptors that clearly distinguish between levels of quality. For example, Criterion 2 (Specified) uses a clear progression from 'all elements absent' (0) to 'names a capability but no system' (1) to 'most relevant specifiers present' (4) and 'all relevant specifiers present' (5). Criterion 4 (Projective) also uses logical discriminators such as 'only one of {cross-domain, forward-in-time, technical-gap}' versus requiring multiple elements. [Affects: #1, #2, #3, #4]"
+      },
+      {
+        "name": "avoids_trivial",
+        "weight": 6.0,
+        "verdict": "MET",
+        "agreement": 1.0,
+        "reason": "default: The rubric's criteria (Clear, Specified, Automatable, Projective) are all substantive and require specific, non-trivial qualities in a scientific feasibility claim. None of the requirements, such as providing measurable success criteria or ensuring the claim is amenable to computational analysis, are trivially satisfied or failed by a reasonable submission."
+      },
+      {
+        "name": "irrelevant_criteria",
+        "weight": -10.0,
+        "verdict": "UNMET",
+        "agreement": 1.0,
+        "reason": "default: All criteria in the rubric (clear, specified, automatable, and projective) directly correspond to the specific requirements for a high-quality scientific feasibility claim as outlined in the task prompt."
+      },
+      {
+        "name": "missing_critical",
+        "weight": -10.0,
+        "verdict": "UNMET",
+        "agreement": 1.0,
+        "reason": "default: The rubric comprehensively addresses all four critical aspects defined in the task prompt: Clear (Index 1), Specified (Index 2), Automatable (Index 3), and Projective (Index 4). It also explicitly incorporates the negative constraints, such as avoiding vague terms, policy statements, and consensus-settled facts."
+      },
+      {
+        "name": "over_constrained",
+        "weight": -8.0,
+        "verdict": "UNMET",
+        "agreement": 1.0,
+        "reason": "default: The rubric criteria are closely aligned with the requirements and examples provided in the task prompt. The specific details included in the rubric (such as examples of vague terms or types of technical specifiers) are reasonable elaborations of the prompt's instructions rather than unrequested mandates or external assumptions."
+      },
+      {
+        "name": "no_negative_criteria",
+        "weight": -6.0,
+        "verdict": "MET",
+        "agreement": 1.0,
+        "reason": "default: The rubric consists of four criteria (clear, specified, automatable, and projective), all of which are assigned a positive weight of 5.0. There are no negative-weight or penalty criteria included in the structure."
+      },
+      {
+        "name": "unfalsifiable_criteria",
+        "weight": -8.0,
+        "verdict": "UNMET",
+        "agreement": 1.0,
+        "reason": "default: The rubric does not contain any 'low bar' or unfalsifiable criteria. Each of the four criteria (Clear, Specified, Automatable, Projective) requires specific, high-level technical attributes and provides a scoring range that discriminates between poor and high-quality submissions based on technical detail and reasoning rather than mere effort."
+      },
+      {
+        "name": "poorly_anchored_ordinal",
+        "weight": -6.0,
+        "verdict": "UNMET",
+        "agreement": 1.0,
+        "reason": "default: The rubric avoids using simple evaluative adjectives like 'Excellent' or 'Poor' as level definitions. Instead, it provides detailed behavioral and structural descriptions for each level, such as 'SMEs would interpret it essentially identically' or 'Names a capability but no system or method'."
+      },
+      {
+        "name": "counting_dependent",
+        "weight": -4.0,
+        "verdict": "UNMET",
+        "agreement": 1.0,
+        "reason": "default: The rubric does not require the LLM to perform unreliable mechanical counts of structural units such as words, sentences, or paragraphs. While it uses small numbers to distinguish quality levels (e.g., 'one or two undefined qualitative terms' in Criterion 1), these refer to semantic features within a short, single-assertion claim, which does not trigger the reliability issues associated with counting discrete textual units in long-form content."
+      },
+      {
+        "name": "unanchored_grounding",
+        "weight": -8.0,
+        "verdict": "MET",
+        "agreement": 1.0,
+        "reason": "default: The rubric requires evaluators to verify claims against 'existing scientific consensus' (Criterion 4) and the capabilities of an 'automated AI feasibility system' (Criterion 3) without providing any external references, gold standards, or bounded audit procedures to define these benchmarks. This forces the evaluator to rely on an undefined external body of knowledge (scientific consensus) and an undefined technical standard (AI system capabilities), fitting manifestations (B) and (C) of the criterion. [Affects: #3, #4]"
+      },
+      {
+        "name": "proxy_gameable",
+        "weight": -8.0,
+        "verdict": "UNMET",
+        "agreement": 1.0,
+        "reason": "default: The rubric avoids surface-level proxies by defining specific technical components required for a high-quality claim (e.g., target capability, system, constraints) and explicitly penalizing vague qualitative terms like 'robust' or 'safe' (Criterion 1). It includes substantive quality gates, such as requiring scientific plausibility and the absence of obvious impossibility (Criterion 4), and ensures that 'enough detail' is defined by a specific list of necessary technical specifiers (Criterion 2) rather than mere verbosity."
+      }
+    ]
+  }
+}
