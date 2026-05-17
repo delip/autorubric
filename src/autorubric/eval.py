@@ -199,6 +199,7 @@ def _serialize_eval_config(config: EvalConfig) -> dict[str, Any]:
         "experiment_name": config.experiment_name,
         "experiments_dir": str(config.experiments_dir),
         "resume": config.resume,
+        "use_reference_submission": config.use_reference_submission,
     }
 
 
@@ -350,6 +351,12 @@ class EvalConfig:
             Default is "./experiments".
         resume: If True and experiment exists, resume from checkpoint.
             Default True.
+        use_reference_submission: If True (default), pass each item's
+            reference_submission (or the dataset-level one) to the grader so
+            the judge sees a `<reference_submission>` block. Set to False to
+            grade without any reference even when items carry one — useful for
+            reproducing baselines (e.g. simple-evals HealthBench parity)
+            where the original grader never received a reference.
     """
 
     fail_fast: bool = False
@@ -359,6 +366,7 @@ class EvalConfig:
     experiment_name: str | None = None
     experiments_dir: Path | str = "experiments"
     resume: bool = True
+    use_reference_submission: bool = True
 
 
 @dataclass
@@ -1181,8 +1189,13 @@ class EvalRunner:
 
         # Use per-item rubric if available, otherwise fall back to global
         effective_rubric = self.dataset.get_item_rubric(idx)
-        # Get effective reference submission (item-level takes precedence)
-        reference = self.dataset.get_item_reference_submission(idx)
+        # Get effective reference submission (item-level takes precedence).
+        # Honor EvalConfig.use_reference_submission so callers can grade
+        # without a reference even when items carry one.
+        if self.config.use_reference_submission:
+            reference = self.dataset.get_item_reference_submission(idx)
+        else:
+            reference = None
 
         try:
             report = await effective_rubric.grade(
