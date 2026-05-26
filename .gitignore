@@ -1,3 +1,6 @@
+# these can be generated
+examples/data/research-plan-gen/*.json
+
 future-work/
 CLAUDE.md
 AGENTS.md
@@ -196,3 +199,6 @@ cython_debug/
 .pypirc
 
 .DS_Storesite/
+
+# Raw parquet cache for research-plan-gen converter (scripts/convert_research_plan_gen.py)
+.cache/
