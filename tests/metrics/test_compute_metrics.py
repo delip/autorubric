@@ -339,3 +339,127 @@ class TestEvalResultMethod:
 
         assert isinstance(metrics, MetricsResult)
         assert metrics.criterion_accuracy == 1.0
+
+
+def create_single_criterion_dataset(ground_truths: list[list[CriterionVerdict]]):
+    """Create a single binary-criterion dataset with explicit ground truths.
+
+    Each element of ``ground_truths`` is a per-item list of one verdict.
+    """
+    rubric = Rubric([Criterion(name="Accuracy", weight=10.0, requirement="Be accurate")])
+    dataset = RubricDataset(prompt="Test prompt", rubric=rubric, name="test-single")
+    for idx, gt in enumerate(ground_truths):
+        dataset.add_item(
+            submission=f"Response {idx}",
+            description=f"Item {idx}",
+            ground_truth=gt,
+        )
+    return dataset
+
+
+class TestComputeMetricsCannotAssess:
+    """Tests for CANNOT_ASSESS handling, including the as_category mode (Issue #1)."""
+
+    CA = CriterionVerdict.CANNOT_ASSESS
+    MET = CriterionVerdict.MET
+    UNMET = CriterionVerdict.UNMET
+
+    def test_as_category_accepted_at_runtime(self):
+        """as_category must be accepted and return a MetricsResult (was unreachable)."""
+        dataset = create_single_criterion_dataset([[self.MET], [self.UNMET], [self.CA], [self.MET]])
+        predictions = [[self.MET], [self.CA], [self.CA], [self.UNMET]]
+        eval_result = create_mock_eval_result(dataset, predictions)
+
+        metrics = compute_metrics(eval_result, dataset, cannot_assess="as_category")
+
+        assert isinstance(metrics, MetricsResult)
+
+    def test_ca_vs_ca_counts_as_correct_under_as_category(self):
+        """A CA prediction matching a CA ground truth counts as a correct 3-class match."""
+        # Items: (MET,MET) match, (CA,CA) match under as_category, (UNMET,UNMET) match.
+        dataset = create_single_criterion_dataset([[self.MET], [self.CA], [self.UNMET]])
+        predictions = [[self.MET], [self.CA], [self.UNMET]]
+        eval_result = create_mock_eval_result(dataset, predictions)
+
+        metrics = compute_metrics(eval_result, dataset, cannot_assess="as_category")
+
+        # All three pairs agree as distinct classes -> perfect 3-class accuracy.
+        assert metrics.criterion_accuracy == 1.0
+        cm = metrics.per_criterion[0]
+        assert cm.accuracy == 1.0
+        assert cm.n_samples == 3
+
+    def test_as_category_differs_from_as_unmet(self):
+        """When truth is a real verdict but pred is CA, the two modes diverge."""
+        # truth: MET, UNMET ; pred: CA, CA
+        dataset = create_single_criterion_dataset([[self.MET], [self.UNMET]])
+        predictions = [[self.CA], [self.CA]]
+        eval_result = create_mock_eval_result(dataset, predictions)
+
+        cat = compute_metrics(eval_result, dataset, cannot_assess="as_category")
+        unmet = compute_metrics(eval_result, dataset, cannot_assess="as_unmet")
+
+        # as_category: pred=CA vs truth=MET (miss), pred=CA vs truth=UNMET (miss) -> 0.0
+        assert cat.criterion_accuracy == 0.0
+        # as_unmet: CA->UNMET, so (UNMET vs MET)=miss, (UNMET vs UNMET)=hit -> 0.5
+        assert unmet.criterion_accuracy == 0.5
+        # Distinct results prove the 3-class treatment is real.
+        assert cat.criterion_accuracy != unmet.criterion_accuracy
+
+    def test_three_class_kappa_and_accuracy_under_as_category(self):
+        """Per-criterion kappa/accuracy reflect three classes under as_category."""
+        # A mix exercising all three classes in both truth and pred.
+        gts = [[self.MET], [self.UNMET], [self.CA], [self.MET], [self.CA], [self.UNMET]]
+        preds = [[self.MET], [self.UNMET], [self.CA], [self.UNMET], [self.MET], [self.UNMET]]
+        dataset = create_single_criterion_dataset(gts)
+        eval_result = create_mock_eval_result(dataset, preds)
+
+        metrics = compute_metrics(eval_result, dataset, cannot_assess="as_category")
+        cm = metrics.per_criterion[0]
+
+        # No filtering -> all 6 samples retained.
+        assert cm.n_samples == 6
+        # 3-class accuracy: matches at indices 0,1,2,5 -> 4/6.
+        assert cm.accuracy == pytest.approx(4 / 6)
+        # Kappa is computed over 3 classes; it must be finite (not the undefined 0 fallback
+        # path) and reflect the partial agreement.
+        assert -1.0 <= cm.kappa <= 1.0
+        assert cm.kappa != 0.0
+
+    def test_exclude_unchanged(self):
+        """Regression: exclude drops CA pairs; numbers match hand computation."""
+        # truth: MET, UNMET, CA, MET ; pred: MET, CA, UNMET, UNMET
+        # exclude drops item1 (pred CA) and item2 (truth CA), leaving:
+        #   item0: MET/MET (hit), item3: truth MET / pred UNMET (miss) -> 2 samples, acc 0.5
+        dataset = create_single_criterion_dataset([[self.MET], [self.UNMET], [self.CA], [self.MET]])
+        predictions = [[self.MET], [self.CA], [self.UNMET], [self.UNMET]]
+        eval_result = create_mock_eval_result(dataset, predictions)
+
+        metrics = compute_metrics(eval_result, dataset, cannot_assess="exclude")
+        cm = metrics.per_criterion[0]
+
+        assert cm.n_samples == 2
+        assert cm.accuracy == 0.5
+        assert metrics.criterion_accuracy == 0.5
+        # MET-vs-rest support: truth MET among kept = item0,item3 -> 2; pred MET = item0 -> 1
+        assert cm.support_true == 2
+        assert cm.support_pred == 1
+
+    def test_as_unmet_unchanged(self):
+        """Regression: as_unmet collapses CA->UNMET; numbers match hand computation."""
+        # truth: MET, UNMET, CA, MET ; pred: MET, CA, UNMET, UNMET
+        # as_unmet: truth->[MET,UNMET,UNMET,MET], pred->[MET,UNMET,UNMET,UNMET]
+        #   matches: item0 hit, item1 hit, item2 hit, item3 miss -> 3/4 = 0.75
+        dataset = create_single_criterion_dataset([[self.MET], [self.UNMET], [self.CA], [self.MET]])
+        predictions = [[self.MET], [self.CA], [self.UNMET], [self.UNMET]]
+        eval_result = create_mock_eval_result(dataset, predictions)
+
+        metrics = compute_metrics(eval_result, dataset, cannot_assess="as_unmet")
+        cm = metrics.per_criterion[0]
+
+        assert cm.n_samples == 4
+        assert cm.accuracy == 0.75
+        assert metrics.criterion_accuracy == 0.75
+        # MET-vs-rest: truth MET = item0,item3 -> 2 ; pred MET = item0 -> 1
+        assert cm.support_true == 2
+        assert cm.support_pred == 1
