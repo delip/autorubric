@@ -37,36 +37,61 @@ def main() -> None:
     with THEME:
         fig, ax = plt.subplots(figsize=(5, 4))
 
-        bars_base = ax.bar(x - width / 2, BASELINE, width, label="Baseline",
-                           color=COLOR_BASELINE, edgecolor="0.95")
-        bars_cal = ax.bar(x + width / 2, CALIBRATED, width, label="Calibrated (3-shot)",
-                          color=COLOR_CALIBRATED, edgecolor="0.95")
+        bars_base = ax.bar(
+            x - width / 2, BASELINE, width, label="Baseline", color=COLOR_BASELINE, edgecolor="0.95"
+        )
+        bars_cal = ax.bar(
+            x + width / 2,
+            CALIBRATED,
+            width,
+            label="Calibrated (3-shot)",
+            color=COLOR_CALIBRATED,
+            edgecolor="0.95",
+        )
 
         # Accuracy annotations (with %)
-        ax.text(bars_base[0].get_x() + bars_base[0].get_width() / 2,
-                bars_base[0].get_height() + 1.5, "75.0%",
-                ha="center", va="bottom", fontsize=6)
-        ax.text(bars_cal[0].get_x() + bars_cal[0].get_width() / 2,
-                bars_cal[0].get_height() + 1.5, "90.0%",
-                ha="center", va="bottom", fontsize=6)
+        ax.text(
+            bars_base[0].get_x() + bars_base[0].get_width() / 2,
+            bars_base[0].get_height() + 1.5,
+            "75.0%",
+            ha="center",
+            va="bottom",
+            fontsize=6,
+        )
+        ax.text(
+            bars_cal[0].get_x() + bars_cal[0].get_width() / 2,
+            bars_cal[0].get_height() + 1.5,
+            "90.0%",
+            ha="center",
+            va="bottom",
+            fontsize=6,
+        )
 
         # Kappa annotations (original scale)
-        ax.text(bars_base[1].get_x() + bars_base[1].get_width() / 2,
-                bars_base[1].get_height() + 1.5, f"{KAPPA_BASELINE}",
-                ha="center", va="bottom", fontsize=6)
-        ax.text(bars_cal[1].get_x() + bars_cal[1].get_width() / 2,
-                bars_cal[1].get_height() + 1.5, f"{KAPPA_CALIBRATED}",
-                ha="center", va="bottom", fontsize=6)
+        ax.text(
+            bars_base[1].get_x() + bars_base[1].get_width() / 2,
+            bars_base[1].get_height() + 1.5,
+            f"{KAPPA_BASELINE}",
+            ha="center",
+            va="bottom",
+            fontsize=6,
+        )
+        ax.text(
+            bars_cal[1].get_x() + bars_cal[1].get_width() / 2,
+            bars_cal[1].get_height() + 1.5,
+            f"{KAPPA_CALIBRATED}",
+            ha="center",
+            va="bottom",
+            fontsize=6,
+        )
 
         ax.set_ylabel("Score")
         ax.set_xticks(x)
         ax.set_xticklabels(METRICS)
         ax.set_ylim(0, 105)
 
-        ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.01), ncol=2,
-                  frameon=False)
-        fig.suptitle("Few-Shot Calibration: Baseline vs Calibrated",
-                     fontweight="bold", y=0.98)
+        ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.01), ncol=2, frameon=False)
+        fig.suptitle("Few-Shot Calibration: Baseline vs Calibrated", fontweight="bold", y=0.98)
         fig.subplots_adjust(top=0.85)
 
         out = IMAGE_DIR / "fewshot-calibration-comparison.png"

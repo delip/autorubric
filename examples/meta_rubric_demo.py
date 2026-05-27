@@ -27,15 +27,16 @@ from autorubric.meta import (
 def load_sample_rubric() -> Rubric:
     """Load a sample rubric from the researcher_bench dataset for testing."""
     dataset_path = (
-        Path(__file__).parent.parent
-        / "researcher_bench/output/Claude_rubric_dataset.json"
+        Path(__file__).parent.parent / "researcher_bench/output/Claude_rubric_dataset.json"
     )
     if not dataset_path.exists():
-        return Rubric.from_dict([
-            {"weight": 10, "requirement": "Response is clear and well-organized"},
-            {"weight": 8, "requirement": "Response addresses the main question"},
-            {"weight": 5, "requirement": "Response is accurate and factual"},
-        ])
+        return Rubric.from_dict(
+            [
+                {"weight": 10, "requirement": "Response is clear and well-organized"},
+                {"weight": 8, "requirement": "Response addresses the main question"},
+                {"weight": 5, "requirement": "Response is accurate and factual"},
+            ]
+        )
 
     with open(dataset_path, encoding="utf-8") as f:
         data = json.load(f)
@@ -45,10 +46,12 @@ def load_sample_rubric() -> Rubric:
         if first_item.get("rubric"):
             return Rubric.from_dict(first_item["rubric"])
 
-    return Rubric.from_dict([
-        {"weight": 10, "requirement": "Response is clear and well-organized"},
-        {"weight": 8, "requirement": "Response addresses the main question"},
-    ])
+    return Rubric.from_dict(
+        [
+            {"weight": 10, "requirement": "Response is clear and well-organized"},
+            {"weight": 8, "requirement": "Response addresses the main question"},
+        ]
+    )
 
 
 async def main() -> None:
@@ -75,9 +78,7 @@ async def main() -> None:
         "large language models in healthcare, including benefits, risks, "
         "and ethical considerations."
     )
-    await evaluate_rubric_in_context(
-        sample_rubric, task_prompt, llm_config, display="stdout"
-    )
+    await evaluate_rubric_in_context(sample_rubric, task_prompt, llm_config, display="stdout")
 
 
 def verify_rubric_loading() -> None:

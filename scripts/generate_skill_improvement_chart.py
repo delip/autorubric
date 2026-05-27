@@ -53,8 +53,16 @@ def chart_convergence(data: dict) -> None:
     with THEME:
         fig, ax = plt.subplots(figsize=(5, 3.5))
 
-        ax.plot(iters, scores, marker="o", color=COLOR_TEAL, linewidth=1.8, markersize=5,
-                label="Improved skill", zorder=3)
+        ax.plot(
+            iters,
+            scores,
+            marker="o",
+            color=COLOR_TEAL,
+            linewidth=1.8,
+            markersize=5,
+            label="Improved skill",
+            zorder=3,
+        )
 
         for x, y in zip(iters, scores):
             # Place labels below for points near the top to avoid clipping
@@ -62,11 +70,18 @@ def chart_convergence(data: dict) -> None:
             va = "top" if y > 0.95 else "bottom"
             ax.text(x, y + offset, f"{y:.2f}", ha="center", va=va, fontsize=6)
 
-        ax.axhline(gold_score, linestyle="--", color=COLOR_AMBER, linewidth=1.2,
-                   label=f"Curated skill ({gold_score:.2f})")
+        ax.axhline(
+            gold_score,
+            linestyle="--",
+            color=COLOR_AMBER,
+            linewidth=1.2,
+            label=f"Curated skill ({gold_score:.2f})",
+        )
         ax.legend(
-            loc="lower center", bbox_to_anchor=(0.5, 1.01),
-            ncol=2, frameon=False,
+            loc="lower center",
+            bbox_to_anchor=(0.5, 1.01),
+            ncol=2,
+            frameon=False,
         )
 
         ax.set_xlabel("Iteration")
@@ -96,23 +111,39 @@ def chart_before_after(data: dict) -> None:
         fig, ax = plt.subplots(figsize=(8, 4))
 
         bars_v1 = ax.bar(
-            x - width / 2, v1_vals, width,
-            label="Preliminary Skill", color=COLOR_CORAL, edgecolor="0.95",
+            x - width / 2,
+            v1_vals,
+            width,
+            label="Preliminary Skill",
+            color=COLOR_CORAL,
+            edgecolor="0.95",
         )
         bars_improved = ax.bar(
-            x + width / 2, improved_vals, width,
-            label="Improved Skill", color=COLOR_TEAL, edgecolor="0.95",
+            x + width / 2,
+            improved_vals,
+            width,
+            label="Improved Skill",
+            color=COLOR_TEAL,
+            edgecolor="0.95",
         )
 
         for bar, val in zip(bars_v1, v1_vals):
             ax.text(
-                bar.get_x() + bar.get_width() / 2, bar.get_height() + 1,
-                f"{val:.0f}", ha="center", va="bottom", fontsize=5,
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height() + 1,
+                f"{val:.0f}",
+                ha="center",
+                va="bottom",
+                fontsize=5,
             )
         for bar, val in zip(bars_improved, improved_vals):
             ax.text(
-                bar.get_x() + bar.get_width() / 2, bar.get_height() + 1,
-                f"{val:.0f}", ha="center", va="bottom", fontsize=5,
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height() + 1,
+                f"{val:.0f}",
+                ha="center",
+                va="bottom",
+                fontsize=5,
             )
 
         ax.set_ylabel("Pass rate (%)")
@@ -120,8 +151,10 @@ def chart_before_after(data: dict) -> None:
         ax.set_xticks(x)
         ax.set_xticklabels(short_labels, rotation=25, ha="right")
         ax.legend(
-            loc="lower center", bbox_to_anchor=(0.5, 1.01),
-            ncol=2, frameon=False,
+            loc="lower center",
+            bbox_to_anchor=(0.5, 1.01),
+            ncol=2,
+            frameon=False,
         )
 
         _save(fig, "skill-improvement-before-after.png")
@@ -147,25 +180,45 @@ def chart_three_way(data: dict) -> None:
         fig, ax = plt.subplots(figsize=(10, 4.5))
 
         bars_v1 = ax.bar(
-            x - width, v1_vals, width,
-            label="Preliminary Skill", color=COLOR_GRAY, edgecolor="0.95",
+            x - width,
+            v1_vals,
+            width,
+            label="Preliminary Skill",
+            color=COLOR_GRAY,
+            edgecolor="0.95",
         )
         bars_improved = ax.bar(
-            x, improved_vals, width,
-            label="Improved Skill", color=COLOR_AMBER, edgecolor="0.95",
+            x,
+            improved_vals,
+            width,
+            label="Improved Skill",
+            color=COLOR_AMBER,
+            edgecolor="0.95",
         )
         bars_gold = ax.bar(
-            x + width, gold_vals, width,
-            label="Curated Skill", color=COLOR_TEAL, edgecolor="0.95",
+            x + width,
+            gold_vals,
+            width,
+            label="Curated Skill",
+            color=COLOR_TEAL,
+            edgecolor="0.95",
         )
 
         # Only annotate values that differ from 100 to reduce clutter
-        for bars, vals in [(bars_v1, v1_vals), (bars_improved, improved_vals), (bars_gold, gold_vals)]:
+        for bars, vals in [
+            (bars_v1, v1_vals),
+            (bars_improved, improved_vals),
+            (bars_gold, gold_vals),
+        ]:
             for bar, val in zip(bars, vals):
                 if val != 100:
                     ax.text(
-                        bar.get_x() + bar.get_width() / 2, max(bar.get_height(), 1) + 1,
-                        f"{val:.0f}", ha="center", va="bottom", fontsize=5,
+                        bar.get_x() + bar.get_width() / 2,
+                        max(bar.get_height(), 1) + 1,
+                        f"{val:.0f}",
+                        ha="center",
+                        va="bottom",
+                        fontsize=5,
                     )
 
         ax.set_ylabel("Pass rate (%)")
@@ -173,8 +226,10 @@ def chart_three_way(data: dict) -> None:
         ax.set_xticks(x)
         ax.set_xticklabels(short_labels, rotation=25, ha="right")
         ax.legend(
-            loc="lower center", bbox_to_anchor=(0.5, 1.01),
-            ncol=3, frameon=False,
+            loc="lower center",
+            bbox_to_anchor=(0.5, 1.01),
+            ncol=3,
+            frameon=False,
         )
 
         _save(fig, "skill-improvement-three-way.png")

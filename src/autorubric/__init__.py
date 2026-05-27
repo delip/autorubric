@@ -1,6 +1,15 @@
-from importlib.metadata import version, PackageNotFoundError
+from importlib.metadata import PackageNotFoundError, version
 
 from autorubric.dataset import DataItem, RubricDataset
+from autorubric.eval import (
+    EvalConfig,
+    EvalResult,
+    EvalRunner,
+    EvalTimingStats,
+    ExperimentManifest,
+    ItemResult,
+    evaluate,
+)
 from autorubric.llm import (
     ErrorCategory,
     GenerateResult,
@@ -13,10 +22,50 @@ from autorubric.llm import (
     classify_grading_error,
     generate,
 )
+from autorubric.meta import (
+    ImprovementConfig,
+    ImprovementResult,
+    ImprovementRunner,
+    IssueDetail,
+    IterationResult,
+    evaluate_rubric_in_context,
+    evaluate_rubric_standalone,
+    get_in_context_meta_rubric,
+    get_standalone_meta_rubric,
+    improve_rubric,
+)
+from autorubric.metrics import (
+    # Result types
+    BiasResult,
+    BootstrapResult,
+    BootstrapResults,
+    CannotAssessMode,
+    ConfidenceInterval,
+    CorrelationResult,
+    CriterionMetrics,
+    DistributionResult,
+    EMDResult,
+    JudgeMetrics,
+    KSTestResult,
+    MetricsResult,
+    # Main interface
+    compute_metrics,
+    # Distribution metrics (unique to autorubric)
+    earth_movers_distance,
+    # Helpers
+    extract_verdicts_from_report,
+    filter_cannot_assess,
+    ks_test,
+    score_distribution,
+    systematic_bias,
+    verdict_to_binary,
+    verdict_to_string,
+    wasserstein_distance,
+)
 from autorubric.rubric import Rubric
 from autorubric.types import (
-    AggregationStrategy,
     AggregatedMultiChoiceVerdict,
+    AggregationStrategy,
     CannotAssessConfig,
     CannotAssessStrategy,
     CountFn,
@@ -32,8 +81,8 @@ from autorubric.types import (
     FewShotExample,
     JudgeVote,
     LengthPenalty,
-    MultiChoiceJudgment,
     MultiChoiceJudgeVote,
+    MultiChoiceJudgment,
     MultiChoiceVerdict,
     NominalAggregation,
     OrdinalAggregation,
@@ -52,55 +101,6 @@ from autorubric.utils import (
     normalize_to_grade_input,
     parse_thinking_output,
     word_count,
-)
-from autorubric.eval import (
-    EvalConfig,
-    EvalResult,
-    EvalRunner,
-    EvalTimingStats,
-    ExperimentManifest,
-    ItemResult,
-    evaluate,
-)
-from autorubric.metrics import (
-    # Main interface
-    compute_metrics,
-    # Result types
-    BiasResult,
-    BootstrapResult,
-    BootstrapResults,
-    CannotAssessMode,
-    ConfidenceInterval,
-    CorrelationResult,
-    CriterionMetrics,
-    DistributionResult,
-    EMDResult,
-    JudgeMetrics,
-    KSTestResult,
-    MetricsResult,
-    # Distribution metrics (unique to autorubric)
-    earth_movers_distance,
-    wasserstein_distance,
-    ks_test,
-    score_distribution,
-    systematic_bias,
-    # Helpers
-    extract_verdicts_from_report,
-    filter_cannot_assess,
-    verdict_to_binary,
-    verdict_to_string,
-)
-from autorubric.meta import (
-    ImprovementConfig,
-    ImprovementResult,
-    ImprovementRunner,
-    IssueDetail,
-    IterationResult,
-    evaluate_rubric_in_context,
-    evaluate_rubric_standalone,
-    get_in_context_meta_rubric,
-    get_standalone_meta_rubric,
-    improve_rubric,
 )
 
 # Global debug flag — when True, prints fully constructed LLM prompts before each call

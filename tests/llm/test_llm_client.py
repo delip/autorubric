@@ -1,7 +1,6 @@
 """Tests for LLMClient class."""
 
 import tempfile
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -261,7 +260,9 @@ class TestLLMClientGenerate:
             cache_key = client._cache_key("openai/gpt-5.2", "System", "User", None)
             client._cache.set(cache_key, "cached response")
 
-            with patch("autorubric.llm.litellm.acompletion", new_callable=AsyncMock) as mock_completion:
+            with patch(
+                "autorubric.llm.litellm.acompletion", new_callable=AsyncMock
+            ) as mock_completion:
                 result = await client.generate(
                     system_prompt="System",
                     user_prompt="User",
@@ -383,7 +384,9 @@ class TestLLMClientGenerate:
             mock_response = MagicMock()
             mock_response.choices = [mock_choice]
 
-            with patch("autorubric.llm.litellm.acompletion", new_callable=AsyncMock) as mock_completion:
+            with patch(
+                "autorubric.llm.litellm.acompletion", new_callable=AsyncMock
+            ) as mock_completion:
                 mock_completion.return_value = mock_response
 
                 # Force cache usage

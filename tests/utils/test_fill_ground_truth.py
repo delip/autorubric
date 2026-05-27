@@ -1,6 +1,6 @@
 """Tests for fill_ground_truth utility function."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -14,8 +14,8 @@ from autorubric.dataset import DataItem, RubricDataset
 from autorubric.types import (
     CriterionReport,
     EnsembleCriterionReport,
-    EvaluationReport,
     EnsembleEvaluationReport,
+    EvaluationReport,
     MultiChoiceVerdict,
 )
 from autorubric.utils import fill_ground_truth
@@ -347,9 +347,7 @@ async def test_fill_ground_truth_with_concurrency_limit(binary_rubric, binary_cr
     dataset = RubricDataset(
         prompt="Evaluate the response",
         rubric=binary_rubric,
-        items=[
-            DataItem(submission=f"Response {i}", description=f"Item {i}") for i in range(5)
-        ],
+        items=[DataItem(submission=f"Response {i}", description=f"Item {i}") for i in range(5)],
         name="test",
     )
 

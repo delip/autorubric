@@ -135,17 +135,24 @@ async def test_per_criterion_grader_with_negative_criterion_unmet(sample_rubric,
         assert report.score == pytest.approx(1.0)
         assert report.report is not None
         verdicts = [criterion.final_verdict for criterion in report.report]
-        assert verdicts == [CriterionVerdict.MET, CriterionVerdict.MET, CriterionVerdict.MET, CriterionVerdict.UNMET]
+        assert verdicts == [
+            CriterionVerdict.MET,
+            CriterionVerdict.MET,
+            CriterionVerdict.MET,
+            CriterionVerdict.UNMET,
+        ]
 
 
 @pytest.mark.asyncio
 async def test_all_negative_criteria_all_unmet_returns_perfect_score(mock_llm_config):
     """All-negative rubric with no errors present should return 1.0."""
-    rubric = Rubric([
-        Criterion(weight=-1.0, requirement="Contains factual errors"),
-        Criterion(weight=-1.0, requirement="Contains profanity"),
-        Criterion(weight=-1.0, requirement="Contains harmful content"),
-    ])
+    rubric = Rubric(
+        [
+            Criterion(weight=-1.0, requirement="Contains factual errors"),
+            Criterion(weight=-1.0, requirement="Contains profanity"),
+            Criterion(weight=-1.0, requirement="Contains harmful content"),
+        ]
+    )
 
     async def mock_generate(
         system_prompt: str,
@@ -178,11 +185,13 @@ async def test_all_negative_criteria_all_unmet_returns_perfect_score(mock_llm_co
 @pytest.mark.asyncio
 async def test_all_negative_criteria_all_met_returns_zero_score(mock_llm_config):
     """All-negative rubric with all errors present should return 0.0."""
-    rubric = Rubric([
-        Criterion(weight=-1.0, requirement="Contains factual errors"),
-        Criterion(weight=-1.0, requirement="Contains profanity"),
-        Criterion(weight=-1.0, requirement="Contains harmful content"),
-    ])
+    rubric = Rubric(
+        [
+            Criterion(weight=-1.0, requirement="Contains factual errors"),
+            Criterion(weight=-1.0, requirement="Contains profanity"),
+            Criterion(weight=-1.0, requirement="Contains harmful content"),
+        ]
+    )
 
     async def mock_generate(
         system_prompt: str,
@@ -215,11 +224,13 @@ async def test_all_negative_criteria_all_met_returns_zero_score(mock_llm_config)
 @pytest.mark.asyncio
 async def test_all_negative_criteria_partial_errors_returns_partial_score(mock_llm_config):
     """All-negative rubric with some errors should return partial score."""
-    rubric = Rubric([
-        Criterion(weight=-1.0, requirement="Contains factual errors"),
-        Criterion(weight=-1.0, requirement="Contains profanity"),
-        Criterion(weight=-1.0, requirement="Contains harmful content"),
-    ])
+    rubric = Rubric(
+        [
+            Criterion(weight=-1.0, requirement="Contains factual errors"),
+            Criterion(weight=-1.0, requirement="Contains profanity"),
+            Criterion(weight=-1.0, requirement="Contains harmful content"),
+        ]
+    )
 
     call_count = 0
 
@@ -263,10 +274,12 @@ async def test_all_negative_criteria_partial_errors_returns_partial_score(mock_l
 @pytest.mark.asyncio
 async def test_all_negative_criteria_with_different_weights(mock_llm_config):
     """All-negative rubric with varying weights should weight errors appropriately."""
-    rubric = Rubric([
-        Criterion(weight=-2.0, requirement="Contains major factual errors"),
-        Criterion(weight=-1.0, requirement="Contains minor typos"),
-    ])
+    rubric = Rubric(
+        [
+            Criterion(weight=-2.0, requirement="Contains major factual errors"),
+            Criterion(weight=-1.0, requirement="Contains minor typos"),
+        ]
+    )
 
     call_count = 0
 
@@ -320,12 +333,14 @@ async def test_parse_failure_no_bias_with_negative_heavy_rubric(mock_llm_config)
     ensuring parse failures result in worst-case scores.
     """
     # Rubric with mostly negative criteria (error detection focused)
-    rubric = Rubric([
-        Criterion(weight=1.0, requirement="Is helpful"),
-        Criterion(weight=-1.0, requirement="Contains factual errors"),
-        Criterion(weight=-1.0, requirement="Contains harmful content"),
-        Criterion(weight=-1.0, requirement="Contains profanity"),
-    ])
+    rubric = Rubric(
+        [
+            Criterion(weight=1.0, requirement="Is helpful"),
+            Criterion(weight=-1.0, requirement="Contains factual errors"),
+            Criterion(weight=-1.0, requirement="Contains harmful content"),
+            Criterion(weight=-1.0, requirement="Contains profanity"),
+        ]
+    )
 
     mock_client = MagicMock()
     mock_client.generate = AsyncMock(side_effect=Exception("Cannot evaluate"))
@@ -356,10 +371,12 @@ async def test_parse_failure_no_bias_with_negative_heavy_rubric(mock_llm_config)
 @pytest.mark.asyncio
 async def test_parse_failure_all_negative_rubric_returns_zero(mock_llm_config):
     """All-negative rubric with parse failures should return 0.0 (worst case)."""
-    rubric = Rubric([
-        Criterion(weight=-1.0, requirement="Contains errors"),
-        Criterion(weight=-1.0, requirement="Contains harmful content"),
-    ])
+    rubric = Rubric(
+        [
+            Criterion(weight=-1.0, requirement="Contains errors"),
+            Criterion(weight=-1.0, requirement="Contains harmful content"),
+        ]
+    )
 
     mock_client = MagicMock()
     mock_client.generate = AsyncMock(side_effect=Exception("Invalid response"))
@@ -380,11 +397,13 @@ async def test_parse_failure_all_negative_rubric_returns_zero(mock_llm_config):
 @pytest.mark.asyncio
 async def test_criterion_name_propagates_to_report(mock_llm_config):
     """Test that Criterion.name is propagated to CriterionReport."""
-    rubric = Rubric([
-        Criterion(name="accuracy", weight=2.0, requirement="Is factually accurate"),
-        Criterion(name="clarity", weight=1.0, requirement="Is clearly written"),
-        Criterion(weight=1.0, requirement="No name criterion"),  # name=None
-    ])
+    rubric = Rubric(
+        [
+            Criterion(name="accuracy", weight=2.0, requirement="Is factually accurate"),
+            Criterion(name="clarity", weight=1.0, requirement="Is clearly written"),
+            Criterion(weight=1.0, requirement="No name criterion"),  # name=None
+        ]
+    )
 
     async def mock_generate(
         system_prompt: str,

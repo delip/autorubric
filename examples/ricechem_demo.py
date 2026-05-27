@@ -137,9 +137,7 @@ def build_grader(
             few_shot_config=few_shot_config,
         )
         config_str = f"ensemble:{':'.join(ENSEMBLE_MODELS)}"
-        model_label = (
-            f"Ensemble ({', '.join(m.split('/')[-1] for m in ENSEMBLE_MODELS)})"
-        )
+        model_label = f"Ensemble ({', '.join(m.split('/')[-1] for m in ENSEMBLE_MODELS)})"
     else:
         llm_config = LLMConfig(
             model=MODEL,
@@ -156,9 +154,7 @@ def build_grader(
             training_data=training_data,
             few_shot_config=few_shot_config,
         )
-        config_str = (
-            f"{MODEL}:t={llm_config.temperature}:thinking={llm_config.thinking}"
-        )
+        config_str = f"{MODEL}:t={llm_config.temperature}:thinking={llm_config.thinking}"
         model_label = MODEL
 
     if training_data is not None:
@@ -279,12 +275,9 @@ async def main():
     # Cost summary
     total_cost = sum(r[0].total_completion_cost or 0 for r in all_results)
     total_tokens = sum(
-        (r[0].total_token_usage.total_tokens if r[0].total_token_usage else 0)
-        for r in all_results
+        (r[0].total_token_usage.total_tokens if r[0].total_token_usage else 0) for r in all_results
     )
-    errors = sum(
-        sum(1 for ir in r[0].item_results if ir.error is not None) for r in all_results
-    )
+    errors = sum(sum(1 for ir in r[0].item_results if ir.error is not None) for r in all_results)
     print(f"\nTotal cost: ${total_cost:.4f}")
     print(f"Total tokens: {total_tokens:,}")
     if errors:

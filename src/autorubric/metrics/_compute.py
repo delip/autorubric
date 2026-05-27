@@ -6,7 +6,6 @@ comprehensive evaluation metrics from an EvalResult and RubricDataset.
 
 from __future__ import annotations
 
-import warnings
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
@@ -23,19 +22,15 @@ from sklearn.metrics import (
 )
 
 from ..types import Criterion, CriterionVerdict
-
 from ._helpers import (
     classify_criteria,
     extract_all_verdicts_from_report,
-    extract_verdicts_from_report,
     filter_na_multi_choice,
     get_option_value,
     resolve_ground_truth,
 )
 from ._types import (
-    BiasResult,
     BootstrapResults,
-    ConfidenceInterval,
     CorrelationResult,
     CriterionMetrics,
     CriterionMetricsUnion,
@@ -211,9 +206,7 @@ def _compute_adjacent_accuracy(
     if not pred_indices:
         return 0.0
 
-    adjacent_correct = sum(
-        1 for p, t in zip(pred_indices, true_indices) if abs(p - t) <= 1
-    )
+    adjacent_correct = sum(1 for p, t in zip(pred_indices, true_indices) if abs(p - t) <= 1)
     return adjacent_correct / len(pred_indices)
 
 
@@ -310,9 +303,7 @@ def _compute_ordinal_criterion_metrics(
 
     # Weighted kappa (quadratic weights for ordinal)
     try:
-        weighted_kappa = cohen_kappa_score(
-            true_indices, pred_indices, weights="quadratic"
-        )
+        weighted_kappa = cohen_kappa_score(true_indices, pred_indices, weights="quadratic")
     except Exception:
         weighted_kappa = 0.0
 
@@ -439,9 +430,7 @@ def _verdict_to_binary(verdict: CriterionVerdict) -> int:
     return 1 if verdict == CriterionVerdict.MET else 0
 
 
-def _compute_correlation(
-    x: list[float], y: list[float], method: str
-) -> CorrelationResult:
+def _compute_correlation(x: list[float], y: list[float], method: str) -> CorrelationResult:
     """Compute correlation with interpretation."""
     if len(x) < 3:
         return CorrelationResult(
@@ -617,8 +606,8 @@ def _compute_judge_metrics(
 
 
 def compute_metrics(
-    eval_result: "EvalResult",
-    dataset: "RubricDataset",
+    eval_result: EvalResult,
+    dataset: RubricDataset,
     *,
     bootstrap: bool = False,
     n_bootstrap: int = 1000,
@@ -672,15 +661,11 @@ def compute_metrics(
 
     missing = dataset_indices - eval_indices
     if missing:
-        result_warnings.append(
-            f"{len(missing)} items from dataset not found in eval_result"
-        )
+        result_warnings.append(f"{len(missing)} items from dataset not found in eval_result")
 
     extra = eval_indices - dataset_indices
     if extra:
-        result_warnings.append(
-            f"{len(extra)} items in eval_result not in dataset"
-        )
+        result_warnings.append(f"{len(extra)} items in eval_result not in dataset")
 
     # Use intersection
     common_indices = sorted(dataset_indices & eval_indices)
@@ -963,9 +948,7 @@ def compute_metrics(
             criterion_kappas.append(metrics.kappa)
 
     # Aggregate metrics
-    mean_kappa = (
-        sum(criterion_kappas) / len(criterion_kappas) if criterion_kappas else 0.0
-    )
+    mean_kappa = sum(criterion_kappas) / len(criterion_kappas) if criterion_kappas else 0.0
 
     # Binary-only aggregate metrics (precision/recall/f1 only make sense for binary)
     if binary_pred_flat:

@@ -64,12 +64,8 @@ async def main():
     print("=" * 80)
     print(f"\nPrompt: {dataset.prompt}\n")
     print(f"Rubric Criteria (total positive weight: {dataset.total_positive_weight}):")
-    for i, (criterion, name) in enumerate(
-        zip(dataset.rubric.rubric, dataset.criterion_names)
-    ):
-        weight_str = (
-            f"+{criterion.weight}" if criterion.weight > 0 else str(criterion.weight)
-        )
+    for i, (criterion, name) in enumerate(zip(dataset.rubric.rubric, dataset.criterion_names)):
+        weight_str = f"+{criterion.weight}" if criterion.weight > 0 else str(criterion.weight)
         print(f"  {i + 1}. {name:10} [{weight_str:>6}]")
     print("\n" + "-" * 80)
 
@@ -122,9 +118,7 @@ async def main():
 
         if result.token_usage:
             usage = result.token_usage
-            cost_str = (
-                f"${result.completion_cost:.6f}" if result.completion_cost else "N/A"
-            )
+            cost_str = f"${result.completion_cost:.6f}" if result.completion_cost else "N/A"
             print(
                 f"  LLM Usage: {usage.total_tokens:,} tokens "
                 f"(prompt: {usage.prompt_tokens:,}, completion: {usage.completion_tokens:,})"
@@ -141,9 +135,7 @@ async def main():
         pred = item_result.report.score
         actual = dataset.compute_weighted_score(item.ground_truth)
         error = abs(pred - actual)
-        print(
-            f"{item_result.item_idx + 1:<10} {pred:>12.3f} {actual:>12.3f} {error:>12.3f}"
-        )
+        print(f"{item_result.item_idx + 1:<10} {pred:>12.3f} {actual:>12.3f} {error:>12.3f}")
 
     # EvalRunner timing stats
     print("\n" + "-" * 80)
@@ -171,9 +163,7 @@ async def main():
         print(f"  Completion tokens: {total_usage.completion_tokens:>12,}")
         print(f"  Total tokens:      {total_usage.total_tokens:>12,}")
         if total_usage.cache_creation_input_tokens > 0:
-            print(
-                f"  Cache created:     {total_usage.cache_creation_input_tokens:>12,}"
-            )
+            print(f"  Cache created:     {total_usage.cache_creation_input_tokens:>12,}")
         if total_usage.cache_read_input_tokens > 0:
             print(f"  Cache hits:        {total_usage.cache_read_input_tokens:>12,}")
         print(f"\nTotal Cost: ${total_cost:.6f}" if total_cost else "\nTotal Cost: N/A")

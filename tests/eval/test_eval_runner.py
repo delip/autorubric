@@ -42,10 +42,12 @@ from autorubric.types import (
 @pytest.fixture
 def sample_dataset() -> RubricDataset:
     """Create a sample dataset for testing."""
-    rubric = Rubric([
-        Criterion(name="accuracy", weight=10.0, requirement="Is factually accurate"),
-        Criterion(name="clarity", weight=5.0, requirement="Is clearly written"),
-    ])
+    rubric = Rubric(
+        [
+            Criterion(name="accuracy", weight=10.0, requirement="Is factually accurate"),
+            Criterion(name="clarity", weight=5.0, requirement="Is clearly written"),
+        ]
+    )
     dataset = RubricDataset(
         prompt="Explain a concept",
         rubric=rubric,
@@ -315,9 +317,7 @@ class TestItemResult:
                 reason="Too verbose",
             ),
         ]
-        report = EvaluationReport(
-            score=0.67, raw_score=10.0, report=criterion_reports
-        )
+        report = EvaluationReport(score=0.67, raw_score=10.0, report=criterion_reports)
         result = ItemResult(item_idx=0, item=item, report=report, duration_seconds=1.0)
 
         d = result.to_dict()
@@ -370,12 +370,8 @@ class TestItemResult:
             final_verdict=CriterionVerdict.MET,
             final_reason="Both agree",
             votes=[
-                JudgeVote(
-                    judge_id="j1", verdict=CriterionVerdict.MET, reason="Yes", weight=1.0
-                ),
-                JudgeVote(
-                    judge_id="j2", verdict=CriterionVerdict.MET, reason="Agree", weight=1.0
-                ),
+                JudgeVote(judge_id="j1", verdict=CriterionVerdict.MET, reason="Yes", weight=1.0),
+                JudgeVote(judge_id="j2", verdict=CriterionVerdict.MET, reason="Agree", weight=1.0),
             ],
             agreement=1.0,
         )
@@ -878,13 +874,12 @@ class TestManifestSeedPersistence:
 
     @pytest.fixture
     def sample_dataset(self):
-        items = [
-            DataItem(submission=f"Answer {i}", description=f"Item {i}")
-            for i in range(2)
-        ]
-        rubric = Rubric(rubric=[
-            Criterion(weight=10.0, requirement="Is the answer correct?"),
-        ])
+        items = [DataItem(submission=f"Answer {i}", description=f"Item {i}") for i in range(2)]
+        rubric = Rubric(
+            rubric=[
+                Criterion(weight=10.0, requirement="Is the answer correct?"),
+            ]
+        )
         return RubricDataset(
             name="seed-test",
             prompt="Test prompt",

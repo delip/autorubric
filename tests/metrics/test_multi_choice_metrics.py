@@ -3,13 +3,12 @@
 import pytest
 
 from autorubric import Criterion, CriterionVerdict, Rubric
-from autorubric.dataset import DataItem, RubricDataset
+from autorubric.dataset import RubricDataset
 from autorubric.eval import EvalResult, ItemResult
 from autorubric.metrics import (
     classify_criteria,
     classify_criterion,
     compute_metrics,
-    extract_all_verdicts_from_report,
     filter_na_multi_choice,
     get_option_value,
     is_na_option,
@@ -21,7 +20,6 @@ from autorubric.metrics._compute import (
     _compute_per_option_metrics,
 )
 from autorubric.types import CriterionReport, EvaluationReport, MultiChoiceVerdict
-
 
 # =============================================================================
 # Fixtures
@@ -331,20 +329,22 @@ class TestComputeNominalCriterionMetrics:
 @pytest.fixture
 def ordinal_dataset() -> RubricDataset:
     """Create a dataset with ordinal criteria."""
-    rubric = Rubric([
-        Criterion(
-            name="satisfaction",
-            weight=10.0,
-            requirement="Satisfaction level",
-            scale_type="ordinal",
-            options=[
-                {"label": "1", "value": 0.0},
-                {"label": "2", "value": 0.33},
-                {"label": "3", "value": 0.67},
-                {"label": "4", "value": 1.0},
-            ],
-        ),
-    ])
+    rubric = Rubric(
+        [
+            Criterion(
+                name="satisfaction",
+                weight=10.0,
+                requirement="Satisfaction level",
+                scale_type="ordinal",
+                options=[
+                    {"label": "1", "value": 0.0},
+                    {"label": "2", "value": 0.33},
+                    {"label": "3", "value": 0.67},
+                    {"label": "4", "value": 1.0},
+                ],
+            ),
+        ]
+    )
     dataset = RubricDataset(prompt="Test", rubric=rubric)
     # Add items with ground truth as string labels
     dataset.add_item(submission="A", description="D1", ground_truth=["4"])
@@ -373,7 +373,7 @@ def hybrid_dataset(hybrid_rubric) -> RubricDataset:
 
 def _make_ordinal_report(selected_index: int) -> EvaluationReport:
     """Create a mock EvaluationReport for ordinal criterion."""
-    from autorubric.types import CriterionReport, MultiChoiceVerdict
+    from autorubric.types import CriterionReport
 
     return EvaluationReport(
         score=0.5,
@@ -401,7 +401,7 @@ def _make_hybrid_report(
     nominal_index: int,
 ) -> EvaluationReport:
     """Create a mock EvaluationReport for hybrid rubric."""
-    from autorubric.types import CriterionReport, MultiChoiceVerdict
+    from autorubric.types import CriterionReport
 
     return EvaluationReport(
         score=0.5,
@@ -600,10 +600,12 @@ class TestBackwardsCompatibility:
 
     def test_binary_only_unchanged(self):
         """Binary-only rubrics produce identical results to before."""
-        rubric = Rubric([
-            Criterion(name="C1", weight=10.0, requirement="R1"),
-            Criterion(name="C2", weight=5.0, requirement="R2"),
-        ])
+        rubric = Rubric(
+            [
+                Criterion(name="C1", weight=10.0, requirement="R1"),
+                Criterion(name="C2", weight=5.0, requirement="R2"),
+            ]
+        )
         dataset = RubricDataset(prompt="Test", rubric=rubric)
         dataset.add_item(
             submission="A",

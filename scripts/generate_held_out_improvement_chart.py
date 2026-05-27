@@ -52,23 +52,39 @@ def accuracy_before_after() -> None:
         fig, ax = plt.subplots(figsize=(8, 4))
 
         bars_seed = ax.bar(
-            x - width / 2, SEED_ACCURACY, width,
-            label="Seed", color=COLOR_CORAL, edgecolor="0.95",
+            x - width / 2,
+            SEED_ACCURACY,
+            width,
+            label="Seed",
+            color=COLOR_CORAL,
+            edgecolor="0.95",
         )
         bars_improved = ax.bar(
-            x + width / 2, IMPROVED_ACCURACY, width,
-            label="Improved", color=COLOR_TEAL, edgecolor="0.95",
+            x + width / 2,
+            IMPROVED_ACCURACY,
+            width,
+            label="Improved",
+            color=COLOR_TEAL,
+            edgecolor="0.95",
         )
 
         for bar, val in zip(bars_seed, SEED_ACCURACY):
             ax.text(
-                bar.get_x() + bar.get_width() / 2, bar.get_height() + 1,
-                str(val), ha="center", va="bottom", fontsize=5,
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height() + 1,
+                str(val),
+                ha="center",
+                va="bottom",
+                fontsize=5,
             )
         for bar, val in zip(bars_improved, IMPROVED_ACCURACY):
             ax.text(
-                bar.get_x() + bar.get_width() / 2, bar.get_height() + 1,
-                str(val), ha="center", va="bottom", fontsize=5,
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height() + 1,
+                str(val),
+                ha="center",
+                va="bottom",
+                fontsize=5,
             )
 
         ax.set_ylabel("% correct")
@@ -76,8 +92,10 @@ def accuracy_before_after() -> None:
         ax.set_xticks(x)
         ax.set_xticklabels(CRITERIA, rotation=25, ha="right")
         ax.legend(
-            loc="lower center", bbox_to_anchor=(0.5, 1.01),
-            ncol=2, frameon=False,
+            loc="lower center",
+            bbox_to_anchor=(0.5, 1.01),
+            ncol=2,
+            frameon=False,
         )
 
         out = IMAGE_DIR / "held-out-accuracy-before-after.png"
@@ -101,12 +119,21 @@ def error_rates() -> None:
         fig, ax = plt.subplots(figsize=(7, 4.5))
 
         bars_fp = ax.barh(
-            y, fp_sorted, height=0.6,
-            label="False positive rate", color=COLOR_CORAL, edgecolor="0.95",
+            y,
+            fp_sorted,
+            height=0.6,
+            label="False positive rate",
+            color=COLOR_CORAL,
+            edgecolor="0.95",
         )
         bars_fn = ax.barh(
-            y, fn_sorted, height=0.6, left=fp_sorted,
-            label="False negative rate", color=COLOR_DARK, edgecolor="0.95",
+            y,
+            fn_sorted,
+            height=0.6,
+            left=fp_sorted,
+            label="False negative rate",
+            color=COLOR_DARK,
+            edgecolor="0.95",
         )
 
         for bar, val in zip(bars_fp, fp_sorted):
@@ -114,14 +141,22 @@ def error_rates() -> None:
                 ax.text(
                     bar.get_x() + bar.get_width() / 2,
                     bar.get_y() + bar.get_height() / 2,
-                    str(val), ha="center", va="center", fontsize=5, color="white",
+                    str(val),
+                    ha="center",
+                    va="center",
+                    fontsize=5,
+                    color="white",
                 )
         for bar, val, left in zip(bars_fn, fn_sorted, fp_sorted):
             if val >= 10:
                 ax.text(
                     left + val / 2,
                     bar.get_y() + bar.get_height() / 2,
-                    str(val), ha="center", va="center", fontsize=5, color="white",
+                    str(val),
+                    ha="center",
+                    va="center",
+                    fontsize=5,
+                    color="white",
                 )
 
         ax.set_xlabel("% of graded items")
@@ -129,8 +164,10 @@ def error_rates() -> None:
         ax.set_yticks(y)
         ax.set_yticklabels(names)
         ax.legend(
-            loc="lower center", bbox_to_anchor=(0.5, 1.01),
-            ncol=2, frameon=False,
+            loc="lower center",
+            bbox_to_anchor=(0.5, 1.01),
+            ncol=2,
+            frameon=False,
         )
 
         out = IMAGE_DIR / "held-out-error-rates.png"
@@ -145,20 +182,32 @@ def accuracy_convergence() -> None:
         fig, ax = plt.subplots(figsize=(5, 3.5))
 
         ax.plot(
-            CONVERGENCE_ITERS, CONVERGENCE_ACC,
-            marker="o", color=COLOR_TEAL, linewidth=1.8, markersize=5,
+            CONVERGENCE_ITERS,
+            CONVERGENCE_ACC,
+            marker="o",
+            color=COLOR_TEAL,
+            linewidth=1.8,
+            markersize=5,
         )
 
         for x, y in zip(CONVERGENCE_ITERS, CONVERGENCE_ACC):
             ax.text(
-                x, y + 0.025, f"{y:.2f}",
-                ha="center", va="bottom", fontsize=6,
+                x,
+                y + 0.025,
+                f"{y:.2f}",
+                ha="center",
+                va="bottom",
+                fontsize=6,
             )
 
         ax.axhline(0.90, linestyle="--", color="0.5", linewidth=0.8)
         ax.text(
-            CONVERGENCE_ITERS[-1] + 0.15, 0.90, "Target",
-            va="center", fontsize=6, color="0.5",
+            CONVERGENCE_ITERS[-1] + 0.15,
+            0.90,
+            "Target",
+            va="center",
+            fontsize=6,
+            color="0.5",
         )
 
         ax.set_xlabel("Iteration")

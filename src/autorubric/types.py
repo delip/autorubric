@@ -49,8 +49,7 @@ class TokenUsage:
             total_tokens=self.total_tokens + other.total_tokens,
             cache_creation_input_tokens=self.cache_creation_input_tokens
             + other.cache_creation_input_tokens,
-            cache_read_input_tokens=self.cache_read_input_tokens
-            + other.cache_read_input_tokens,
+            cache_read_input_tokens=self.cache_read_input_tokens + other.cache_read_input_tokens,
         )
 
     def __radd__(self, other: "TokenUsage | int") -> "TokenUsage":
@@ -283,9 +282,7 @@ class Criterion(BaseModel):
         if self.options is None:
             raise ValueError("Binary criterion has no options")
         if index < 0 or index >= len(self.options):
-            raise ValueError(
-                f"Option index {index} out of range [0, {len(self.options)})"
-            )
+            raise ValueError(f"Option index {index} out of range [0, {len(self.options)})")
         return self.options[index].value
 
     def find_option_by_label(self, label: str) -> int:
@@ -593,14 +590,21 @@ class CriterionJudgment(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     criterion_status: CriterionVerdict = Field(
-        description="Whether the criterion is satisfied (MET), not satisfied (UNMET), or cannot be determined (CANNOT_ASSESS)"
+        description=(
+            "Whether the criterion is satisfied (MET), not satisfied (UNMET), "
+            "or cannot be determined (CANNOT_ASSESS)"
+        )
     )
     explanation: str = Field(
-        description="Brief explanation of why the criterion is or isn't met, or why it cannot be assessed"
+        description=(
+            "Brief explanation of why the criterion is or isn't met, or why it cannot be assessed"
+        )
     )
     reasoning: str | None = Field(
         default=None,
-        description="Extended thinking/reasoning trace from the LLM (populated when thinking is enabled)",
+        description=(
+            "Extended thinking/reasoning trace from the LLM (populated when thinking is enabled)"
+        ),
     )
 
 
@@ -621,15 +625,15 @@ class MultiChoiceJudgment(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    selected_option: int = Field(
-        description="The number of your chosen option (1, 2, 3, etc.)"
-    )
+    selected_option: int = Field(description="The number of your chosen option (1, 2, 3, etc.)")
     explanation: str = Field(
         description="Brief explanation of why this option best describes the submission"
     )
     reasoning: str | None = Field(
         default=None,
-        description="Extended thinking/reasoning trace from the LLM (populated when thinking is enabled)",
+        description=(
+            "Extended thinking/reasoning trace from the LLM (populated when thinking is enabled)"
+        ),
     )
 
 
@@ -707,10 +711,7 @@ class EnsembleCriterionReport:
             elif self.multi_choice_votes and self.final_multi_choice_verdict:
                 # For multi-choice, count votes matching the final selected index
                 final_idx = self.final_multi_choice_verdict.selected_index
-                agreeing = sum(
-                    1 for v in self.multi_choice_votes
-                    if v.selected_index == final_idx
-                )
+                agreeing = sum(1 for v in self.multi_choice_votes if v.selected_index == final_idx)
                 self.agreement = agreeing / len(self.multi_choice_votes)
 
     @property

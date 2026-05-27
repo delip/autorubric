@@ -1,6 +1,5 @@
 """Tests for CANNOT_ASSESS verdict handling in graders."""
 
-import re
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -44,11 +43,13 @@ def mock_llm_config() -> LLMConfig:
 @pytest.fixture
 def sample_rubric() -> Rubric:
     """Create a sample rubric for testing CANNOT_ASSESS."""
-    return Rubric([
-        Criterion(name="fact1", weight=10.0, requirement="States the correct fact 1"),
-        Criterion(name="fact2", weight=5.0, requirement="States the correct fact 2"),
-        Criterion(name="error", weight=-3.0, requirement="Contains factual errors"),
-    ])
+    return Rubric(
+        [
+            Criterion(name="fact1", weight=10.0, requirement="States the correct fact 1"),
+            Criterion(name="fact2", weight=5.0, requirement="States the correct fact 2"),
+            Criterion(name="error", weight=-3.0, requirement="Contains factual errors"),
+        ]
+    )
 
 
 # =============================================================================
@@ -111,9 +112,7 @@ async def test_cannot_assess_count_in_report(mock_llm_config, sample_rubric):
 
 
 @pytest.mark.asyncio
-async def test_skip_strategy_excludes_cannot_assess_from_scoring(
-    mock_llm_config, sample_rubric
-):
+async def test_skip_strategy_excludes_cannot_assess_from_scoring(mock_llm_config, sample_rubric):
     """Test that SKIP strategy excludes CANNOT_ASSESS criteria from scoring."""
     call_count = 0
 
@@ -166,10 +165,12 @@ async def test_skip_strategy_excludes_cannot_assess_from_scoring(
 @pytest.mark.asyncio
 async def test_skip_strategy_all_cannot_assess_returns_zero(mock_llm_config):
     """Test SKIP strategy when all criteria are CANNOT_ASSESS."""
-    rubric = Rubric([
-        Criterion(weight=10.0, requirement="R1"),
-        Criterion(weight=5.0, requirement="R2"),
-    ])
+    rubric = Rubric(
+        [
+            Criterion(weight=10.0, requirement="R1"),
+            Criterion(weight=5.0, requirement="R2"),
+        ]
+    )
 
     async def mock_generate(
         system_prompt: str,
@@ -205,9 +206,7 @@ async def test_skip_strategy_all_cannot_assess_returns_zero(mock_llm_config):
 
 
 @pytest.mark.asyncio
-async def test_fail_strategy_treats_cannot_assess_as_worst_case(
-    mock_llm_config, sample_rubric
-):
+async def test_fail_strategy_treats_cannot_assess_as_worst_case(mock_llm_config, sample_rubric):
     """Test that FAIL strategy treats CANNOT_ASSESS as worst case."""
     call_count = 0
 
@@ -249,9 +248,7 @@ async def test_fail_strategy_treats_cannot_assess_as_worst_case(
     ):
         grader = CriterionGrader(
             llm_config=mock_llm_config,
-            cannot_assess_config=CannotAssessConfig(
-                strategy=CannotAssessStrategy.FAIL
-            ),
+            cannot_assess_config=CannotAssessConfig(strategy=CannotAssessStrategy.FAIL),
         )
         result = await sample_rubric.grade("Test", grader=grader)
 
@@ -266,10 +263,12 @@ async def test_fail_strategy_treats_cannot_assess_as_worst_case(
 @pytest.mark.asyncio
 async def test_fail_strategy_negative_criterion_cannot_assess(mock_llm_config):
     """Test FAIL strategy treats negative CANNOT_ASSESS as MET (error assumed)."""
-    rubric = Rubric([
-        Criterion(weight=10.0, requirement="Positive criterion"),
-        Criterion(weight=-5.0, requirement="Contains errors"),
-    ])
+    rubric = Rubric(
+        [
+            Criterion(weight=10.0, requirement="Positive criterion"),
+            Criterion(weight=-5.0, requirement="Contains errors"),
+        ]
+    )
 
     call_count = 0
 
@@ -305,9 +304,7 @@ async def test_fail_strategy_negative_criterion_cannot_assess(mock_llm_config):
     ):
         grader = CriterionGrader(
             llm_config=mock_llm_config,
-            cannot_assess_config=CannotAssessConfig(
-                strategy=CannotAssessStrategy.FAIL
-            ),
+            cannot_assess_config=CannotAssessConfig(strategy=CannotAssessStrategy.FAIL),
         )
         result = await rubric.grade("Test", grader=grader)
 
@@ -325,9 +322,7 @@ async def test_fail_strategy_negative_criterion_cannot_assess(mock_llm_config):
 
 
 @pytest.mark.asyncio
-async def test_zero_strategy_treats_cannot_assess_as_unmet(
-    mock_llm_config, sample_rubric
-):
+async def test_zero_strategy_treats_cannot_assess_as_unmet(mock_llm_config, sample_rubric):
     """Test that ZERO strategy treats CANNOT_ASSESS as UNMET (0 contribution)."""
     call_count = 0
 
@@ -366,9 +361,7 @@ async def test_zero_strategy_treats_cannot_assess_as_unmet(
     ):
         grader = CriterionGrader(
             llm_config=mock_llm_config,
-            cannot_assess_config=CannotAssessConfig(
-                strategy=CannotAssessStrategy.ZERO
-            ),
+            cannot_assess_config=CannotAssessConfig(strategy=CannotAssessStrategy.ZERO),
         )
         result = await sample_rubric.grade("Test", grader=grader)
 
@@ -445,9 +438,11 @@ async def test_partial_strategy_gives_partial_credit(mock_llm_config, sample_rub
 @pytest.mark.asyncio
 async def test_partial_strategy_custom_credit(mock_llm_config):
     """Test PARTIAL strategy with custom partial_credit value."""
-    rubric = Rubric([
-        Criterion(weight=10.0, requirement="R1"),
-    ])
+    rubric = Rubric(
+        [
+            Criterion(weight=10.0, requirement="R1"),
+        ]
+    )
 
     async def mock_generate(
         system_prompt: str,
@@ -491,11 +486,13 @@ async def test_partial_strategy_custom_credit(mock_llm_config):
 @pytest.mark.asyncio
 async def test_mixed_verdicts_all_strategies(mock_llm_config):
     """Test grading with all three verdict types (MET, UNMET, CANNOT_ASSESS)."""
-    rubric = Rubric([
-        Criterion(weight=10.0, requirement="R1"),
-        Criterion(weight=10.0, requirement="R2"),
-        Criterion(weight=10.0, requirement="R3"),
-    ])
+    rubric = Rubric(
+        [
+            Criterion(weight=10.0, requirement="R1"),
+            Criterion(weight=10.0, requirement="R2"),
+            Criterion(weight=10.0, requirement="R3"),
+        ]
+    )
 
     call_count = 0
 

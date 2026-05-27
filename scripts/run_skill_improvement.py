@@ -90,38 +90,49 @@ def extract_unique_papers(dataset: RubricDataset) -> list[dict]:
 
 
 async def generate_reviews(
-    client: LLMClient, skill: str, papers: list[dict],
+    client: LLMClient,
+    skill: str,
+    papers: list[dict],
 ) -> list[dict]:
     """Generate a review for each paper using the given skill."""
     tasks = []
     for paper in papers:
-        tasks.append(client.generate(
-            system_prompt=skill,
-            user_prompt=paper["prompt"],
-            return_result=True,
-        ))
+        tasks.append(
+            client.generate(
+                system_prompt=skill,
+                user_prompt=paper["prompt"],
+                return_result=True,
+            )
+        )
     results = await asyncio.gather(*tasks)
     reviews = []
     for paper, result in zip(papers, results):
-        reviews.append({
-            "paper_id": paper["paper_id"],
-            "review": result.content,
-            "cost": result.cost or 0.0,
-        })
+        reviews.append(
+            {
+                "paper_id": paper["paper_id"],
+                "review": result.content,
+                "cost": result.cost or 0.0,
+            }
+        )
     return reviews
 
 
 async def grade_reviews(
-    rubric: Rubric, grader: CriterionGrader, reviews: list[dict], papers: list[dict],
+    rubric: Rubric,
+    grader: CriterionGrader,
+    reviews: list[dict],
+    papers: list[dict],
 ) -> list[dict]:
     """Grade each review against the rubric. Returns per-review grading data."""
     tasks = []
     for review, paper in zip(reviews, papers):
-        tasks.append(rubric.grade(
-            to_grade=review["review"],
-            grader=grader,
-            query=paper["prompt"],
-        ))
+        tasks.append(
+            rubric.grade(
+                to_grade=review["review"],
+                grader=grader,
+                query=paper["prompt"],
+            )
+        )
     reports = await asyncio.gather(*tasks)
     graded = []
     for review, report in zip(reviews, reports):
@@ -134,12 +145,14 @@ async def grade_reviews(
                 "verdict": verdict.value,
                 "reason": reason,
             }
-        graded.append({
-            "paper_id": review["paper_id"],
-            "score": report.score,
-            "per_criterion": per_criterion,
-            "cost": report.completion_cost or 0.0,
-        })
+        graded.append(
+            {
+                "paper_id": review["paper_id"],
+                "score": report.score,
+                "per_criterion": per_criterion,
+                "cost": report.completion_cost or 0.0,
+            }
+        )
     return graded
 
 
@@ -148,8 +161,7 @@ def compute_pass_rates(graded: list[dict], criteria_names: list[str]) -> dict[st
     rates = {}
     for name in criteria_names:
         met = sum(
-            1 for g in graded
-            if g["per_criterion"][name]["verdict"] == CriterionVerdict.MET.value
+            1 for g in graded if g["per_criterion"][name]["verdict"] == CriterionVerdict.MET.value
         )
         rates[name] = met / len(graded)
     return rates
@@ -161,11 +173,15 @@ def format_criteria_table(criteria: list, pass_rates: dict[str, float]) -> str:
     for c in criteria:
         rate = pass_rates.get(c.name, 0.0)
         status = "PASSING" if rate >= 0.7 else "FAILING"
-        lines.append(f"- **{c.name}** (weight={c.weight}, pass_rate={rate:.0%}, {status}): {c.requirement}")
+        lines.append(
+            f"- **{c.name}** (weight={c.weight}, pass_rate={rate:.0%}, {status}): {c.requirement}"
+        )
     return "\n".join(lines)
 
 
-def format_failure_examples(graded: list[dict], criteria: list, pass_rates: dict[str, float], max_examples: int = 3) -> str:
+def format_failure_examples(
+    graded: list[dict], criteria: list, pass_rates: dict[str, float], max_examples: int = 3
+) -> str:
     """Format sample failure explanations for criteria with low pass rates."""
     sections = []
     failing = [(c.name, pass_rates[c.name]) for c in criteria if pass_rates[c.name] < 0.7]
@@ -209,18 +225,18 @@ async def run_improvement_loop(
     total_cost = 0.0
 
     for i in range(MAX_ITERATIONS):
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"Iteration {i}")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
 
         # Generate reviews
-        print(f"  Generating reviews with current skill...")
+        print("  Generating reviews with current skill...")
         reviews = await generate_reviews(agent_client, current_skill, papers)
         gen_cost = sum(r["cost"] for r in reviews)
         total_cost += gen_cost
 
         # Grade reviews
-        print(f"  Grading reviews...")
+        print("  Grading reviews...")
         graded = await grade_reviews(rubric, eval_grader, reviews, papers)
         grade_cost = sum(g["cost"] for g in graded)
         total_cost += grade_cost
@@ -239,7 +255,9 @@ async def run_improvement_loop(
             "skill": current_skill,
             "mean_score": mean_score,
             "pass_rates": pass_rates,
-            "sample_reviews": [{"paper_id": r["paper_id"], "review": r["review"][:500]} for r in reviews[:3]],
+            "sample_reviews": [
+                {"paper_id": r["paper_id"], "review": r["review"][:500]} for r in reviews[:3]
+            ],
             "generation_cost": gen_cost,
             "grading_cost": grade_cost,
         }
@@ -249,15 +267,17 @@ async def run_improvement_loop(
         if i > 0:
             prev_score = iterations[i - 1]["mean_score"]
             if mean_score - prev_score < CONVERGENCE_THRESHOLD:
-                print(f"  Score plateau (delta={mean_score - prev_score:.3f} < {CONVERGENCE_THRESHOLD}). Stopping.")
+                print(
+                    f"  Score plateau (delta={mean_score - prev_score:.3f} < {CONVERGENCE_THRESHOLD}). Stopping."
+                )
                 break
 
         if i == MAX_ITERATIONS - 1:
-            print(f"  Max iterations reached.")
+            print("  Max iterations reached.")
             break
 
         # Revise skill
-        print(f"  Revising skill...")
+        print("  Revising skill...")
         criteria_table = format_criteria_table(rubric.rubric, pass_rates)
         failure_examples = format_failure_examples(graded, rubric.rubric, pass_rates)
         history = format_history(iterations)
@@ -285,8 +305,12 @@ async def run_improvement_loop(
 
 
 async def evaluate_with_skill(
-    skill: str, label: str, rubric: Rubric, papers: list[dict],
-    agent_client: LLMClient, eval_grader: CriterionGrader,
+    skill: str,
+    label: str,
+    rubric: Rubric,
+    papers: list[dict],
+    agent_client: LLMClient,
+    eval_grader: CriterionGrader,
 ) -> dict:
     """Generate and grade reviews for a given skill. Returns summary."""
     print(f"\nEvaluating {label}...")
@@ -337,7 +361,11 @@ async def main():
 
     # Run improvement loop
     iterations = await run_improvement_loop(
-        rubric, papers, agent_client, eval_grader, revision_client,
+        rubric,
+        papers,
+        agent_client,
+        eval_grader,
+        revision_client,
     )
 
     # Determine convergence reason
@@ -351,13 +379,19 @@ async def main():
 
     # Evaluate curated skill for comparison
     gold_result = await evaluate_with_skill(
-        GOLD_SKILL, "Curated Skill", rubric, papers, agent_client, eval_grader,
+        GOLD_SKILL,
+        "Curated Skill",
+        rubric,
+        papers,
+        agent_client,
+        eval_grader,
     )
 
     # Compute total cost
-    total_cost = sum(
-        it.get("generation_cost", 0) + it.get("grading_cost", 0) for it in iterations
-    ) + gold_result["cost"]
+    total_cost = (
+        sum(it.get("generation_cost", 0) + it.get("grading_cost", 0) for it in iterations)
+        + gold_result["cost"]
+    )
 
     elapsed = time.time() - start_time
 
@@ -390,9 +424,9 @@ async def main():
     print(f"Total cost: ${total_cost:.4f}")
 
     # Summary
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("SUMMARY")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"V1 score:       {iterations[0]['mean_score']:.2f}")
     print(f"Improved score: {iterations[-1]['mean_score']:.2f}")
     print(f"Gold score:     {gold_result['mean_score']:.2f}")

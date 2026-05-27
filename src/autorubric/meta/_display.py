@@ -221,7 +221,9 @@ def render_to_html(
     score_color = (
         _color_to_css("green")
         if result.score >= 0.7
-        else _color_to_css("yellow") if result.score >= 0.5 else _color_to_css("red")
+        else _color_to_css("yellow")
+        if result.score >= 0.5
+        else _color_to_css("red")
     )
 
     html_parts = [
@@ -372,8 +374,7 @@ def render_to_html(
     cost_html = ""
     if result.completion_cost:
         cost_html = (
-            f"<span class='results-label'>Cost</span>"
-            f"<span>${result.completion_cost:.6f}</span>"
+            f"<span class='results-label'>Cost</span><span>${result.completion_cost:.6f}</span>"
         )
 
     html_parts.append(f"""
@@ -426,13 +427,9 @@ def render_to_html(
             weight_str = f"{'+' if weight > 0 else ''}{weight}"
 
             if error is not None:
-                badge_html = (
-                    f"<span class=\"error-badge\">{_escape_html(status_text)}</span>"
-                )
+                badge_html = f'<span class="error-badge">{_escape_html(status_text)}</span>'
             else:
-                badge_html = (
-                    f"<span class=\"status {status_class}\">{status_text}</span>"
-                )
+                badge_html = f'<span class="status {status_class}">{status_text}</span>'
 
             html_parts.append(f"""
             <tr>
@@ -623,12 +620,10 @@ def render_improvement_report_html(
     ]
 
     # Header
-    parts.append(f"<h1>Rubric Improvement Report</h1>\n")
+    parts.append("<h1>Rubric Improvement Report</h1>\n")
     parts.append("<div class='stats'>")
     parts.append(f"<span><strong>Iterations:</strong> {len(iterations)}</span>")
-    parts.append(
-        f"<span><strong>Convergence:</strong> {_escape_html(convergence_reason)}</span>"
-    )
+    parts.append(f"<span><strong>Convergence:</strong> {_escape_html(convergence_reason)}</span>")
     if total_cost > 0:
         parts.append(f"<span><strong>Total cost:</strong> ${total_cost:.4f}</span>")
     parts.append("</div>\n")
@@ -666,16 +661,13 @@ def render_improvement_report_html(
         agr_str = f"{it.agreement:.0%}" if it.agreement is not None else "N/A"
         # Adapt header text for held-out mode (no issues/agreement)
         if it.held_out_diagnostics is not None:
-            header_label = (
-                f"Iteration {it.iteration} — "
-                f"Accuracy: {it.quality_score:.1%}"
-            )
+            header_label = f"Iteration {it.iteration} — Accuracy: {it.quality_score:.1%}"
         else:
             header_label = (
                 f"Iteration {it.iteration} — Quality: {it.quality_score:.1%}, "
                 f"Agreement: {agr_str}, Issues: {len(it.issues)}"
             )
-        parts.append(f'<div class="accordion-item">\n')
+        parts.append('<div class="accordion-item">\n')
         parts.append(
             f'<h2 class="accordion-header">'
             f'<button class="accordion-button collapsed" type="button" '
@@ -710,17 +702,16 @@ def render_improvement_report_html(
         # Held-out per-criterion accuracy table
         if it.held_out_diagnostics is not None:
             parts.append("<h4>Per-Criterion Accuracy</h4>\n<table>\n<thead><tr>")
-            parts.append(
-                "<th>Criterion</th><th>Accuracy</th>"
-                "<th>FP Rate</th><th>FN Rate</th>"
-            )
+            parts.append("<th>Criterion</th><th>Accuracy</th><th>FP Rate</th><th>FN Rate</th>")
             parts.append("</tr></thead>\n<tbody>\n")
             for cr in sorted(
                 it.held_out_diagnostics.per_criterion,
                 key=lambda c: c.accuracy,
             ):
-                acc_color = "var(--green)" if cr.accuracy >= 0.9 else (
-                    "var(--yellow)" if cr.accuracy >= 0.7 else "var(--red)"
+                acc_color = (
+                    "var(--green)"
+                    if cr.accuracy >= 0.9
+                    else ("var(--yellow)" if cr.accuracy >= 0.7 else "var(--red)")
                 )
                 parts.append(
                     f"<tr><td class='crit-name'>"
@@ -736,10 +727,7 @@ def render_improvement_report_html(
             from ._improve import _match_issue_to_criteria
 
             parts.append("<h4>Issues</h4>\n<table>\n<thead><tr>")
-            parts.append(
-                "<th>Criterion</th><th>Type</th>"
-                "<th>Rubric #</th><th>Feedback</th>"
-            )
+            parts.append("<th>Criterion</th><th>Type</th><th>Rubric #</th><th>Feedback</th>")
             parts.append("</tr></thead>\n<tbody>\n")
             for issue in it.issues:
                 if issue.is_antipattern:
@@ -775,9 +763,7 @@ def render_improvement_report_html(
         # Link to per-iteration eval HTML (meta-rubric mode only)
         if it.quality_report is not None:
             eval_file = f"eval-iter-{it.iteration:02d}.html"
-            parts.append(
-                f"<p><a href='{eval_file}'>View detailed evaluation report</a></p>\n"
-            )
+            parts.append(f"<p><a href='{eval_file}'>View detailed evaluation report</a></p>\n")
 
         parts.append("</div>\n</div>\n</div>\n")
     parts.append("</div>\n")

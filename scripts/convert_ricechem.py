@@ -3,9 +3,8 @@
 
 import csv
 import sys
-from pathlib import Path
-
 import warnings
+from pathlib import Path
 
 import numpy as np
 
@@ -93,18 +92,12 @@ def read_graded_rubric(q: int) -> tuple[list[str], list[dict]]:
     with open(path, encoding="utf-8") as f:
         reader = csv.DictReader(f)
         fieldnames = list(reader.fieldnames or [])
-        criteria_cols = [
-            c
-            for c in fieldnames
-            if c not in META_COLS and c not in EXCLUDE_COLS[q]
-        ]
+        criteria_cols = [c for c in fieldnames if c not in META_COLS and c not in EXCLUDE_COLS[q]]
         rows = list(reader)
     return criteria_cols, rows
 
 
-def infer_weights(
-    criteria_cols: list[str], rows: list[dict]
-) -> tuple[np.ndarray, float]:
+def infer_weights(criteria_cols: list[str], rows: list[dict]) -> tuple[np.ndarray, float]:
     """Infer criterion weights via least-squares regression on Score."""
     n = len(rows)
     m = len(criteria_cols)
@@ -205,9 +198,7 @@ def convert_question(q: int) -> None:
         ground_truth = []
         for col in criteria_cols:
             val = row.get(col, "").strip().upper()
-            ground_truth.append(
-                CriterionVerdict.MET if val == "TRUE" else CriterionVerdict.UNMET
-            )
+            ground_truth.append(CriterionVerdict.MET if val == "TRUE" else CriterionVerdict.UNMET)
 
         items.append(
             DataItem(
@@ -227,7 +218,9 @@ def convert_question(q: int) -> None:
     out_path = OUT_DIR / f"q{q}.json"
     dataset.to_file(out_path)
 
-    print(f"Q{q}: {len(criteria_cols)} criteria, {len(items)} students ({blank_count} blank excluded), R²={r2:.4f}")
+    print(
+        f"Q{q}: {len(criteria_cols)} criteria, {len(items)} students ({blank_count} blank excluded), R²={r2:.4f}"
+    )
     print(f"  Weights: {[f'{short_names[i]}={weights[i]:.2f}' for i in range(len(weights))]}")
     print(f"  Saved to {out_path}")
 
@@ -236,7 +229,7 @@ def convert_question(q: int) -> None:
     assert len(loaded.items) == len(items)
     assert loaded.rubric is not None
     assert len(loaded.rubric.rubric) == len(criteria_cols)
-    print(f"  Round-trip verified ✓")
+    print("  Round-trip verified ✓")
     print()
 
 

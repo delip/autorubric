@@ -33,7 +33,7 @@ def compute_penalty(counts: np.ndarray, exponent: float) -> np.ndarray:
     penalty = np.zeros_like(counts)
     mid = (counts > FREE_BUDGET) & (counts < MAX_CAP)
     ratio = (counts[mid] - FREE_BUDGET) / (MAX_CAP - FREE_BUDGET)
-    penalty[mid] = PENALTY_AT_CAP * (ratio ** exponent)
+    penalty[mid] = PENALTY_AT_CAP * (ratio**exponent)
     penalty[counts >= MAX_CAP] = PENALTY_AT_CAP
     return penalty * 100
 
@@ -51,17 +51,14 @@ def main() -> None:
 
         for (exp, label, ls, lw), color in zip(EXPONENTS, COLORS):
             penalty = compute_penalty(counts, exp)
-            ax.plot(counts, penalty, linestyle=ls, linewidth=lw, color=color,
-                    label=label)
+            ax.plot(counts, penalty, linestyle=ls, linewidth=lw, color=color, label=label)
 
         ax.set_xlabel("Word count")
         ax.set_ylabel("Penalty (%)")
         ax.set_xlim(0, 500)
         ax.set_ylim(0, 35)
-        ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.01), ncol=5,
-                  frameon=False, fontsize=7)
-        fig.suptitle("Length Penalty Curves by Exponent", fontweight="bold",
-                     y=0.98)
+        ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.01), ncol=5, frameon=False, fontsize=7)
+        fig.suptitle("Length Penalty Curves by Exponent", fontweight="bold", y=0.98)
         fig.subplots_adjust(top=0.85)
 
         out = IMAGE_DIR / "length-penalty-curve.png"

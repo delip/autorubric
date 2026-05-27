@@ -18,23 +18,25 @@ from autorubric import (
 
 async def main():
     # Define evaluation criteria
-    rubric = Rubric([
-        Criterion(
-            name="completeness",
-            weight=1.0,
-            requirement="The explanation covers all key steps of photosynthesis",
-        ),
-        Criterion(
-            name="accuracy",
-            weight=1.0,
-            requirement="Scientific facts are accurate and correctly stated",
-        ),
-        Criterion(
-            name="clarity",
-            weight=1.0,
-            requirement="The explanation is clear and understandable",
-        ),
-    ])
+    rubric = Rubric(
+        [
+            Criterion(
+                name="completeness",
+                weight=1.0,
+                requirement="The explanation covers all key steps of photosynthesis",
+            ),
+            Criterion(
+                name="accuracy",
+                weight=1.0,
+                requirement="Scientific facts are accurate and correctly stated",
+            ),
+            Criterion(
+                name="clarity",
+                weight=1.0,
+                requirement="The explanation is clear and understandable",
+            ),
+        ]
+    )
 
     # Reference submission: exemplar of a high-quality response
     reference = """Photosynthesis is the process by which plants convert light energy
@@ -74,7 +76,7 @@ convert CO2 into glucose. The overall equation is:
 
     # Evaluate each submission
     for idx, item in enumerate(dataset.items):
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"Evaluating: {item.description}")
         print(f"Submission: {item.submission[:100]}...")
 

@@ -9,7 +9,6 @@ import pytest
 from autorubric import Criterion, CriterionVerdict, Rubric
 from autorubric.dataset import DataItem, RubricDataset
 
-
 # =============================================================================
 # DataItem Tests
 # =============================================================================
@@ -73,11 +72,13 @@ class TestDataItem:
 @pytest.fixture
 def sample_rubric() -> Rubric:
     """Create a sample rubric for testing."""
-    return Rubric([
-        Criterion(name="Accuracy", weight=10.0, requirement="Must be accurate"),
-        Criterion(name="Clarity", weight=5.0, requirement="Must be clear"),
-        Criterion(name="Errors", weight=-3.0, requirement="Contains errors"),
-    ])
+    return Rubric(
+        [
+            Criterion(name="Accuracy", weight=10.0, requirement="Must be accurate"),
+            Criterion(name="Clarity", weight=5.0, requirement="Must be clear"),
+            Criterion(name="Errors", weight=-3.0, requirement="Contains errors"),
+        ]
+    )
 
 
 @pytest.fixture
@@ -160,10 +161,12 @@ class TestRubricDatasetProperties:
 
     def test_criterion_names_fallback(self):
         """criterion_names falls back to C{index} for unnamed criteria."""
-        rubric = Rubric([
-            Criterion(weight=1.0, requirement="R1"),  # No name
-            Criterion(name="Named", weight=1.0, requirement="R2"),
-        ])
+        rubric = Rubric(
+            [
+                Criterion(weight=1.0, requirement="R1"),  # No name
+                Criterion(name="Named", weight=1.0, requirement="R2"),
+            ]
+        )
         dataset = RubricDataset(prompt="Test", rubric=rubric)
         assert dataset.criterion_names == ["C1", "Named"]
 
@@ -308,15 +311,19 @@ class TestRubricDatasetSerialization:
 
     def test_from_json_prompt_optional(self):
         """from_json allows missing prompt (per-item prompts may be used)."""
-        rubric_json = json.dumps({
-            "rubric": [{"name": "C1", "weight": 1.0, "requirement": "test"}],
-            "items": [{
-                "submission": "test",
-                "description": "test",
-                "ground_truth": None,
-                "prompt": "per-item prompt",
-            }],
-        })
+        rubric_json = json.dumps(
+            {
+                "rubric": [{"name": "C1", "weight": 1.0, "requirement": "test"}],
+                "items": [
+                    {
+                        "submission": "test",
+                        "description": "test",
+                        "ground_truth": None,
+                        "prompt": "per-item prompt",
+                    }
+                ],
+            }
+        )
         ds = RubricDataset.from_json(rubric_json)
         assert ds.prompt is None
         assert ds.get_item_prompt(0) == "per-item prompt"
@@ -333,17 +340,19 @@ class TestRubricDatasetSerialization:
 
     def test_from_json_invalid_verdict(self):
         """from_json raises ValueError for invalid verdict."""
-        json_str = json.dumps({
-            "prompt": "Test",
-            "rubric": [{"weight": 1.0, "requirement": "R1"}],
-            "items": [
-                {
-                    "submission": "T",
-                    "description": "D",
-                    "ground_truth": ["INVALID"],
-                }
-            ],
-        })
+        json_str = json.dumps(
+            {
+                "prompt": "Test",
+                "rubric": [{"weight": 1.0, "requirement": "R1"}],
+                "items": [
+                    {
+                        "submission": "T",
+                        "description": "D",
+                        "ground_truth": ["INVALID"],
+                    }
+                ],
+            }
+        )
         with pytest.raises(ValueError, match="invalid verdict"):
             RubricDataset.from_json(json_str)
 
@@ -353,9 +362,7 @@ class TestRubricDatasetFileIO:
 
     def test_to_file_and_from_file(self, sample_dataset: RubricDataset):
         """Dataset can be saved and loaded from file."""
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".json", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             temp_path = Path(f.name)
 
         try:
@@ -374,9 +381,7 @@ class TestRubricDatasetFileIO:
 
     def test_from_file_accepts_string_path(self, sample_dataset: RubricDataset):
         """from_file accepts string path."""
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".json", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             temp_path = f.name
 
         try:
@@ -397,9 +402,7 @@ class TestDataItemWithRubric:
 
     def test_create_with_rubric(self):
         """DataItem can be created with per-item rubric."""
-        rubric = Rubric([
-            Criterion(name="Quality", weight=1.0, requirement="Must be high quality")
-        ])
+        rubric = Rubric([Criterion(name="Quality", weight=1.0, requirement="Must be high quality")])
         item = DataItem(
             submission="Test",
             description="Test item",
@@ -410,10 +413,12 @@ class TestDataItemWithRubric:
 
     def test_ground_truth_validates_against_item_rubric(self):
         """DataItem validates ground_truth length against its own rubric."""
-        rubric = Rubric([
-            Criterion(name="C1", weight=1.0, requirement="R1"),
-            Criterion(name="C2", weight=1.0, requirement="R2"),
-        ])
+        rubric = Rubric(
+            [
+                Criterion(name="C1", weight=1.0, requirement="R1"),
+                Criterion(name="C2", weight=1.0, requirement="R2"),
+            ]
+        )
         # Valid: 2 verdicts for 2 criteria
         item = DataItem(
             submission="Test",
@@ -425,10 +430,12 @@ class TestDataItemWithRubric:
 
     def test_ground_truth_rejects_length_mismatch_with_item_rubric(self):
         """DataItem rejects ground_truth that doesn't match item rubric length."""
-        rubric = Rubric([
-            Criterion(name="C1", weight=1.0, requirement="R1"),
-            Criterion(name="C2", weight=1.0, requirement="R2"),
-        ])
+        rubric = Rubric(
+            [
+                Criterion(name="C1", weight=1.0, requirement="R1"),
+                Criterion(name="C2", weight=1.0, requirement="R2"),
+            ]
+        )
         with pytest.raises(ValueError, match="item rubric has 2 criteria"):
             DataItem(
                 submission="Test",
@@ -515,10 +522,12 @@ class TestRubricDatasetWithPerItemRubrics:
 
     def test_add_item_without_rubric_uses_global(self):
         """add_item without rubric uses global for validation."""
-        global_rubric = Rubric([
-            Criterion(name="C1", weight=1.0, requirement="R1"),
-            Criterion(name="C2", weight=1.0, requirement="R2"),
-        ])
+        global_rubric = Rubric(
+            [
+                Criterion(name="C1", weight=1.0, requirement="R1"),
+                Criterion(name="C2", weight=1.0, requirement="R2"),
+            ]
+        )
         dataset = RubricDataset(prompt="Test", rubric=global_rubric)
         dataset.add_item(
             submission="Text",
@@ -563,9 +572,7 @@ class TestRubricDatasetSerializationWithPerItemRubrics:
         item1 = DataItem(submission="T1", description="D1", rubric=item_rubric)
         item2 = DataItem(submission="T2", description="D2")  # Uses global
 
-        dataset = RubricDataset(
-            prompt="Test", rubric=global_rubric, items=[item1, item2]
-        )
+        dataset = RubricDataset(prompt="Test", rubric=global_rubric, items=[item1, item2])
 
         json_str = dataset.to_json()
         data = json.loads(json_str)
@@ -576,18 +583,20 @@ class TestRubricDatasetSerializationWithPerItemRubrics:
 
     def test_from_json_with_null_global_rubric(self):
         """from_json parses null global rubric."""
-        json_str = json.dumps({
-            "prompt": "Test",
-            "rubric": None,
-            "items": [
-                {
-                    "submission": "T",
-                    "description": "D",
-                    "rubric": [{"name": "Item", "weight": 1.0, "requirement": "R"}],
-                    "ground_truth": None,
-                }
-            ],
-        })
+        json_str = json.dumps(
+            {
+                "prompt": "Test",
+                "rubric": None,
+                "items": [
+                    {
+                        "submission": "T",
+                        "description": "D",
+                        "rubric": [{"name": "Item", "weight": 1.0, "requirement": "R"}],
+                        "ground_truth": None,
+                    }
+                ],
+            }
+        )
 
         dataset = RubricDataset.from_json(json_str)
         assert dataset.rubric is None
@@ -596,18 +605,20 @@ class TestRubricDatasetSerializationWithPerItemRubrics:
 
     def test_from_json_raises_when_no_rubric(self):
         """from_json raises when item has no rubric and no global rubric."""
-        json_str = json.dumps({
-            "prompt": "Test",
-            "rubric": None,
-            "items": [
-                {
-                    "submission": "T",
-                    "description": "D",
-                    "ground_truth": None,
-                    # No rubric field
-                }
-            ],
-        })
+        json_str = json.dumps(
+            {
+                "prompt": "Test",
+                "rubric": None,
+                "items": [
+                    {
+                        "submission": "T",
+                        "description": "D",
+                        "ground_truth": None,
+                        # No rubric field
+                    }
+                ],
+            }
+        )
 
         with pytest.raises(ValueError, match="Item 0 has no rubric"):
             RubricDataset.from_json(json_str)
@@ -705,9 +716,7 @@ class TestRubricDatasetWithReferenceSubmission:
 
         assert dataset.get_item_reference_submission(0) == "Global reference"
 
-    def test_get_item_reference_returns_none_when_no_reference(
-        self, sample_rubric: Rubric
-    ):
+    def test_get_item_reference_returns_none_when_no_reference(self, sample_rubric: Rubric):
         """get_item_reference_submission returns None when no reference set."""
         item = DataItem(submission="Student answer", description="D")
         dataset = RubricDataset(
@@ -781,12 +790,14 @@ class TestRubricDatasetSerializationWithReferenceSubmission:
 
     def test_from_json_with_global_reference(self, sample_rubric: Rubric):
         """from_json parses global reference_submission."""
-        json_str = json.dumps({
-            "prompt": "Test",
-            "rubric": [{"name": "C1", "weight": 1.0, "requirement": "R1"}],
-            "reference_submission": "Global exemplar",
-            "items": [{"submission": "Answer", "description": "D", "ground_truth": None}],
-        })
+        json_str = json.dumps(
+            {
+                "prompt": "Test",
+                "rubric": [{"name": "C1", "weight": 1.0, "requirement": "R1"}],
+                "reference_submission": "Global exemplar",
+                "items": [{"submission": "Answer", "description": "D", "ground_truth": None}],
+            }
+        )
 
         dataset = RubricDataset.from_json(json_str)
 
@@ -794,16 +805,20 @@ class TestRubricDatasetSerializationWithReferenceSubmission:
 
     def test_from_json_with_item_reference(self, sample_rubric: Rubric):
         """from_json parses per-item reference_submission."""
-        json_str = json.dumps({
-            "prompt": "Test",
-            "rubric": [{"name": "C1", "weight": 1.0, "requirement": "R1"}],
-            "items": [{
-                "submission": "Answer",
-                "description": "D",
-                "ground_truth": None,
-                "reference_submission": "Item exemplar",
-            }],
-        })
+        json_str = json.dumps(
+            {
+                "prompt": "Test",
+                "rubric": [{"name": "C1", "weight": 1.0, "requirement": "R1"}],
+                "items": [
+                    {
+                        "submission": "Answer",
+                        "description": "D",
+                        "ground_truth": None,
+                        "reference_submission": "Item exemplar",
+                    }
+                ],
+            }
+        )
 
         dataset = RubricDataset.from_json(json_str)
 
@@ -915,9 +930,7 @@ class TestPerItemPrompt:
         with pytest.raises(ValueError, match="no prompt and dataset has no global prompt"):
             dataset.get_item_prompt(0)
 
-    def test_serialization_roundtrip_preserves_per_item_prompts(
-        self, sample_rubric: Rubric
-    ):
+    def test_serialization_roundtrip_preserves_per_item_prompts(self, sample_rubric: Rubric):
         """Serialization round-trip preserves per-item prompts."""
         item1 = DataItem(
             submission="T1",
@@ -958,9 +971,7 @@ class TestPerItemPrompt:
         assert dataset[0].prompt == "Custom item prompt"
         assert dataset.get_item_prompt(0) == "Custom item prompt"
 
-    def test_add_item_without_prompt_raises_when_no_global_prompt(
-        self, sample_rubric: Rubric
-    ):
+    def test_add_item_without_prompt_raises_when_no_global_prompt(self, sample_rubric: Rubric):
         """add_item without prompt raises ValueError when no global prompt."""
         dataset = RubricDataset.__new__(RubricDataset)
         dataset.prompt = None
@@ -975,9 +986,7 @@ class TestPerItemPrompt:
         ):
             dataset.add_item(submission="Test", description="D")
 
-    def test_post_init_validation_error_when_no_prompt_available(
-        self, sample_rubric: Rubric
-    ):
+    def test_post_init_validation_error_when_no_prompt_available(self, sample_rubric: Rubric):
         """__post_init__ raises ValueError when item has no prompt and dataset has no prompt."""
         item = DataItem(
             submission="Test",
@@ -1052,27 +1061,29 @@ class TestPerItemPrompt:
 
     def test_from_json_with_per_item_prompts(self, sample_rubric: Rubric):
         """from_json parses per-item prompts correctly."""
-        json_str = json.dumps({
-            "prompt": "Global prompt",
-            "rubric": [
-                {"name": "C1", "weight": 1.0, "requirement": "R1"},
-                {"name": "C2", "weight": 1.0, "requirement": "R2"},
-                {"name": "C3", "weight": -1.0, "requirement": "R3"},
-            ],
-            "items": [
-                {
-                    "submission": "T1",
-                    "description": "D1",
-                    "ground_truth": ["MET", "MET", "UNMET"],
-                    "prompt": "Item-specific prompt",
-                },
-                {
-                    "submission": "T2",
-                    "description": "D2",
-                    "ground_truth": ["UNMET", "MET", "UNMET"],
-                },
-            ],
-        })
+        json_str = json.dumps(
+            {
+                "prompt": "Global prompt",
+                "rubric": [
+                    {"name": "C1", "weight": 1.0, "requirement": "R1"},
+                    {"name": "C2", "weight": 1.0, "requirement": "R2"},
+                    {"name": "C3", "weight": -1.0, "requirement": "R3"},
+                ],
+                "items": [
+                    {
+                        "submission": "T1",
+                        "description": "D1",
+                        "ground_truth": ["MET", "MET", "UNMET"],
+                        "prompt": "Item-specific prompt",
+                    },
+                    {
+                        "submission": "T2",
+                        "description": "D2",
+                        "ground_truth": ["UNMET", "MET", "UNMET"],
+                    },
+                ],
+            }
+        )
 
         dataset = RubricDataset.from_json(json_str)
 
@@ -1081,9 +1092,7 @@ class TestPerItemPrompt:
         assert dataset.get_item_prompt(0) == "Item-specific prompt"
         assert dataset.get_item_prompt(1) == "Global prompt"
 
-    def test_dataset_with_only_per_item_prompts_no_global(
-        self, sample_rubric: Rubric
-    ):
+    def test_dataset_with_only_per_item_prompts_no_global(self, sample_rubric: Rubric):
         """Dataset can have no global prompt if all items have per-item prompts."""
         item1 = DataItem(
             submission="T1",

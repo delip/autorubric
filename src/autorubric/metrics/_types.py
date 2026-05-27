@@ -5,9 +5,12 @@ All models are frozen (immutable) for consistency with the rest of autorubric.
 """
 
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 # Type alias for CANNOT_ASSESS handling in metrics
 CannotAssessMode = Literal["exclude", "as_unmet", "as_category"]
@@ -642,7 +645,8 @@ class MetricsResult(BaseModel):
         criterion_precision: Overall precision for MET class (binary criteria only).
         criterion_recall: Overall recall for MET class (binary criteria only).
         criterion_f1: Overall F1 for MET class (binary criteria only).
-        mean_kappa: Mean kappa across criteria (weighted for ordinal, unweighted for binary/nominal).
+        mean_kappa: Mean kappa across criteria (weighted for ordinal, unweighted for
+            binary/nominal).
         per_criterion: Per-criterion metrics breakdown (polymorphic union type).
         score_rmse: RMSE of cumulative scores.
         score_mae: MAE of cumulative scores.
@@ -749,9 +753,7 @@ class MetricsResult(BaseModel):
 
         lines.append("")
         lines.append("Bias Analysis:")
-        lines.append(
-            f"  Mean Bias:   {self.bias.mean_bias:+.4f} ({self.bias.direction})"
-        )
+        lines.append(f"  Mean Bias:   {self.bias.mean_bias:+.4f} ({self.bias.direction})")
         lines.append(f"  Significant: {'Yes' if self.bias.is_significant else 'No'}")
 
         # NA stats for multi-choice
@@ -775,12 +777,10 @@ class MetricsResult(BaseModel):
                 f"{self.bootstrap.accuracy_ci[1]:.1%}]"
             )
             lines.append(
-                f"  Kappa:    [{self.bootstrap.kappa_ci[0]:.3f}, "
-                f"{self.bootstrap.kappa_ci[1]:.3f}]"
+                f"  Kappa:    [{self.bootstrap.kappa_ci[0]:.3f}, {self.bootstrap.kappa_ci[1]:.3f}]"
             )
             lines.append(
-                f"  RMSE:     [{self.bootstrap.rmse_ci[0]:.4f}, "
-                f"{self.bootstrap.rmse_ci[1]:.4f}]"
+                f"  RMSE:     [{self.bootstrap.rmse_ci[0]:.4f}, {self.bootstrap.rmse_ci[1]:.4f}]"
             )
 
         if self.per_judge:
@@ -814,7 +814,10 @@ class MetricsResult(BaseModel):
 
         if ordinal_criteria:
             lines.append("\nOrdinal Criteria:")
-            header = f"{'Criterion':<20} {'Exact':>8} {'Adj':>8} {'WKappa':>8} {'Spearman':>10} {'RMSE':>8}"
+            header = (
+                f"{'Criterion':<20} {'Exact':>8} {'Adj':>8} "
+                f"{'WKappa':>8} {'Spearman':>10} {'RMSE':>8}"
+            )
             lines.append(header)
             lines.append("-" * len(header))
             for cm in ordinal_criteria:

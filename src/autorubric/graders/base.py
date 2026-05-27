@@ -58,9 +58,7 @@ class Grader(ABC):
         pass
 
     @abstractmethod
-    async def aggregate(
-        self, judge_results: Any, *, normalize: bool = True
-    ) -> EvaluationReport:
+    async def aggregate(self, judge_results: Any, *, normalize: bool = True) -> EvaluationReport:
         """Transform judge results into an EvaluationReport.
 
         Args:

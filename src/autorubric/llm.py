@@ -21,16 +21,15 @@ import openai
 import yaml
 from dotenv import load_dotenv
 from pydantic import BaseModel, ValidationError
+from rich.console import Console
+from rich.panel import Panel
+from rich.syntax import Syntax
 from tenacity import (
     retry,
     retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
 )
-
-from rich.console import Console
-from rich.panel import Panel
-from rich.syntax import Syntax
 
 from autorubric.rate_limit import RateLimitPool
 
@@ -216,7 +215,7 @@ class GenerateResult:
     content: str
     thinking: str | None = None
     raw_response: Any = None
-    usage: "TokenUsage | None" = None
+    usage: TokenUsage | None = None
     cost: float | None = None
     parsed: Any = None
 
@@ -259,7 +258,7 @@ def _extract_thinking_content(message: Any) -> str | None:
     return None
 
 
-def _extract_usage_from_response(response: Any) -> "TokenUsage":
+def _extract_usage_from_response(response: Any) -> TokenUsage:
     """Extract token usage from LiteLLM response.
 
     LiteLLM provides an OpenAI-compatible usage object:
@@ -350,8 +349,9 @@ class LLMConfig:
     """Configuration for LLM calls.
 
     Attributes:
-        model: Model identifier in LiteLLM format (e.g., "openai/gpt-5.2", "anthropic/claude-sonnet-4-5-20250929",
-               "gemini/gemini-3-pro-preview", "ollama/qwen3:14b"). REQUIRED - no default.
+        model: Model identifier in LiteLLM format (e.g., "openai/gpt-5.2",
+               "anthropic/claude-sonnet-4-5-20250929", "gemini/gemini-3-pro-preview",
+               "ollama/qwen3:14b"). REQUIRED - no default.
                See LiteLLM docs for full list of supported models.
         temperature: Sampling temperature (0.0 = deterministic).
         max_tokens: Maximum tokens in response.
@@ -368,7 +368,8 @@ class LLMConfig:
         cache_ttl: Cache time-to-live in seconds (None = no expiration).
         api_key: Optional API key override (otherwise uses environment variables).
         api_base: Optional API base URL override.
-        thinking: Enable thinking/reasoning mode (unified across providers). Accepts multiple formats:
+        thinking: Enable thinking/reasoning mode (unified across providers). Accepts
+            multiple formats:
             - ThinkingLevel enum: ThinkingLevel.HIGH, ThinkingLevel.MEDIUM, etc.
             - String: "low", "medium", "high", "none"
             - Int: Direct token budget (e.g., 32000)

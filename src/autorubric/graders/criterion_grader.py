@@ -285,10 +285,7 @@ class CriterionGrader(Grader):
             self._multi_choice_system_prompt = multi_choice_system_prompt
 
         # Create LLM clients for each judge
-        self._clients = {
-            judge.judge_id: LLMClient(judge.llm_config)
-            for judge in self._judges
-        }
+        self._clients = {judge.judge_id: LLMClient(judge.llm_config) for judge in self._judges}
 
         # Pre-compute few-shot examples if training data provided
         # Note: For multi-choice, examples are stored as (submission, selected_index, reason)
@@ -325,7 +322,9 @@ class CriterionGrader(Grader):
         rubric_criteria = self._training_data.rubric.rubric if self._training_data.rubric else []
 
         for criterion_idx in range(n_criteria):
-            criterion = rubric_criteria[criterion_idx] if criterion_idx < len(rubric_criteria) else None
+            criterion = (
+                rubric_criteria[criterion_idx] if criterion_idx < len(rubric_criteria) else None
+            )
             if criterion is not None and criterion.is_multi_choice:
                 examples = self._select_multi_choice_examples(criterion_idx)
                 self._multi_choice_examples[criterion_idx] = examples
@@ -477,7 +476,11 @@ class CriterionGrader(Grader):
             if item.ground_truth is None:
                 continue
             label = item.ground_truth[criterion_idx]
-            idx = self._label_to_option_index(criterion_idx, label) if isinstance(label, str) else label
+            idx = (
+                self._label_to_option_index(criterion_idx, label)
+                if isinstance(label, str)
+                else label
+            )
             if idx is None:
                 continue
             option_groups.setdefault(idx, []).append((item, idx))
@@ -498,7 +501,11 @@ class CriterionGrader(Grader):
                 identity=lambda pair: pair[0].submission,
             )
         else:
-            all_pairs = [(item, resolved_idx) for pairs in option_groups.values() for item, resolved_idx in pairs]
+            all_pairs = [
+                (item, resolved_idx)
+                for pairs in option_groups.values()
+                for item, resolved_idx in pairs
+            ]
             rng.shuffle(all_pairs)
             return [
                 (item.submission, resolved_idx, None)
@@ -597,9 +604,7 @@ class CriterionGrader(Grader):
             # via CriterionReport.error / is_error.
             category = classify_grading_error(e)
             if category == "unknown":
-                verdict = (
-                    CriterionVerdict.MET if criterion.weight < 0 else CriterionVerdict.UNMET
-                )
+                verdict = CriterionVerdict.MET if criterion.weight < 0 else CriterionVerdict.UNMET
             else:
                 verdict = CriterionVerdict.CANNOT_ASSESS
             logger.warning(
@@ -651,7 +656,6 @@ class CriterionGrader(Grader):
             shuffled_options = [criterion.options[i] for i in shuffled_indices]
 
             # Create criterion with shuffled options for prompt building
-            from autorubric.types import CriterionOption
 
             prompt_criterion = Criterion(
                 weight=criterion.weight,
@@ -799,7 +803,9 @@ class CriterionGrader(Grader):
     ) -> JudgeCriterionResults:
         """Evaluate all criteria for a single judge (parallel per criterion)."""
         tasks = [
-            self._judge_single_criterion(judge, criterion, idx, to_grade, query, reference_submission)
+            self._judge_single_criterion(
+                judge, criterion, idx, to_grade, query, reference_submission
+            )
             for idx, criterion in enumerate(rubric)
         ]
         results = await asyncio.gather(*tasks)
@@ -1005,9 +1011,7 @@ class CriterionGrader(Grader):
             completion_cost=total_cost if total_cost > 0 else None,
         )
 
-    def _aggregate_votes(
-        self, votes: list[JudgeVote]
-    ) -> tuple[CriterionVerdict, str]:
+    def _aggregate_votes(self, votes: list[JudgeVote]) -> tuple[CriterionVerdict, str]:
         """Aggregate votes from multiple judges into a single verdict."""
         if not votes:
             return CriterionVerdict.CANNOT_ASSESS, "No votes"
@@ -1018,8 +1022,9 @@ class CriterionGrader(Grader):
             return CriterionVerdict.CANNOT_ASSESS, "All judges could not assess"
 
         met_weight = sum(v.weight for v in assessable_votes if v.verdict == CriterionVerdict.MET)
-        unmet_weight = sum(v.weight for v in assessable_votes if v.verdict == CriterionVerdict.UNMET)
-        total_weight = met_weight + unmet_weight
+        unmet_weight = sum(
+            v.weight for v in assessable_votes if v.verdict == CriterionVerdict.UNMET
+        )
 
         if self._aggregation == "majority":
             verdict = CriterionVerdict.MET if met_weight > unmet_weight else CriterionVerdict.UNMET
@@ -1210,7 +1215,9 @@ class CriterionGrader(Grader):
             # Accumulate weights per index
             weight_per_idx: dict[int, float] = {}
             for v in votes:
-                weight_per_idx[v.selected_index] = weight_per_idx.get(v.selected_index, 0.0) + v.weight
+                weight_per_idx[v.selected_index] = (
+                    weight_per_idx.get(v.selected_index, 0.0) + v.weight
+                )
             most_common_idx = max(weight_per_idx, key=weight_per_idx.get)  # type: ignore
         elif strategy == "unanimous":
             unique_indices = set(indices)
@@ -1262,7 +1269,9 @@ class CriterionGrader(Grader):
                     fail_reports.append(
                         CriterionReport(
                             requirement=r.requirement,
-                            verdict=CriterionVerdict.UNMET if r.weight > 0 else CriterionVerdict.MET,
+                            verdict=CriterionVerdict.UNMET
+                            if r.weight > 0
+                            else CriterionVerdict.MET,
                             reason=r.reason,
                             weight=r.weight,
                             name=r.name,

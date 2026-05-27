@@ -45,7 +45,6 @@ from autorubric.types import (
     EvaluationReport,
     JudgeVote,
     MultiChoiceJudgeVote,
-    MultiChoiceVerdict,
     TokenUsage,
 )
 from autorubric.utils import aggregate_completion_cost, aggregate_token_usage
@@ -126,12 +125,18 @@ def _serialize_grader_config(grader: Grader) -> dict[str, Any]:
                             if isinstance(jmodel, str):
                                 weight = getattr(j, "weight", 1.0)
                                 mpr = getattr(jcfg, "max_parallel_requests", None)
-                                config["judges"].append({
-                                    "judge_id": jid,
-                                    "model": jmodel,
-                                    "weight": weight if isinstance(weight, (int, float)) else 1.0,
-                                    "max_parallel_requests": mpr if isinstance(mpr, int) else None,
-                                })
+                                config["judges"].append(
+                                    {
+                                        "judge_id": jid,
+                                        "model": jmodel,
+                                        "weight": weight
+                                        if isinstance(weight, (int, float))
+                                        else 1.0,
+                                        "max_parallel_requests": mpr
+                                        if isinstance(mpr, int)
+                                        else None,
+                                    }
+                                )
                     aggregation = getattr(grader, "_aggregation", None)
                     if isinstance(aggregation, str):
                         config["aggregation"] = aggregation
@@ -223,9 +228,7 @@ def _serialize_ensemble_criterion_report(ecr: EnsembleCriterionReport) -> dict[s
             for v in ecr.votes
         ]
     if ecr.final_multi_choice_verdict is not None:
-        d["final_multi_choice_verdict"] = ecr.final_multi_choice_verdict.model_dump(
-            mode="json"
-        )
+        d["final_multi_choice_verdict"] = ecr.final_multi_choice_verdict.model_dump(mode="json")
     if ecr.multi_choice_votes:
         d["multi_choice_votes"] = [
             {
@@ -272,9 +275,7 @@ def _deserialize_ensemble_report(
     for ecr_data in report_data["criterion_reports"]:
         criterion = Criterion.model_validate(ecr_data["criterion"])
         final_verdict = (
-            CriterionVerdict(ecr_data["final_verdict"])
-            if ecr_data.get("final_verdict")
-            else None
+            CriterionVerdict(ecr_data["final_verdict"]) if ecr_data.get("final_verdict") else None
         )
 
         votes = [
@@ -399,8 +400,7 @@ class ItemResult:
             if isinstance(self.report, EnsembleEvaluationReport):
                 report_dict["report_type"] = "ensemble"
                 report_dict["criterion_reports"] = [
-                    _serialize_ensemble_criterion_report(ecr)
-                    for ecr in self.report.report
+                    _serialize_ensemble_criterion_report(ecr) for ecr in self.report.report
                 ]
                 report_dict["judge_scores"] = self.report.judge_scores
             else:
@@ -570,7 +570,7 @@ class EvalResult:
         na_mode: Literal["exclude", "as_worst"] = "exclude",
         confidence_level: float = 0.95,
         seed: int | None = None,
-    ) -> "MetricsResult":
+    ) -> MetricsResult:
         """Compute comprehensive evaluation metrics against ground truth.
 
         This method compares predicted verdicts and scores against ground truth
@@ -753,12 +753,10 @@ class ExperimentManifest:
             completed_indices=set(data.get("completed_indices", [])),
             error=data.get("error"),
             started_at=(
-                datetime.fromisoformat(data["started_at"])
-                if data.get("started_at") else None
+                datetime.fromisoformat(data["started_at"]) if data.get("started_at") else None
             ),
             completed_at=(
-                datetime.fromisoformat(data["completed_at"])
-                if data.get("completed_at") else None
+                datetime.fromisoformat(data["completed_at"]) if data.get("completed_at") else None
             ),
             total_duration_seconds=data.get("total_duration_seconds"),
             dataset_path=data.get("dataset_path"),
@@ -919,9 +917,7 @@ class EvalRunner:
 
         # Determine pending items
         pending_items = [
-            (idx, item)
-            for idx, item in enumerate(self.dataset)
-            if idx not in completed_indices
+            (idx, item) for idx, item in enumerate(self.dataset) if idx not in completed_indices
         ]
 
         item_results: list[ItemResult] = list(previous_results)
@@ -1013,9 +1009,7 @@ class EvalRunner:
             experiment_dir=self._exp_dir,
         )
 
-    def _setup_experiment(
-        self, started_at: datetime
-    ) -> tuple[set[int], list[ItemResult]]:
+    def _setup_experiment(self, started_at: datetime) -> tuple[set[int], list[ItemResult]]:
         """Set up experiment directory and load checkpoint if resuming.
 
         Returns:
@@ -1050,9 +1044,7 @@ class EvalRunner:
                                     idx = data["item_idx"]
                                     if idx < len(self.dataset):
                                         item = self.dataset[idx]
-                                        previous_results.append(
-                                            ItemResult.from_dict(data, item)
-                                        )
+                                        previous_results.append(ItemResult.from_dict(data, item))
                     logger.info(
                         f"Resuming experiment {self._experiment_name} with "
                         f"{len(completed_indices)} completed items"

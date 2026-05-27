@@ -89,9 +89,7 @@ class Rubric:
                     )
 
         if not isinstance(data, list):
-            raise ValueError(
-                f"Invalid rubric format. Expected a list, got {type(data).__name__}"
-            )
+            raise ValueError(f"Invalid rubric format. Expected a list, got {type(data).__name__}")
 
         if not data:
             raise ValueError("No criteria found")
@@ -133,19 +131,15 @@ class Rubric:
                     field = ".".join(str(loc) for loc in error["loc"])
                     error_details.append(f"{field}: {error['msg']}")
 
-                error_msg = f"Invalid criterion at index {idx}:\n  " + "\n  ".join(
-                    error_details
-                )
+                error_msg = f"Invalid criterion at index {idx}:\n  " + "\n  ".join(error_details)
                 raise ValueError(error_msg) from e
             except Exception as e:
-                raise ValueError(
-                    f"Failed to create criterion at index {idx}: {e}"
-                ) from e
+                raise ValueError(f"Failed to create criterion at index {idx}: {e}") from e
 
         return criteria
 
     @classmethod
-    def from_yaml(cls, yaml_string: str) -> "Rubric":
+    def from_yaml(cls, yaml_string: str) -> Rubric:
         """Parse rubric from a YAML string."""
         try:
             data = yaml.safe_load(yaml_string)
@@ -156,7 +150,7 @@ class Rubric:
         return cls(criteria)
 
     @classmethod
-    def from_json(cls, json_string: str) -> "Rubric":
+    def from_json(cls, json_string: str) -> Rubric:
         """Parse rubric from a JSON string."""
         try:
             data = json.loads(json_string)
@@ -167,7 +161,7 @@ class Rubric:
         return cls(criteria)
 
     @classmethod
-    def from_file(cls, source: str | Any) -> "Rubric":
+    def from_file(cls, source: str | Any) -> Rubric:
         """Load rubric from a file path or file-like object, auto-detecting format."""
         if hasattr(source, "read"):
             file_name = getattr(source, "name", "")  # type: ignore[arg-type]
@@ -188,18 +182,14 @@ class Rubric:
                 try:
                     data = yaml.safe_load(content)
                 except yaml.YAMLError as e:
-                    raise ValueError(
-                        f"Failed to parse YAML from file object: {e}"
-                    ) from e
+                    raise ValueError(f"Failed to parse YAML from file object: {e}") from e
                 criteria = cls.validate_and_create_criteria(data)
                 return cls(criteria)
             elif extension == ".json":
                 try:
                     data = json.loads(content)
                 except json.JSONDecodeError as e:
-                    raise ValueError(
-                        f"Failed to parse JSON from file object: {e}"
-                    ) from e
+                    raise ValueError(f"Failed to parse JSON from file object: {e}") from e
                 criteria = cls.validate_and_create_criteria(data)
                 return cls(criteria)
             else:
@@ -292,9 +282,7 @@ class Rubric:
             The computed score.
         """
         if len(verdicts) != len(self.rubric):
-            raise ValueError(
-                f"Expected {len(self.rubric)} verdicts, got {len(verdicts)}"
-            )
+            raise ValueError(f"Expected {len(self.rubric)} verdicts, got {len(verdicts)}")
 
         weighted_sum = 0.0
         total_positive_weight = 0.0
@@ -366,7 +354,7 @@ class Rubric:
             return 0.0
 
     @classmethod
-    def from_dict(cls, data: list[dict[str, Any]] | dict[str, Any]) -> "Rubric":
+    def from_dict(cls, data: list[dict[str, Any]] | dict[str, Any]) -> Rubric:
         """Create rubric from a list of dictionaries or a dict with sections."""
         criteria = cls.validate_and_create_criteria(data)
         return cls(criteria)

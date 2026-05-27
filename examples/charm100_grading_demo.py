@@ -39,9 +39,7 @@ from autorubric.metrics._helpers import classify_criterion
 load_dotenv()
 
 # Path to the multi-choice dataset
-DATASET_PATH = (
-    Path(__file__).parent / "data" / "charm100.json"
-)
+DATASET_PATH = Path(__file__).parent / "data" / "charm100.json"
 
 
 def format_confusion_matrix(matrix: list[list[int]], labels: list[str]) -> str:
@@ -57,16 +55,14 @@ def format_confusion_matrix(matrix: list[list[int]], labels: list[str]) -> str:
     header = " " * (col_width + 2) + "Predicted".center(col_width * len(labels))
     lines.append(header)
 
-    label_header = " " * (col_width + 2) + "".join(
-        lbl.center(col_width) for lbl in short_labels
-    )
+    label_header = " " * (col_width + 2) + "".join(lbl.center(col_width) for lbl in short_labels)
     lines.append(label_header)
     lines.append(" " * (col_width) + "-" * (col_width * len(labels) + 2))
 
     # Rows
     for i, row_label in enumerate(short_labels):
         prefix = "Actual " if i == len(labels) // 2 else "       "
-        row_str = f"{prefix}{row_label:>{col_width-2}} |"
+        row_str = f"{prefix}{row_label:>{col_width - 2}} |"
         for val in matrix[i]:
             row_str += f"{val:^{col_width}}"
         lines.append(row_str)
@@ -117,18 +113,16 @@ async def main():
     print("Criteria:")
     for i, criterion in enumerate(dataset.rubric.rubric):
         c_type = classify_criterion(criterion)
-        weight_str = (
-            f"+{criterion.weight}" if criterion.weight > 0 else str(criterion.weight)
-        )
+        weight_str = f"+{criterion.weight}" if criterion.weight > 0 else str(criterion.weight)
 
         if criterion.is_binary:
-            print(f"  {i+1}. {criterion.name:20} [{weight_str:>6}] (binary)")
+            print(f"  {i + 1}. {criterion.name:20} [{weight_str:>6}] (binary)")
         else:
             scale_info = f"{c_type}, {len(criterion.options)} options"
             na_opts = [opt for opt in criterion.options if opt.na]
             if na_opts:
-                scale_info += f", 1 NA"
-            print(f"  {i+1}. {criterion.name:20} [{weight_str:>6}] ({scale_info})")
+                scale_info += ", 1 NA"
+            print(f"  {i + 1}. {criterion.name:20} [{weight_str:>6}] ({scale_info})")
 
             # Show options for multi-choice
             for j, opt in enumerate(criterion.options):
@@ -183,28 +177,22 @@ async def main():
             print(f"  Exact Accuracy:    {cm.exact_accuracy:.1%}")
             print(f"  Adjacent Accuracy: {cm.adjacent_accuracy:.1%} (within ±1)")
             print()
-            print(
-                f"  Weighted Kappa:    {cm.weighted_kappa:.3f} ({cm.kappa_interpretation})"
-            )
+            print(f"  Weighted Kappa:    {cm.weighted_kappa:.3f} ({cm.kappa_interpretation})")
             if cm.fleiss_kappa is not None:
                 print(f"  Fleiss' Kappa:     {cm.fleiss_kappa:.3f}")
             print()
             print(
                 f"  Spearman rho:      {cm.spearman.coefficient:.3f} (p={cm.spearman.p_value:.4f})"
             )
-            print(
-                f"  Kendall tau:       {cm.kendall.coefficient:.3f} (p={cm.kendall.p_value:.4f})"
-            )
+            print(f"  Kendall tau:       {cm.kendall.coefficient:.3f} (p={cm.kendall.p_value:.4f})")
             print()
             print(f"  RMSE:              {cm.rmse:.4f}")
             print(f"  MAE:               {cm.mae:.4f}")
 
             # Per-option metrics
             print("\n  Per-Option Metrics:")
-            print(
-                f"    {'Option':<30} {'Prec':>8} {'Recall':>8} {'F1':>8} {'Support':>8}"
-            )
-            print(f"    {'-'*30} {'-'*8} {'-'*8} {'-'*8} {'-'*8}")
+            print(f"    {'Option':<30} {'Prec':>8} {'Recall':>8} {'F1':>8} {'Support':>8}")
+            print(f"    {'-' * 30} {'-' * 8} {'-' * 8} {'-' * 8} {'-' * 8}")
             for opt in cm.per_option:
                 label = opt.label[:30]
                 print(
@@ -227,10 +215,8 @@ async def main():
 
             # Per-option metrics
             print("\n  Per-Option Metrics:")
-            print(
-                f"    {'Option':<30} {'Prec':>8} {'Recall':>8} {'F1':>8} {'Support':>8}"
-            )
-            print(f"    {'-'*30} {'-'*8} {'-'*8} {'-'*8} {'-'*8}")
+            print(f"    {'Option':<30} {'Prec':>8} {'Recall':>8} {'F1':>8} {'Support':>8}")
+            print(f"    {'-' * 30} {'-' * 8} {'-' * 8} {'-' * 8} {'-' * 8}")
             for opt in cm.per_option:
                 label = opt.label[:30]
                 print(
@@ -285,9 +271,7 @@ async def main():
                 elif cr.multi_choice_verdict is not None:
                     mc = cr.multi_choice_verdict
                     match = "✓" if mc.selected_label == gt else "✗"
-                    print(
-                        f"    {criterion.name}: {mc.selected_label} (GT: {gt}) {match}"
-                    )
+                    print(f"    {criterion.name}: {mc.selected_label} (GT: {gt}) {match}")
 
     # Timing stats
     print("\n" + "-" * 80)

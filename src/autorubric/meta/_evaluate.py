@@ -178,8 +178,7 @@ async def evaluate_rubric_in_context(
     if display is not None:
         prompt_preview = task_prompt[:100] + "..." if len(task_prompt) > 100 else task_prompt
         rubric_summary = (
-            f"Evaluating rubric with {len(rubric.rubric)} criteria\n"
-            f"Task: {prompt_preview}"
+            f"Evaluating rubric with {len(rubric.rubric)} criteria\nTask: {prompt_preview}"
         )
         display_meta_rubric_result(
             result,

@@ -286,9 +286,7 @@ def _rubric_to_lines(rubric: Rubric) -> list[str]:
     return lines
 
 
-def _build_inline_diff_line(
-    prefix: str, line: str, other_line: str, *, is_add: bool
-) -> Text:
+def _build_inline_diff_line(prefix: str, line: str, other_line: str, *, is_add: bool) -> Text:
     """Build a Rich Text line with two-tone background highlighting.
 
     Uses dark background for the full line and brighter background on the
@@ -327,9 +325,7 @@ class ImprovementProgressDisplay:
         self._progress: Progress | None = None
         self._task_id: TaskID | None = None
 
-    def begin_iteration(
-        self, iteration: int, max_iterations: int, total_steps: int
-    ) -> None:
+    def begin_iteration(self, iteration: int, max_iterations: int, total_steps: int) -> None:
         """Start a progress bar for one iteration."""
         self._progress = Progress(
             SpinnerColumn(),
@@ -369,8 +365,7 @@ class ImprovementProgressDisplay:
         progress = Progress(
             SpinnerColumn(),
             TextColumn(
-                f"[bold blue]Iteration {iteration + 1}/{max_iterations} "
-                f"[not bold]· {phase_name}"
+                f"[bold blue]Iteration {iteration + 1}/{max_iterations} [not bold]· {phase_name}"
             ),
             TimeElapsedColumn(),
             console=self._console,
@@ -392,9 +387,9 @@ class ImprovementProgressDisplay:
 
     def log_issues_table(
         self,
-        issues: list["IssueDetail"],
+        issues: list[IssueDetail],
         *,
-        rubric: "Rubric | None" = None,
+        rubric: Rubric | None = None,
     ) -> None:
         """Print a Rich table of issues found in this iteration."""
         if not issues:
@@ -429,7 +424,7 @@ class ImprovementProgressDisplay:
 
         self._console.print(table)
 
-    def log_rubric(self, rubric: "Rubric", iteration: int) -> None:
+    def log_rubric(self, rubric: Rubric, iteration: int) -> None:
         """Print a Rich panel showing the rubric criteria."""
         table = Table(show_header=True, show_lines=False, padding=(0, 1))
         table.add_column("#", style="dim", justify="right", width=3)
@@ -458,17 +453,15 @@ class ImprovementProgressDisplay:
                 default=None,
             )
             if worst:
-                parts.append(
-                    f"worst={worst.criterion_name}({worst.accuracy:.0%})"
-                )
+                parts.append(f"worst={worst.criterion_name}({worst.accuracy:.0%})")
         self._console.print(" ".join(parts))
 
     def print_held_out_summary(
         self,
-        iterations: list["IterationResult"],
+        iterations: list[IterationResult],
         convergence_reason: str,
         total_cost: float,
-        artifacts_dir: "Path | None",
+        artifacts_dir: Path | None,
     ) -> None:
         """Print a summary table for held-out improvement."""
         table = Table(title="Held-Out Improvement Summary", show_lines=False)
@@ -499,8 +492,7 @@ class ImprovementProgressDisplay:
             initial = iterations[0]
             final = iterations[-1]
             self._console.print(
-                f"\n  Accuracy: {initial.quality_score:.1%} -> "
-                f"{final.quality_score:.1%}"
+                f"\n  Accuracy: {initial.quality_score:.1%} -> {final.quality_score:.1%}"
             )
 
         self._console.print(f"  Convergence: {convergence_reason}")
@@ -511,8 +503,8 @@ class ImprovementProgressDisplay:
 
     def log_rubric_diff(
         self,
-        prev_rubric: "Rubric",
-        curr_rubric: "Rubric",
+        prev_rubric: Rubric,
+        curr_rubric: Rubric,
         iteration: int,
     ) -> None:
         """Print a paired before/after diff of rubric criteria between iterations.
@@ -547,12 +539,22 @@ class ImprovementProgressDisplay:
                 n_pairs = max(len(old_block), len(new_block))
                 for k in range(n_pairs):
                     if k < len(old_block) and k < len(new_block):
-                        styled.append_text(_build_inline_diff_line(
-                            "- ", old_block[k], new_block[k], is_add=False,
-                        ))
-                        styled.append_text(_build_inline_diff_line(
-                            "+ ", new_block[k], old_block[k], is_add=True,
-                        ))
+                        styled.append_text(
+                            _build_inline_diff_line(
+                                "- ",
+                                old_block[k],
+                                new_block[k],
+                                is_add=False,
+                            )
+                        )
+                        styled.append_text(
+                            _build_inline_diff_line(
+                                "+ ",
+                                new_block[k],
+                                old_block[k],
+                                is_add=True,
+                            )
+                        )
                     elif k < len(old_block):
                         styled.append(f"- {old_block[k]}\n", style="on #3d1f1f")
                     else:
@@ -593,9 +595,7 @@ class ImprovementProgressDisplay:
         table.add_column("Status")
 
         for it in iterations:
-            agreement_str = (
-                f"{it.agreement:.0%}" if it.agreement is not None else "N/A"
-            )
+            agreement_str = f"{it.agreement:.0%}" if it.agreement is not None else "N/A"
             fixed_str = str(len(it.issues_fixed)) if it.issues_fixed else "-"
             intro_str = str(len(it.issues_introduced)) if it.issues_introduced else "-"
             status = "Accepted" if it.accepted else f"Rejected: {it.rejection_reason}"
@@ -618,21 +618,13 @@ class ImprovementProgressDisplay:
                 (it for it in reversed(iterations) if it.accepted), iterations[-1]
             )
             self._console.print(
-                f"\n  Quality: {initial.quality_score:.1%} -> "
-                f"{final_accepted.quality_score:.1%}"
+                f"\n  Quality: {initial.quality_score:.1%} -> {final_accepted.quality_score:.1%}"
             )
-            if (
-                initial.agreement is not None
-                and final_accepted.agreement is not None
-            ):
+            if initial.agreement is not None and final_accepted.agreement is not None:
                 self._console.print(
-                    f"  Agreement: {initial.agreement:.0%} -> "
-                    f"{final_accepted.agreement:.0%}"
+                    f"  Agreement: {initial.agreement:.0%} -> {final_accepted.agreement:.0%}"
                 )
-            self._console.print(
-                f"  Issues: {len(initial.issues)} -> "
-                f"{len(final_accepted.issues)}"
-            )
+            self._console.print(f"  Issues: {len(initial.issues)} -> {len(final_accepted.issues)}")
 
         self._console.print(f"  Convergence: {convergence_reason}")
         if total_cost > 0:
@@ -701,9 +693,7 @@ def format_issues_for_prompt(issues: list[IssueDetail]) -> str:
 
     lines: list[str] = []
     for i, issue in enumerate(issues, 1):
-        issue_type = (
-            "ANTI-PATTERN DETECTED" if issue.is_antipattern else "QUALITY GAP"
-        )
+        issue_type = "ANTI-PATTERN DETECTED" if issue.is_antipattern else "QUALITY GAP"
         lines.append(f"{i}. [{issue_type}] {issue.criterion_name}")
         lines.append(f"   Feedback: {issue.feedback}")
         lines.append("")
@@ -719,9 +709,7 @@ def format_agreement_for_prompt(
         return ""
 
     lines: list[str] = ["## Inter-Judge Agreement"]
-    for name, agreement in sorted(
-        per_criterion_agreement.items(), key=lambda x: x[1]
-    ):
+    for name, agreement in sorted(per_criterion_agreement.items(), key=lambda x: x[1]):
         if agreement >= 0.8:
             level = "HIGH"
         elif agreement >= 0.6:
@@ -797,8 +785,7 @@ async def validate_ground_truth(
             grader=grader,
             query=task_prompt or validation_data.prompt,
             reference_submission=(
-                item.reference_submission
-                or validation_data.reference_submission
+                item.reference_submission or validation_data.reference_submission
             ),
         )
         rubric_scores.append(result.score)
@@ -808,13 +795,15 @@ async def validate_ground_truth(
             _item_reports.append(result)
 
         if _capture is not None:
-            _capture.append({
-                "submission": item.submission[:200],
-                "description": item.description,
-                "rubric_score": result.score,
-                "expected_score": expected_scores[i],
-                "gap": result.score - expected_scores[i],
-            })
+            _capture.append(
+                {
+                    "submission": item.submission[:200],
+                    "description": item.description,
+                    "rubric_score": result.score,
+                    "expected_score": expected_scores[i],
+                    "gap": result.score - expected_scores[i],
+                }
+            )
 
         if on_item_complete is not None:
             on_item_complete()
@@ -852,9 +841,7 @@ def _select_diagnostic_items(
     over_scored: list[tuple[int, float, float, EnsembleEvaluationReport]] = []
     under_scored: list[tuple[int, float, float, EnsembleEvaluationReport]] = []
 
-    for i, ((rubric_score, expected_score), report) in enumerate(
-        zip(per_item, item_reports)
-    ):
+    for i, ((rubric_score, expected_score), report) in enumerate(zip(per_item, item_reports)):
         gap = rubric_score - expected_score
         if gap > 0:
             over_scored.append((i, rubric_score, expected_score, report))
@@ -899,10 +886,7 @@ def _format_error_criteria(
             sign = "+" if weight > 0 else ""
             verdict_str = verdict.value
             name = ecr.criterion.name or ecr.criterion.requirement[:40]
-            lines.append(
-                f"    [w={sign}{weight}, {verdict_str}] {name}: "
-                f"{ecr.final_reason}"
-            )
+            lines.append(f"    [w={sign}{weight}, {verdict_str}] {name}: {ecr.final_reason}")
 
     return lines
 
@@ -936,20 +920,20 @@ def format_ground_truth_for_prompt(
             f"expected={expected_score:.2f} (gap: {gap:+.2f})"
         )
     lines.append(
-        "Adjust criteria to reduce scoring gaps on submissions "
-        "that are over- or under-scored."
+        "Adjust criteria to reduce scoring gaps on submissions that are over- or under-scored."
     )
 
     if item_reports is not None and len(item_reports) == len(per_item):
         over_scored, under_scored = _select_diagnostic_items(
-            per_item, item_reports, n_per_direction=n_diagnostic,
+            per_item,
+            item_reports,
+            n_per_direction=n_diagnostic,
         )
         if over_scored or under_scored:
             lines.append("")
             lines.append("## Grading Diagnostics for Largest Gaps")
             lines.append(
-                "The following shows why the rubric over- or under-scored "
-                "specific submissions."
+                "The following shows why the rubric over- or under-scored specific submissions."
             )
             lines.append(
                 "For over-scored submissions, criteria listed were MET but "
@@ -1001,9 +985,7 @@ def format_ground_truth_for_prompt(
     return "\n".join(lines)
 
 
-def build_revision_history(
-    iterations: list[IterationResult], window: int
-) -> str:
+def build_revision_history(iterations: list[IterationResult], window: int) -> str:
     """Format recent iteration history for the revision prompt."""
     if not iterations:
         return "No previous iterations."
@@ -1057,9 +1039,7 @@ async def validate_agreement(
     total_cost: float = 0.0
 
     for sample in samples:
-        result = await rubric.grade(
-            to_grade=sample, grader=grader, query=task_prompt
-        )
+        result = await rubric.grade(to_grade=sample, grader=grader, query=task_prompt)
         if isinstance(result, EnsembleEvaluationReport) and result.report:
             all_agreements.append(result.mean_agreement)
             total_cost += result.completion_cost or 0.0
@@ -1070,16 +1050,17 @@ async def validate_agreement(
             if _capture is not None:
                 from autorubric.eval import _serialize_ensemble_criterion_report
 
-                _capture.append({
-                    "submission": sample,
-                    "score": result.score,
-                    "mean_agreement": result.mean_agreement,
-                    "completion_cost": result.completion_cost,
-                    "criterion_reports": [
-                        _serialize_ensemble_criterion_report(ecr)
-                        for ecr in result.report
-                    ],
-                })
+                _capture.append(
+                    {
+                        "submission": sample,
+                        "score": result.score,
+                        "mean_agreement": result.mean_agreement,
+                        "completion_cost": result.completion_cost,
+                        "criterion_reports": [
+                            _serialize_ensemble_criterion_report(ecr) for ecr in result.report
+                        ],
+                    }
+                )
 
         if on_sample_complete is not None:
             on_sample_complete()
@@ -1089,8 +1070,7 @@ async def validate_agreement(
 
     mean_agreement = sum(all_agreements) / len(all_agreements)
     per_criterion_agreement = {
-        name: sum(vals) / len(vals)
-        for name, vals in per_criterion_totals.items()
+        name: sum(vals) / len(vals) for name, vals in per_criterion_totals.items()
     }
     return mean_agreement, per_criterion_agreement, total_cost if total_cost > 0 else None
 
@@ -1165,9 +1145,7 @@ async def revise_rubric(
     )
 
     effective_system_prompt = (
-        system_prompt
-        or config.revision_system_prompt
-        or RUBRIC_REVISION_SYSTEM_PROMPT
+        system_prompt or config.revision_system_prompt or RUBRIC_REVISION_SYSTEM_PROMPT
     )
     effective_user_template = (
         user_prompt_template
@@ -1196,9 +1174,7 @@ async def revise_rubric(
     )
 
     client = LLMClient(config.revision_llm)
-    gen_result = await client.generate(
-        effective_system_prompt, user_prompt, return_result=True
-    )
+    gen_result = await client.generate(effective_system_prompt, user_prompt, return_result=True)
 
     text = gen_result.content
     revision_cost = gen_result.cost
@@ -1262,8 +1238,7 @@ async def validate_held_out(
             grader=grader,
             query=task_prompt or validation_data.prompt,
             reference_submission=(
-                item.reference_submission
-                or validation_data.reference_submission
+                item.reference_submission or validation_data.reference_submission
             ),
         )
         item_reports.append(result)
@@ -1315,11 +1290,13 @@ async def validate_held_out(
             all_exemplars[c_idx].append(exemplar)
 
         if _capture is not None:
-            _capture.append({
-                "submission": item.submission[:200],
-                "description": item.description,
-                "rubric_score": result.score,
-            })
+            _capture.append(
+                {
+                    "submission": item.submission[:200],
+                    "description": item.description,
+                    "rubric_score": result.score,
+                }
+            )
 
         if on_item_complete is not None:
             on_item_complete()
@@ -1340,18 +1317,20 @@ async def validate_held_out(
         disagreements = disagreements[:max_exemplars_per_criterion]
 
         agreements = [e for e in all_exemplars[c_idx] if not e.is_disagreement]
-        agreements = agreements[:min(2, max_exemplars_per_criterion)]
+        agreements = agreements[: min(2, max_exemplars_per_criterion)]
 
-        per_criterion.append(CriterionErrorReport(
-            criterion_index=c_idx,
-            criterion_name=criterion.name or f"criterion_{c_idx}",
-            n_samples=total,
-            accuracy=accuracy,
-            false_positive_rate=fpr,
-            false_negative_rate=fnr,
-            disagreement_exemplars=disagreements,
-            agreement_exemplars=agreements,
-        ))
+        per_criterion.append(
+            CriterionErrorReport(
+                criterion_index=c_idx,
+                criterion_name=criterion.name or f"criterion_{c_idx}",
+                n_samples=total,
+                accuracy=accuracy,
+                false_positive_rate=fpr,
+                false_negative_rate=fnr,
+                disagreement_exemplars=disagreements,
+                agreement_exemplars=agreements,
+            )
+        )
 
     accuracies = [cr.accuracy for cr in per_criterion if cr.n_samples > 0]
     mean_accuracy = sum(accuracies) / len(accuracies) if accuracies else 1.0
@@ -1419,9 +1398,7 @@ def format_held_out_for_prompt(
             lines.append("**Agreements** (judge got these RIGHT):")
             for ex in cr.agreement_exemplars[:max_exemplars_per_criterion]:
                 lines.append(f"  Item {ex.item_index + 1}:")
-                lines.append(
-                    f"    Judge verdict: {ex.llm_verdict.value} (correct)"
-                )
+                lines.append(f"    Judge verdict: {ex.llm_verdict.value} (correct)")
                 lines.append(f"    Judge reasoning: {ex.llm_reason}")
 
     lines.append("")
@@ -1446,15 +1423,11 @@ def validate_criteria_structure(
         (valid, error_message) — True and None if valid, False and reason if not.
     """
     if len(original.rubric) != len(revised.rubric):
-        return False, (
-            f"Criteria count changed: {len(original.rubric)} -> {len(revised.rubric)}"
-        )
+        return False, (f"Criteria count changed: {len(original.rubric)} -> {len(revised.rubric)}")
 
     for i, (orig, rev) in enumerate(zip(original.rubric, revised.rubric)):
         if orig.name and rev.name and orig.name != rev.name:
-            return False, (
-                f"Criterion {i + 1} name changed: {orig.name!r} -> {rev.name!r}"
-            )
+            return False, (f"Criterion {i + 1} name changed: {orig.name!r} -> {rev.name!r}")
 
     return True, None
 
@@ -1494,9 +1467,7 @@ async def revise_rubric_held_out(
     )
 
     effective_system_prompt = (
-        system_prompt
-        or config.revision_system_prompt
-        or HELD_OUT_REVISION_SYSTEM_PROMPT
+        system_prompt or config.revision_system_prompt or HELD_OUT_REVISION_SYSTEM_PROMPT
     )
     effective_user_template = (
         user_prompt_template
@@ -1525,9 +1496,7 @@ async def revise_rubric_held_out(
     )
 
     client = LLMClient(config.revision_llm)
-    gen_result = await client.generate(
-        effective_system_prompt, user_prompt, return_result=True
-    )
+    gen_result = await client.generate(effective_system_prompt, user_prompt, return_result=True)
 
     text = gen_result.content
     revision_cost = gen_result.cost
@@ -1916,14 +1885,8 @@ class ImprovementRunner:
         n_validation_items = 0
 
         if config.validation_data is not None:
-            has_gt = all(
-                item.ground_truth is not None
-                for item in config.validation_data.items
-            )
-            has_no_gt = all(
-                item.ground_truth is None
-                for item in config.validation_data.items
-            )
+            has_gt = all(item.ground_truth is not None for item in config.validation_data.items)
+            has_no_gt = all(item.ground_truth is None for item in config.validation_data.items)
             if not has_gt and not has_no_gt:
                 raise ValueError(
                     "validation_data items must ALL have ground_truth or "
@@ -1939,8 +1902,7 @@ class ImprovementRunner:
                     )
                 if len(config.eval_llm) < 2:
                     raise ValueError(
-                        "eval_llm must have >= 2 judges for multi-judge "
-                        "validation mode"
+                        "eval_llm must have >= 2 judges for multi-judge validation mode"
                     )
 
             # Build grader from eval_llm
@@ -1978,9 +1940,7 @@ class ImprovementRunner:
 
             # --- Evaluate quality ---
             html_path = (
-                str(artifacts_dir / f"eval-iter-{iteration:02d}.html")
-                if artifacts_dir
-                else None
+                str(artifacts_dir / f"eval-iter-{iteration:02d}.html") if artifacts_dir else None
             )
 
             if progress:
@@ -2003,10 +1963,7 @@ class ImprovementRunner:
             iter_usage = quality_report.token_usage
 
             if progress:
-                next_phase = (
-                    "Validating" if config.validation_data is not None
-                    else "Done"
-                )
+                next_phase = "Validating" if config.validation_data is not None else "Done"
                 progress.advance(phase_name=next_phase)
 
             # --- Validation ---
@@ -2024,32 +1981,27 @@ class ImprovementRunner:
                         expected_scores,
                         validation_grader,
                         task_prompt=self.task_prompt,
-                        on_item_complete=(
-                            progress.advance if progress else None
-                        ),
+                        on_item_complete=(progress.advance if progress else None),
                         _capture=validation_capture,
                         _item_reports=item_reports,
                     )
                     agreement = correlation
                     validation_text = format_ground_truth_for_prompt(
-                        correlation, per_item, item_reports=item_reports,
+                        correlation,
+                        per_item,
+                        item_reports=item_reports,
                     )
                     validation_cost = val_cost or 0.0
                 else:
                     # Multi-judge mode
-                    samples = [
-                        item.submission
-                        for item in config.validation_data.items
-                    ]
+                    samples = [item.submission for item in config.validation_data.items]
                     assert isinstance(config.eval_llm, list)
                     agr, per_crit, val_cost = await validate_agreement(
                         current_rubric,
                         samples,
                         config.eval_llm,
                         task_prompt=self.task_prompt,
-                        on_sample_complete=(
-                            progress.advance if progress else None
-                        ),
+                        on_sample_complete=(progress.advance if progress else None),
                         _capture=validation_capture,
                     )
                     agreement = agr
@@ -2106,20 +2058,14 @@ class ImprovementRunner:
                 )
 
             # --- Display iteration results (persistent output) ---
-            prev_rubric = (
-                iterations[-2].rubric if len(iterations) >= 2 else None
-            )
+            prev_rubric = iterations[-2].rubric if len(iterations) >= 2 else None
             if progress:
                 progress.log_iteration(iter_result)
                 if prev_rubric is not None:
-                    progress.log_rubric_diff(
-                        prev_rubric, current_rubric, iteration
-                    )
+                    progress.log_rubric_diff(prev_rubric, current_rubric, iteration)
                 else:
                     progress.log_rubric(current_rubric, iteration)
-                progress.log_issues_table(
-                    iter_result.issues, rubric=current_rubric
-                )
+                progress.log_issues_table(iter_result.issues, rubric=current_rubric)
             elif config.display == "stdout":
                 print(f"\n  Quality: {quality_score:.1%}")
                 if agreement is not None:
@@ -2136,7 +2082,7 @@ class ImprovementRunner:
                         tofile=f"Iteration {iteration}",
                         lineterm="",
                     )
-                    print(f"  Rubric diff:")
+                    print("  Rubric diff:")
                     for line in diff:
                         print(f"    {line}")
                 else:
@@ -2147,13 +2093,8 @@ class ImprovementRunner:
                 for issue in issues:
                     tag = "ANTI-PATTERN" if issue.is_antipattern else "QUALITY GAP"
                     refs = _match_issue_to_criteria(issue, current_rubric)
-                    ref_str = (
-                        f" (#{', #'.join(str(r) for r in refs)})" if refs else ""
-                    )
-                    print(
-                        f"  [{tag}] {issue.criterion_name}{ref_str}: "
-                        f"{issue.feedback}"
-                    )
+                    ref_str = f" (#{', #'.join(str(r) for r in refs)})" if refs else ""
+                    print(f"  [{tag}] {issue.criterion_name}{ref_str}: {issue.feedback}")
 
             # --- Track best ---
             combined = quality_score
@@ -2200,9 +2141,7 @@ class ImprovementRunner:
             if not progress and config.display == "stdout":
                 print(f"\nITERATION {iteration}: REVISING RUBRIC...")
 
-            history_text = build_revision_history(
-                iterations, config.history_window
-            )
+            history_text = build_revision_history(iterations, config.history_window)
 
             # If the revision was rejected, revert to the last accepted rubric
             if not accepted:
@@ -2212,9 +2151,7 @@ class ImprovementRunner:
                         break
 
             if progress:
-                with progress.phase(
-                    iteration, config.max_iterations, "Revising rubric"
-                ):
+                with progress.phase(iteration, config.max_iterations, "Revising rubric"):
                     current_rubric, revision_cost = await revise_rubric(
                         current_rubric,
                         self.task_prompt,
@@ -2261,12 +2198,11 @@ class ImprovementRunner:
                 original_rubric,
                 best_rubric,
             )
-            (artifacts_dir / "improvement_report.html").write_text(
-                html, encoding="utf-8"
-            )
+            (artifacts_dir / "improvement_report.html").write_text(html, encoding="utf-8")
 
         # --- summary.json ---
         if artifacts_dir:
+
             def _rubric_to_criteria_list(rubric: Rubric) -> list[dict]:
                 return [
                     {
@@ -2294,15 +2230,15 @@ class ImprovementRunner:
                     "plateau_patience": config.plateau_patience,
                     "has_validation_data": config.validation_data is not None,
                     "validation_mode": (
-                        "ground_truth" if has_gt
-                        else "multi_judge" if config.validation_data is not None
+                        "ground_truth"
+                        if has_gt
+                        else "multi_judge"
+                        if config.validation_data is not None
                         else None
                     ),
                     "reject_agreement_regression": config.reject_agreement_regression,
                     "history_window": config.history_window,
-                    "eval_llm_model": (
-                        _get_eval_llm_config(config.eval_llm).model
-                    ),
+                    "eval_llm_model": (_get_eval_llm_config(config.eval_llm).model),
                     "revision_llm_model": config.revision_llm.model,
                 },
                 "iterations_summary": [
@@ -2320,16 +2256,12 @@ class ImprovementRunner:
                     for it in iterations
                 ],
             }
-            with open(
-                artifacts_dir / "summary.json", "w", encoding="utf-8"
-            ) as f:
+            with open(artifacts_dir / "summary.json", "w", encoding="utf-8") as f:
                 json.dump(summary, f, indent=2, default=str)
 
         # --- Summary ---
         if progress:
-            progress.print_summary(
-                iterations, convergence_reason, total_cost, artifacts_dir
-            )
+            progress.print_summary(iterations, convergence_reason, total_cost, artifacts_dir)
         elif config.display == "stdout":
             print(f"\n{'=' * 60}")
             print("IMPROVEMENT SUMMARY")
@@ -2346,18 +2278,9 @@ class ImprovementRunner:
                     f"\n  Quality: {initial.quality_score:.1%} -> "
                     f"{final_accepted.quality_score:.1%}"
                 )
-                if (
-                    initial.agreement is not None
-                    and final_accepted.agreement is not None
-                ):
-                    print(
-                        f"  Agreement: {initial.agreement:.0%} -> "
-                        f"{final_accepted.agreement:.0%}"
-                    )
-                print(
-                    f"  Issues: {len(initial.issues)} -> "
-                    f"{len(final_accepted.issues)}"
-                )
+                if initial.agreement is not None and final_accepted.agreement is not None:
+                    print(f"  Agreement: {initial.agreement:.0%} -> {final_accepted.agreement:.0%}")
+                print(f"  Issues: {len(initial.issues)} -> {len(final_accepted.issues)}")
 
             print(f"  Convergence: {convergence_reason}")
             if total_cost > 0:
@@ -2398,20 +2321,13 @@ class ImprovementRunner:
             f"{'Iter':<6} {'Quality':<10} {'Agreement':<12} "
             f"{'Issues':<8} {'Fixed':<8} {'Introduced':<12}"
         )
-        sep = (
-            f"{'─' * 6} {'─' * 10} {'─' * 12} "
-            f"{'─' * 8} {'─' * 8} {'─' * 12}"
-        )
+        sep = f"{'─' * 6} {'─' * 10} {'─' * 12} {'─' * 8} {'─' * 8} {'─' * 12}"
         print(f"\n{header}")
         print(sep)
         for it in iterations:
-            agreement_str = (
-                f"{it.agreement:.0%}" if it.agreement is not None else "N/A"
-            )
+            agreement_str = f"{it.agreement:.0%}" if it.agreement is not None else "N/A"
             fixed_str = str(len(it.issues_fixed)) if it.issues_fixed else "-"
-            intro_str = (
-                str(len(it.issues_introduced)) if it.issues_introduced else "-"
-            )
+            intro_str = str(len(it.issues_introduced)) if it.issues_introduced else "-"
             status = "" if it.accepted else " [REJECTED]"
             print(
                 f"{it.iteration:<6} {it.quality_score:<10.1%} {agreement_str:<12} "
@@ -2428,16 +2344,10 @@ class ImprovementRunner:
 
         # Validate requirements
         if config.validation_data is None:
+            raise ValueError("validation_data is required for held_out strategy")
+        if not all(item.ground_truth is not None for item in config.validation_data.items):
             raise ValueError(
-                "validation_data is required for held_out strategy"
-            )
-        if not all(
-            item.ground_truth is not None
-            for item in config.validation_data.items
-        ):
-            raise ValueError(
-                "All validation_data items must have ground_truth "
-                "for held_out strategy"
+                "All validation_data items must have ground_truth for held_out strategy"
             )
 
         # Set up artifacts directory
@@ -2473,7 +2383,9 @@ class ImprovementRunner:
             # --- Validate held-out ---
             if progress:
                 progress.begin_iteration(
-                    iteration, config.max_iterations, n_items,
+                    iteration,
+                    config.max_iterations,
+                    n_items,
                 )
 
             held_out_result = await validate_held_out(
@@ -2482,9 +2394,7 @@ class ImprovementRunner:
                 validation_grader,
                 task_prompt=self.task_prompt,
                 max_exemplars_per_criterion=config.max_exemplars_per_criterion,
-                on_item_complete=(
-                    progress.advance if progress else None
-                ),
+                on_item_complete=(progress.advance if progress else None),
                 _capture=validation_capture,
             )
 
@@ -2525,15 +2435,11 @@ class ImprovementRunner:
             if progress:
                 progress.log_held_out_iteration(iter_result)
                 if iteration > 0:
-                    progress.log_rubric_diff(
-                        iterations[-2].rubric, current_rubric, iteration
-                    )
+                    progress.log_rubric_diff(iterations[-2].rubric, current_rubric, iteration)
                 else:
                     progress.log_rubric(current_rubric, iteration)
             elif config.display == "stdout":
-                print(
-                    f"  Iter {iteration}: accuracy={mean_accuracy:.1%}"
-                )
+                print(f"  Iter {iteration}: accuracy={mean_accuracy:.1%}")
 
             # --- Track best ---
             if mean_accuracy > best_accuracy:
@@ -2575,14 +2481,10 @@ class ImprovementRunner:
                 held_out_result,
                 max_exemplars_per_criterion=config.max_exemplars_per_criterion,
             )
-            history_text = build_revision_history(
-                iterations, config.history_window
-            )
+            history_text = build_revision_history(iterations, config.history_window)
 
             if progress:
-                with progress.phase(
-                    iteration, config.max_iterations, "Revising rubric"
-                ):
+                with progress.phase(iteration, config.max_iterations, "Revising rubric"):
                     revised_rubric, revision_cost = await revise_rubric_held_out(
                         current_rubric,
                         self.task_prompt,
@@ -2631,12 +2533,11 @@ class ImprovementRunner:
                 original_rubric,
                 best_rubric,
             )
-            (artifacts_dir / "improvement_report.html").write_text(
-                html, encoding="utf-8"
-            )
+            (artifacts_dir / "improvement_report.html").write_text(html, encoding="utf-8")
 
         # --- summary.json ---
         if artifacts_dir:
+
             def _rubric_to_criteria_list(rubric: Rubric) -> list[dict]:
                 return [
                     {
@@ -2664,9 +2565,7 @@ class ImprovementRunner:
                     "max_exemplars_per_criterion": config.max_exemplars_per_criterion,
                     "score_plateau_threshold": config.score_plateau_threshold,
                     "plateau_patience": config.plateau_patience,
-                    "eval_llm_model": (
-                        _get_eval_llm_config(config.eval_llm).model
-                    ),
+                    "eval_llm_model": (_get_eval_llm_config(config.eval_llm).model),
                     "revision_llm_model": config.revision_llm.model,
                 },
                 "iterations_summary": [
@@ -2679,9 +2578,7 @@ class ImprovementRunner:
                     for it in iterations
                 ],
             }
-            with open(
-                artifacts_dir / "summary.json", "w", encoding="utf-8"
-            ) as f:
+            with open(artifacts_dir / "summary.json", "w", encoding="utf-8") as f:
                 json.dump(summary, f, indent=2, default=str)
 
         # --- Summary ---
@@ -2694,9 +2591,7 @@ class ImprovementRunner:
             print("HELD-OUT IMPROVEMENT SUMMARY")
             print(f"{'=' * 60}")
             for it in iterations:
-                print(
-                    f"  Iter {it.iteration}: accuracy={it.quality_score:.1%}"
-                )
+                print(f"  Iter {it.iteration}: accuracy={it.quality_score:.1%}")
             print(f"  Convergence: {convergence_reason}")
             if total_cost > 0:
                 print(f"  Total cost: ${total_cost:.4f}")
@@ -2757,9 +2652,7 @@ def _build_config(
         return replace(config, **overrides) if overrides else config
 
     if "eval_llm" not in overrides or "revision_llm" not in overrides:
-        raise ValueError(
-            "Either config or both eval_llm and revision_llm must be provided"
-        )
+        raise ValueError("Either config or both eval_llm and revision_llm must be provided")
     return ImprovementConfig(**overrides)
 
 

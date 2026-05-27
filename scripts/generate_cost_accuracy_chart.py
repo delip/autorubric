@@ -17,10 +17,28 @@ THEME = (
 )
 
 MODELS = [
-    {"name": "Gemini Flash", "accuracy": 87.5, "cost": 0.0012, "color": "#e76f51", "offset": (8, -10)},
-    {"name": "Claude Haiku", "accuracy": 89.2, "cost": 0.0018, "color": "#2a9d8f", "offset": (8, 6)},
+    {
+        "name": "Gemini Flash",
+        "accuracy": 87.5,
+        "cost": 0.0012,
+        "color": "#e76f51",
+        "offset": (8, -10),
+    },
+    {
+        "name": "Claude Haiku",
+        "accuracy": 89.2,
+        "cost": 0.0018,
+        "color": "#2a9d8f",
+        "offset": (8, 6),
+    },
     {"name": "GPT-4 Mini", "accuracy": 91.3, "cost": 0.0034, "color": "#264653", "offset": (-8, 6)},
-    {"name": "GPT-4 Turbo", "accuracy": 94.1, "cost": 0.0156, "color": "#e9c46a", "offset": (-8, -10)},
+    {
+        "name": "GPT-4 Turbo",
+        "accuracy": 94.1,
+        "cost": 0.0156,
+        "color": "#e9c46a",
+        "offset": (-8, -10),
+    },
 ]
 
 
@@ -34,8 +52,7 @@ def main() -> None:
         fig, ax = plt.subplots(figsize=(5.5, 4))
 
         for m in MODELS:
-            ax.scatter(m["cost"], m["accuracy"], marker="o", s=80,
-                       color=m["color"], zorder=3)
+            ax.scatter(m["cost"], m["accuracy"], marker="o", s=80, color=m["color"], zorder=3)
             ax.annotate(
                 m["name"],
                 xy=(m["cost"], m["accuracy"]),
@@ -50,7 +67,10 @@ def main() -> None:
         ax.plot(
             [m["cost"] for m in pareto],
             [m["accuracy"] for m in pareto],
-            linestyle="--", color="0.75", linewidth=1, zorder=1,
+            linestyle="--",
+            color="0.75",
+            linewidth=1,
+            zorder=1,
         )
 
         ax.set_xscale("log")
