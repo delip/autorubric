@@ -130,10 +130,12 @@ async def test_binary_infrastructure_failure_cannot_assess_and_no_penalty(mock_l
     strategy: the score should equal a baseline where that criterion is simply absent.
     """
     # Two positive criteria. The second one's judge call fails with an infra error.
-    rubric = Rubric([
-        Criterion(weight=2.0, requirement="Criterion A"),
-        Criterion(weight=1.0, requirement="Criterion B"),
-    ])
+    rubric = Rubric(
+        [
+            Criterion(weight=2.0, requirement="Criterion A"),
+            Criterion(weight=1.0, requirement="Criterion B"),
+        ]
+    )
 
     async def mock_generate(system_prompt, user_prompt, **kwargs) -> Any:
         if "Criterion B" in user_prompt:
@@ -220,10 +222,12 @@ async def test_binary_unknown_failure_keeps_worst_case(mock_llm_config):
 
     Positive-weight criterion -> UNMET; negative-weight criterion -> MET.
     """
-    rubric = Rubric([
-        Criterion(weight=2.0, requirement="Positive criterion"),
-        Criterion(weight=-1.0, requirement="Negative criterion"),
-    ])
+    rubric = Rubric(
+        [
+            Criterion(weight=2.0, requirement="Positive criterion"),
+            Criterion(weight=-1.0, requirement="Negative criterion"),
+        ]
+    )
     with patch(
         "autorubric.graders.criterion_grader.LLMClient",
         return_value=_client_raising(RuntimeError("boom")),
@@ -335,19 +339,21 @@ async def test_ensemble_all_judges_fail_cannot_assess_and_flagged():
 @pytest.mark.asyncio
 async def test_multi_choice_infrastructure_failure_is_na(mock_llm_config):
     """Multi-choice infra failure -> NA verdict (excluded from scoring), flagged."""
-    rubric = Rubric([
-        Criterion(
-            name="quality",
-            requirement="How good is it?",
-            weight=5.0,
-            scale_type="ordinal",
-            options=[
-                CriterionOption(label="Bad", value=0.0),
-                CriterionOption(label="Ok", value=0.5),
-                CriterionOption(label="Great", value=1.0),
-            ],
-        ),
-    ])
+    rubric = Rubric(
+        [
+            Criterion(
+                name="quality",
+                requirement="How good is it?",
+                weight=5.0,
+                scale_type="ordinal",
+                options=[
+                    CriterionOption(label="Bad", value=0.0),
+                    CriterionOption(label="Ok", value=0.5),
+                    CriterionOption(label="Great", value=1.0),
+                ],
+            ),
+        ]
+    )
     with patch(
         "autorubric.graders.criterion_grader.LLMClient",
         return_value=_client_raising(litellm.Timeout("timed out", model="m", llm_provider="p")),
