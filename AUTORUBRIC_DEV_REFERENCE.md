@@ -154,7 +154,7 @@ Note: `classify_grading_error` and `ErrorCategory` are in Public Exports.
 3. Makes concurrent LLM calls per criterion per judge via `asyncio.gather()`
 4. Binary criteria use `binary_response_format` (default: `CriterionJudgment`); meta-rubric evals use `MetaCriterionJudgment` which adds structured `affected_criteria` field
 5. If the response includes `affected_criteria`, grader injects `[Affects: #1, #3]` tag into the reason string
-6. Aggregates votes using strategy (majority/weighted/unanimous/any)
+6. Aggregates votes using strategy (majority/weighted/unanimous/any). For binary criteria, `majority` is an **unweighted head-count** (> 50% of judges, ties → UNMET), distinct from `weighted` (decides by summed judge weights).
 7. Returns `EnsembleEvaluationReport` (consistent interface)
 
 When a judge call fails, the grader calls `classify_grading_error()` on the exception. `infrastructure` and `parse` failures are routed to `CANNOT_ASSESS` (binary) or `na=True` (multi-choice) — so under the default `CannotAssessStrategy.SKIP` they are excluded from the scoring denominator and do NOT penalize the submission. Only `unknown` errors keep the previous conservative worst-case verdict (UNMET for positive weight, MET for negative). The failure message (category-prefixed, e.g. `"infrastructure: ..."`) is stored on `JudgeVote.error` (binary) and `MultiChoiceJudgeVote.error` (multi-choice — same parity). `EnsembleCriterionReport.error` is set only when EVERY contributing judge vote errored; a mix of failed + successful judges yields a genuine verdict with `error is None`. The `is_error` property on `CriterionReport` / `EnsembleCriterionReport` lets downstream code distinguish error-induced verdicts from genuine ones without string-matching `reason`.

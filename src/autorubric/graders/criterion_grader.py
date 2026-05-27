@@ -1028,7 +1028,10 @@ class CriterionGrader(Grader):
         )
 
         if self._aggregation == "majority":
-            verdict = CriterionVerdict.MET if met_weight > unmet_weight else CriterionVerdict.UNMET
+            # True head-count: count judges, ignore weights (> 50%); tie -> UNMET.
+            met_count = sum(1 for v in assessable_votes if v.verdict == CriterionVerdict.MET)
+            unmet_count = sum(1 for v in assessable_votes if v.verdict == CriterionVerdict.UNMET)
+            verdict = CriterionVerdict.MET if met_count > unmet_count else CriterionVerdict.UNMET
         elif self._aggregation == "weighted":
             verdict = CriterionVerdict.MET if met_weight > unmet_weight else CriterionVerdict.UNMET
         elif self._aggregation == "unanimous":
