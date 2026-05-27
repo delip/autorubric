@@ -374,6 +374,59 @@ async def test_multi_choice_infrastructure_failure_is_na(mock_llm_config):
     assert report.score == 0.0
 
 
+@pytest.mark.asyncio
+async def test_ensemble_multi_choice_vote_carries_error():
+    """In a mixed multi-choice ensemble, the failed judge's vote records its error.
+
+    The successful judge yields a genuine vote (error None); the failed judge's vote
+    carries a category-prefixed error. Exercises MultiChoiceJudgeVote.error parity.
+    """
+    rubric = Rubric(
+        [
+            Criterion(
+                name="quality",
+                requirement="How good is it?",
+                weight=5.0,
+                scale_type="ordinal",
+                options=[
+                    CriterionOption(label="Bad", value=0.0),
+                    CriterionOption(label="Ok", value=0.5),
+                    CriterionOption(label="Great", value=1.0),
+                ],
+            ),
+        ]
+    )
+
+    client_a = _client_raising(litellm.Timeout("a down", model="m", llm_provider="p"))
+    client_b = MagicMock()
+    client_b.generate = AsyncMock(return_value=_ok_mc_result(2))
+
+    def fake_client(config: LLMConfig) -> MagicMock:
+        return client_a if config.model == "judge-a-model" else client_b
+
+    with patch(
+        "autorubric.graders.criterion_grader.LLMClient",
+        side_effect=fake_client,
+    ):
+        grader = CriterionGrader(
+            judges=[
+                JudgeSpec(LLMConfig(model="judge-a-model"), "judge_a"),
+                JudgeSpec(LLMConfig(model="judge-b-model"), "judge_b"),
+            ],
+            aggregation="majority",
+            shuffle_options=False,
+        )
+        report = await rubric.grade("submission", grader=grader)
+
+    assert report.report is not None
+    cr = report.report[0]
+    assert cr.multi_choice_votes
+    by_id = {v.judge_id: v for v in cr.multi_choice_votes}
+    assert by_id["judge_a"].error is not None
+    assert by_id["judge_a"].error.startswith("infrastructure:")
+    assert by_id["judge_b"].error is None
+
+
 # =============================================================================
 # Serialization round-trip
 # =============================================================================

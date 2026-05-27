@@ -880,6 +880,7 @@ class CriterionGrader(Grader):
                                 weight=judge_result.weight,
                                 na=mcv.na,
                                 shuffle_order=cr.report.shuffle_order,
+                                error=cr.report.error,
                             )
                         )
 

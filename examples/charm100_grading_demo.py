@@ -178,6 +178,8 @@ async def main():
             print(f"  Adjacent Accuracy: {cm.adjacent_accuracy:.1%} (within ±1)")
             print()
             print(f"  Weighted Kappa:    {cm.weighted_kappa:.3f} ({cm.kappa_interpretation})")
+            if cm.krippendorff_alpha is not None:
+                print(f"  Krippendorff α:    {cm.krippendorff_alpha:.3f}  (recommended)")
             if cm.fleiss_kappa is not None:
                 print(f"  Fleiss' Kappa:     {cm.fleiss_kappa:.3f}")
             print()
@@ -210,6 +212,8 @@ async def main():
             print()
             print(f"  Exact Accuracy:    {cm.exact_accuracy:.1%}")
             print(f"  Cohen's Kappa:     {cm.kappa:.3f} ({cm.kappa_interpretation})")
+            if cm.krippendorff_alpha is not None:
+                print(f"  Krippendorff α:    {cm.krippendorff_alpha:.3f}  (recommended)")
             if cm.fleiss_kappa is not None:
                 print(f"  Fleiss' Kappa:     {cm.fleiss_kappa:.3f}")
 
@@ -238,6 +242,10 @@ async def main():
             print(f"  Recall:            {cm.recall:.2f}")
             print(f"  F1:                {cm.f1:.2f}")
             print(f"  Cohen's Kappa:     {cm.kappa:.3f} ({cm.kappa_interpretation})")
+            if cm.krippendorff_alpha is not None:
+                print(f"  Krippendorff α:    {cm.krippendorff_alpha:.3f}  (recommended)")
+            if cm.fleiss_kappa is not None:
+                print(f"  Fleiss' Kappa:     {cm.fleiss_kappa:.3f}")
             print(f"  MET support:       {cm.support_true} (pred: {cm.support_pred})")
 
     # Individual results

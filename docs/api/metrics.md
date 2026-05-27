@@ -6,6 +6,8 @@ Agreement and correlation metrics for validating LLM judges against ground truth
 
 When your dataset includes ground truth labels, `compute_metrics()` measures how well your LLM judge agrees with human annotations. Metrics include accuracy, precision, recall, F1, Cohen's kappa, correlations, and systematic bias analysis.
 
+For ensemble (multi-judge) evaluations, each per-criterion metrics object also reports **inter-judge agreement** (judges vs. each other, independent of ground truth). The recommended statistic is **Krippendorff's alpha** (`krippendorff_alpha`) — it handles unequal/missing raters and is level-aware (nominal vs. ordinal). **Fleiss' kappa** (`fleiss_kappa`) is also reported as the classic fixed-rater nominal measure, computed complete-case. Both are populated only with an ensemble of ≥2 judges and ≥2 items, and are `None` otherwise.
+
 !!! tip "Research Background"
 
     Casabianca et al. (2025) recommend agreement metrics including ICC, Krippendorff's alpha, and quadratic-weighted kappa (QWK), with iterative refinement until agreement with human-labeled subsets is acceptable. He et al. (2025) emphasize that correlation alone can mask systematic bias.
