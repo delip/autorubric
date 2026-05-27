@@ -851,6 +851,24 @@ class LLMClient:
             "directory": str(self._cache.directory),
         }
 
+    def close(self) -> None:
+        """Close the on-disk cache, releasing its file handles.
+
+        diskcache keeps the underlying SQLite database open for the lifetime of
+        the cache object. Call this when done with the client so the cache
+        directory can be removed (notably on Windows, which refuses to delete
+        files that are still open). Safe to call when no cache was initialized.
+        """
+        if self._cache is not None:
+            self._cache.close()
+            self._cache = None
+
+    def __enter__(self) -> LLMClient:
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.close()
+
 
 # Convenience function for simple usage
 async def generate(
