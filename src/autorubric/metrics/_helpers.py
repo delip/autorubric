@@ -113,6 +113,43 @@ def verdict_to_binary(verdicts: Sequence[CriterionVerdict]) -> list[int]:
     return [1 if v == CriterionVerdict.MET else 0 for v in verdicts]
 
 
+def prepare_binary_metric_inputs(
+    pred_verdicts: list[CriterionVerdict],
+    true_verdicts: list[CriterionVerdict],
+    mode: CannotAssessMode = "exclude",
+) -> tuple[list[str], list[str], list[int], list[int]]:
+    """Build label and MET-vs-rest representations for binary-criterion metrics.
+
+    Applies ``filter_cannot_assess(mode)`` first, then returns two parallel
+    representations of the surviving verdict pairs:
+
+    - ``label_pred`` / ``label_true``: verdict ``.value`` strings, suitable for
+      ``accuracy_score`` and ``cohen_kappa_score``. Under ``"as_category"`` these
+      may include CANNOT_ASSESS as a distinct third class (so a CANNOT_ASSESS
+      prediction matching a CANNOT_ASSESS ground truth counts as correct). Under
+      ``"exclude"`` / ``"as_unmet"`` no CANNOT_ASSESS survives, so these are
+      two-class and numerically identical to the prior MET/non-MET encoding.
+    - ``met_pred`` / ``met_true``: MET one-vs-rest 0/1 ints (1 iff MET), suitable
+      for ``precision_score`` / ``recall_score`` / ``f1_score`` and for the
+      ``support_true`` / ``support_pred`` counts.
+
+    Args:
+        pred_verdicts: Predicted verdicts.
+        true_verdicts: Ground truth verdicts.
+        mode: CANNOT_ASSESS handling mode (see ``filter_cannot_assess``).
+
+    Returns:
+        Tuple of (label_pred, label_true, met_pred, met_true).
+    """
+    filtered_pred, filtered_true = filter_cannot_assess(pred_verdicts, true_verdicts, mode)
+    return (
+        verdict_to_string(filtered_pred),
+        verdict_to_string(filtered_true),
+        verdict_to_binary(filtered_pred),
+        verdict_to_binary(filtered_true),
+    )
+
+
 def verdict_to_string(verdicts: Sequence[CriterionVerdict]) -> list[str]:
     """Convert verdicts to string values.
 

@@ -6,6 +6,7 @@ comprehensive evaluation metrics from an EvalResult and RubricDataset.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
@@ -27,10 +28,12 @@ from ._helpers import (
     extract_all_verdicts_from_report,
     filter_na_multi_choice,
     get_option_value,
+    prepare_binary_metric_inputs,
     resolve_ground_truth,
 )
 from ._types import (
     BootstrapResults,
+    CannotAssessMode,
     CorrelationResult,
     CriterionMetrics,
     CriterionMetricsUnion,
@@ -425,11 +428,6 @@ def _compute_nominal_criterion_metrics(
     )
 
 
-def _verdict_to_binary(verdict: CriterionVerdict) -> int:
-    """Convert a single verdict to binary (MET=1, else=0)."""
-    return 1 if verdict == CriterionVerdict.MET else 0
-
-
 def _compute_correlation(x: list[float], y: list[float], method: str) -> CorrelationResult:
     """Compute correlation with interpretation."""
     if len(x) < 3:
@@ -466,8 +464,8 @@ def _compute_correlation(x: list[float], y: list[float], method: str) -> Correla
 
 
 def _compute_bootstrap_ci(
-    y_true: list[int],
-    y_pred: list[int],
+    y_true: Sequence[int] | Sequence[str],
+    y_pred: Sequence[int] | Sequence[str],
     true_scores: list[float],
     pred_scores: list[float],
     n_bootstrap: int,
@@ -546,29 +544,29 @@ def _compute_judge_metrics(
     true_scores: list[float],
     judge_verdicts: list[list[CriterionVerdict]],
     true_verdicts: list[list[CriterionVerdict]],
-    cannot_assess: Literal["exclude", "as_unmet"],
+    cannot_assess: CannotAssessMode,
 ) -> JudgeMetrics:
     """Compute metrics for a single judge."""
-    # Flatten verdicts for criterion-level metrics
-    pred_flat = []
-    true_flat = []
-
+    # Flatten verdicts across items, then build label (accuracy/kappa) and
+    # MET-vs-rest (precision/recall/f1) representations via the shared helper.
+    pred_flat: list[CriterionVerdict] = []
+    true_flat: list[CriterionVerdict] = []
     for pred_v, true_v in zip(judge_verdicts, true_verdicts):
-        for p, t in zip(pred_v, true_v):
-            if cannot_assess == "exclude":
-                if p == CriterionVerdict.CANNOT_ASSESS or t == CriterionVerdict.CANNOT_ASSESS:
-                    continue
-            pred_flat.append(_verdict_to_binary(p))
-            true_flat.append(_verdict_to_binary(t))
+        pred_flat.extend(pred_v)
+        true_flat.extend(true_v)
+
+    label_pred, label_true, met_pred, met_true = prepare_binary_metric_inputs(
+        pred_flat, true_flat, cannot_assess
+    )
 
     # Criterion-level metrics
-    if pred_flat:
-        criterion_accuracy = accuracy_score(true_flat, pred_flat)
-        criterion_precision = precision_score(true_flat, pred_flat, zero_division=0)
-        criterion_recall = recall_score(true_flat, pred_flat, zero_division=0)
-        criterion_f1 = f1_score(true_flat, pred_flat, zero_division=0)
+    if label_pred:
+        criterion_accuracy = accuracy_score(label_true, label_pred)
+        criterion_precision = precision_score(met_true, met_pred, zero_division=0)
+        criterion_recall = recall_score(met_true, met_pred, zero_division=0)
+        criterion_f1 = f1_score(met_true, met_pred, zero_division=0)
         try:
-            kappa = cohen_kappa_score(true_flat, pred_flat)
+            kappa = cohen_kappa_score(label_true, label_pred)
         except Exception:
             kappa = 0.0
     else:
@@ -612,7 +610,7 @@ def compute_metrics(
     bootstrap: bool = False,
     n_bootstrap: int = 1000,
     per_judge: bool = False,
-    cannot_assess: Literal["exclude", "as_unmet"] = "exclude",
+    cannot_assess: CannotAssessMode = "exclude",
     na_mode: Literal["exclude", "as_worst"] = "exclude",
     confidence_level: float = 0.95,
     seed: int | None = None,
@@ -632,6 +630,10 @@ def compute_metrics(
         cannot_assess: How to handle CANNOT_ASSESS verdicts (binary criteria):
             - "exclude": Skip pairs where either is CANNOT_ASSESS (default)
             - "as_unmet": Treat CANNOT_ASSESS as UNMET
+            - "as_category": Keep CANNOT_ASSESS as a distinct third class. Accuracy and
+              Cohen's kappa are then computed over three classes (a CANNOT_ASSESS
+              prediction matching a CANNOT_ASSESS ground truth counts as correct);
+              precision/recall/f1 remain MET-vs-rest.
         na_mode: How to handle NA options (multi-choice criteria):
             - "exclude": Skip pairs where either is NA (default)
             - "as_worst": Keep NA in metrics (no special treatment)
@@ -824,9 +826,13 @@ def compute_metrics(
     per_criterion: list[CriterionMetricsUnion] = []
     criterion_kappas: list[float] = []
 
-    # For binary-only aggregate metrics
-    binary_pred_flat: list[int] = []
-    binary_true_flat: list[int] = []
+    # For binary-only aggregate metrics:
+    # label_*_flat feed accuracy/kappa (may be 3-class under "as_category");
+    # met_*_flat feed precision/recall/f1 (MET one-vs-rest).
+    label_pred_flat: list[str] = []
+    label_true_flat: list[str] = []
+    met_pred_flat: list[int] = []
+    met_true_flat: list[int] = []
 
     for c_idx in range(n_criteria):
         criterion = criteria[c_idx]
@@ -839,23 +845,20 @@ def compute_metrics(
             pred_verdicts = [v for v in pred_data if isinstance(v, CriterionVerdict)]
             true_verdicts = [v for v in true_data if isinstance(v, CriterionVerdict)]
 
-            # Filter CANNOT_ASSESS
-            pred_filtered = []
-            true_filtered = []
-            for p, t in zip(pred_verdicts, true_verdicts):
-                if cannot_assess == "exclude":
-                    if p == CriterionVerdict.CANNOT_ASSESS or t == CriterionVerdict.CANNOT_ASSESS:
-                        continue
-                pred_filtered.append(_verdict_to_binary(p))
-                true_filtered.append(_verdict_to_binary(t))
+            # Handle CANNOT_ASSESS centrally and build label + MET-vs-rest reps.
+            label_pred, label_true, met_pred, met_true = prepare_binary_metric_inputs(
+                pred_verdicts, true_verdicts, cannot_assess
+            )
 
             # Add to aggregate
-            binary_pred_flat.extend(pred_filtered)
-            binary_true_flat.extend(true_filtered)
+            label_pred_flat.extend(label_pred)
+            label_true_flat.extend(label_true)
+            met_pred_flat.extend(met_pred)
+            met_true_flat.extend(met_true)
 
             name = criterion.name or f"Criterion {c_idx + 1}"
 
-            if not pred_filtered:
+            if not label_pred:
                 per_criterion.append(
                     CriterionMetrics(
                         name=name,
@@ -873,13 +876,13 @@ def compute_metrics(
                 )
                 continue
 
-            c_acc = accuracy_score(true_filtered, pred_filtered)
-            c_prec = precision_score(true_filtered, pred_filtered, zero_division=0)
-            c_rec = recall_score(true_filtered, pred_filtered, zero_division=0)
-            c_f1 = f1_score(true_filtered, pred_filtered, zero_division=0)
+            c_acc = accuracy_score(label_true, label_pred)
+            c_prec = precision_score(met_true, met_pred, zero_division=0)
+            c_rec = recall_score(met_true, met_pred, zero_division=0)
+            c_f1 = f1_score(met_true, met_pred, zero_division=0)
 
             try:
-                c_kappa = cohen_kappa_score(true_filtered, pred_filtered)
+                c_kappa = cohen_kappa_score(label_true, label_pred)
             except Exception:
                 c_kappa = 0.0
 
@@ -889,15 +892,15 @@ def compute_metrics(
                 CriterionMetrics(
                     name=name,
                     index=c_idx,
-                    n_samples=len(pred_filtered),
+                    n_samples=len(label_pred),
                     accuracy=float(c_acc),
                     precision=float(c_prec),
                     recall=float(c_rec),
                     f1=float(c_f1),
                     kappa=float(c_kappa),
                     kappa_interpretation=_interpret_kappa(c_kappa),
-                    support_true=sum(true_filtered),
-                    support_pred=sum(pred_filtered),
+                    support_true=sum(met_true),
+                    support_pred=sum(met_pred),
                 )
             )
 
@@ -951,11 +954,11 @@ def compute_metrics(
     mean_kappa = sum(criterion_kappas) / len(criterion_kappas) if criterion_kappas else 0.0
 
     # Binary-only aggregate metrics (precision/recall/f1 only make sense for binary)
-    if binary_pred_flat:
-        criterion_accuracy = accuracy_score(binary_true_flat, binary_pred_flat)
-        criterion_precision = precision_score(binary_true_flat, binary_pred_flat, zero_division=0)
-        criterion_recall = recall_score(binary_true_flat, binary_pred_flat, zero_division=0)
-        criterion_f1 = f1_score(binary_true_flat, binary_pred_flat, zero_division=0)
+    if label_pred_flat:
+        criterion_accuracy = accuracy_score(label_true_flat, label_pred_flat)
+        criterion_precision = precision_score(met_true_flat, met_pred_flat, zero_division=0)
+        criterion_recall = recall_score(met_true_flat, met_pred_flat, zero_division=0)
+        criterion_f1 = f1_score(met_true_flat, met_pred_flat, zero_division=0)
     else:
         # No binary criteria - compute accuracy across all multi-choice
         # For multi-choice, accuracy is exact match
@@ -991,10 +994,10 @@ def compute_metrics(
 
     # Bootstrap CIs (optional) - uses binary metrics for backwards compat
     bootstrap_results = None
-    if bootstrap and binary_pred_flat:
+    if bootstrap and label_pred_flat:
         bootstrap_results = _compute_bootstrap_ci(
-            binary_true_flat,
-            binary_pred_flat,
+            label_true_flat,
+            label_pred_flat,
             all_true_scores,
             all_pred_scores,
             n_bootstrap=n_bootstrap,
