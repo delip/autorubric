@@ -820,6 +820,24 @@ class MetricsResult(BaseModel):
         lines.append("")
         lines.append("Per-Criterion Breakdown:")
 
+        # Inter-judge agreement (Krippendorff's alpha + Fleiss' kappa) is only populated for
+        # ensembles with >=2 judges; append those columns to a group's table only when at
+        # least one criterion in the group carries them. Krippendorff's alpha is the
+        # recommended statistic, so it leads.
+        def _has_agreement(criteria: list) -> bool:
+            return any(
+                cm.krippendorff_alpha is not None or cm.fleiss_kappa is not None for cm in criteria
+            )
+
+        def _agreement_header() -> str:
+            return f" {'Kripp-α':>9} {'Fleiss':>8}"
+
+        def _agreement_cells(cm) -> str:
+            def fmt(value: float | None, width: int) -> str:
+                return f"{value:>{width}.3f}" if value is not None else f"{'n/a':>{width}}"
+
+            return f" {fmt(cm.krippendorff_alpha, 9)} {fmt(cm.fleiss_kappa, 8)}"
+
         # Separate display by criterion type
         binary_criteria = [cm for cm in self.per_criterion if cm.criterion_type == "binary"]
         ordinal_criteria = [cm for cm in self.per_criterion if cm.criterion_type == "ordinal"]
@@ -828,39 +846,57 @@ class MetricsResult(BaseModel):
         if binary_criteria:
             if ordinal_criteria or nominal_criteria:
                 lines.append("\nBinary Criteria:")
+            show_agreement = _has_agreement(binary_criteria)
             header = f"{'Criterion':<20} {'Acc':>8} {'Prec':>8} {'Rec':>8} {'F1':>8} {'Kappa':>8}"
+            if show_agreement:
+                header += _agreement_header()
             lines.append(header)
             lines.append("-" * len(header))
             for cm in binary_criteria:
-                lines.append(
+                row = (
                     f"{cm.name:<20} {cm.accuracy:>8.1%} {cm.precision:>8.2f} "
                     f"{cm.recall:>8.2f} {cm.f1:>8.2f} {cm.kappa:>8.3f}"
                 )
+                if show_agreement:
+                    row += _agreement_cells(cm)
+                lines.append(row)
 
         if ordinal_criteria:
             lines.append("\nOrdinal Criteria:")
+            show_agreement = _has_agreement(ordinal_criteria)
             header = (
                 f"{'Criterion':<20} {'Exact':>8} {'Adj':>8} "
                 f"{'WKappa':>8} {'Spearman':>10} {'RMSE':>8}"
             )
+            if show_agreement:
+                header += _agreement_header()
             lines.append(header)
             lines.append("-" * len(header))
             for cm in ordinal_criteria:
-                lines.append(
+                row = (
                     f"{cm.name:<20} {cm.exact_accuracy:>8.1%} {cm.adjacent_accuracy:>8.1%} "
                     f"{cm.weighted_kappa:>8.3f} {cm.spearman.coefficient:>10.4f} {cm.rmse:>8.4f}"
                 )
+                if show_agreement:
+                    row += _agreement_cells(cm)
+                lines.append(row)
 
         if nominal_criteria:
             lines.append("\nNominal Criteria:")
+            show_agreement = _has_agreement(nominal_criteria)
             header = f"{'Criterion':<20} {'Accuracy':>10} {'Kappa':>8} {'Interpretation':<20}"
+            if show_agreement:
+                header += _agreement_header()
             lines.append(header)
             lines.append("-" * len(header))
             for cm in nominal_criteria:
-                lines.append(
+                row = (
                     f"{cm.name:<20} {cm.exact_accuracy:>10.1%} {cm.kappa:>8.3f} "
                     f"{cm.kappa_interpretation:<20}"
                 )
+                if show_agreement:
+                    row += _agreement_cells(cm)
+                lines.append(row)
 
         return "\n".join(lines)
 
@@ -897,6 +933,8 @@ class MetricsResult(BaseModel):
                 "bias": self.bias.mean_bias,
                 "adjacent_accuracy": None,
                 "weighted_kappa": None,
+                "krippendorff_alpha": None,
+                "fleiss_kappa": None,
             }
         )
 
@@ -921,6 +959,8 @@ class MetricsResult(BaseModel):
                         "bias": None,
                         "adjacent_accuracy": None,
                         "weighted_kappa": None,
+                        "krippendorff_alpha": cm.krippendorff_alpha,
+                        "fleiss_kappa": cm.fleiss_kappa,
                     }
                 )
             elif cm.criterion_type == "ordinal":
@@ -942,6 +982,8 @@ class MetricsResult(BaseModel):
                         "bias": None,
                         "adjacent_accuracy": cm.adjacent_accuracy,
                         "weighted_kappa": cm.weighted_kappa,
+                        "krippendorff_alpha": cm.krippendorff_alpha,
+                        "fleiss_kappa": cm.fleiss_kappa,
                     }
                 )
             else:  # nominal
@@ -963,6 +1005,8 @@ class MetricsResult(BaseModel):
                         "bias": None,
                         "adjacent_accuracy": None,
                         "weighted_kappa": None,
+                        "krippendorff_alpha": cm.krippendorff_alpha,
+                        "fleiss_kappa": cm.fleiss_kappa,
                     }
                 )
 
@@ -987,6 +1031,8 @@ class MetricsResult(BaseModel):
                         "bias": jm.bias.mean_bias,
                         "adjacent_accuracy": None,
                         "weighted_kappa": None,
+                        "krippendorff_alpha": None,
+                        "fleiss_kappa": None,
                     }
                 )
 

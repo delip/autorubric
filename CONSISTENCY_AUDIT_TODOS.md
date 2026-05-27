@@ -38,7 +38,7 @@ fix lands. This file is the working backlog — keep it updated as items are res
   - Fix direction: make `"majority"` a true head-count (count judges, ignore weights; `> 50%`), keep `"weighted"` weight-based; decide tie behavior (see T3-B) and document both. Add tests with unequal weights proving majority ≠ weighted.
   - Effort/risk: **low / low** (behavior change for weighted ensembles using `majority` — call out in changelog).
 
-- [ ] **T1-D `[V]` (M) — `krippendorff_alpha` / `fleiss_kappa` never surfaced in `summary()` or `to_dataframe()`.** *(loose end from Issue #2)*
+- [x] **T1-D `[V]` (M) — `krippendorff_alpha` / `fleiss_kappa` never surfaced in `summary()` or `to_dataframe()`.** *(loose end from Issue #2)*
   - Inconsistency: both fields exist on `CriterionMetrics`/`OrdinalCriterionMetrics`/`NominalCriterionMetrics` and serialize via `to_file()`, but the two human-facing renderers never emit them.
   - Sites: fields `src/autorubric/metrics/_types.py:249-250, 353-354, 401-402`; `summary()` and `to_dataframe()` in the same file contain no reference to them.
   - Why it matters: the headline metrics of Issue #2 are invisible in the primary outputs.

@@ -817,3 +817,120 @@ def test_krippendorff_alpha_error_vote_becomes_missing_cell():
     )
     assert clean.krippendorff_alpha is not None
     assert with_err.krippendorff_alpha == pytest.approx(clean.krippendorff_alpha)
+
+
+# =============================================================================
+# Rendering: summary() and to_dataframe() surface agreement stats (T1-D)
+# =============================================================================
+
+
+def _binary_alpha_metrics(judge_verdicts_per_item, ground_truth):
+    """Like ``_binary_alpha_dataset`` but returns the full MetricsResult."""
+    crit = Criterion(name="acc", weight=10.0, requirement="Be accurate")
+    ds = RubricDataset(prompt="p", rubric=Rubric([crit]), name="x")
+    reports = [_binary_ensemble_report(crit, jv) for jv in judge_verdicts_per_item]
+    for i, gt in enumerate(ground_truth):
+        ds.add_item(submission=f"s{i}", description="d", ground_truth=[gt])
+    item_results = [
+        ItemResult(item_idx=i, item=ds.items[i], report=r, duration_seconds=0.1)
+        for i, r in enumerate(reports)
+    ]
+    return compute_metrics(_eval_result(item_results), ds)
+
+
+def _multi_alpha_metrics(crit, judge_indices_per_item, ground_truth):
+    """Like ``_multi_alpha_dataset`` but returns the full MetricsResult."""
+    ds = RubricDataset(prompt="p", rubric=Rubric([crit]), name="x")
+    reports = [_multi_choice_ensemble_report(crit, ji) for ji in judge_indices_per_item]
+    for i, gt in enumerate(ground_truth):
+        ds.add_item(submission=f"s{i}", description="d", ground_truth=[gt])
+    item_results = [
+        ItemResult(item_idx=i, item=ds.items[i], report=r, duration_seconds=0.1)
+        for i, r in enumerate(reports)
+    ]
+    return compute_metrics(_eval_result(item_results), ds)
+
+
+_PERFECT_BINARY = (
+    [
+        [
+            ("ja", CriterionVerdict.MET),
+            ("jb", CriterionVerdict.MET),
+            ("jc", CriterionVerdict.MET),
+        ],
+        [
+            ("ja", CriterionVerdict.UNMET),
+            ("jb", CriterionVerdict.UNMET),
+            ("jc", CriterionVerdict.UNMET),
+        ],
+    ],
+    [CriterionVerdict.MET, CriterionVerdict.UNMET],
+)
+
+
+def test_summary_surfaces_alpha_and_fleiss_binary():
+    metrics = _binary_alpha_metrics(*_PERFECT_BINARY)
+    # Guard: the ensemble path actually populated the agreement stats.
+    assert metrics.per_criterion[0].krippendorff_alpha is not None
+    assert metrics.per_criterion[0].fleiss_kappa is not None
+    summary = metrics.summary()
+    assert "Kripp-α" in summary  # "Kripp-α"
+    assert "Fleiss" in summary
+
+
+def test_to_dataframe_has_agreement_columns_binary():
+    pytest.importorskip("pandas")
+    metrics = _binary_alpha_metrics(*_PERFECT_BINARY)
+    df = metrics.to_dataframe()
+    assert "krippendorff_alpha" in df.columns
+    assert "fleiss_kappa" in df.columns
+    crit_row = df[df["level"] == "criterion"].iloc[0]
+    assert crit_row["krippendorff_alpha"] == pytest.approx(1.0)
+    assert crit_row["fleiss_kappa"] == pytest.approx(1.0)
+
+
+def test_summary_omits_agreement_columns_for_single_judge():
+    metrics = _binary_alpha_metrics(
+        [[("ja", CriterionVerdict.MET)], [("ja", CriterionVerdict.UNMET)]],
+        [CriterionVerdict.MET, CriterionVerdict.UNMET],
+    )
+    assert metrics.per_criterion[0].krippendorff_alpha is None
+    summary = metrics.summary()
+    assert "Kripp-α" not in summary
+    assert "Fleiss" not in summary
+
+
+def test_to_dataframe_agreement_none_for_single_judge():
+    import pandas as pd
+
+    metrics = _binary_alpha_metrics(
+        [[("ja", CriterionVerdict.MET)], [("ja", CriterionVerdict.UNMET)]],
+        [CriterionVerdict.MET, CriterionVerdict.UNMET],
+    )
+    df = metrics.to_dataframe()
+    # Columns are always present (uniform schema); values are NaN when not applicable.
+    assert "krippendorff_alpha" in df.columns
+    assert "fleiss_kappa" in df.columns
+    crit_row = df[df["level"] == "criterion"].iloc[0]
+    assert pd.isna(crit_row["krippendorff_alpha"])
+    assert pd.isna(crit_row["fleiss_kappa"])
+
+
+def test_dataframe_and_summary_surface_agreement_ordinal_and_nominal():
+    pytest.importorskip("pandas")
+    ordinal = _multi_alpha_metrics(
+        _ordinal_criterion(),
+        [[("ja", 2), ("jb", 2), ("jc", 2)], [("ja", 0), ("jb", 0), ("jc", 0)]],
+        ["High", "Low"],
+    )
+    nominal = _multi_alpha_metrics(
+        _nominal_criterion_with_na(),
+        [[("ja", 1), ("jb", 1), ("jc", 1)], [("ja", 0), ("jb", 0), ("jc", 0)]],
+        ["Just right", "Too brief"],
+    )
+    for metrics in (ordinal, nominal):
+        assert metrics.per_criterion[0].krippendorff_alpha is not None
+        df = metrics.to_dataframe()
+        crit_row = df[df["level"] == "criterion"].iloc[0]
+        assert crit_row["krippendorff_alpha"] == pytest.approx(1.0)
+        assert "Kripp-α" in metrics.summary()

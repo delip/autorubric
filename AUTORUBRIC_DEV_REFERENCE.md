@@ -197,6 +197,8 @@ Judge-call failures classified as `infrastructure` or `parse` (see Grading Flow 
 
 `krippendorff` (numpy-only) and `statsmodels` are both **hard dependencies**; the graceful import guards (`HAS_KRIPPENDORFF` / `HAS_STATSMODELS`) in `_compute.py` stay for safety.
 
+Both stats are surfaced in `MetricsResult.summary()` and `MetricsResult.to_dataframe()` (in `_types.py`). `to_dataframe()` always emits `krippendorff_alpha` / `fleiss_kappa` columns (`None`/`NaN` where not applicable — aggregate/judge rows, single-judge criteria). `summary()` appends `Kripp-α` (recommended, leads) and `Fleiss` columns to a criterion-type table only when at least one criterion in that group has a non-`None` value, so single-judge output is unchanged; per-criterion `None` renders as `n/a`.
+
 ### Improvement Loop Artifact Persistence
 When `save_artifacts=True` and `artifacts_dir` is set, the improvement loop writes:
 - `rubric-iter-{NN}.json` — criteria array per iteration
