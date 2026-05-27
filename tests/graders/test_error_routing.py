@@ -375,6 +375,184 @@ async def test_multi_choice_infrastructure_failure_is_na(mock_llm_config):
 
 
 @pytest.mark.asyncio
+async def test_multi_choice_unknown_negative_weight_picks_highest_value(mock_llm_config):
+    """Unknown error, negative weight -> worst case is the HIGHEST-value option.
+
+    For negative weights, MET-equivalent (highest value) maximizes the penalty, so the
+    conservative worst case mirrors the binary ``MET if weight < 0`` rule.
+    """
+    rubric = Rubric(
+        [
+            Criterion(
+                name="severity",
+                requirement="How severe is it?",
+                weight=-5.0,
+                scale_type="ordinal",
+                options=[
+                    CriterionOption(label="Minor", value=0.0),
+                    CriterionOption(label="Major", value=0.5),
+                    CriterionOption(label="Severe", value=1.0),
+                ],
+            ),
+        ]
+    )
+    with patch(
+        "autorubric.graders.criterion_grader.LLMClient",
+        return_value=_client_raising(RuntimeError("boom")),
+    ):
+        grader = CriterionGrader(llm_config=mock_llm_config, shuffle_options=False)
+        report = await rubric.grade("submission", grader=grader)
+
+    assert report.report is not None
+    cr = report.report[0]
+    assert cr.final_multi_choice_verdict is not None
+    assert cr.final_multi_choice_verdict.selected_index == 2
+    assert cr.final_multi_choice_verdict.value == 1.0
+    assert cr.final_multi_choice_verdict.na is False
+    assert cr.is_error
+    assert cr.error is not None
+    assert cr.error.startswith("unknown:")
+    assert report.score == pytest.approx(0.0)
+
+
+@pytest.mark.asyncio
+async def test_multi_choice_unknown_with_na_option_does_not_select_na(mock_llm_config):
+    """Unknown error must NOT auto-select an NA option (NA is reserved for infra/parse).
+
+    Positive weight -> worst case is the lowest-value scored (non-NA) option.
+    """
+    rubric = Rubric(
+        [
+            Criterion(
+                name="quality",
+                requirement="How good is it?",
+                weight=5.0,
+                scale_type="ordinal",
+                options=[
+                    CriterionOption(label="NA", value=0.0, na=True),
+                    CriterionOption(label="Bad", value=0.0),
+                    CriterionOption(label="Great", value=1.0),
+                ],
+            ),
+        ]
+    )
+    with patch(
+        "autorubric.graders.criterion_grader.LLMClient",
+        return_value=_client_raising(RuntimeError("boom")),
+    ):
+        grader = CriterionGrader(llm_config=mock_llm_config, shuffle_options=False)
+        report = await rubric.grade("submission", grader=grader)
+
+    assert report.report is not None
+    cr = report.report[0]
+    assert cr.final_multi_choice_verdict is not None
+    assert cr.final_multi_choice_verdict.na is False
+    assert cr.final_multi_choice_verdict.selected_index == 1
+    assert report.score == 0.0
+
+
+@pytest.mark.asyncio
+async def test_multi_choice_unknown_negative_weight_with_na_option_picks_highest_non_na(
+    mock_llm_config,
+):
+    """Unknown error, negative weight, NA present -> highest-value non-NA option."""
+    rubric = Rubric(
+        [
+            Criterion(
+                name="severity",
+                requirement="How severe is it?",
+                weight=-5.0,
+                scale_type="ordinal",
+                options=[
+                    CriterionOption(label="NA", value=0.0, na=True),
+                    CriterionOption(label="Minor", value=0.0),
+                    CriterionOption(label="Severe", value=1.0),
+                ],
+            ),
+        ]
+    )
+    with patch(
+        "autorubric.graders.criterion_grader.LLMClient",
+        return_value=_client_raising(RuntimeError("boom")),
+    ):
+        grader = CriterionGrader(llm_config=mock_llm_config, shuffle_options=False)
+        report = await rubric.grade("submission", grader=grader)
+
+    assert report.report is not None
+    cr = report.report[0]
+    assert cr.final_multi_choice_verdict is not None
+    assert cr.final_multi_choice_verdict.selected_index == 2
+    assert cr.final_multi_choice_verdict.value == 1.0
+    assert cr.final_multi_choice_verdict.na is False
+    assert report.score == pytest.approx(0.0)
+
+
+@pytest.mark.asyncio
+async def test_multi_choice_unknown_positive_weight_picks_lowest_value(mock_llm_config):
+    """Unknown error, positive weight -> worst case is the lowest-value option."""
+    rubric = Rubric(
+        [
+            Criterion(
+                name="quality",
+                requirement="How good is it?",
+                weight=5.0,
+                scale_type="ordinal",
+                options=[
+                    CriterionOption(label="Bad", value=0.0),
+                    CriterionOption(label="Ok", value=0.5),
+                    CriterionOption(label="Great", value=1.0),
+                ],
+            ),
+        ]
+    )
+    with patch(
+        "autorubric.graders.criterion_grader.LLMClient",
+        return_value=_client_raising(RuntimeError("boom")),
+    ):
+        grader = CriterionGrader(llm_config=mock_llm_config, shuffle_options=False)
+        report = await rubric.grade("submission", grader=grader)
+
+    assert report.report is not None
+    cr = report.report[0]
+    assert cr.final_multi_choice_verdict is not None
+    assert cr.final_multi_choice_verdict.selected_index == 0
+    assert cr.final_multi_choice_verdict.value == 0.0
+    assert cr.final_multi_choice_verdict.na is False
+    assert report.score == 0.0
+
+
+@pytest.mark.asyncio
+async def test_multi_choice_unknown_ties_pick_first_index(mock_llm_config):
+    """Unknown error with tied worst values -> first option (deterministic)."""
+    rubric = Rubric(
+        [
+            Criterion(
+                name="kind",
+                requirement="Which kind?",
+                weight=5.0,
+                scale_type="nominal",
+                options=[
+                    CriterionOption(label="A", value=0.0),
+                    CriterionOption(label="B", value=0.0),
+                    CriterionOption(label="C", value=1.0),
+                ],
+            ),
+        ]
+    )
+    with patch(
+        "autorubric.graders.criterion_grader.LLMClient",
+        return_value=_client_raising(RuntimeError("boom")),
+    ):
+        grader = CriterionGrader(llm_config=mock_llm_config, shuffle_options=False)
+        report = await rubric.grade("submission", grader=grader)
+
+    assert report.report is not None
+    cr = report.report[0]
+    assert cr.final_multi_choice_verdict is not None
+    assert cr.final_multi_choice_verdict.selected_index == 0
+
+
+@pytest.mark.asyncio
 async def test_ensemble_multi_choice_vote_carries_error():
     """In a mixed multi-choice ensemble, the failed judge's vote records its error.
 

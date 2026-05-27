@@ -45,7 +45,7 @@ fix lands. This file is the working backlog — keep it updated as items are res
   - Fix direction: add α (emphasized) and Fleiss columns/rows to `to_dataframe()` and lines to `summary()` for all three criterion types; gate on `is not None`. Consider also surfacing `per_option`/`confusion_matrix` (see T8 minors).
   - Effort/risk: **low / low**.
 
-- [ ] **T1-F (H) — Multi-choice `unknown`-error worst case ignores weight sign and flips to NA/skip.**
+- [x] **T1-F (H) — Multi-choice `unknown`-error worst case ignores weight sign and flips to NA/skip.**
   - Inconsistency: binary unknown-error synthesizes a weight-aware worst case (`MET if weight<0 else UNMET`, `criterion_grader.py:606-609`). Multi-choice (`:753-771`) always picks the lowest-`value` option **and short-circuits to the first NA option if one exists**, ignoring weight sign — so an `unknown` error on a criterion that has an NA option becomes `na=True` (excluded under SKIP), the opposite of "keep a conservative worst-case verdict" (its own comment, `:746`). Negative-weight multi-choice criteria are under-penalized (lowest value is not the worst case when weight < 0).
   - Sites: `src/autorubric/graders/criterion_grader.py:606-609` (binary) vs `:753-771` (multi-choice).
   - Why it matters: error handling is not conservative for multi-choice; silently drops `unknown` errors when an NA option exists.

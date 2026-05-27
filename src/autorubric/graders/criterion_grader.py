@@ -740,40 +740,49 @@ class CriterionGrader(Grader):
             return CriterionResult(report=report, usage=result.usage, cost=result.cost)
 
         except Exception as e:
-            # Classify the failure (see _judge_binary_criterion). Multi-choice has no
-            # CANNOT_ASSESS verdict, so for infrastructure/parse failures we mark the
-            # verdict na=True (excluded from scoring under the default SKIP strategy).
-            # Unknown errors keep the conservative worst-case option.
             category = classify_grading_error(e)
             logger.warning(
                 f"Error evaluating multi-choice criterion '{criterion.requirement[:50]}...' "
                 f"with judge '{judge.judge_id}' [{category}]: {e}"
             )
 
-            # Find worst-case option (lowest value, or NA)
-            worst_idx = 0
-            worst_value = criterion.options[0].value
-            for i, opt in enumerate(criterion.options):
-                if opt.na:
-                    worst_idx = i
-                    break
-                if opt.value < worst_value:
-                    worst_idx = i
-                    worst_value = opt.value
-
-            worst_option = criterion.options[worst_idx]
+            options = criterion.options
             if category == "unknown":
+                # Conservative worst case, weight-sign-aware, among scored (non-NA)
+                # options only — mirrors the binary worst case (MET if weight < 0 else
+                # UNMET). Never auto-select an NA option for an unknown error; NA/skip
+                # is reserved for infrastructure/parse failures. min/max return the
+                # first option on ties (deterministic w.r.t. option order). The
+                # validator guarantees at least one non-NA option exists.
+                scored = [(i, opt) for i, opt in enumerate(options) if not opt.na]
+                if criterion.weight < 0:
+                    worst_idx, worst_option = max(scored, key=lambda io: io[1].value)
+                else:
+                    worst_idx, worst_option = min(scored, key=lambda io: io[1].value)
                 multi_choice_verdict = MultiChoiceVerdict(
                     selected_index=worst_idx,
                     selected_label=worst_option.label,
                     value=worst_option.value,
-                    na=worst_option.na,
+                    na=False,
                 )
             else:
-                # Exclude from scoring: na=True, zero contribution.
+                # Infrastructure/parse: abstain (excluded under SKIP). Point at the NA
+                # option if one exists, else the lowest-value option, then force
+                # na=True with zero contribution. (The na=True-vs-non-NA-option
+                # contradiction when no NA option exists is tracked by T2-B.)
+                abstain_idx = 0
+                abstain_value = options[0].value
+                for i, opt in enumerate(options):
+                    if opt.na:
+                        abstain_idx = i
+                        break
+                    if opt.value < abstain_value:
+                        abstain_idx = i
+                        abstain_value = opt.value
+                abstain_option = options[abstain_idx]
                 multi_choice_verdict = MultiChoiceVerdict(
-                    selected_index=worst_idx,
-                    selected_label=worst_option.label,
+                    selected_index=abstain_idx,
+                    selected_label=abstain_option.label,
                     value=0.0,
                     na=True,
                 )
