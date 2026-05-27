@@ -30,12 +30,17 @@ def main() -> None:
     with THEME:
         fig, ax = plt.subplots(figsize=(5, 3))
 
-        bars = ax.barh(range(len(names)), vals,
-                       color=colors, edgecolor="0.95", height=0.55)
+        bars = ax.barh(range(len(names)), vals, color=colors, edgecolor="0.95", height=0.55)
 
         for bar, val in zip(bars, vals):
-            ax.text(val + 0.01, bar.get_y() + bar.get_height() / 2,
-                    f"{val:.2f}", va="center", fontsize=6, fontweight="bold")
+            ax.text(
+                val + 0.01,
+                bar.get_y() + bar.get_height() / 2,
+                f"{val:.2f}",
+                va="center",
+                fontsize=6,
+                fontweight="bold",
+            )
 
         ax.set_yticks(range(len(names)))
         ax.set_yticklabels(names)

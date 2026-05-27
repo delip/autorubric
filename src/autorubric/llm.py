@@ -17,19 +17,19 @@ from typing import TYPE_CHECKING, Any, Literal, TypeVar
 
 import diskcache
 import litellm
+import openai
 import yaml
 from dotenv import load_dotenv
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
+from rich.console import Console
+from rich.panel import Panel
+from rich.syntax import Syntax
 from tenacity import (
     retry,
     retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
 )
-
-from rich.console import Console
-from rich.panel import Panel
-from rich.syntax import Syntax
 
 from autorubric.rate_limit import RateLimitPool
 
@@ -43,6 +43,45 @@ logger = logging.getLogger(__name__)
 
 # Type variable for structured output
 T = TypeVar("T", bound=BaseModel)
+
+
+# ============================================================================
+# Grading error classification
+# ============================================================================
+
+ErrorCategory = Literal["infrastructure", "parse", "unknown"]
+"""Category of a failure encountered while grading a single criterion.
+
+- infrastructure: API/network failure (timeout, connection, rate limit, server error).
+  Not the submission's fault; the judge never produced a usable response.
+- parse: the judge responded but its output could not be parsed/validated into the
+  expected schema. Also not the submission's fault.
+- unknown: an unexpected error that does not fit the above categories.
+"""
+
+
+def classify_grading_error(exc: BaseException) -> ErrorCategory:
+    """Classify an exception raised while grading a criterion.
+
+    Reuses the underlying OpenAI exception taxonomy that LiteLLM builds on: every
+    transient API failure (``Timeout``, ``APIConnectionError``, ``RateLimitError``,
+    ``ServiceUnavailableError``, ``InternalServerError``, status errors, etc.) subclasses
+    ``openai.APIError`` (including ``litellm.APIError`` itself), while parse/validation
+    failures (``json.JSONDecodeError`` -> ``ValueError``, ``pydantic.ValidationError``)
+    do not.
+
+    Args:
+        exc: The exception raised during a judge call.
+
+    Returns:
+        ``"infrastructure"`` for API/network errors, ``"parse"`` for JSON/validation
+        errors, and ``"unknown"`` for anything else.
+    """
+    if isinstance(exc, openai.APIError):
+        return "infrastructure"
+    if isinstance(exc, (ValidationError, ValueError)):
+        return "parse"
+    return "unknown"
 
 
 # ============================================================================
@@ -176,7 +215,7 @@ class GenerateResult:
     content: str
     thinking: str | None = None
     raw_response: Any = None
-    usage: "TokenUsage | None" = None
+    usage: TokenUsage | None = None
     cost: float | None = None
     parsed: Any = None
 
@@ -219,7 +258,7 @@ def _extract_thinking_content(message: Any) -> str | None:
     return None
 
 
-def _extract_usage_from_response(response: Any) -> "TokenUsage":
+def _extract_usage_from_response(response: Any) -> TokenUsage:
     """Extract token usage from LiteLLM response.
 
     LiteLLM provides an OpenAI-compatible usage object:
@@ -310,8 +349,9 @@ class LLMConfig:
     """Configuration for LLM calls.
 
     Attributes:
-        model: Model identifier in LiteLLM format (e.g., "openai/gpt-5.2", "anthropic/claude-sonnet-4-5-20250929",
-               "gemini/gemini-3-pro-preview", "ollama/qwen3:14b"). REQUIRED - no default.
+        model: Model identifier in LiteLLM format (e.g., "openai/gpt-5.2",
+               "anthropic/claude-sonnet-4-5-20250929", "gemini/gemini-3-pro-preview",
+               "ollama/qwen3:14b"). REQUIRED - no default.
                See LiteLLM docs for full list of supported models.
         temperature: Sampling temperature (0.0 = deterministic).
         max_tokens: Maximum tokens in response.
@@ -328,7 +368,8 @@ class LLMConfig:
         cache_ttl: Cache time-to-live in seconds (None = no expiration).
         api_key: Optional API key override (otherwise uses environment variables).
         api_base: Optional API base URL override.
-        thinking: Enable thinking/reasoning mode (unified across providers). Accepts multiple formats:
+        thinking: Enable thinking/reasoning mode (unified across providers). Accepts
+            multiple formats:
             - ThinkingLevel enum: ThinkingLevel.HIGH, ThinkingLevel.MEDIUM, etc.
             - String: "low", "medium", "high", "none"
             - Int: Direct token budget (e.g., 32000)
@@ -809,6 +850,24 @@ class LLMClient:
             "count": len(self._cache),
             "directory": str(self._cache.directory),
         }
+
+    def close(self) -> None:
+        """Close the on-disk cache, releasing its file handles.
+
+        diskcache keeps the underlying SQLite database open for the lifetime of
+        the cache object. Call this when done with the client so the cache
+        directory can be removed (notably on Windows, which refuses to delete
+        files that are still open). Safe to call when no cache was initialized.
+        """
+        if self._cache is not None:
+            self._cache.close()
+            self._cache = None
+
+    def __enter__(self) -> LLMClient:
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.close()
 
 
 # Convenience function for simple usage

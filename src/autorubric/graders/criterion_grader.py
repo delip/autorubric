@@ -10,10 +10,10 @@ import random
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
 from autorubric.graders.base import Grader
-from autorubric.llm import GenerateResult, LLMClient, LLMConfig
+from autorubric.llm import GenerateResult, LLMClient, LLMConfig, classify_grading_error
 from autorubric.prompts import (
     FEW_SHOT_SYSTEM_PROMPT_ADDITION,
     GRADER_SYSTEM_PROMPT_DEFAULT,
@@ -67,6 +67,23 @@ def _derive_shuffle_rng(
     key = f"{master_seed}:{item_key}:{criterion_idx}:{judge_id}"
     derived = int(hashlib.sha256(key.encode()).hexdigest()[:16], 16) % (2**31)
     return random.Random(derived)
+
+
+def _combine_errors(errors: list[str | None]) -> str | None:
+    """Combine per-judge error strings into an ensemble-level error.
+
+    Returns a combined message only when *every* contributing judge errored (so the
+    final verdict was driven entirely by failures). Returns None if any judge produced
+    a genuine judgment, or if there were no contributing judges.
+    """
+    if not errors or any(e is None for e in errors):
+        return None
+    return " | ".join(e for e in errors if e is not None)
+
+
+def _aggregate_error(votes: list[JudgeVote]) -> str | None:
+    """Ensemble error string for binary votes (see ``_combine_errors``)."""
+    return _combine_errors([v.error for v in votes])
 
 
 @dataclass
@@ -268,10 +285,7 @@ class CriterionGrader(Grader):
             self._multi_choice_system_prompt = multi_choice_system_prompt
 
         # Create LLM clients for each judge
-        self._clients = {
-            judge.judge_id: LLMClient(judge.llm_config)
-            for judge in self._judges
-        }
+        self._clients = {judge.judge_id: LLMClient(judge.llm_config) for judge in self._judges}
 
         # Pre-compute few-shot examples if training data provided
         # Note: For multi-choice, examples are stored as (submission, selected_index, reason)
@@ -308,7 +322,9 @@ class CriterionGrader(Grader):
         rubric_criteria = self._training_data.rubric.rubric if self._training_data.rubric else []
 
         for criterion_idx in range(n_criteria):
-            criterion = rubric_criteria[criterion_idx] if criterion_idx < len(rubric_criteria) else None
+            criterion = (
+                rubric_criteria[criterion_idx] if criterion_idx < len(rubric_criteria) else None
+            )
             if criterion is not None and criterion.is_multi_choice:
                 examples = self._select_multi_choice_examples(criterion_idx)
                 self._multi_choice_examples[criterion_idx] = examples
@@ -460,7 +476,11 @@ class CriterionGrader(Grader):
             if item.ground_truth is None:
                 continue
             label = item.ground_truth[criterion_idx]
-            idx = self._label_to_option_index(criterion_idx, label) if isinstance(label, str) else label
+            idx = (
+                self._label_to_option_index(criterion_idx, label)
+                if isinstance(label, str)
+                else label
+            )
             if idx is None:
                 continue
             option_groups.setdefault(idx, []).append((item, idx))
@@ -481,7 +501,11 @@ class CriterionGrader(Grader):
                 identity=lambda pair: pair[0].submission,
             )
         else:
-            all_pairs = [(item, resolved_idx) for pairs in option_groups.values() for item, resolved_idx in pairs]
+            all_pairs = [
+                (item, resolved_idx)
+                for pairs in option_groups.values()
+                for item, resolved_idx in pairs
+            ]
             rng.shuffle(all_pairs)
             return [
                 (item.submission, resolved_idx, None)
@@ -571,19 +595,27 @@ class CriterionGrader(Grader):
             )
             return CriterionResult(report=report, usage=result.usage, cost=result.cost)
 
-        except (ValidationError, Exception) as e:
-            # Conservative default: worst case for each criterion type
-            default_verdict = (
-                CriterionVerdict.MET if criterion.weight < 0 else CriterionVerdict.UNMET
-            )
+        except Exception as e:
+            # Classify the failure. Infrastructure (API/network) and parse/validation
+            # failures are not the submission's fault, so route them to CANNOT_ASSESS
+            # (excluded from scoring under the default SKIP strategy) instead of a
+            # score-affecting worst-case verdict. Only truly unknown errors keep the
+            # conservative worst-case default. The error is also surfaced structurally
+            # via CriterionReport.error / is_error.
+            category = classify_grading_error(e)
+            if category == "unknown":
+                verdict = CriterionVerdict.MET if criterion.weight < 0 else CriterionVerdict.UNMET
+            else:
+                verdict = CriterionVerdict.CANNOT_ASSESS
             logger.warning(
                 f"Error evaluating criterion '{criterion.requirement[:50]}...' "
-                f"with judge '{judge.judge_id}': {e}"
+                f"with judge '{judge.judge_id}' [{category}]: {e}"
             )
             report = CriterionReport(
                 requirement=criterion.requirement,
-                verdict=default_verdict,
-                reason=f"Error parsing judge response: {str(e)}",
+                verdict=verdict,
+                reason=f"Judge call failed ({category}): {str(e)}",
+                error=f"{category}: {str(e)}",
                 weight=criterion.weight,
                 name=criterion.name,
                 options=criterion.options,
@@ -624,7 +656,6 @@ class CriterionGrader(Grader):
             shuffled_options = [criterion.options[i] for i in shuffled_indices]
 
             # Create criterion with shuffled options for prompt building
-            from autorubric.types import CriterionOption
 
             prompt_criterion = Criterion(
                 weight=criterion.weight,
@@ -708,12 +739,15 @@ class CriterionGrader(Grader):
             )
             return CriterionResult(report=report, usage=result.usage, cost=result.cost)
 
-        except (ValidationError, Exception) as e:
-            # Conservative default for multi-choice: select lowest value option
-            # (or NA option if available)
+        except Exception as e:
+            # Classify the failure (see _judge_binary_criterion). Multi-choice has no
+            # CANNOT_ASSESS verdict, so for infrastructure/parse failures we mark the
+            # verdict na=True (excluded from scoring under the default SKIP strategy).
+            # Unknown errors keep the conservative worst-case option.
+            category = classify_grading_error(e)
             logger.warning(
                 f"Error evaluating multi-choice criterion '{criterion.requirement[:50]}...' "
-                f"with judge '{judge.judge_id}': {e}"
+                f"with judge '{judge.judge_id}' [{category}]: {e}"
             )
 
             # Find worst-case option (lowest value, or NA)
@@ -728,18 +762,28 @@ class CriterionGrader(Grader):
                     worst_value = opt.value
 
             worst_option = criterion.options[worst_idx]
-            multi_choice_verdict = MultiChoiceVerdict(
-                selected_index=worst_idx,
-                selected_label=worst_option.label,
-                value=worst_option.value,
-                na=worst_option.na,
-            )
+            if category == "unknown":
+                multi_choice_verdict = MultiChoiceVerdict(
+                    selected_index=worst_idx,
+                    selected_label=worst_option.label,
+                    value=worst_option.value,
+                    na=worst_option.na,
+                )
+            else:
+                # Exclude from scoring: na=True, zero contribution.
+                multi_choice_verdict = MultiChoiceVerdict(
+                    selected_index=worst_idx,
+                    selected_label=worst_option.label,
+                    value=0.0,
+                    na=True,
+                )
 
             report = CriterionReport(
                 requirement=criterion.requirement,
                 verdict=None,
                 multi_choice_verdict=multi_choice_verdict,
-                reason=f"Error parsing judge response: {str(e)}",
+                reason=f"Judge call failed ({category}): {str(e)}",
+                error=f"{category}: {str(e)}",
                 weight=criterion.weight,
                 name=criterion.name,
                 options=criterion.options,
@@ -759,7 +803,9 @@ class CriterionGrader(Grader):
     ) -> JudgeCriterionResults:
         """Evaluate all criteria for a single judge (parallel per criterion)."""
         tasks = [
-            self._judge_single_criterion(judge, criterion, idx, to_grade, query, reference_submission)
+            self._judge_single_criterion(
+                judge, criterion, idx, to_grade, query, reference_submission
+            )
             for idx, criterion in enumerate(rubric)
         ]
         results = await asyncio.gather(*tasks)
@@ -816,8 +862,12 @@ class CriterionGrader(Grader):
             if criterion_report.is_multi_choice:
                 # Multi-choice: build MultiChoiceJudgeVote list
                 mc_votes: list[MultiChoiceJudgeVote] = []
+                # MultiChoiceJudgeVote has no error field; track per-judge errors here so
+                # we can surface an ensemble-level error when every judge call failed.
+                mc_errors: list[str | None] = []
                 for judge_result in judge_results:
                     cr = judge_result.criterion_results[criterion_idx]
+                    mc_errors.append(cr.report.error)
                     mcv = cr.report.multi_choice_verdict
                     if mcv is not None:
                         mc_votes.append(
@@ -853,6 +903,7 @@ class CriterionGrader(Grader):
                         votes=[],  # Binary votes empty for multi-choice
                         final_multi_choice_verdict=final_mc_verdict,
                         multi_choice_votes=mc_votes,
+                        error=_combine_errors(mc_errors),
                     )
                 )
             else:
@@ -866,6 +917,7 @@ class CriterionGrader(Grader):
                             verdict=cr.report.verdict,
                             reason=cr.report.reason,
                             weight=judge_result.weight,
+                            error=cr.report.error,
                         )
                     )
 
@@ -881,6 +933,7 @@ class CriterionGrader(Grader):
                         final_verdict=final_verdict,
                         final_reason=final_reason,
                         votes=votes,
+                        error=_aggregate_error(votes),
                     )
                 )
 
@@ -958,9 +1011,7 @@ class CriterionGrader(Grader):
             completion_cost=total_cost if total_cost > 0 else None,
         )
 
-    def _aggregate_votes(
-        self, votes: list[JudgeVote]
-    ) -> tuple[CriterionVerdict, str]:
+    def _aggregate_votes(self, votes: list[JudgeVote]) -> tuple[CriterionVerdict, str]:
         """Aggregate votes from multiple judges into a single verdict."""
         if not votes:
             return CriterionVerdict.CANNOT_ASSESS, "No votes"
@@ -971,8 +1022,9 @@ class CriterionGrader(Grader):
             return CriterionVerdict.CANNOT_ASSESS, "All judges could not assess"
 
         met_weight = sum(v.weight for v in assessable_votes if v.verdict == CriterionVerdict.MET)
-        unmet_weight = sum(v.weight for v in assessable_votes if v.verdict == CriterionVerdict.UNMET)
-        total_weight = met_weight + unmet_weight
+        unmet_weight = sum(
+            v.weight for v in assessable_votes if v.verdict == CriterionVerdict.UNMET
+        )
 
         if self._aggregation == "majority":
             verdict = CriterionVerdict.MET if met_weight > unmet_weight else CriterionVerdict.UNMET
@@ -1163,7 +1215,9 @@ class CriterionGrader(Grader):
             # Accumulate weights per index
             weight_per_idx: dict[int, float] = {}
             for v in votes:
-                weight_per_idx[v.selected_index] = weight_per_idx.get(v.selected_index, 0.0) + v.weight
+                weight_per_idx[v.selected_index] = (
+                    weight_per_idx.get(v.selected_index, 0.0) + v.weight
+                )
             most_common_idx = max(weight_per_idx, key=weight_per_idx.get)  # type: ignore
         elif strategy == "unanimous":
             unique_indices = set(indices)
@@ -1215,7 +1269,9 @@ class CriterionGrader(Grader):
                     fail_reports.append(
                         CriterionReport(
                             requirement=r.requirement,
-                            verdict=CriterionVerdict.UNMET if r.weight > 0 else CriterionVerdict.MET,
+                            verdict=CriterionVerdict.UNMET
+                            if r.weight > 0
+                            else CriterionVerdict.MET,
                             reason=r.reason,
                             weight=r.weight,
                             name=r.name,

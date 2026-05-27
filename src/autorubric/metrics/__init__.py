@@ -30,6 +30,23 @@ Example:
 """
 
 # Result types
+# Main compute function (also accessible via EvalResult.compute_metrics)
+from ._compute import compute_metrics
+
+# Helper functions (for advanced use cases)
+from ._helpers import (
+    classify_criteria,
+    classify_criterion,
+    extract_all_verdicts_from_report,
+    extract_verdicts_from_report,
+    filter_cannot_assess,
+    filter_na_multi_choice,
+    get_option_value,
+    is_na_option,
+    resolve_ground_truth,
+    verdict_to_binary,
+    verdict_to_string,
+)
 from ._types import (
     BiasResult,
     BinaryCriterionMetrics,
@@ -60,24 +77,6 @@ from .distribution import (
     systematic_bias,
     wasserstein_distance,
 )
-
-# Helper functions (for advanced use cases)
-from ._helpers import (
-    classify_criteria,
-    classify_criterion,
-    extract_all_verdicts_from_report,
-    extract_verdicts_from_report,
-    filter_cannot_assess,
-    filter_na_multi_choice,
-    get_option_value,
-    is_na_option,
-    resolve_ground_truth,
-    verdict_to_binary,
-    verdict_to_string,
-)
-
-# Main compute function (also accessible via EvalResult.compute_metrics)
-from ._compute import compute_metrics
 
 __all__ = [
     # Main interface

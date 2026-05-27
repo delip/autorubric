@@ -31,11 +31,24 @@ def main() -> None:
         fig, ax1 = plt.subplots(figsize=(7, 4))
 
         # Bars: issues detected (left y-axis)
-        bars = ax1.bar(ITERATIONS, ISSUES, width=0.5, color=COLOR_BARS,
-                       edgecolor="0.95", label="Issues detected", zorder=2)
+        bars = ax1.bar(
+            ITERATIONS,
+            ISSUES,
+            width=0.5,
+            color=COLOR_BARS,
+            edgecolor="0.95",
+            label="Issues detected",
+            zorder=2,
+        )
         for bar, val in zip(bars, ISSUES):
-            ax1.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.5,
-                     str(val), ha="center", va="bottom", fontsize=6)
+            ax1.text(
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height() + 0.5,
+                str(val),
+                ha="center",
+                va="bottom",
+                fontsize=6,
+            )
 
         ax1.set_xlabel("Iteration")
         ax1.set_ylabel("Issues detected")
@@ -46,11 +59,20 @@ def main() -> None:
         ax2 = ax1.twinx()
         # Aquarel scientific theme hides the right spine; re-enable for dual-axis
         ax2.spines["right"].set_visible(True)
-        ax2.plot(ITERATIONS, QUALITY_SCORES, marker="o", color=COLOR_LINE,
-                 linewidth=1.8, markersize=5, label="Quality score", zorder=3)
+        ax2.plot(
+            ITERATIONS,
+            QUALITY_SCORES,
+            marker="o",
+            color=COLOR_LINE,
+            linewidth=1.8,
+            markersize=5,
+            label="Quality score",
+            zorder=3,
+        )
         for x, y in zip(ITERATIONS, QUALITY_SCORES):
-            ax2.text(x, y + 0.04, f"{y:.2f}", ha="center", va="bottom",
-                     fontsize=6, color=COLOR_LINE)
+            ax2.text(
+                x, y + 0.04, f"{y:.2f}", ha="center", va="bottom", fontsize=6, color=COLOR_LINE
+            )
 
         ax2.set_ylabel("Quality score")
         ax2.set_ylim(-0.05, 1.20)
@@ -58,11 +80,11 @@ def main() -> None:
         # Combined legend above chart
         h1, l1 = ax1.get_legend_handles_labels()
         h2, l2 = ax2.get_legend_handles_labels()
-        ax1.legend(h1 + h2, l1 + l2, loc="lower center",
-                   bbox_to_anchor=(0.5, 1.01), ncol=2, frameon=False)
+        ax1.legend(
+            h1 + h2, l1 + l2, loc="lower center", bbox_to_anchor=(0.5, 1.01), ncol=2, frameon=False
+        )
 
-        fig.suptitle("Rubric Improvement Over Iterations", fontweight="bold",
-                     y=0.98)
+        fig.suptitle("Rubric Improvement Over Iterations", fontweight="bold", y=0.98)
         fig.subplots_adjust(top=0.85)
 
         out = IMAGE_DIR / "rubric-improvement-chart.png"

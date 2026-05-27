@@ -95,21 +95,15 @@ async def main():
     print("\nAggregation Strategy: majority")
     print(f"\nPrompt: {dataset.prompt}\n")
     print(f"Rubric Criteria (total positive weight: {dataset.total_positive_weight}):")
-    for i, (criterion, name) in enumerate(
-        zip(dataset.rubric.rubric, dataset.criterion_names)
-    ):
-        weight_str = (
-            f"+{criterion.weight}" if criterion.weight > 0 else str(criterion.weight)
-        )
+    for i, (criterion, name) in enumerate(zip(dataset.rubric.rubric, dataset.criterion_names)):
+        weight_str = f"+{criterion.weight}" if criterion.weight > 0 else str(criterion.weight)
         print(f"  {i + 1}. {name:10} [{weight_str:>6}]")
     print("\n" + "-" * 80)
 
     # Grade all items using EvalRunner
     print(f"\nGrading {len(dataset)} items with ensemble of {len(judges)} judges...")
     llm_calls = len(judges) * dataset.num_criteria
-    print(
-        f"(Each item requires {len(judges)} x {dataset.num_criteria} = {llm_calls} LLM calls)\n"
-    )
+    print(f"(Each item requires {len(judges)} x {dataset.num_criteria} = {llm_calls} LLM calls)\n")
 
     eval_result = await evaluate(
         dataset=dataset,
@@ -189,12 +183,8 @@ async def main():
 
     if eval_result.total_token_usage:
         print("\nTotal Token Usage:")
-        print(
-            f"  Prompt tokens:     {eval_result.total_token_usage.prompt_tokens:>12,}"
-        )
-        print(
-            f"  Completion tokens: {eval_result.total_token_usage.completion_tokens:>12,}"
-        )
+        print(f"  Prompt tokens:     {eval_result.total_token_usage.prompt_tokens:>12,}")
+        print(f"  Completion tokens: {eval_result.total_token_usage.completion_tokens:>12,}")
         print(f"  Total tokens:      {eval_result.total_token_usage.total_tokens:>12,}")
 
     if eval_result.total_completion_cost and eval_result.total_completion_cost > 0:
@@ -211,12 +201,8 @@ async def main():
     print(f"  P95 item time:     {ts.p95_item_duration_seconds:.2f}s")
 
     print("\n" + "=" * 80)
-    print(
-        f"Note: This ensemble grading uses {len(judges)}x the LLM calls of single-model grading,"
-    )
-    print(
-        "but can improve reliability through consensus and highlight ambiguous cases."
-    )
+    print(f"Note: This ensemble grading uses {len(judges)}x the LLM calls of single-model grading,")
+    print("but can improve reliability through consensus and highlight ambiguous cases.")
     print("=" * 80)
 
 

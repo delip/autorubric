@@ -24,8 +24,13 @@ CONDITION_KEYS = ["without-skill", "poor-skill", "good-skill"]
 COLOR_LIST = [COLORS["without"], COLORS["poor"], COLORS["good"]]
 
 DIMENSIONS = {
-    "Outcome": ["paper_summary", "methodology_assessment", "statistical_evaluation",
-                 "strengths_and_weaknesses", "clear_recommendation"],
+    "Outcome": [
+        "paper_summary",
+        "methodology_assessment",
+        "statistical_evaluation",
+        "strengths_and_weaknesses",
+        "clear_recommendation",
+    ],
     "Style": ["constructive_tone", "structured_format", "specific_references"],
     "Efficiency": ["concise_review"],
 }
@@ -50,7 +55,9 @@ def load_data() -> tuple[list[str], dict[str, list[list[str]]], list[float]]:
     return criteria, conditions, weights
 
 
-def compute_pass_rates(criteria: list[str], conditions: dict[str, list[list[str]]]) -> dict[str, list[float]]:
+def compute_pass_rates(
+    criteria: list[str], conditions: dict[str, list[list[str]]]
+) -> dict[str, list[float]]:
     """Compute per-criterion pass rate (%) for each condition."""
     rates: dict[str, list[float]] = {}
     for cond, verdicts_list in conditions.items():
@@ -79,21 +86,26 @@ def chart_pass_rates(criteria: list[str], rates: dict[str, list[float]]) -> None
 
         for i, (cond, color) in enumerate(zip(CONDITION_KEYS, COLOR_LIST)):
             offset = (i - 1) * width
-            bars = ax.bar(x + offset, rates[cond], width, label=LABELS[cond],
-                          color=color, edgecolor="0.95")
+            bars = ax.bar(
+                x + offset, rates[cond], width, label=LABELS[cond], color=color, edgecolor="0.95"
+            )
             for bar, val in zip(bars, rates[cond]):
                 if val > 0:
-                    ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 1.5,
-                            f"{val:.0f}", ha="center", va="bottom", fontsize=5)
+                    ax.text(
+                        bar.get_x() + bar.get_width() / 2,
+                        bar.get_height() + 1.5,
+                        f"{val:.0f}",
+                        ha="center",
+                        va="bottom",
+                        fontsize=5,
+                    )
 
         ax.set_ylabel("Pass rate (%)")
         ax.set_xticks(x)
         ax.set_xticklabels(short_labels, rotation=25, ha="right")
         ax.set_ylim(0, 115)
-        ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.01), ncol=3,
-                  frameon=False)
-        fig.suptitle("Per-Criterion Pass Rate by Condition", fontweight="bold",
-                     y=0.98)
+        ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.01), ncol=3, frameon=False)
+        fig.suptitle("Per-Criterion Pass Rate by Condition", fontweight="bold", y=0.98)
         fig.subplots_adjust(top=0.85)
 
         _save(fig, "skill-eval-pass-rates.png")
@@ -115,12 +127,19 @@ def chart_overall_scores(conditions: dict[str, list[list[str]]], weights: list[f
     with THEME:
         fig, ax = plt.subplots(figsize=(6, 2.8))
 
-        bars = ax.barh(range(len(CONDITION_KEYS)), vals,
-                       color=COLOR_LIST, edgecolor="0.95", height=0.55)
+        bars = ax.barh(
+            range(len(CONDITION_KEYS)), vals, color=COLOR_LIST, edgecolor="0.95", height=0.55
+        )
 
         for bar, val in zip(bars, vals):
-            ax.text(val + 0.02, bar.get_y() + bar.get_height() / 2,
-                    f"{val:.2f}", va="center", fontsize=7, fontweight="bold")
+            ax.text(
+                val + 0.02,
+                bar.get_y() + bar.get_height() / 2,
+                f"{val:.2f}",
+                va="center",
+                fontsize=7,
+                fontweight="bold",
+            )
 
         # Delta annotations between bars
         for i in range(1, len(vals)):
@@ -128,10 +147,16 @@ def chart_overall_scores(conditions: dict[str, list[list[str]]], weights: list[f
             mid_x = (vals[i - 1] + vals[i]) / 2
             mid_y = i - 0.5
             ax.annotate(
-                f"+{delta:.2f}", xy=(mid_x, mid_y), fontsize=7, fontweight="bold",
-                color="#555555", ha="center", va="center",
-                bbox=dict(boxstyle="round,pad=0.25", facecolor="white",
-                          edgecolor="#cccccc", alpha=0.9),
+                f"+{delta:.2f}",
+                xy=(mid_x, mid_y),
+                fontsize=7,
+                fontweight="bold",
+                color="#555555",
+                ha="center",
+                va="center",
+                bbox=dict(
+                    boxstyle="round,pad=0.25", facecolor="white", edgecolor="#cccccc", alpha=0.9
+                ),
             )
 
         ax.set_yticks(range(len(CONDITION_KEYS)))
@@ -159,19 +184,31 @@ def chart_lift(criteria: list[str], rates: dict[str, list[float]]) -> None:
     with THEME:
         fig, ax = plt.subplots(figsize=(7, 4.5))
 
-        bars = ax.barh(range(len(names)), values,
-                       color=bar_colors, edgecolor="0.95", height=0.6)
+        bars = ax.barh(range(len(names)), values, color=bar_colors, edgecolor="0.95", height=0.6)
 
         for bar, val in zip(bars, values):
             if val >= 0:
-                ax.text(val + 2, bar.get_y() + bar.get_height() / 2,
-                        f"{val:+.0f}", va="center", ha="left", fontsize=6,
-                        fontweight="bold")
+                ax.text(
+                    val + 2,
+                    bar.get_y() + bar.get_height() / 2,
+                    f"{val:+.0f}",
+                    va="center",
+                    ha="left",
+                    fontsize=6,
+                    fontweight="bold",
+                )
             else:
                 # Place inside the bar to avoid overlap with y-axis labels
-                ax.text(val / 2, bar.get_y() + bar.get_height() / 2,
-                        f"{val:+.0f}", va="center", ha="center", fontsize=6,
-                        fontweight="bold", color="white")
+                ax.text(
+                    val / 2,
+                    bar.get_y() + bar.get_height() / 2,
+                    f"{val:+.0f}",
+                    va="center",
+                    ha="center",
+                    fontsize=6,
+                    fontweight="bold",
+                    color="white",
+                )
 
         ax.set_yticks(range(len(names)))
         ax.set_yticklabels(names)
@@ -206,11 +243,18 @@ def chart_dimensions(criteria: list[str], conditions: dict[str, list[list[str]]]
         for i, (cond, color) in enumerate(zip(CONDITION_KEYS, COLOR_LIST)):
             vals = [dim_rates[d][i] for d in dim_names]
             offset = (i - 1) * width
-            bars = ax.bar(x + offset, vals, width, label=LABELS[cond],
-                          color=color, edgecolor="0.95")
+            bars = ax.bar(
+                x + offset, vals, width, label=LABELS[cond], color=color, edgecolor="0.95"
+            )
             for bar, val in zip(bars, vals):
-                ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 1.5,
-                        f"{val:.0f}", ha="center", va="bottom", fontsize=6)
+                ax.text(
+                    bar.get_x() + bar.get_width() / 2,
+                    bar.get_height() + 1.5,
+                    f"{val:.0f}",
+                    ha="center",
+                    va="bottom",
+                    fontsize=6,
+                )
 
         ax.set_ylabel("Pass rate (%)")
         ax.set_xticks(x)
@@ -237,8 +281,16 @@ def chart_heatmap(criteria: list[str], rates: dict[str, list[float]]) -> None:
             for j in range(len(CONDITION_KEYS)):
                 val = matrix[i, j]
                 text_color = "white" if val > 60 else "0.2"
-                ax.text(j, i, f"{val:.0f}", ha="center", va="center",
-                        fontsize=7, fontweight="bold", color=text_color)
+                ax.text(
+                    j,
+                    i,
+                    f"{val:.0f}",
+                    ha="center",
+                    va="center",
+                    fontsize=7,
+                    fontweight="bold",
+                    color=text_color,
+                )
 
         ax.set_xticks(range(len(col_labels)))
         ax.set_xticklabels(col_labels)

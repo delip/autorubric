@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 from dotenv import load_dotenv
 
-from autorubric import LLMConfig, Rubric
+from autorubric import LLMConfig
 from autorubric.dataset import RubricDataset
 from autorubric.graders import CriterionGrader
 from autorubric.llm import LLMClient
@@ -21,7 +21,9 @@ from autorubric.types import CriterionVerdict
 load_dotenv()
 
 DATA_PATH = Path(__file__).parent.parent / "examples" / "data" / "peer_review_skill_eval.json"
-OUTPUT_PATH = Path(__file__).parent.parent / "examples" / "data" / "skill_improvement_comparison.json"
+OUTPUT_PATH = (
+    Path(__file__).parent.parent / "examples" / "data" / "skill_improvement_comparison.json"
+)
 
 V1_SKILL = "Provide brief feedback on the text below."
 
@@ -92,15 +94,22 @@ def extract_unique_papers(dataset: RubricDataset) -> list[dict]:
 
 
 async def generate_reviews(client, skill, papers):
-    tasks = [client.generate(system_prompt=skill, user_prompt=p["prompt"], return_result=True) for p in papers]
+    tasks = [
+        client.generate(system_prompt=skill, user_prompt=p["prompt"], return_result=True)
+        for p in papers
+    ]
     results = await asyncio.gather(*tasks)
-    return [{"paper_id": p["paper_id"], "review": r.content, "cost": r.cost or 0.0}
-            for p, r in zip(papers, results)]
+    return [
+        {"paper_id": p["paper_id"], "review": r.content, "cost": r.cost or 0.0}
+        for p, r in zip(papers, results)
+    ]
 
 
 async def grade_reviews(rubric, grader, reviews, papers):
-    tasks = [rubric.grade(to_grade=r["review"], grader=grader, query=p["prompt"])
-             for r, p in zip(reviews, papers)]
+    tasks = [
+        rubric.grade(to_grade=r["review"], grader=grader, query=p["prompt"])
+        for r, p in zip(reviews, papers)
+    ]
     reports = await asyncio.gather(*tasks)
     graded = []
     for review, report in zip(reviews, reports):
@@ -110,17 +119,24 @@ async def grade_reviews(rubric, grader, reviews, papers):
             reason = cr.final_reason if hasattr(cr, "final_reason") else cr.reason
             name = cr.criterion.name if hasattr(cr, "criterion") else cr.name
             per_criterion[name] = {"verdict": verdict.value, "reason": reason}
-        graded.append({
-            "paper_id": review["paper_id"],
-            "score": report.score,
-            "per_criterion": per_criterion,
-        })
+        graded.append(
+            {
+                "paper_id": review["paper_id"],
+                "score": report.score,
+                "per_criterion": per_criterion,
+            }
+        )
     return graded
 
 
 def compute_pass_rates(graded, criteria_names):
-    return {name: sum(1 for g in graded if g["per_criterion"][name]["verdict"] == CriterionVerdict.MET.value) / len(graded)
-            for name in criteria_names}
+    return {
+        name: sum(
+            1 for g in graded if g["per_criterion"][name]["verdict"] == CriterionVerdict.MET.value
+        )
+        / len(graded)
+        for name in criteria_names
+    }
 
 
 def format_criteria_table(criteria, pass_rates):
@@ -128,7 +144,9 @@ def format_criteria_table(criteria, pass_rates):
     for c in criteria:
         rate = pass_rates.get(c.name, 0.0)
         status = "PASSING" if rate >= 0.7 else "FAILING"
-        lines.append(f"- **{c.name}** (weight={c.weight}, pass_rate={rate:.0%}, {status}): {c.requirement}")
+        lines.append(
+            f"- **{c.name}** (weight={c.weight}, pass_rate={rate:.0%}, {status}): {c.requirement}"
+        )
     return "\n".join(lines)
 
 
@@ -137,17 +155,24 @@ def format_failure_examples(graded, criteria, pass_rates, max_examples=3):
     failing = [(c.name, pass_rates[c.name]) for c in criteria if pass_rates[c.name] < 0.7]
     failing.sort(key=lambda x: x[1])
     for name, rate in failing[:5]:
-        examples = [f"  - Paper {g['paper_id']}: {g['per_criterion'][name]['reason']}"
-                    for g in graded
-                    if g["per_criterion"][name]["verdict"] == CriterionVerdict.UNMET.value
-                    and g["per_criterion"][name]["reason"]][:max_examples]
+        examples = [
+            f"  - Paper {g['paper_id']}: {g['per_criterion'][name]['reason']}"
+            for g in graded
+            if g["per_criterion"][name]["verdict"] == CriterionVerdict.UNMET.value
+            and g["per_criterion"][name]["reason"]
+        ][:max_examples]
         if examples:
             sections.append(f"**{name}** ({rate:.0%} pass rate):\n" + "\n".join(examples))
     return "\n\n".join(sections) if sections else "No failing criteria."
 
 
 async def single_revision_run(
-    label, rubric, papers, agent_client, eval_grader, revision_client,
+    label,
+    rubric,
+    papers,
+    agent_client,
+    eval_grader,
+    revision_client,
 ):
     """Run iteration 0, revise once, run iteration 1. Return per-paper scores."""
     criteria_names = [c.name for c in rubric.rubric]
@@ -167,11 +192,16 @@ async def single_revision_run(
     criteria_table = format_criteria_table(rubric.rubric, pass_rates_0)
     failure_examples = format_failure_examples(graded_0, rubric.rubric, pass_rates_0)
     revision_prompt = REVISION_USER_TEMPLATE.format(
-        iteration=0, skill=V1_SKILL, criteria_table=criteria_table,
-        failure_examples=failure_examples, history="This is the first iteration.",
+        iteration=0,
+        skill=V1_SKILL,
+        criteria_table=criteria_table,
+        failure_examples=failure_examples,
+        history="This is the first iteration.",
     )
     result = await revision_client.generate(
-        system_prompt=REVISION_SYSTEM_PROMPT, user_prompt=revision_prompt, return_result=True,
+        system_prompt=REVISION_SYSTEM_PROMPT,
+        user_prompt=revision_prompt,
+        return_result=True,
     )
     revised_skill = result.content.strip()
 
@@ -195,8 +225,12 @@ async def single_revision_run(
 
     return {
         "vague": {"scores": scores_0, "mean": float(mean_0), "pass_rates": pass_rates_0},
-        "revised": {"scores": scores_1, "mean": float(mean_1), "pass_rates": pass_rates_1,
-                     "skill": revised_skill},
+        "revised": {
+            "scores": scores_1,
+            "mean": float(mean_1),
+            "pass_rates": pass_rates_1,
+            "skill": revised_skill,
+        },
         "gold": {"scores": scores_g, "mean": float(mean_g)},
     }
 
@@ -216,8 +250,15 @@ async def main():
     print(f"Loaded {len(papers)} papers, {len(rubric.rubric)} criteria")
     print(f"Running {N_SEEDS} seeds x 2 conditions")
 
-    agent_config = LLMConfig(model="groq/llama-3.1-8b-instant", temperature=0.7, max_parallel_requests=5)
-    eval_config = LLMConfig(model="gemini/gemini-3-flash-preview", temperature=1.0, thinking="medium", max_parallel_requests=10)
+    agent_config = LLMConfig(
+        model="groq/llama-3.1-8b-instant", temperature=0.7, max_parallel_requests=5
+    )
+    eval_config = LLMConfig(
+        model="gemini/gemini-3-flash-preview",
+        temperature=1.0,
+        thinking="medium",
+        max_parallel_requests=10,
+    )
     same_revision_config = LLMConfig(model="gemini/gemini-3-flash-preview", temperature=1.0)
     cross_revision_config = LLMConfig(model="openai/gpt-5.4", temperature=1.0)
 
@@ -229,29 +270,41 @@ async def main():
     all_results = {"same_judge": [], "cross_judge": []}
 
     for seed in range(N_SEEDS):
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"SEED {seed}")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
 
         same_result = await single_revision_run(
-            f"same-judge seed={seed}", rubric, papers,
-            agent_client, eval_grader, same_revision_client,
+            f"same-judge seed={seed}",
+            rubric,
+            papers,
+            agent_client,
+            eval_grader,
+            same_revision_client,
         )
         cross_result = await single_revision_run(
-            f"cross-judge seed={seed}", rubric, papers,
-            agent_client, eval_grader, cross_revision_client,
+            f"cross-judge seed={seed}",
+            rubric,
+            papers,
+            agent_client,
+            eval_grader,
+            cross_revision_client,
         )
         all_results["same_judge"].append(same_result)
         all_results["cross_judge"].append(cross_result)
 
     # Aggregate across seeds
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("AGGREGATED RESULTS")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     for condition in ["same_judge", "cross_judge"]:
         runs = all_results[condition]
-        label = "Same-judge (Gemini→Gemini)" if condition == "same_judge" else "Cross-judge (Gemini→GPT-5.4)"
+        label = (
+            "Same-judge (Gemini→Gemini)"
+            if condition == "same_judge"
+            else "Cross-judge (Gemini→GPT-5.4)"
+        )
         for stage in ["vague", "revised", "gold"]:
             all_scores = []
             for run in runs:
@@ -259,8 +312,10 @@ async def main():
             mean = np.mean(all_scores)
             ci_lo, ci_hi = bootstrap_ci(all_scores)
             per_seed_means = [np.mean(run[stage]["scores"]) for run in runs]
-            print(f"  {label} {stage:>8}: {mean:.3f} [{ci_lo:.3f}, {ci_hi:.3f}]  "
-                  f"per-seed: {[f'{m:.2f}' for m in per_seed_means]}")
+            print(
+                f"  {label} {stage:>8}: {mean:.3f} [{ci_lo:.3f}, {ci_hi:.3f}]  "
+                f"per-seed: {[f'{m:.2f}' for m in per_seed_means]}"
+            )
 
     # Save
     output = {
@@ -275,6 +330,7 @@ async def main():
         "results": all_results,
         "elapsed_seconds": time.time() - start_time,
     }
+
     # Convert numpy types for JSON
     def convert(obj):
         if isinstance(obj, (np.floating, np.integer)):

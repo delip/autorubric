@@ -1,7 +1,6 @@
 """Tests for LLMClient class."""
 
 import tempfile
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -63,6 +62,7 @@ class TestLLMClientInitialization:
             )
             client = LLMClient(config)
             assert client._cache is not None
+            client.close()
 
 
 class TestLLMClientCacheKey:
@@ -142,6 +142,7 @@ class TestLLMClientCacheStats:
             assert stats["count"] == 0
             assert stats["directory"] == temp_dir
             assert "size" in stats
+            client.close()
 
 
 class TestLLMClientClearCache:
@@ -175,6 +176,7 @@ class TestLLMClientClearCache:
 
             assert count == 2
             assert len(client._cache) == 0
+            client.close()
 
 
 class TestLLMClientEnsureCache:
@@ -196,6 +198,7 @@ class TestLLMClientEnsureCache:
 
             assert cache is not None
             assert client._cache is not None
+            client.close()
 
     def test_ensure_cache_returns_existing_cache(self):
         """_ensure_cache returns existing cache without reinitializing."""
@@ -211,6 +214,7 @@ class TestLLMClientEnsureCache:
             returned_cache = client._ensure_cache()
 
             assert returned_cache is original_cache
+            client.close()
 
 
 class TestLLMClientGenerate:
@@ -261,7 +265,9 @@ class TestLLMClientGenerate:
             cache_key = client._cache_key("openai/gpt-5.2", "System", "User", None)
             client._cache.set(cache_key, "cached response")
 
-            with patch("autorubric.llm.litellm.acompletion", new_callable=AsyncMock) as mock_completion:
+            with patch(
+                "autorubric.llm.litellm.acompletion", new_callable=AsyncMock
+            ) as mock_completion:
                 result = await client.generate(
                     system_prompt="System",
                     user_prompt="User",
@@ -269,6 +275,8 @@ class TestLLMClientGenerate:
 
                 assert result == "cached response"
                 mock_completion.assert_not_called()
+
+            client.close()
 
     @pytest.mark.asyncio
     async def test_generate_with_structured_output(self):
@@ -383,7 +391,9 @@ class TestLLMClientGenerate:
             mock_response = MagicMock()
             mock_response.choices = [mock_choice]
 
-            with patch("autorubric.llm.litellm.acompletion", new_callable=AsyncMock) as mock_completion:
+            with patch(
+                "autorubric.llm.litellm.acompletion", new_callable=AsyncMock
+            ) as mock_completion:
                 mock_completion.return_value = mock_response
 
                 # Force cache usage
@@ -398,3 +408,5 @@ class TestLLMClientGenerate:
                 # Response should be cached
                 cache_key = client._cache_key("openai/gpt-5.2", "System", "User", None)
                 assert client._cache.get(cache_key) == "Response"
+
+            client.close()

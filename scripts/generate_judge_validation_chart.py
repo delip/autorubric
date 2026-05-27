@@ -19,8 +19,8 @@ THEME = (
 CRITERIA = ["hate_speech", "harassment", "misinformation", "self_harm", "spam"]
 METRICS = {
     "Accuracy": [92.0, 87.0, 78.0, 95.0, 89.0],
-    "Kappa":    [81.2, 71.4, 52.1, 87.6, 76.1],
-    "F1":       [89.1, 82.3, 74.2, 92.3, 85.6],
+    "Kappa": [81.2, 71.4, 52.1, 87.6, 76.1],
+    "F1": [89.1, 82.3, 74.2, 92.3, 85.6],
 }
 METRIC_COLORS = {"Accuracy": "#4682B4", "Kappa": "#E8825A", "F1": "#2A9D8F"}
 
@@ -39,21 +39,30 @@ def main() -> None:
         # Highlight the misinformation group with a subtle background
         misinfo_idx = CRITERIA.index("misinformation")
         ax.axvspan(
-            misinfo_idx - 0.42, misinfo_idx + 0.42,
-            color="#fff3cd", zorder=0,
+            misinfo_idx - 0.42,
+            misinfo_idx + 0.42,
+            color="#fff3cd",
+            zorder=0,
         )
 
         for i, name in enumerate(metric_names):
             offset = (i - 1) * width
             bars = ax.bar(
-                x + offset, METRICS[name], width,
-                label=name, color=METRIC_COLORS[name], edgecolor="0.95",
+                x + offset,
+                METRICS[name],
+                width,
+                label=name,
+                color=METRIC_COLORS[name],
+                edgecolor="0.95",
             )
             for bar, val in zip(bars, METRICS[name]):
                 ax.text(
                     bar.get_x() + bar.get_width() / 2,
                     bar.get_height() + 0.8,
-                    f"{val:.1f}", ha="center", va="bottom", fontsize=5,
+                    f"{val:.1f}",
+                    ha="center",
+                    va="bottom",
+                    fontsize=5,
                 )
 
         ax.set_ylabel("Score")
@@ -61,8 +70,10 @@ def main() -> None:
         ax.set_xticklabels(labels, rotation=25, ha="right")
         ax.set_ylim(0, 108)
         ax.legend(
-            loc="lower center", bbox_to_anchor=(0.5, 1.01),
-            ncol=3, frameon=False,
+            loc="lower center",
+            bbox_to_anchor=(0.5, 1.01),
+            ncol=3,
+            frameon=False,
         )
         fig.suptitle("Per-Criterion Validation Metrics", fontweight="bold", y=0.98)
         fig.subplots_adjust(top=0.85)

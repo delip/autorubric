@@ -107,9 +107,7 @@ def create_per_criterion_mock_client(sample_criteria: CriterionList | None = Non
                 else "Requirement not satisfied by the submission."
             )
             judgment = CriterionJudgment(
-                criterion_status=(
-                    CriterionVerdict.MET if criteria_met else CriterionVerdict.UNMET
-                ),
+                criterion_status=(CriterionVerdict.MET if criteria_met else CriterionVerdict.UNMET),
                 explanation=explanation,
             )
 

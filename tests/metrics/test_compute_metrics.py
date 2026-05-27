@@ -1,30 +1,29 @@
 """Tests for compute_metrics function."""
 
-import pytest
-from unittest.mock import MagicMock
+from datetime import datetime
 
-from autorubric.dataset import DataItem, RubricDataset
+import pytest
+
+from autorubric.dataset import RubricDataset
 from autorubric.eval import EvalResult, EvalTimingStats, ItemResult
+from autorubric.metrics import MetricsResult, compute_metrics
 from autorubric.rubric import Rubric
 from autorubric.types import (
     Criterion,
-    CriterionVerdict,
     CriterionReport,
+    CriterionVerdict,
     EvaluationReport,
-    EnsembleCriterionReport,
-    EnsembleEvaluationReport,
-    JudgeVote,
 )
-from autorubric.metrics import compute_metrics, MetricsResult
-from datetime import datetime
 
 
 def create_mock_dataset():
     """Create a simple mock dataset for testing."""
-    rubric = Rubric([
-        Criterion(name="Accuracy", weight=10.0, requirement="Be accurate"),
-        Criterion(name="Clarity", weight=5.0, requirement="Be clear"),
-    ])
+    rubric = Rubric(
+        [
+            Criterion(name="Accuracy", weight=10.0, requirement="Be accurate"),
+            Criterion(name="Clarity", weight=5.0, requirement="Be clear"),
+        ]
+    )
 
     dataset = RubricDataset(
         prompt="Test prompt",
@@ -83,12 +82,14 @@ def create_mock_eval_result(dataset: RubricDataset, predictions: list[list[Crite
             ],
         )
 
-        item_results.append(ItemResult(
-            item_idx=idx,
-            item=dataset.items[idx],
-            report=report,
-            duration_seconds=0.5,
-        ))
+        item_results.append(
+            ItemResult(
+                item_idx=idx,
+                item=dataset.items[idx],
+                report=report,
+                duration_seconds=0.5,
+            )
+        )
 
     return EvalResult(
         item_results=item_results,
@@ -214,9 +215,7 @@ class TestComputeMetricsOptions:
         ]
         eval_result = create_mock_eval_result(dataset, predictions)
 
-        metrics = compute_metrics(
-            eval_result, dataset, bootstrap=True, n_bootstrap=100, seed=42
-        )
+        metrics = compute_metrics(eval_result, dataset, bootstrap=True, n_bootstrap=100, seed=42)
 
         assert metrics.bootstrap is not None
         assert metrics.bootstrap.n_bootstrap == 100
@@ -282,6 +281,7 @@ class TestMetricsResultMethods:
         assert "Accuracy" in summary
 
     def test_to_dataframe(self):
+        pytest.importorskip("pandas")  # to_dataframe() requires the optional pandas dependency
         dataset = create_mock_dataset()
         predictions = [
             [CriterionVerdict.MET, CriterionVerdict.MET],

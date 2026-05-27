@@ -3,17 +3,16 @@
 import pytest
 
 from autorubric import (
+    AggregatedMultiChoiceVerdict,
     Criterion,
     CriterionOption,
     CriterionVerdict,
     MultiChoiceJudgment,
     MultiChoiceVerdict,
-    AggregatedMultiChoiceVerdict,
     Rubric,
 )
-from autorubric.dataset import DataItem, RubricDataset
+from autorubric.dataset import RubricDataset
 from autorubric.types import MultiChoiceJudgeVote
-
 
 # =============================================================================
 # CriterionOption Tests
@@ -297,21 +296,23 @@ class TestDatasetMultiChoice:
     @pytest.fixture
     def mixed_rubric(self):
         """Create a rubric with binary and multi-choice criteria."""
-        return Rubric([
-            Criterion(name="accuracy", requirement="Is this accurate?", weight=10.0),
-            Criterion(
-                name="satisfaction",
-                requirement="How satisfied?",
-                weight=5.0,
-                scale_type="ordinal",
-                options=[
-                    CriterionOption(label="1", value=0.0),
-                    CriterionOption(label="2", value=0.33),
-                    CriterionOption(label="3", value=0.67),
-                    CriterionOption(label="4", value=1.0),
-                ],
-            ),
-        ])
+        return Rubric(
+            [
+                Criterion(name="accuracy", requirement="Is this accurate?", weight=10.0),
+                Criterion(
+                    name="satisfaction",
+                    requirement="How satisfied?",
+                    weight=5.0,
+                    scale_type="ordinal",
+                    options=[
+                        CriterionOption(label="1", value=0.0),
+                        CriterionOption(label="2", value=0.33),
+                        CriterionOption(label="3", value=0.67),
+                        CriterionOption(label="4", value=1.0),
+                    ],
+                ),
+            ]
+        )
 
     def test_compute_weighted_score_multi_choice(self, mixed_rubric):
         """compute_weighted_score handles multi-choice ground truth."""
@@ -417,8 +418,8 @@ class TestMultiChoiceAggregation:
 
     def test_ordinal_mean_aggregation(self, ordinal_options):
         """Mean aggregation snaps to nearest option value."""
-        from autorubric.graders.criterion_grader import CriterionGrader, JudgeSpec
         from autorubric import LLMConfig
+        from autorubric.graders.criterion_grader import CriterionGrader
 
         # Create a minimal grader to access aggregation methods
         grader = CriterionGrader(
@@ -462,8 +463,8 @@ class TestMultiChoiceAggregation:
 
     def test_nominal_mode_aggregation(self, nominal_options):
         """Mode aggregation picks most common selection."""
-        from autorubric.graders.criterion_grader import CriterionGrader
         from autorubric import LLMConfig
+        from autorubric.graders.criterion_grader import CriterionGrader
 
         grader = CriterionGrader(
             llm_config=LLMConfig(model="openai/gpt-4"),
@@ -512,8 +513,8 @@ class TestOptionShuffling:
 
     def test_shuffle_options_enabled_by_default(self):
         """CriterionGrader has shuffle_options=True by default."""
-        from autorubric.graders.criterion_grader import CriterionGrader
         from autorubric import LLMConfig
+        from autorubric.graders.criterion_grader import CriterionGrader
 
         grader = CriterionGrader(
             llm_config=LLMConfig(model="openai/gpt-4"),
@@ -522,8 +523,8 @@ class TestOptionShuffling:
 
     def test_shuffle_options_can_be_disabled(self):
         """CriterionGrader shuffle_options can be set to False."""
-        from autorubric.graders.criterion_grader import CriterionGrader
         from autorubric import LLMConfig
+        from autorubric.graders.criterion_grader import CriterionGrader
 
         grader = CriterionGrader(
             llm_config=LLMConfig(model="openai/gpt-4"),
@@ -615,8 +616,8 @@ class TestSeedReproducibility:
 
     def test_seed_auto_generated(self):
         """Grader without explicit seed gets a valid auto-generated seed."""
-        from autorubric.graders.criterion_grader import CriterionGrader
         from autorubric import LLMConfig
+        from autorubric.graders.criterion_grader import CriterionGrader
 
         grader = CriterionGrader(llm_config=LLMConfig(model="openai/gpt-4"))
         assert isinstance(grader.seed, int)
@@ -624,16 +625,16 @@ class TestSeedReproducibility:
 
     def test_seed_explicit(self):
         """Grader uses the explicit seed when provided."""
-        from autorubric.graders.criterion_grader import CriterionGrader
         from autorubric import LLMConfig
+        from autorubric.graders.criterion_grader import CriterionGrader
 
         grader = CriterionGrader(llm_config=LLMConfig(model="openai/gpt-4"), seed=42)
         assert grader.seed == 42
 
     def test_seed_produces_deterministic_shuffle(self):
         """Same seed + same inputs → same shuffle order."""
+
         from autorubric.graders.criterion_grader import _derive_shuffle_rng
-        import random
 
         indices_a = list(range(5))
         rng_a = _derive_shuffle_rng(42, "abc123", 0, "default")
@@ -689,9 +690,9 @@ class TestSeedReproducibility:
 
     def test_seed_coordinates_few_shot(self):
         """Master seed flows to FewShotConfig when its seed is unset."""
-        from autorubric.graders.criterion_grader import CriterionGrader
-        from autorubric import Criterion, LLMConfig, FewShotConfig, Rubric
+        from autorubric import Criterion, FewShotConfig, LLMConfig, Rubric
         from autorubric.dataset import RubricDataset
+        from autorubric.graders.criterion_grader import CriterionGrader
 
         rubric = Rubric(rubric=[Criterion(weight=1.0, requirement="test")])
         dataset = RubricDataset(
@@ -710,9 +711,9 @@ class TestSeedReproducibility:
 
     def test_seed_does_not_override_explicit_few_shot_seed(self):
         """Master seed does not override an explicitly set FewShotConfig.seed."""
-        from autorubric.graders.criterion_grader import CriterionGrader
-        from autorubric import Criterion, LLMConfig, FewShotConfig, Rubric
+        from autorubric import Criterion, FewShotConfig, LLMConfig, Rubric
         from autorubric.dataset import RubricDataset
+        from autorubric.graders.criterion_grader import CriterionGrader
 
         rubric = Rubric(rubric=[Criterion(weight=1.0, requirement="test")])
         dataset = RubricDataset(
@@ -731,7 +732,7 @@ class TestSeedReproducibility:
 
     def test_shuffle_order_field_in_criterion_report(self):
         """CriterionReport supports the shuffle_order field."""
-        from autorubric.types import CriterionReport, CriterionVerdict
+        from autorubric.types import CriterionReport
 
         report = CriterionReport(
             weight=1.0,

@@ -38,9 +38,7 @@ from autorubric.graders import CriterionGrader
 from autorubric.types import CriterionVerdict
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_DATASET = (
-    PROJECT_ROOT / "researcher_bench" / "output" / "test_rubric_dataset.json"
-)
+DEFAULT_DATASET = PROJECT_ROOT / "researcher_bench" / "output" / "test_rubric_dataset.json"
 # MODEL = "anthropic/claude-sonnet-4-5-20250929"
 MODEL = "gemini/gemini-3-flash-preview"
 DEFAULT_MAX_PARALLEL_REQUESTS = 3
@@ -48,9 +46,7 @@ CATEGORY_PATTERN = re.compile(r"\[(.+?)\]")
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Grade ResearcherBench outputs with AutoRubric."
-    )
+    parser = argparse.ArgumentParser(description="Grade ResearcherBench outputs with AutoRubric.")
     parser.add_argument(
         "dataset",
         nargs="?",
@@ -138,9 +134,7 @@ async def main() -> None:
     )
 
     # -- Per-item results --
-    print(
-        f"\n--- Per-Item Results ({eval_result.successful_items}/{n_items} succeeded) ---"
-    )
+    print(f"\n--- Per-Item Results ({eval_result.successful_items}/{n_items} succeeded) ---")
 
     scores: list[float] = []
     category_scores: dict[str, list[float]] = defaultdict(list)

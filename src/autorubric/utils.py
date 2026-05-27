@@ -14,9 +14,7 @@ if TYPE_CHECKING:
     from autorubric.graders.base import Grader
     from autorubric.types import (
         Criterion,
-        CriterionReport,
         CriterionVerdict,
-        EnsembleCriterionReport,
         EnsembleEvaluationReport,
         EvaluationReport,
     )
@@ -226,7 +224,7 @@ def aggregate_completion_cost(costs: list[float | None]) -> float | None:
 
 
 def aggregate_evaluation_usage(
-    reports: list["EvaluationReport"],
+    reports: list[EvaluationReport],
 ) -> tuple[TokenUsage | None, float | None]:
     """Aggregate usage and cost from multiple EvaluationReports.
 
@@ -259,9 +257,9 @@ def aggregate_evaluation_usage(
 
 
 def _extract_ground_truth_from_report(
-    report: "EvaluationReport | EnsembleEvaluationReport",
-    criteria: list["Criterion"],
-) -> list["CriterionVerdict | str"]:
+    report: EvaluationReport | EnsembleEvaluationReport,
+    criteria: list[Criterion],
+) -> list[CriterionVerdict | str]:
     """Extract ground truth values from an evaluation report.
 
     Converts grading report verdicts to the ground_truth format expected by DataItem.
@@ -279,15 +277,12 @@ def _extract_ground_truth_from_report(
         ValueError: If report is missing or malformed.
     """
     from autorubric.metrics._helpers import _extract_raw_verdicts
-    from autorubric.types import CriterionVerdict
 
     if report.report is None:
         raise ValueError("Report has no criterion-level breakdown")
 
     if len(report.report) != len(criteria):
-        raise ValueError(
-            f"Report has {len(report.report)} criteria but rubric has {len(criteria)}"
-        )
+        raise ValueError(f"Report has {len(report.report)} criteria but rubric has {len(criteria)}")
 
     ground_truth: list[CriterionVerdict | str] = []
 
@@ -316,13 +311,13 @@ def _extract_ground_truth_from_report(
 
 
 async def fill_ground_truth(
-    dataset: "RubricDataset",
-    grader: "Grader",
+    dataset: RubricDataset,
+    grader: Grader,
     *,
     force: bool = False,
     show_progress: bool = True,
     max_concurrent_items: int | None = None,
-) -> "RubricDataset":
+) -> RubricDataset:
     """Generate ground truth labels for dataset items using an LLM grader.
 
     Uses the provided grader to evaluate each item and extracts the verdicts
@@ -376,9 +371,7 @@ async def fill_ground_truth(
 
     if items_to_grade:
 
-        async def grade_item(
-            idx: int, item: DataItem
-        ) -> tuple[int, DataItem | None, str | None]:
+        async def grade_item(idx: int, item: DataItem) -> tuple[int, DataItem | None, str | None]:
             try:
                 # Use per-item rubric if available, otherwise fall back to global
                 effective_rubric = dataset.get_item_rubric(idx)

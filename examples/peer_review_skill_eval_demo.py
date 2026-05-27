@@ -108,9 +108,7 @@ def compute_pass_rates(items, dataset):
 
 
 async def main():
-    parser = argparse.ArgumentParser(
-        description="Evaluate agent skill efficacy with AutoRubric"
-    )
+    parser = argparse.ArgumentParser(description="Evaluate agent skill efficacy with AutoRubric")
     parser.add_argument(
         "--improve",
         action="store_true",
@@ -146,14 +144,12 @@ async def main():
     print("=" * 80)
 
     print(f"\nDataset: {len(dataset)} items (10 papers x 3 conditions)")
-    print(f"Rubric: {dataset.num_criteria} criteria "
-          f"(total positive weight: {dataset.total_positive_weight})")
-    for i, (criterion, name) in enumerate(
-        zip(dataset.rubric.rubric, dataset.criterion_names)
-    ):
-        weight_str = (
-            f"+{criterion.weight}" if criterion.weight > 0 else str(criterion.weight)
-        )
+    print(
+        f"Rubric: {dataset.num_criteria} criteria "
+        f"(total positive weight: {dataset.total_positive_weight})"
+    )
+    for i, (criterion, name) in enumerate(zip(dataset.rubric.rubric, dataset.criterion_names)):
+        weight_str = f"+{criterion.weight}" if criterion.weight > 0 else str(criterion.weight)
         print(f"  {i + 1}. {name:30} [{weight_str:>6}]")
 
     # =========================================================================
@@ -198,10 +194,7 @@ async def main():
                 cm = per_criterion_map[cname]
                 accuracies.append(cm.accuracy)
         avg_acc = sum(accuracies) / len(accuracies) if accuracies else 0.0
-        print(
-            f"{dim_name:<15} {weight_label:<10} {len(criteria_names):>10} "
-            f"{avg_acc:>14.1%}"
-        )
+        print(f"{dim_name:<15} {weight_label:<10} {len(criteria_names):>10} {avg_acc:>14.1%}")
 
     # Penalty criterion
     if PENALTY_CRITERION in per_criterion_map:
@@ -240,10 +233,7 @@ async def main():
         mean_score = condition_means[cond]
         delta = mean_score - baseline
         delta_str = f"{delta:+.3f}" if cond != "without-skill" else "---"
-        print(
-            f"{cond:<20} {len(condition_results[cond]):>5} "
-            f"{mean_score:>12.3f} {delta_str:>15}"
-        )
+        print(f"{cond:<20} {len(condition_results[cond]):>5} {mean_score:>12.3f} {delta_str:>15}")
 
     # Per-criterion pass rates by condition (from ground truth)
     print("\nPer-Criterion Ground Truth Pass Rates by Condition:")
@@ -274,9 +264,7 @@ async def main():
                 item = ir.item
                 pred = ir.report.score
                 expected = dataset.compute_weighted_score(item.ground_truth)
-                print(
-                    f"P{paper_idx + 1:<7} {cond:<20} {pred:>10.3f} {expected:>10.3f}"
-                )
+                print(f"P{paper_idx + 1:<7} {cond:<20} {pred:>10.3f} {expected:>10.3f}")
         if paper_idx < 2:
             print()
 
@@ -350,7 +338,7 @@ async def main():
             save_artifacts=True,
         )
 
-        print(f"\nImprovement complete:")
+        print("\nImprovement complete:")
         print(f"  Iterations:       {len(result.iterations)}")
         print(f"  Best iteration:   {result.best_iteration}")
         print(f"  Convergence:      {result.convergence_reason}")
@@ -387,9 +375,7 @@ async def main():
         print(f"  Completion tokens: {total_usage.completion_tokens:>12,}")
         print(f"  Total tokens:      {total_usage.total_tokens:>12,}")
         if total_usage.cache_creation_input_tokens > 0:
-            print(
-                f"  Cache created:     {total_usage.cache_creation_input_tokens:>12,}"
-            )
+            print(f"  Cache created:     {total_usage.cache_creation_input_tokens:>12,}")
         if total_usage.cache_read_input_tokens > 0:
             print(f"  Cache hits:        {total_usage.cache_read_input_tokens:>12,}")
         print(f"\nTotal Cost: ${total_cost:.6f}" if total_cost else "\nTotal Cost: N/A")

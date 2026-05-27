@@ -10,14 +10,13 @@ from typing import TYPE_CHECKING, Literal
 from ..types import (
     Criterion,
     CriterionVerdict,
-    EvaluationReport,
     EnsembleEvaluationReport,
+    EvaluationReport,
 )
-
 from ._types import CannotAssessMode, CriterionType
 
 if TYPE_CHECKING:
-    from ..rubric import Rubric
+    pass
 
 
 def _extract_raw_verdicts(cr) -> tuple:

@@ -31,9 +31,7 @@ N_VAL = 98  # ~30% of 327 items
 
 
 class CriterionSpec(BaseModel):
-    weight: int = Field(
-        description="Importance weight (5-15 for positive, negative for errors)"
-    )
+    weight: int = Field(description="Importance weight (5-15 for positive, negative for errors)")
     requirement: str = Field(description="Clear, specific evaluation criterion")
     name: str | None = Field(default=None, description="Short identifier")
 
@@ -42,9 +40,7 @@ class GeneratedRubric(BaseModel):
     criteria: list[CriterionSpec] = Field(description="List of evaluation criteria")
 
 
-async def generate_baseline_rubric(
-    task_prompt: str, llm_config: LLMConfig
-) -> tuple[Rubric, float]:
+async def generate_baseline_rubric(task_prompt: str, llm_config: LLMConfig) -> tuple[Rubric, float]:
     """Generate a baseline rubric via a single LLM call (no iterative improvement)."""
     client = LLMClient(llm_config)
     gen = await client.generate(
@@ -56,15 +52,11 @@ async def generate_baseline_rubric(
         response_format=GeneratedRubric,
         return_result=True,
     )
-    rubric = Rubric.from_dict(
-        [c.model_dump(exclude_none=True) for c in gen.parsed.criteria]
-    )
+    rubric = Rubric.from_dict([c.model_dump(exclude_none=True) for c in gen.parsed.criteria])
     return rubric, gen.cost or 0.0
 
 
-def quality_plateau(
-    current: IterationResult, history: list[IterationResult]
-) -> str | None:
+def quality_plateau(current: IterationResult, history: list[IterationResult]) -> str | None:
     """Stop when no issues remain or quality score plateaus for 4 iterations."""
     if not current.issues:
         return "no_issues"
@@ -160,9 +152,7 @@ async def main() -> None:
     print("-" * 64)
 
     print("\nGenerating baseline rubric via single LLM call ...")
-    baseline_rubric, baseline_gen_cost = await generate_baseline_rubric(
-        task_prompt, revision_llm
-    )
+    baseline_rubric, baseline_gen_cost = await generate_baseline_rubric(task_prompt, revision_llm)
     baseline_eval_cost = 0.0
 
     baseline_rho, cost = await measure_test_correlation(
@@ -186,9 +176,7 @@ async def main() -> None:
         convergence_fn=quality_plateau,
         max_iterations=MAX_ITERATIONS,
     )
-    baseline_runner = ImprovementRunner(
-        baseline_rubric, task_prompt, config=baseline_config
-    )
+    baseline_runner = ImprovementRunner(baseline_rubric, task_prompt, config=baseline_config)
     baseline_result = await baseline_runner.run()
     improved_baseline = baseline_result.final_rubric
 
@@ -233,9 +221,7 @@ async def main() -> None:
         convergence_fn=quality_plateau,
         max_iterations=MAX_ITERATIONS,
     )
-    original_runner = ImprovementRunner(
-        original_rubric, task_prompt, config=original_config
-    )
+    original_runner = ImprovementRunner(original_rubric, task_prompt, config=original_config)
     original_result = await original_runner.run()
     improved_original = original_result.final_rubric
 
@@ -272,14 +258,14 @@ async def main() -> None:
     print(f"  Delta (baseline -> improved baseline): {baseline_delta:+.3f}")
     print(f"  Delta (original -> improved original): {original_delta:+.3f}")
 
-    print(f"\n  Baseline track:")
+    print("\n  Baseline track:")
     print(f"    Improvement iterations:  {len(baseline_result.iterations)}")
     print(f"    Convergence reason:      {baseline_result.convergence_reason}")
     print(f"    Improvement loop cost:   ${baseline_improvement_cost:.4f}")
     print(f"    Generation + eval cost:  ${baseline_gen_cost + baseline_eval_cost:.4f}")
     print(f"    Track total cost:        ${baseline_track_cost:.4f}")
 
-    print(f"\n  Original track:")
+    print("\n  Original track:")
     print(f"    Improvement iterations:  {len(original_result.iterations)}")
     print(f"    Convergence reason:      {original_result.convergence_reason}")
     print(f"    Improvement loop cost:   ${original_improvement_cost:.4f}")

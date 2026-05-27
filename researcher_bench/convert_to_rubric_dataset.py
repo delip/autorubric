@@ -22,7 +22,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-
 GENERIC_PROMPT = "Provide a response to the question."
 
 
@@ -54,11 +53,13 @@ def convert_rubric_to_criteria(rubric_data: list[dict]) -> list[dict]:
     """
     criteria = []
     for i, item in enumerate(rubric_data):
-        criteria.append({
-            "name": f"C{i + 1}",
-            "weight": item["weight"],
-            "requirement": item["point"],
-        })
+        criteria.append(
+            {
+                "name": f"C{i + 1}",
+                "weight": item["weight"],
+                "requirement": item["point"],
+            }
+        )
     return criteria
 
 
@@ -79,10 +80,13 @@ def create_item(
     Returns:
         DataItem-compatible dict with submission, description, and per-item rubric
     """
-    submission_content = json.dumps({
-        "question": question_data["question"],
-        "response": response,
-    }, ensure_ascii=False)
+    submission_content = json.dumps(
+        {
+            "question": question_data["question"],
+            "response": response,
+        },
+        ensure_ascii=False,
+    )
 
     category = question_data.get("category", "Unknown")
     subject = question_data.get("Subject", "Unknown")

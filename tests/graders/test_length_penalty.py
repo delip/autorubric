@@ -20,11 +20,13 @@ def mock_llm_config() -> LLMConfig:
 
 @pytest.fixture
 def simple_rubric() -> Rubric:
-    return Rubric([
-        Criterion(weight=10.0, requirement="Contains greeting"),
-        Criterion(weight=5.0, requirement="Contains farewell"),
-        Criterion(weight=-3.0, requirement="Contains profanity"),
-    ])
+    return Rubric(
+        [
+            Criterion(weight=10.0, requirement="Contains greeting"),
+            Criterion(weight=5.0, requirement="Contains farewell"),
+            Criterion(weight=-3.0, requirement="Contains profanity"),
+        ]
+    )
 
 
 def create_all_met_mock_client() -> MagicMock:
@@ -114,7 +116,7 @@ class TestLengthPenaltyWithNormalize:
             return_value=mock_client,
         ):
             grader = CriterionGrader(
-            llm_config=mock_llm_config,
+                llm_config=mock_llm_config,
                 normalize=True,
                 length_penalty=LengthPenalty(
                     free_budget=10,
@@ -139,7 +141,7 @@ class TestLengthPenaltyWithNormalize:
             return_value=mock_client,
         ):
             grader = CriterionGrader(
-            llm_config=mock_llm_config,
+                llm_config=mock_llm_config,
                 normalize=True,
                 length_penalty=LengthPenalty(
                     free_budget=5,
@@ -165,7 +167,7 @@ class TestLengthPenaltyWithoutNormalize:
             return_value=mock_client,
         ):
             grader = CriterionGrader(
-            llm_config=mock_llm_config,
+                llm_config=mock_llm_config,
                 normalize=False,
             )
 
@@ -174,9 +176,7 @@ class TestLengthPenaltyWithoutNormalize:
             assert result.raw_score == 15.0
             assert result.score == 15.0
 
-    async def test_raw_score_with_length_penalty_under_budget(
-        self, simple_rubric, mock_llm_config
-    ):
+    async def test_raw_score_with_length_penalty_under_budget(self, simple_rubric, mock_llm_config):
         mock_client = create_all_met_mock_client()
 
         with patch(
@@ -184,7 +184,7 @@ class TestLengthPenaltyWithoutNormalize:
             return_value=mock_client,
         ):
             grader = CriterionGrader(
-            llm_config=mock_llm_config,
+                llm_config=mock_llm_config,
                 normalize=False,
                 length_penalty=LengthPenalty(
                     free_budget=100,
@@ -207,7 +207,7 @@ class TestLengthPenaltyWithoutNormalize:
             return_value=mock_client,
         ):
             grader = CriterionGrader(
-            llm_config=mock_llm_config,
+                llm_config=mock_llm_config,
                 normalize=False,
                 length_penalty=LengthPenalty(
                     free_budget=5,
@@ -230,7 +230,7 @@ class TestLengthPenaltyWithoutNormalize:
             return_value=mock_client,
         ):
             grader = CriterionGrader(
-            llm_config=mock_llm_config,
+                llm_config=mock_llm_config,
                 normalize=False,
                 length_penalty=LengthPenalty(
                     free_budget=5,
@@ -248,9 +248,11 @@ class TestLengthPenaltyWithoutNormalize:
             assert result.score == pytest.approx(15.0 - expected_penalty)
 
     async def test_raw_score_can_go_negative(self, mock_llm_config):
-        rubric = Rubric([
-            Criterion(weight=5.0, requirement="Contains greeting"),
-        ])
+        rubric = Rubric(
+            [
+                Criterion(weight=5.0, requirement="Contains greeting"),
+            ]
+        )
 
         mock_client = create_all_met_mock_client()
 
@@ -259,7 +261,7 @@ class TestLengthPenaltyWithoutNormalize:
             return_value=mock_client,
         ):
             grader = CriterionGrader(
-            llm_config=mock_llm_config,
+                llm_config=mock_llm_config,
                 normalize=False,
                 length_penalty=LengthPenalty(
                     free_budget=5,
@@ -278,10 +280,12 @@ class TestLengthPenaltyWithoutNormalize:
 @pytest.mark.asyncio
 class TestLengthPenaltyWithNegativeCriteria:
     async def test_negative_criteria_met_reduces_raw_score(self, mock_llm_config):
-        rubric = Rubric([
-            Criterion(weight=10.0, requirement="Contains greeting"),
-            Criterion(weight=-5.0, requirement="Contains spam"),
-        ])
+        rubric = Rubric(
+            [
+                Criterion(weight=10.0, requirement="Contains greeting"),
+                Criterion(weight=-5.0, requirement="Contains spam"),
+            ]
+        )
 
         async def mock_generate(
             system_prompt: str,
@@ -320,7 +324,7 @@ class TestLengthPenaltyWithNegativeCriteria:
             return_value=mock_client,
         ):
             grader = CriterionGrader(
-            llm_config=mock_llm_config,
+                llm_config=mock_llm_config,
                 normalize=False,
             )
 
@@ -330,10 +334,12 @@ class TestLengthPenaltyWithNegativeCriteria:
             assert result.score == 5.0
 
     async def test_negative_criteria_with_length_penalty(self, mock_llm_config):
-        rubric = Rubric([
-            Criterion(weight=10.0, requirement="Contains greeting"),
-            Criterion(weight=-5.0, requirement="Contains spam"),
-        ])
+        rubric = Rubric(
+            [
+                Criterion(weight=10.0, requirement="Contains greeting"),
+                Criterion(weight=-5.0, requirement="Contains spam"),
+            ]
+        )
 
         async def mock_generate(
             system_prompt: str,
@@ -372,7 +378,7 @@ class TestLengthPenaltyWithNegativeCriteria:
             return_value=mock_client,
         ):
             grader = CriterionGrader(
-            llm_config=mock_llm_config,
+                llm_config=mock_llm_config,
                 normalize=False,
                 length_penalty=LengthPenalty(
                     free_budget=5,

@@ -36,14 +36,28 @@ def _load_section_mapping(meta_rubric_path: Path) -> dict[str, str]:
     return mapping
 
 
+def _error_category(error: str | None) -> str:
+    """Extract the leading category from an error string (e.g. "infrastructure")."""
+    if not error:
+        return "unknown"
+    return error.split(":", 1)[0].strip() or "unknown"
+
+
 def _get_verdict_display(
-    verdict: CriterionVerdict | None, weight: float
+    verdict: CriterionVerdict | None, weight: float, error: str | None = None
 ) -> tuple[str, str]:
     """Get verdict text and color based on verdict and weight.
 
     For positive weights: MET is good (green), UNMET is bad (red)
     For negative weights (anti-patterns): MET is bad (red), UNMET is good (green)
+
+    When ``error`` is set, the verdict was synthesized from a failed judge call;
+    surface a distinct ERROR badge (bright_magenta) so it is visually separate from
+    a genuine N/A.
     """
+    if error is not None:
+        return f"ERROR ({_error_category(error)})", "bright_magenta"
+
     if verdict is None or verdict == CriterionVerdict.CANNOT_ASSESS:
         return "N/A", "yellow"
 
@@ -139,7 +153,8 @@ def display_to_stdout(
             weight = cr.criterion.weight
             name = cr.criterion.name or "unnamed"
 
-            status_text, status_color = _get_verdict_display(verdict, weight)
+            error = getattr(cr, "error", None)
+            status_text, status_color = _get_verdict_display(verdict, weight, error)
             weight_str = f"{'+' if weight > 0 else ''}{weight}"
 
             table.add_row(
@@ -206,7 +221,9 @@ def render_to_html(
     score_color = (
         _color_to_css("green")
         if result.score >= 0.7
-        else _color_to_css("yellow") if result.score >= 0.5 else _color_to_css("red")
+        else _color_to_css("yellow")
+        if result.score >= 0.5
+        else _color_to_css("red")
     )
 
     html_parts = [
@@ -300,6 +317,14 @@ def render_to_html(
         .status-detected { color: var(--red); background: rgba(239, 68, 68, 0.1); }
         .status-clear { color: var(--green); background: rgba(34, 197, 94, 0.1); }
         .status-na { color: var(--yellow); background: rgba(234, 179, 8, 0.1); }
+        .error-badge {
+            font-weight: 600;
+            padding: 0.25rem 0.75rem;
+            border-radius: 4px;
+            color: var(--magenta);
+            background: rgba(217, 70, 239, 0.12);
+            border: 1px solid var(--magenta);
+        }
         .issues-header {
             background: var(--bg-secondary);
             border-left: 4px solid var(--red);
@@ -349,8 +374,7 @@ def render_to_html(
     cost_html = ""
     if result.completion_cost:
         cost_html = (
-            f"<span class='results-label'>Cost</span>"
-            f"<span>${result.completion_cost:.6f}</span>"
+            f"<span class='results-label'>Cost</span><span>${result.completion_cost:.6f}</span>"
         )
 
     html_parts.append(f"""
@@ -394,14 +418,23 @@ def render_to_html(
             verdict = cr.final_verdict
             weight = cr.criterion.weight
             name = cr.criterion.name or "unnamed"
-            status_text, status_color = _get_verdict_display(verdict, weight)
-            status_class = f"status-{status_text.lower()}"
+            error = getattr(cr, "error", None)
+            status_text, status_color = _get_verdict_display(verdict, weight, error)
+            if error is not None:
+                status_class = "status-error"
+            else:
+                status_class = f"status-{status_text.lower()}"
             weight_str = f"{'+' if weight > 0 else ''}{weight}"
+
+            if error is not None:
+                badge_html = f'<span class="error-badge">{_escape_html(status_text)}</span>'
+            else:
+                badge_html = f'<span class="status {status_class}">{status_text}</span>'
 
             html_parts.append(f"""
             <tr>
                 <td>{_escape_html(name)}</td>
-                <td><span class="status {status_class}">{status_text}</span></td>
+                <td>{badge_html}</td>
                 <td>{weight_str}</td>
             </tr>
 """)
@@ -587,12 +620,10 @@ def render_improvement_report_html(
     ]
 
     # Header
-    parts.append(f"<h1>Rubric Improvement Report</h1>\n")
+    parts.append("<h1>Rubric Improvement Report</h1>\n")
     parts.append("<div class='stats'>")
     parts.append(f"<span><strong>Iterations:</strong> {len(iterations)}</span>")
-    parts.append(
-        f"<span><strong>Convergence:</strong> {_escape_html(convergence_reason)}</span>"
-    )
+    parts.append(f"<span><strong>Convergence:</strong> {_escape_html(convergence_reason)}</span>")
     if total_cost > 0:
         parts.append(f"<span><strong>Total cost:</strong> ${total_cost:.4f}</span>")
     parts.append("</div>\n")
@@ -630,16 +661,13 @@ def render_improvement_report_html(
         agr_str = f"{it.agreement:.0%}" if it.agreement is not None else "N/A"
         # Adapt header text for held-out mode (no issues/agreement)
         if it.held_out_diagnostics is not None:
-            header_label = (
-                f"Iteration {it.iteration} — "
-                f"Accuracy: {it.quality_score:.1%}"
-            )
+            header_label = f"Iteration {it.iteration} — Accuracy: {it.quality_score:.1%}"
         else:
             header_label = (
                 f"Iteration {it.iteration} — Quality: {it.quality_score:.1%}, "
                 f"Agreement: {agr_str}, Issues: {len(it.issues)}"
             )
-        parts.append(f'<div class="accordion-item">\n')
+        parts.append('<div class="accordion-item">\n')
         parts.append(
             f'<h2 class="accordion-header">'
             f'<button class="accordion-button collapsed" type="button" '
@@ -674,17 +702,16 @@ def render_improvement_report_html(
         # Held-out per-criterion accuracy table
         if it.held_out_diagnostics is not None:
             parts.append("<h4>Per-Criterion Accuracy</h4>\n<table>\n<thead><tr>")
-            parts.append(
-                "<th>Criterion</th><th>Accuracy</th>"
-                "<th>FP Rate</th><th>FN Rate</th>"
-            )
+            parts.append("<th>Criterion</th><th>Accuracy</th><th>FP Rate</th><th>FN Rate</th>")
             parts.append("</tr></thead>\n<tbody>\n")
             for cr in sorted(
                 it.held_out_diagnostics.per_criterion,
                 key=lambda c: c.accuracy,
             ):
-                acc_color = "var(--green)" if cr.accuracy >= 0.9 else (
-                    "var(--yellow)" if cr.accuracy >= 0.7 else "var(--red)"
+                acc_color = (
+                    "var(--green)"
+                    if cr.accuracy >= 0.9
+                    else ("var(--yellow)" if cr.accuracy >= 0.7 else "var(--red)")
                 )
                 parts.append(
                     f"<tr><td class='crit-name'>"
@@ -700,10 +727,7 @@ def render_improvement_report_html(
             from ._improve import _match_issue_to_criteria
 
             parts.append("<h4>Issues</h4>\n<table>\n<thead><tr>")
-            parts.append(
-                "<th>Criterion</th><th>Type</th>"
-                "<th>Rubric #</th><th>Feedback</th>"
-            )
+            parts.append("<th>Criterion</th><th>Type</th><th>Rubric #</th><th>Feedback</th>")
             parts.append("</tr></thead>\n<tbody>\n")
             for issue in it.issues:
                 if issue.is_antipattern:
@@ -739,9 +763,7 @@ def render_improvement_report_html(
         # Link to per-iteration eval HTML (meta-rubric mode only)
         if it.quality_report is not None:
             eval_file = f"eval-iter-{it.iteration:02d}.html"
-            parts.append(
-                f"<p><a href='{eval_file}'>View detailed evaluation report</a></p>\n"
-            )
+            parts.append(f"<p><a href='{eval_file}'>View detailed evaluation report</a></p>\n")
 
         parts.append("</div>\n</div>\n</div>\n")
     parts.append("</div>\n")

@@ -11,7 +11,7 @@ src/autorubric/
 ├── __init__.py              # Public exports
 ├── dataset.py               # DataItem, RubricDataset
 ├── eval.py                  # EvalRunner, EvalResult, evaluate()
-├── llm.py                   # LLMConfig, LLMClient, ThinkingConfig
+├── llm.py                   # LLMConfig, LLMClient, ThinkingConfig, classify_grading_error
 ├── prompts.py               # Centralized prompt definitions
 ├── rate_limit.py            # Per-model rate limiting
 ├── rubric.py                # Core Rubric class
@@ -44,9 +44,11 @@ src/autorubric/
 | `Criterion`                | Single evaluation criterion with weight, requirement, optional multi-choice options |
 | `CriterionOption`          | Multi-choice option with label, value (0-1), optional `na` flag                     |
 | `CriterionVerdict`         | Enum: `MET`, `UNMET`, `CANNOT_ASSESS`                                               |
-| `CriterionReport`          | Criterion + verdict + reason                                                        |
+| `CriterionReport`          | Criterion + verdict + reason; optional `error` (category-prefixed message) + `is_error` property |
 | `EvaluationReport`         | Full grading result with score, raw_score, report, token_usage, cost                |
 | `EnsembleEvaluationReport` | Adds judge_scores, mean_agreement, per-criterion votes                              |
+| `JudgeVote`                | Single judge's verdict + reason for a criterion; optional `error` (category-prefixed message) |
+| `EnsembleCriterionReport`  | Per-criterion aggregate of judge votes; optional `error` (set only when ALL votes errored) + `is_error` property |
 | `LengthPenalty`            | Config: free_budget, max_cap, penalty_at_cap, exponent, penalty_type                |
 | `TokenUsage`               | prompt_tokens, completion_tokens, total_tokens, cache stats                         |
 
@@ -73,6 +75,10 @@ Note: `FewShotConfig` is listed in the Core Types table above (defined in `src/a
 | `LLMConfig`      | model, temperature, max_tokens, thinking, prompt_caching, max_parallel_requests |
 | `LLMClient`      | Async client with generate(), caching, rate limiting                            |
 | `ThinkingConfig` | level (LOW/MEDIUM/HIGH) or budget_tokens                                        |
+| `ErrorCategory`  | `Literal["infrastructure", "parse", "unknown"]` — classification of a grading exception |
+| `classify_grading_error` | `classify_grading_error(exc) -> ErrorCategory`: `infrastructure` for `openai.APIError` subclasses (litellm API/network/timeout/rate-limit/server errors), `parse` for `pydantic.ValidationError` / `ValueError` (incl. `json.JSONDecodeError`), `unknown` otherwise |
+
+Note: `classify_grading_error` and `ErrorCategory` are in Public Exports.
 
 ### Eval Types (src/autorubric/eval.py)
 
@@ -150,6 +156,8 @@ Note: `FewShotConfig` is listed in the Core Types table above (defined in `src/a
 6. Aggregates votes using strategy (majority/weighted/unanimous/any)
 7. Returns `EnsembleEvaluationReport` (consistent interface)
 
+When a judge call fails, the grader calls `classify_grading_error()` on the exception. `infrastructure` and `parse` failures are routed to `CANNOT_ASSESS` (binary) or `na=True` (multi-choice) — so under the default `CannotAssessStrategy.SKIP` they are excluded from the scoring denominator and do NOT penalize the submission. Only `unknown` errors keep the previous conservative worst-case verdict (UNMET for positive weight, MET for negative). The failure message (category-prefixed, e.g. `"infrastructure: ..."`) is stored on `JudgeVote.error`. `EnsembleCriterionReport.error` is set only when EVERY contributing judge vote errored; a mix of failed + successful judges yields a genuine verdict with `error is None`. The `is_error` property on `CriterionReport` / `EnsembleCriterionReport` lets downstream code distinguish error-induced verdicts from genuine ones without string-matching `reason`.
+
 ### Score Calculation
 ```python
 # Positive criteria: MET earns weight, UNMET earns 0
@@ -177,6 +185,8 @@ score = clamp(weighted_sum / total_positive_weight, 0, 1)  # if normalized
 ### CANNOT_ASSESS Handling
 Strategies: `SKIP` (adjust denominator), `ZERO`, `PARTIAL` (configurable), `FAIL` (worst case)
 
+Judge-call failures classified as `infrastructure` or `parse` (see Grading Flow / `classify_grading_error`) are mapped to `CANNOT_ASSESS` (binary) or `na=True` (multi-choice), so under the default `SKIP` strategy they drop out of the denominator instead of penalizing the submission. Only `unknown` errors fall back to the conservative worst-case verdict.
+
 ### Improvement Loop Artifact Persistence
 When `save_artifacts=True` and `artifacts_dir` is set, the improvement loop writes:
 - `rubric-iter-{NN}.json` — criteria array per iteration
@@ -191,7 +201,8 @@ When `save_artifacts=True` and `artifacts_dir` is set, the improvement loop writ
 
 - All graders return `EnsembleEvaluationReport` for consistent interface
 - `raw_score` always populated regardless of `normalize` setting
-- Parse failures use conservative defaults (UNMET for positive, MET for negative weights)
+- Judge-call failures are classified via `classify_grading_error()`: `infrastructure`/`parse` → CANNOT_ASSESS / `na=True` (excluded under default SKIP); only `unknown` keeps conservative defaults (UNMET for positive, MET for negative weights)
+- `JudgeVote.error` / `EnsembleCriterionReport.error` carry category-prefixed messages; `eval.py` serialization round-trips the `error` field on ensemble reports and judge votes
 - Filter `error is not None` results in training pipelines
 - Rate limiting via `LLMConfig.max_parallel_requests` (per-provider semaphore)
 

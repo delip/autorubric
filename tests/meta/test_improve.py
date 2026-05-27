@@ -17,9 +17,9 @@ from autorubric.meta._improve import (
     ImprovementConfig,
     IssueDetail,
     IterationResult,
-    _ConvergenceState,
     _build_revision_history,
     _check_convergence,
+    _ConvergenceState,
     _diff_issues,
     _extract_issues,
     _format_agreement_for_prompt,
@@ -41,15 +41,12 @@ from autorubric.types import (
     JudgeVote,
 )
 
-
 # ============================================================================
 # Helpers
 # ============================================================================
 
 
-def _make_criterion(
-    name: str, weight: float = 1.0, requirement: str | None = None
-) -> Criterion:
+def _make_criterion(name: str, weight: float = 1.0, requirement: str | None = None) -> Criterion:
     return Criterion(
         name=name,
         weight=weight,
@@ -95,9 +92,7 @@ def _make_ensemble_report(
     )
 
 
-def _make_issue(
-    name: str, is_antipattern: bool = False, weight: float = 1.0
-) -> IssueDetail:
+def _make_issue(name: str, is_antipattern: bool = False, weight: float = 1.0) -> IssueDetail:
     return IssueDetail(
         criterion_name=name,
         requirement=f"Requirement for {name}",
@@ -119,11 +114,7 @@ def _make_iteration_result(
 ) -> IterationResult:
     rubric = Rubric([_make_criterion("test_criterion")])
     report = _make_ensemble_report(
-        [
-            _make_ensemble_criterion_report(
-                "test_criterion", 1.0, CriterionVerdict.MET
-            )
-        ]
+        [_make_ensemble_criterion_report("test_criterion", 1.0, CriterionVerdict.MET)]
     )
     return IterationResult(
         iteration=iteration,
@@ -177,22 +168,14 @@ class TestExtractIssues:
 
     def test_positive_met_not_an_issue(self):
         report = _make_ensemble_report(
-            [
-                _make_ensemble_criterion_report(
-                    "clarity", 1.0, CriterionVerdict.MET
-                )
-            ]
+            [_make_ensemble_criterion_report("clarity", 1.0, CriterionVerdict.MET)]
         )
         issues = _extract_issues(report)
         assert len(issues) == 0
 
     def test_negative_unmet_not_an_issue(self):
         report = _make_ensemble_report(
-            [
-                _make_ensemble_criterion_report(
-                    "overlap", -1.0, CriterionVerdict.UNMET
-                )
-            ]
+            [_make_ensemble_criterion_report("overlap", -1.0, CriterionVerdict.UNMET)]
         )
         issues = _extract_issues(report)
         assert len(issues) == 0
@@ -263,11 +246,15 @@ class TestDiffIssues:
 
 class TestMatchIssueToCriteria:
     def _rubric(self) -> Rubric:
-        return Rubric([
-            Criterion(name="clarity", weight=1.0, requirement="The rubric must be written clearly"),
-            Criterion(name="coverage", weight=1.0, requirement="All aspects should be covered"),
-            Criterion(name="overlap", weight=-1.0, requirement="Short req"),
-        ])
+        return Rubric(
+            [
+                Criterion(
+                    name="clarity", weight=1.0, requirement="The rubric must be written clearly"
+                ),
+                Criterion(name="coverage", weight=1.0, requirement="All aspects should be covered"),
+                Criterion(name="overlap", weight=-1.0, requirement="Short req"),
+            ]
+        )
 
     def test_affects_tag_parsed(self):
         """The primary path: [Affects: #1, #3] tag is parsed correctly."""
@@ -458,12 +445,12 @@ class TestMetaCriterionJudgment:
             binary_response_format=MetaCriterionJudgment,
         )
 
-        with patch.object(
-            list(grader._clients.values())[0], "generate", generate_mock
-        ):
-            rubric = Rubric([
-                Criterion(name="clarity", weight=1.0, requirement="Must be clear"),
-            ])
+        with patch.object(list(grader._clients.values())[0], "generate", generate_mock):
+            rubric = Rubric(
+                [
+                    Criterion(name="clarity", weight=1.0, requirement="Must be clear"),
+                ]
+            )
             result = await rubric.grade(to_grade="test submission", grader=grader)
 
         assert result.report is not None
@@ -493,12 +480,12 @@ class TestMetaCriterionJudgment:
             binary_response_format=MetaCriterionJudgment,
         )
 
-        with patch.object(
-            list(grader._clients.values())[0], "generate", generate_mock
-        ):
-            rubric = Rubric([
-                Criterion(name="clarity", weight=1.0, requirement="Must be clear"),
-            ])
+        with patch.object(list(grader._clients.values())[0], "generate", generate_mock):
+            rubric = Rubric(
+                [
+                    Criterion(name="clarity", weight=1.0, requirement="Must be clear"),
+                ]
+            )
             result = await rubric.grade(to_grade="test submission", grader=grader)
 
         assert result.report is not None
@@ -525,12 +512,12 @@ class TestMetaCriterionJudgment:
 
         grader = CriterionGrader(llm_config=LLMConfig(model="test-model"))
 
-        with patch.object(
-            list(grader._clients.values())[0], "generate", generate_mock
-        ):
-            rubric = Rubric([
-                Criterion(name="clarity", weight=1.0, requirement="Must be clear"),
-            ])
+        with patch.object(list(grader._clients.values())[0], "generate", generate_mock):
+            rubric = Rubric(
+                [
+                    Criterion(name="clarity", weight=1.0, requirement="Must be clear"),
+                ]
+            )
             result = await rubric.grade(to_grade="test submission", grader=grader)
 
         assert result.report is not None
@@ -624,10 +611,7 @@ class TestBuildRevisionHistory:
         assert "Quality: 80.0%" in result
 
     def test_window_limit_respected(self):
-        iterations = [
-            _make_iteration_result(i, quality_score=0.5 + i * 0.1)
-            for i in range(5)
-        ]
+        iterations = [_make_iteration_result(i, quality_score=0.5 + i * 0.1) for i in range(5)]
         result = _build_revision_history(iterations, window=2)
         assert "Iteration 3:" in result
         assert "Iteration 4:" in result
@@ -798,10 +782,12 @@ class TestImproveRubricIntegration:
     @pytest.mark.asyncio
     async def test_converges_on_no_issues(self):
         """When the initial evaluation finds no issues, the loop stops immediately."""
-        rubric = Rubric([
-            Criterion(name="clarity", weight=1.0, requirement="Is clear"),
-            Criterion(name="accuracy", weight=1.0, requirement="Is accurate"),
-        ])
+        rubric = Rubric(
+            [
+                Criterion(name="clarity", weight=1.0, requirement="Is clear"),
+                Criterion(name="accuracy", weight=1.0, requirement="Is accurate"),
+            ]
+        )
 
         quality_report = _make_ensemble_report(
             [
@@ -836,9 +822,11 @@ class TestImproveRubricIntegration:
     @pytest.mark.asyncio
     async def test_revision_loop_runs_and_converges(self):
         """The loop revises the rubric and converges when thresholds are met."""
-        rubric = Rubric([
-            Criterion(name="clarity", weight=1.0, requirement="Is clear"),
-        ])
+        rubric = Rubric(
+            [
+                Criterion(name="clarity", weight=1.0, requirement="Is clear"),
+            ]
+        )
 
         # First eval: has issues. Second eval: no issues.
         report_with_issues = _make_ensemble_report(
@@ -862,13 +850,11 @@ class TestImproveRubricIntegration:
 
         eval_mock = AsyncMock(side_effect=[report_with_issues, report_clean])
 
-        revised_criteria_json = json.dumps([
-            {"name": "clarity", "weight": 1.0, "requirement": "Is clear and concise"}
-        ])
-
-        generate_result = GenerateResult(
-            content=revised_criteria_json, cost=0.005
+        revised_criteria_json = json.dumps(
+            [{"name": "clarity", "weight": 1.0, "requirement": "Is clear and concise"}]
         )
+
+        generate_result = GenerateResult(content=revised_criteria_json, cost=0.005)
         generate_mock = AsyncMock(return_value=generate_result)
 
         eval_llm = LLMConfig(model="test-model")
@@ -908,9 +894,11 @@ class TestImproveRubricIntegration:
     @pytest.mark.asyncio
     async def test_max_iterations_respected(self):
         """The loop stops after max_iterations even if issues remain."""
-        rubric = Rubric([
-            Criterion(name="clarity", weight=1.0, requirement="Is clear"),
-        ])
+        rubric = Rubric(
+            [
+                Criterion(name="clarity", weight=1.0, requirement="Is clear"),
+            ]
+        )
 
         report_with_issues = _make_ensemble_report(
             [
@@ -924,12 +912,10 @@ class TestImproveRubricIntegration:
 
         eval_mock = AsyncMock(return_value=report_with_issues)
 
-        revised_criteria_json = json.dumps([
-            {"name": "clarity", "weight": 1.0, "requirement": "Is clear v2"}
-        ])
-        generate_result = GenerateResult(
-            content=revised_criteria_json, cost=0.005
+        revised_criteria_json = json.dumps(
+            [{"name": "clarity", "weight": 1.0, "requirement": "Is clear v2"}]
         )
+        generate_result = GenerateResult(content=revised_criteria_json, cost=0.005)
         generate_mock = AsyncMock(return_value=generate_result)
 
         eval_llm = LLMConfig(model="test-model")
@@ -1007,11 +993,18 @@ class TestPublicFunctionNames:
             validate_agreement,
             validate_ground_truth,
         )
+
         for fn in [
-            extract_issues, diff_issues, format_issues_for_prompt,
-            format_agreement_for_prompt, build_revision_history,
-            validate_agreement, pareto_accept, revise_rubric,
-            compute_expected_scores, validate_ground_truth,
+            extract_issues,
+            diff_issues,
+            format_issues_for_prompt,
+            format_agreement_for_prompt,
+            build_revision_history,
+            validate_agreement,
+            pareto_accept,
+            revise_rubric,
+            compute_expected_scores,
+            validate_ground_truth,
             format_ground_truth_for_prompt,
         ]:
             assert callable(fn)
@@ -1035,6 +1028,7 @@ class TestPublicFunctionNames:
             revise_rubric,
             validate_agreement,
         )
+
         assert _extract_issues is extract_issues
         assert _diff_issues is diff_issues
         assert _format_issues_for_prompt is format_issues_for_prompt
@@ -1061,14 +1055,21 @@ class TestPublicFunctionNames:
             validate_agreement,
             validate_ground_truth,
         )
+
         assert ImprovementRunner is not None
         assert ImprovementProgressDisplay is not None
         assert ConvergenceFn is not None
         for fn in [
-            extract_issues, diff_issues, format_issues_for_prompt,
-            format_agreement_for_prompt, build_revision_history,
-            validate_agreement, pareto_accept, revise_rubric,
-            compute_expected_scores, validate_ground_truth,
+            extract_issues,
+            diff_issues,
+            format_issues_for_prompt,
+            format_agreement_for_prompt,
+            build_revision_history,
+            validate_agreement,
+            pareto_accept,
+            revise_rubric,
+            compute_expected_scores,
+            validate_ground_truth,
             format_ground_truth_for_prompt,
         ]:
             assert callable(fn)
@@ -1082,6 +1083,7 @@ class TestPublicFunctionNames:
 class TestImprovementRunner:
     def test_requires_config(self):
         from autorubric.meta._improve import ImprovementRunner
+
         rubric = Rubric([Criterion(name="x", weight=1.0, requirement="Test")])
         with pytest.raises(ValueError, match="config is required"):
             ImprovementRunner(rubric, "prompt")
@@ -1090,9 +1092,11 @@ class TestImprovementRunner:
     async def test_run_converges_on_no_issues(self):
         from autorubric.meta._improve import ImprovementRunner
 
-        rubric = Rubric([
-            Criterion(name="clarity", weight=1.0, requirement="Is clear"),
-        ])
+        rubric = Rubric(
+            [
+                Criterion(name="clarity", weight=1.0, requirement="Is clear"),
+            ]
+        )
 
         quality_report = _make_ensemble_report(
             [
@@ -1208,9 +1212,11 @@ class TestCustomConvergenceFn:
     @pytest.mark.asyncio
     async def test_custom_convergence_stops_loop(self):
         """Custom convergence_fn is called and can stop the loop."""
-        rubric = Rubric([
-            Criterion(name="clarity", weight=1.0, requirement="Is clear"),
-        ])
+        rubric = Rubric(
+            [
+                Criterion(name="clarity", weight=1.0, requirement="Is clear"),
+            ]
+        )
 
         report_with_issues = _make_ensemble_report(
             [
@@ -1223,12 +1229,10 @@ class TestCustomConvergenceFn:
 
         eval_mock = AsyncMock(return_value=report_with_issues)
 
-        revised_criteria_json = json.dumps([
-            {"name": "clarity", "weight": 1.0, "requirement": "Is clear v2"}
-        ])
-        generate_result = GenerateResult(
-            content=revised_criteria_json, cost=0.005
+        revised_criteria_json = json.dumps(
+            [{"name": "clarity", "weight": 1.0, "requirement": "Is clear v2"}]
         )
+        generate_result = GenerateResult(content=revised_criteria_json, cost=0.005)
         generate_mock = AsyncMock(return_value=generate_result)
 
         def stop_after_one(current, history):
@@ -1268,9 +1272,11 @@ class TestCustomConvergenceFn:
     @pytest.mark.asyncio
     async def test_none_convergence_fn_uses_builtin(self):
         """When convergence_fn is None, built-in logic is used."""
-        rubric = Rubric([
-            Criterion(name="clarity", weight=1.0, requirement="Is clear"),
-        ])
+        rubric = Rubric(
+            [
+                Criterion(name="clarity", weight=1.0, requirement="Is clear"),
+            ]
+        )
 
         quality_report = _make_ensemble_report(
             [
@@ -1317,10 +1323,14 @@ class TestImprovementProgressDisplay:
         display = ImprovementProgressDisplay()
         display._console = Console(file=StringIO(), force_terminal=True)
 
-        rubric = Rubric([
-            Criterion(name="clarity_criterion", weight=1.0, requirement="Must be clear"),
-            Criterion(name="overlap_criterion", weight=-1.0, requirement="No overlapping criteria"),
-        ])
+        rubric = Rubric(
+            [
+                Criterion(name="clarity_criterion", weight=1.0, requirement="Must be clear"),
+                Criterion(
+                    name="overlap_criterion", weight=-1.0, requirement="No overlapping criteria"
+                ),
+            ]
+        )
         issues = [
             IssueDetail(
                 criterion_name="meta_clarity",
@@ -1370,10 +1380,12 @@ class TestImprovementProgressDisplay:
         display = ImprovementProgressDisplay()
         display._console = Console(file=StringIO(), force_terminal=True)
 
-        rubric = Rubric([
-            Criterion(name="a", weight=1.0, requirement="First criterion"),
-            Criterion(name="b", weight=-0.5, requirement="Anti-pattern check"),
-        ])
+        rubric = Rubric(
+            [
+                Criterion(name="a", weight=1.0, requirement="First criterion"),
+                Criterion(name="b", weight=-0.5, requirement="Anti-pattern check"),
+            ]
+        )
         display.log_rubric(rubric, iteration=0)
         output = display._console.file.getvalue()
         assert "First criterion" in output
@@ -1391,14 +1403,18 @@ class TestImprovementProgressDisplay:
         # Use no_color to avoid ANSI escapes splitting inline-highlighted text
         display._console = Console(file=StringIO(), force_terminal=True, no_color=True)
 
-        prev = Rubric([
-            Criterion(name="a", weight=1.0, requirement="Old requirement"),
-            Criterion(name="b", weight=2.0, requirement="Unchanged"),
-        ])
-        curr = Rubric([
-            Criterion(name="a", weight=1.0, requirement="New requirement"),
-            Criterion(name="b", weight=2.0, requirement="Unchanged"),
-        ])
+        prev = Rubric(
+            [
+                Criterion(name="a", weight=1.0, requirement="Old requirement"),
+                Criterion(name="b", weight=2.0, requirement="Unchanged"),
+            ]
+        )
+        curr = Rubric(
+            [
+                Criterion(name="a", weight=1.0, requirement="New requirement"),
+                Criterion(name="b", weight=2.0, requirement="Unchanged"),
+            ]
+        )
         display.log_rubric_diff(prev, curr, iteration=1)
         output = display._console.file.getvalue()
         assert "Iteration 1" in output
@@ -1420,9 +1436,11 @@ class TestImprovementProgressDisplay:
         display = ImprovementProgressDisplay()
         display._console = Console(file=StringIO(), force_terminal=True)
 
-        rubric = Rubric([
-            Criterion(name="a", weight=1.0, requirement="Same"),
-        ])
+        rubric = Rubric(
+            [
+                Criterion(name="a", weight=1.0, requirement="Same"),
+            ]
+        )
         display.log_rubric_diff(rubric, rubric, iteration=1)
         output = display._console.file.getvalue()
         assert "No changes" in output
@@ -1534,9 +1552,7 @@ class TestValidateAgreementCallback:
         )
         report2.completion_cost = 0.02
 
-        with patch.object(
-            rubric, "grade", new_callable=AsyncMock, side_effect=[report1, report2]
-        ):
+        with patch.object(rubric, "grade", new_callable=AsyncMock, side_effect=[report1, report2]):
             _, _, cost = await validate_agreement(
                 rubric,
                 samples,
@@ -1558,9 +1574,7 @@ class TestReviseRubricCost:
 
         rubric = Rubric([Criterion(name="x", weight=1.0, requirement="Test")])
 
-        revised_json = json.dumps([
-            {"name": "x", "weight": 1.0, "requirement": "Improved test"}
-        ])
+        revised_json = json.dumps([{"name": "x", "weight": 1.0, "requirement": "Improved test"}])
         gen_result = GenerateResult(content=revised_json, cost=0.05)
         generate_mock = AsyncMock(return_value=gen_result)
 
@@ -1595,9 +1609,7 @@ class TestRenderImprovementReportHtml:
             _make_iteration_result(0, quality_score=0.6, issues=[_make_issue("a")]),
             _make_iteration_result(1, quality_score=0.9),
         ]
-        html = render_improvement_report_html(
-            iterations, "score_plateau", 0.05, rubric, rubric
-        )
+        html = render_improvement_report_html(iterations, "score_plateau", 0.05, rubric, rubric)
         assert "<!DOCTYPE html>" in html
         assert "Rubric Improvement Report" in html
         assert "score_plateau" in html
@@ -1609,9 +1621,7 @@ class TestRenderImprovementReportHtml:
         rubric = Rubric([Criterion(name="x", weight=1.0, requirement="Test")])
         issues = [_make_issue("clarity"), _make_issue("overlap", is_antipattern=True)]
         iterations = [_make_iteration_result(0, issues=issues)]
-        html = render_improvement_report_html(
-            iterations, "no_issues", 0.01, rubric, rubric
-        )
+        html = render_improvement_report_html(iterations, "no_issues", 0.01, rubric, rubric)
         assert "clarity" in html
         assert "overlap" in html
         assert "ANTI-PATTERN" in html
@@ -1622,13 +1632,13 @@ class TestRenderImprovementReportHtml:
         from autorubric.meta._display import render_improvement_report_html
 
         original = Rubric([Criterion(name="x", weight=1.0, requirement="Old")])
-        final = Rubric([
-            Criterion(name="x", weight=1.0, requirement="Improved criterion"),
-        ])
-        iterations = [_make_iteration_result(0)]
-        html = render_improvement_report_html(
-            iterations, "no_issues", 0.0, original, final
+        final = Rubric(
+            [
+                Criterion(name="x", weight=1.0, requirement="Improved criterion"),
+            ]
         )
+        iterations = [_make_iteration_result(0)]
+        html = render_improvement_report_html(iterations, "no_issues", 0.0, original, final)
         assert "Final Rubric" in html
         assert "Improved criterion" in html
 
@@ -1707,9 +1717,7 @@ class TestReviseRubricCapture:
 
         rubric = Rubric([Criterion(name="x", weight=1.0, requirement="Test")])
 
-        revised_json = json.dumps([
-            {"name": "x", "weight": 1.0, "requirement": "Improved test"}
-        ])
+        revised_json = json.dumps([{"name": "x", "weight": 1.0, "requirement": "Improved test"}])
         gen_result = GenerateResult(content=revised_json, cost=0.05)
         generate_mock = AsyncMock(return_value=gen_result)
 
@@ -1723,7 +1731,12 @@ class TestReviseRubricCapture:
             mock_cls.return_value.generate = generate_mock
 
             await revise_rubric(
-                rubric, "task", [], "no validation", "no history", config,
+                rubric,
+                "task",
+                [],
+                "no validation",
+                "no history",
+                config,
                 _capture=capture,
             )
 
@@ -1740,9 +1753,7 @@ class TestReviseRubricCapture:
 
         rubric = Rubric([Criterion(name="x", weight=1.0, requirement="Test")])
 
-        revised_json = json.dumps([
-            {"name": "x", "weight": 1.0, "requirement": "Improved test"}
-        ])
+        revised_json = json.dumps([{"name": "x", "weight": 1.0, "requirement": "Improved test"}])
         gen_result = GenerateResult(content=revised_json, cost=0.05)
         generate_mock = AsyncMock(return_value=gen_result)
 
@@ -1755,7 +1766,12 @@ class TestReviseRubricCapture:
             mock_cls.return_value.generate = generate_mock
 
             revised, cost = await revise_rubric(
-                rubric, "task", [], "no validation", "no history", config,
+                rubric,
+                "task",
+                [],
+                "no validation",
+                "no history",
+                config,
                 _capture=None,
             )
 
@@ -1828,20 +1844,24 @@ class TestArtifactPersistence:
     @staticmethod
     def _make_eval_mock(quality_report):
         """Create an eval mock that writes an HTML stub when output_html_path is given."""
+
         async def _eval_side_effect(rubric, *args, **kwargs):
             html_path = kwargs.get("output_html_path")
             if html_path:
                 Path(html_path).write_text("<html>stub</html>", encoding="utf-8")
             return quality_report
+
         return AsyncMock(side_effect=_eval_side_effect)
 
     @pytest.mark.asyncio
     async def test_artifacts_written_on_convergence(self, tmp_path):
         """When save_artifacts=True and loop converges on first iteration,
         all expected artifact files are created."""
-        rubric = Rubric([
-            Criterion(name="clarity", weight=1.0, requirement="Is clear"),
-        ])
+        rubric = Rubric(
+            [
+                Criterion(name="clarity", weight=1.0, requirement="Is clear"),
+            ]
+        )
 
         quality_report = _make_ensemble_report(
             [
@@ -1854,7 +1874,6 @@ class TestArtifactPersistence:
         config = ImprovementConfig(
             eval_llm=LLMConfig(model="test-model"),
             revision_llm=LLMConfig(model="test-model"),
-
             save_artifacts=True,
             artifacts_dir=tmp_path / "artifacts",
             show_progress=False,
@@ -1865,7 +1884,7 @@ class TestArtifactPersistence:
             "autorubric.meta._improve.evaluate_rubric_in_context",
             self._make_eval_mock(quality_report),
         ):
-            result = await improve_rubric(
+            await improve_rubric(
                 rubric,
                 "Write a summary",
                 config=config,
@@ -1887,9 +1906,11 @@ class TestArtifactPersistence:
     @pytest.mark.asyncio
     async def test_summary_json_structure(self, tmp_path):
         """summary.json contains expected keys and structure."""
-        rubric = Rubric([
-            Criterion(name="clarity", weight=1.0, requirement="Is clear"),
-        ])
+        rubric = Rubric(
+            [
+                Criterion(name="clarity", weight=1.0, requirement="Is clear"),
+            ]
+        )
 
         quality_report = _make_ensemble_report(
             [
@@ -1902,7 +1923,6 @@ class TestArtifactPersistence:
         config = ImprovementConfig(
             eval_llm=LLMConfig(model="test-model"),
             revision_llm=LLMConfig(model="test-model"),
-
             save_artifacts=True,
             artifacts_dir=tmp_path / "artifacts",
             show_progress=False,
@@ -1935,9 +1955,11 @@ class TestArtifactPersistence:
     @pytest.mark.asyncio
     async def test_iter_json_structure(self, tmp_path):
         """iter-00.json contains expected keys from _serialize_iteration."""
-        rubric = Rubric([
-            Criterion(name="clarity", weight=1.0, requirement="Is clear"),
-        ])
+        rubric = Rubric(
+            [
+                Criterion(name="clarity", weight=1.0, requirement="Is clear"),
+            ]
+        )
 
         quality_report = _make_ensemble_report(
             [
@@ -1950,7 +1972,6 @@ class TestArtifactPersistence:
         config = ImprovementConfig(
             eval_llm=LLMConfig(model="test-model"),
             revision_llm=LLMConfig(model="test-model"),
-
             save_artifacts=True,
             artifacts_dir=tmp_path / "artifacts",
             show_progress=False,
@@ -1976,9 +1997,11 @@ class TestArtifactPersistence:
     @pytest.mark.asyncio
     async def test_iter_json_with_revision(self, tmp_path):
         """iter-00.json includes revision data when a revision occurs."""
-        rubric = Rubric([
-            Criterion(name="clarity", weight=1.0, requirement="Is clear"),
-        ])
+        rubric = Rubric(
+            [
+                Criterion(name="clarity", weight=1.0, requirement="Is clear"),
+            ]
+        )
 
         report_with_issues = _make_ensemble_report(
             [
@@ -1999,18 +2022,15 @@ class TestArtifactPersistence:
 
         eval_mock = AsyncMock(side_effect=[report_with_issues, report_clean])
 
-        revised_criteria_json = json.dumps([
-            {"name": "clarity", "weight": 1.0, "requirement": "Is clear and concise"}
-        ])
-        generate_result = GenerateResult(
-            content=revised_criteria_json, cost=0.005
+        revised_criteria_json = json.dumps(
+            [{"name": "clarity", "weight": 1.0, "requirement": "Is clear and concise"}]
         )
+        generate_result = GenerateResult(content=revised_criteria_json, cost=0.005)
         generate_mock = AsyncMock(return_value=generate_result)
 
         config = ImprovementConfig(
             eval_llm=LLMConfig(model="test-model"),
             revision_llm=LLMConfig(model="test-model"),
-
             save_artifacts=True,
             artifacts_dir=tmp_path / "artifacts",
             show_progress=False,
@@ -2052,9 +2072,11 @@ class TestArtifactPersistence:
     @pytest.mark.asyncio
     async def test_html_generated_without_html_display_mode(self, tmp_path):
         """eval HTML and improvement_report.html are generated even when display != 'html'."""
-        rubric = Rubric([
-            Criterion(name="clarity", weight=1.0, requirement="Is clear"),
-        ])
+        rubric = Rubric(
+            [
+                Criterion(name="clarity", weight=1.0, requirement="Is clear"),
+            ]
+        )
 
         quality_report = _make_ensemble_report(
             [
@@ -2067,7 +2089,6 @@ class TestArtifactPersistence:
         config = ImprovementConfig(
             eval_llm=LLMConfig(model="test-model"),
             revision_llm=LLMConfig(model="test-model"),
-
             save_artifacts=True,
             artifacts_dir=tmp_path / "artifacts",
             show_progress=False,
@@ -2092,10 +2113,12 @@ class TestArtifactPersistence:
 
 class TestComputeExpectedScores:
     def test_computes_scores_from_ground_truth(self):
-        rubric = Rubric([
-            Criterion(name="a", weight=10.0, requirement="First"),
-            Criterion(name="b", weight=5.0, requirement="Second"),
-        ])
+        rubric = Rubric(
+            [
+                Criterion(name="a", weight=10.0, requirement="First"),
+                Criterion(name="b", weight=5.0, requirement="Second"),
+            ]
+        )
         dataset = RubricDataset(
             prompt="task",
             rubric=rubric,
@@ -2146,9 +2169,11 @@ class TestComputeExpectedScores:
 class TestValidateGroundTruth:
     @pytest.mark.asyncio
     async def test_computes_correlation(self):
-        rubric = Rubric([
-            Criterion(name="a", weight=10.0, requirement="First"),
-        ])
+        rubric = Rubric(
+            [
+                Criterion(name="a", weight=10.0, requirement="First"),
+            ]
+        )
         dataset = RubricDataset(
             prompt="task",
             rubric=rubric,
@@ -2185,11 +2210,16 @@ class TestValidateGroundTruth:
         grader = CriterionGrader(llm_config=LLMConfig(model="test"))
 
         with patch.object(
-            rubric, "grade", new_callable=AsyncMock,
+            rubric,
+            "grade",
+            new_callable=AsyncMock,
             side_effect=[report_met, report_unmet, report_met],
         ):
             correlation, per_item, cost = await validate_ground_truth(
-                rubric, dataset, expected_scores, grader,
+                rubric,
+                dataset,
+                expected_scores,
+                grader,
             )
 
         # Perfect correlation when rubric scores match expected scores
@@ -2202,9 +2232,11 @@ class TestValidateGroundTruth:
     @pytest.mark.asyncio
     async def test_fallback_for_small_n(self):
         """When n < 3, uses 1-MAE instead of Spearman."""
-        rubric = Rubric([
-            Criterion(name="a", weight=10.0, requirement="First"),
-        ])
+        rubric = Rubric(
+            [
+                Criterion(name="a", weight=10.0, requirement="First"),
+            ]
+        )
         dataset = RubricDataset(
             prompt="task",
             rubric=rubric,
@@ -2235,11 +2267,16 @@ class TestValidateGroundTruth:
         grader = CriterionGrader(llm_config=LLMConfig(model="test"))
 
         with patch.object(
-            rubric, "grade", new_callable=AsyncMock,
+            rubric,
+            "grade",
+            new_callable=AsyncMock,
             side_effect=[report_met, report_unmet],
         ):
             metric, per_item, cost = await validate_ground_truth(
-                rubric, dataset, expected_scores, grader,
+                rubric,
+                dataset,
+                expected_scores,
+                grader,
             )
 
         # Perfect match: MAE=0, so metric = 1 - 0 = 1.0
@@ -2279,17 +2316,34 @@ class TestFormatGroundTruthForPrompt:
         """When item_reports is provided, a diagnostics section appears."""
         per_item = [(0.80, 0.30), (0.20, 0.70), (0.50, 0.50)]
         reports = [
-            _make_ensemble_report([
-                _make_ensemble_criterion_report("accuracy", 10.0, CriterionVerdict.MET, reason="Looks correct"),
-                _make_ensemble_criterion_report("error", -5.0, CriterionVerdict.UNMET, reason="No error found"),
-            ], score=0.80),
-            _make_ensemble_report([
-                _make_ensemble_criterion_report("accuracy", 10.0, CriterionVerdict.UNMET, reason="Missing info"),
-                _make_ensemble_criterion_report("error", -5.0, CriterionVerdict.MET, reason="Has errors"),
-            ], score=0.20),
-            _make_ensemble_report([
-                _make_ensemble_criterion_report("accuracy", 10.0, CriterionVerdict.MET),
-            ], score=0.50),
+            _make_ensemble_report(
+                [
+                    _make_ensemble_criterion_report(
+                        "accuracy", 10.0, CriterionVerdict.MET, reason="Looks correct"
+                    ),
+                    _make_ensemble_criterion_report(
+                        "error", -5.0, CriterionVerdict.UNMET, reason="No error found"
+                    ),
+                ],
+                score=0.80,
+            ),
+            _make_ensemble_report(
+                [
+                    _make_ensemble_criterion_report(
+                        "accuracy", 10.0, CriterionVerdict.UNMET, reason="Missing info"
+                    ),
+                    _make_ensemble_criterion_report(
+                        "error", -5.0, CriterionVerdict.MET, reason="Has errors"
+                    ),
+                ],
+                score=0.20,
+            ),
+            _make_ensemble_report(
+                [
+                    _make_ensemble_criterion_report("accuracy", 10.0, CriterionVerdict.MET),
+                ],
+                score=0.50,
+            ),
         ]
         result = format_ground_truth_for_prompt(0.5, per_item, item_reports=reports)
         assert "## Grading Diagnostics for Largest Gaps" in result
@@ -2321,9 +2375,7 @@ class TestSelectDiagnosticItems:
             (0.60, 0.50),  # gap +0.10 (over)
             (0.50, 0.50),  # gap  0.00 (skip)
         ]
-        reports = [
-            _make_ensemble_report([], score=s) for s, _ in per_item
-        ]
+        reports = [_make_ensemble_report([], score=s) for s, _ in per_item]
         over, under = _select_diagnostic_items(per_item, reports, n_per_direction=3)
         assert len(over) == 2  # items 0 and 2
         assert len(under) == 1  # item 1
@@ -2363,12 +2415,22 @@ class TestSelectDiagnosticItems:
 class TestFormatErrorCriteria:
     def test_over_scored_filters_met_positive_and_unmet_negative(self):
         """Over-scored: include MET positive-weight + UNMET negative-weight."""
-        report = _make_ensemble_report([
-            _make_ensemble_criterion_report("good", 10.0, CriterionVerdict.MET, reason="Reason A"),
-            _make_ensemble_criterion_report("bad", -5.0, CriterionVerdict.UNMET, reason="Reason B"),
-            _make_ensemble_criterion_report("missed", 10.0, CriterionVerdict.UNMET, reason="Should exclude"),
-            _make_ensemble_criterion_report("caught", -5.0, CriterionVerdict.MET, reason="Should exclude"),
-        ])
+        report = _make_ensemble_report(
+            [
+                _make_ensemble_criterion_report(
+                    "good", 10.0, CriterionVerdict.MET, reason="Reason A"
+                ),
+                _make_ensemble_criterion_report(
+                    "bad", -5.0, CriterionVerdict.UNMET, reason="Reason B"
+                ),
+                _make_ensemble_criterion_report(
+                    "missed", 10.0, CriterionVerdict.UNMET, reason="Should exclude"
+                ),
+                _make_ensemble_criterion_report(
+                    "caught", -5.0, CriterionVerdict.MET, reason="Should exclude"
+                ),
+            ]
+        )
         lines = _format_error_criteria(report, over_scored=True)
         assert len(lines) == 2
         assert "good" in lines[0] and "MET" in lines[0]
@@ -2376,28 +2438,44 @@ class TestFormatErrorCriteria:
 
     def test_under_scored_filters_unmet_positive_and_met_negative(self):
         """Under-scored: include UNMET positive-weight + MET negative-weight."""
-        report = _make_ensemble_report([
-            _make_ensemble_criterion_report("good", 10.0, CriterionVerdict.UNMET, reason="Reason C"),
-            _make_ensemble_criterion_report("bad", -5.0, CriterionVerdict.MET, reason="Reason D"),
-            _make_ensemble_criterion_report("met_pos", 10.0, CriterionVerdict.MET, reason="Should exclude"),
-            _make_ensemble_criterion_report("unmet_neg", -5.0, CriterionVerdict.UNMET, reason="Should exclude"),
-        ])
+        report = _make_ensemble_report(
+            [
+                _make_ensemble_criterion_report(
+                    "good", 10.0, CriterionVerdict.UNMET, reason="Reason C"
+                ),
+                _make_ensemble_criterion_report(
+                    "bad", -5.0, CriterionVerdict.MET, reason="Reason D"
+                ),
+                _make_ensemble_criterion_report(
+                    "met_pos", 10.0, CriterionVerdict.MET, reason="Should exclude"
+                ),
+                _make_ensemble_criterion_report(
+                    "unmet_neg", -5.0, CriterionVerdict.UNMET, reason="Should exclude"
+                ),
+            ]
+        )
         lines = _format_error_criteria(report, over_scored=False)
         assert len(lines) == 2
         assert "good" in lines[0] and "UNMET" in lines[0]
         assert "bad" in lines[1] and "MET" in lines[1]
 
     def test_skips_cannot_assess(self):
-        report = _make_ensemble_report([
-            _make_ensemble_criterion_report("x", 10.0, CriterionVerdict.CANNOT_ASSESS, reason="N/A"),
-        ])
+        report = _make_ensemble_report(
+            [
+                _make_ensemble_criterion_report(
+                    "x", 10.0, CriterionVerdict.CANNOT_ASSESS, reason="N/A"
+                ),
+            ]
+        )
         assert _format_error_criteria(report, over_scored=True) == []
         assert _format_error_criteria(report, over_scored=False) == []
 
     def test_skips_none_verdict(self):
-        report = _make_ensemble_report([
-            _make_ensemble_criterion_report("x", 10.0, CriterionVerdict.MET),
-        ])
+        report = _make_ensemble_report(
+            [
+                _make_ensemble_criterion_report("x", 10.0, CriterionVerdict.MET),
+            ]
+        )
         # Manually set verdict to None to simulate multi-choice criterion
         report.report[0].final_verdict = None
         assert _format_error_criteria(report, over_scored=True) == []
@@ -2413,10 +2491,12 @@ class TestFormatErrorCriteria:
 
     def test_weight_sign_in_output(self):
         """Positive weights get '+' prefix, negative don't."""
-        report = _make_ensemble_report([
-            _make_ensemble_criterion_report("pos", 10.0, CriterionVerdict.MET, reason="r1"),
-            _make_ensemble_criterion_report("neg", -5.0, CriterionVerdict.UNMET, reason="r2"),
-        ])
+        report = _make_ensemble_report(
+            [
+                _make_ensemble_criterion_report("pos", 10.0, CriterionVerdict.MET, reason="r1"),
+                _make_ensemble_criterion_report("neg", -5.0, CriterionVerdict.UNMET, reason="r2"),
+            ]
+        )
         lines = _format_error_criteria(report, over_scored=True)
         assert "w=+10" in lines[0]
         assert "w=-5" in lines[1]
@@ -2524,10 +2604,12 @@ class TestValidateHeldOut:
     """Tests for the validate_held_out building block."""
 
     def _rubric_and_dataset(self):
-        rubric = Rubric([
-            Criterion(name="accuracy", weight=1.0, requirement="Must be accurate"),
-            Criterion(name="style", weight=1.0, requirement="Must have good style"),
-        ])
+        rubric = Rubric(
+            [
+                Criterion(name="accuracy", weight=1.0, requirement="Must be accurate"),
+                Criterion(name="style", weight=1.0, requirement="Must have good style"),
+            ]
+        )
         dataset = RubricDataset(
             prompt="task",
             rubric=rubric,
@@ -2570,26 +2652,36 @@ class TestValidateHeldOut:
         # LLM agrees with ground truth on all items for criterion 0 (accuracy),
         # disagrees on all items for criterion 1 (style).
         reports = [
-            self._make_grade_report([
-                ("accuracy", 1.0, CriterionVerdict.MET),
-                ("style", 1.0, CriterionVerdict.UNMET),  # GT=MET, wrong
-            ]),
-            self._make_grade_report([
-                ("accuracy", 1.0, CriterionVerdict.UNMET),
-                ("style", 1.0, CriterionVerdict.MET),  # GT=UNMET, wrong
-            ]),
-            self._make_grade_report([
-                ("accuracy", 1.0, CriterionVerdict.MET),
-                ("style", 1.0, CriterionVerdict.MET),  # GT=UNMET, wrong
-            ]),
+            self._make_grade_report(
+                [
+                    ("accuracy", 1.0, CriterionVerdict.MET),
+                    ("style", 1.0, CriterionVerdict.UNMET),  # GT=MET, wrong
+                ]
+            ),
+            self._make_grade_report(
+                [
+                    ("accuracy", 1.0, CriterionVerdict.UNMET),
+                    ("style", 1.0, CriterionVerdict.MET),  # GT=UNMET, wrong
+                ]
+            ),
+            self._make_grade_report(
+                [
+                    ("accuracy", 1.0, CriterionVerdict.MET),
+                    ("style", 1.0, CriterionVerdict.MET),  # GT=UNMET, wrong
+                ]
+            ),
         ]
 
         with patch.object(
-            rubric, "grade", new_callable=AsyncMock,
+            rubric,
+            "grade",
+            new_callable=AsyncMock,
             side_effect=reports,
         ):
             result = await validate_held_out(
-                rubric, dataset, grader,
+                rubric,
+                dataset,
+                grader,
                 max_exemplars_per_criterion=5,
             )
 
@@ -2616,26 +2708,36 @@ class TestValidateHeldOut:
         #   item1: GT=UNMET, LLM=MET -> FP
         #   item2: GT=MET, LLM=UNMET -> FN
         reports = [
-            self._make_grade_report([
-                ("accuracy", 1.0, CriterionVerdict.MET),
-                ("style", 1.0, CriterionVerdict.MET),
-            ]),
-            self._make_grade_report([
-                ("accuracy", 1.0, CriterionVerdict.MET),  # FP
-                ("style", 1.0, CriterionVerdict.UNMET),
-            ]),
-            self._make_grade_report([
-                ("accuracy", 1.0, CriterionVerdict.UNMET),  # FN
-                ("style", 1.0, CriterionVerdict.UNMET),
-            ]),
+            self._make_grade_report(
+                [
+                    ("accuracy", 1.0, CriterionVerdict.MET),
+                    ("style", 1.0, CriterionVerdict.MET),
+                ]
+            ),
+            self._make_grade_report(
+                [
+                    ("accuracy", 1.0, CriterionVerdict.MET),  # FP
+                    ("style", 1.0, CriterionVerdict.UNMET),
+                ]
+            ),
+            self._make_grade_report(
+                [
+                    ("accuracy", 1.0, CriterionVerdict.UNMET),  # FN
+                    ("style", 1.0, CriterionVerdict.UNMET),
+                ]
+            ),
         ]
 
         with patch.object(
-            rubric, "grade", new_callable=AsyncMock,
+            rubric,
+            "grade",
+            new_callable=AsyncMock,
             side_effect=reports,
         ):
             result = await validate_held_out(
-                rubric, dataset, grader,
+                rubric,
+                dataset,
+                grader,
             )
 
         acc = result.per_criterion[0]
@@ -2649,9 +2751,11 @@ class TestValidateHeldOut:
         """Disagreement exemplars are capped at max_exemplars_per_criterion."""
         from autorubric.meta._improve import validate_held_out
 
-        rubric = Rubric([
-            Criterion(name="c", weight=1.0, requirement="Test"),
-        ])
+        rubric = Rubric(
+            [
+                Criterion(name="c", weight=1.0, requirement="Test"),
+            ]
+        )
         # 5 items, all disagreeing
         items = [
             DataItem(
@@ -2667,11 +2771,15 @@ class TestValidateHeldOut:
         report = self._make_grade_report([("c", 1.0, CriterionVerdict.UNMET)])
 
         with patch.object(
-            rubric, "grade", new_callable=AsyncMock,
+            rubric,
+            "grade",
+            new_callable=AsyncMock,
             return_value=report,
         ):
             result = await validate_held_out(
-                rubric, dataset, grader,
+                rubric,
+                dataset,
+                grader,
                 max_exemplars_per_criterion=2,
             )
 
@@ -2684,18 +2792,24 @@ class TestValidateHeldOut:
 
         rubric, dataset = self._rubric_and_dataset()
         grader = CriterionGrader(llm_config=LLMConfig(model="test"))
-        report = self._make_grade_report([
-            ("accuracy", 1.0, CriterionVerdict.MET),
-            ("style", 1.0, CriterionVerdict.MET),
-        ])
+        report = self._make_grade_report(
+            [
+                ("accuracy", 1.0, CriterionVerdict.MET),
+                ("style", 1.0, CriterionVerdict.MET),
+            ]
+        )
         callback = MagicMock()
 
         with patch.object(
-            rubric, "grade", new_callable=AsyncMock,
+            rubric,
+            "grade",
+            new_callable=AsyncMock,
             return_value=report,
         ):
             await validate_held_out(
-                rubric, dataset, grader,
+                rubric,
+                dataset,
+                grader,
                 on_item_complete=callback,
             )
 
@@ -2706,16 +2820,19 @@ class TestValidateHeldOut:
         """mean_accuracy is the mean of per-criterion accuracies."""
         from autorubric.meta._improve import validate_held_out
 
-        rubric = Rubric([
-            Criterion(name="a", weight=1.0, requirement="A"),
-            Criterion(name="b", weight=1.0, requirement="B"),
-        ])
+        rubric = Rubric(
+            [
+                Criterion(name="a", weight=1.0, requirement="A"),
+                Criterion(name="b", weight=1.0, requirement="B"),
+            ]
+        )
         dataset = RubricDataset(
             prompt="task",
             rubric=rubric,
             items=[
                 DataItem(
-                    submission="s1", description="d1",
+                    submission="s1",
+                    description="d1",
                     ground_truth=[CriterionVerdict.MET, CriterionVerdict.MET],
                 ),
             ],
@@ -2723,13 +2840,17 @@ class TestValidateHeldOut:
         grader = CriterionGrader(llm_config=LLMConfig(model="test"))
 
         # a: correct (MET==MET), b: wrong (UNMET!=MET)
-        report = self._make_grade_report([
-            ("a", 1.0, CriterionVerdict.MET),
-            ("b", 1.0, CriterionVerdict.UNMET),
-        ])
+        report = self._make_grade_report(
+            [
+                ("a", 1.0, CriterionVerdict.MET),
+                ("b", 1.0, CriterionVerdict.UNMET),
+            ]
+        )
 
         with patch.object(
-            rubric, "grade", new_callable=AsyncMock,
+            rubric,
+            "grade",
+            new_callable=AsyncMock,
             return_value=report,
         ):
             result = await validate_held_out(rubric, dataset, grader)
@@ -2873,8 +2994,8 @@ class TestFormatHeldOutForPrompt:
     def test_perfect_accuracy(self):
         from autorubric.meta._improve import (
             CriterionErrorReport,
-            format_held_out_for_prompt,
             HeldOutValidationResult,
+            format_held_out_for_prompt,
         )
 
         report = CriterionErrorReport(
@@ -2926,14 +3047,18 @@ class TestValidateCriteriaStructure:
     def test_same_count_same_names(self):
         from autorubric.meta._improve import validate_criteria_structure
 
-        original = Rubric([
-            Criterion(name="a", weight=1.0, requirement="R1"),
-            Criterion(name="b", weight=1.0, requirement="R2"),
-        ])
-        revised = Rubric([
-            Criterion(name="a", weight=1.0, requirement="R1 improved"),
-            Criterion(name="b", weight=1.0, requirement="R2 improved"),
-        ])
+        original = Rubric(
+            [
+                Criterion(name="a", weight=1.0, requirement="R1"),
+                Criterion(name="b", weight=1.0, requirement="R2"),
+            ]
+        )
+        revised = Rubric(
+            [
+                Criterion(name="a", weight=1.0, requirement="R1 improved"),
+                Criterion(name="b", weight=1.0, requirement="R2 improved"),
+            ]
+        )
         valid, error = validate_criteria_structure(original, revised)
         assert valid is True
         assert error is None
@@ -2941,13 +3066,17 @@ class TestValidateCriteriaStructure:
     def test_different_count_more(self):
         from autorubric.meta._improve import validate_criteria_structure
 
-        original = Rubric([
-            Criterion(name="a", weight=1.0, requirement="R1"),
-        ])
-        revised = Rubric([
-            Criterion(name="a", weight=1.0, requirement="R1"),
-            Criterion(name="b", weight=1.0, requirement="R2"),
-        ])
+        original = Rubric(
+            [
+                Criterion(name="a", weight=1.0, requirement="R1"),
+            ]
+        )
+        revised = Rubric(
+            [
+                Criterion(name="a", weight=1.0, requirement="R1"),
+                Criterion(name="b", weight=1.0, requirement="R2"),
+            ]
+        )
         valid, error = validate_criteria_structure(original, revised)
         assert valid is False
         assert "1 -> 2" in error
@@ -2955,13 +3084,17 @@ class TestValidateCriteriaStructure:
     def test_different_count_fewer(self):
         from autorubric.meta._improve import validate_criteria_structure
 
-        original = Rubric([
-            Criterion(name="a", weight=1.0, requirement="R1"),
-            Criterion(name="b", weight=1.0, requirement="R2"),
-        ])
-        revised = Rubric([
-            Criterion(name="a", weight=1.0, requirement="R1"),
-        ])
+        original = Rubric(
+            [
+                Criterion(name="a", weight=1.0, requirement="R1"),
+                Criterion(name="b", weight=1.0, requirement="R2"),
+            ]
+        )
+        revised = Rubric(
+            [
+                Criterion(name="a", weight=1.0, requirement="R1"),
+            ]
+        )
         valid, error = validate_criteria_structure(original, revised)
         assert valid is False
         assert "2 -> 1" in error
@@ -2969,14 +3102,18 @@ class TestValidateCriteriaStructure:
     def test_name_mismatch(self):
         from autorubric.meta._improve import validate_criteria_structure
 
-        original = Rubric([
-            Criterion(name="a", weight=1.0, requirement="R1"),
-            Criterion(name="b", weight=1.0, requirement="R2"),
-        ])
-        revised = Rubric([
-            Criterion(name="a", weight=1.0, requirement="R1"),
-            Criterion(name="c", weight=1.0, requirement="R2"),
-        ])
+        original = Rubric(
+            [
+                Criterion(name="a", weight=1.0, requirement="R1"),
+                Criterion(name="b", weight=1.0, requirement="R2"),
+            ]
+        )
+        revised = Rubric(
+            [
+                Criterion(name="a", weight=1.0, requirement="R1"),
+                Criterion(name="c", weight=1.0, requirement="R2"),
+            ]
+        )
         valid, error = validate_criteria_structure(original, revised)
         assert valid is False
         assert "'b'" in error
@@ -2985,14 +3122,18 @@ class TestValidateCriteriaStructure:
     def test_unnamed_criteria_name_check_skipped(self):
         from autorubric.meta._improve import validate_criteria_structure
 
-        original = Rubric([
-            Criterion(name=None, weight=1.0, requirement="R1"),
-            Criterion(name="b", weight=1.0, requirement="R2"),
-        ])
-        revised = Rubric([
-            Criterion(name=None, weight=1.0, requirement="R1 improved"),
-            Criterion(name="b", weight=1.0, requirement="R2 improved"),
-        ])
+        original = Rubric(
+            [
+                Criterion(name=None, weight=1.0, requirement="R1"),
+                Criterion(name="b", weight=1.0, requirement="R2"),
+            ]
+        )
+        revised = Rubric(
+            [
+                Criterion(name=None, weight=1.0, requirement="R1 improved"),
+                Criterion(name="b", weight=1.0, requirement="R2 improved"),
+            ]
+        )
         valid, error = validate_criteria_structure(original, revised)
         assert valid is True
         assert error is None
@@ -3001,12 +3142,16 @@ class TestValidateCriteriaStructure:
         """When one side has a name and the other doesn't, skip name check."""
         from autorubric.meta._improve import validate_criteria_structure
 
-        original = Rubric([
-            Criterion(name="a", weight=1.0, requirement="R1"),
-        ])
-        revised = Rubric([
-            Criterion(name=None, weight=1.0, requirement="R1 improved"),
-        ])
+        original = Rubric(
+            [
+                Criterion(name="a", weight=1.0, requirement="R1"),
+            ]
+        )
+        revised = Rubric(
+            [
+                Criterion(name=None, weight=1.0, requirement="R1 improved"),
+            ]
+        )
         valid, error = validate_criteria_structure(original, revised)
         assert valid is True
         assert error is None
@@ -3053,7 +3198,8 @@ class TestCheckHeldOutConvergence:
         from autorubric.meta._improve import _check_held_out_convergence
 
         config = self._default_config(
-            plateau_patience=2, score_plateau_threshold=0.02,
+            plateau_patience=2,
+            score_plateau_threshold=0.02,
         )
         state = _ConvergenceState(prev_score=0.80)
 
@@ -3086,7 +3232,8 @@ class TestCheckHeldOutConvergence:
         from autorubric.meta._improve import _check_held_out_convergence
 
         config = self._default_config(
-            plateau_patience=2, score_plateau_threshold=0.02,
+            plateau_patience=2,
+            score_plateau_threshold=0.02,
         )
         state = _ConvergenceState(prev_score=0.80, plateau_count=1)
 
@@ -3115,13 +3262,13 @@ class TestReviseRubricHeldOut:
     async def test_uses_held_out_prompt_templates(self):
         from autorubric.meta._improve import revise_rubric_held_out
 
-        rubric = Rubric([
-            Criterion(name="a", weight=1.0, requirement="R1"),
-        ])
+        rubric = Rubric(
+            [
+                Criterion(name="a", weight=1.0, requirement="R1"),
+            ]
+        )
 
-        revised_json = json.dumps([
-            {"name": "a", "weight": 1.0, "requirement": "Improved R1"}
-        ])
+        revised_json = json.dumps([{"name": "a", "weight": 1.0, "requirement": "Improved R1"}])
         gen_result = GenerateResult(content=revised_json, cost=0.05)
         generate_mock = AsyncMock(return_value=gen_result)
 
@@ -3134,7 +3281,10 @@ class TestReviseRubricHeldOut:
             mock_cls.return_value.generate = generate_mock
 
             revised, cost = await revise_rubric_held_out(
-                rubric, "task prompt", "diagnostics text", "history text",
+                rubric,
+                "task prompt",
+                "diagnostics text",
+                "history text",
                 config,
             )
 
@@ -3152,15 +3302,19 @@ class TestReviseRubricHeldOut:
         """When revised rubric has different criteria count, returns original."""
         from autorubric.meta._improve import revise_rubric_held_out
 
-        rubric = Rubric([
-            Criterion(name="a", weight=1.0, requirement="R1"),
-        ])
+        rubric = Rubric(
+            [
+                Criterion(name="a", weight=1.0, requirement="R1"),
+            ]
+        )
 
         # LLM returns 2 criteria instead of 1
-        revised_json = json.dumps([
-            {"name": "a", "weight": 1.0, "requirement": "R1"},
-            {"name": "b", "weight": 1.0, "requirement": "R2"},
-        ])
+        revised_json = json.dumps(
+            [
+                {"name": "a", "weight": 1.0, "requirement": "R1"},
+                {"name": "b", "weight": 1.0, "requirement": "R2"},
+            ]
+        )
         gen_result = GenerateResult(content=revised_json, cost=0.02)
         generate_mock = AsyncMock(return_value=gen_result)
 
@@ -3173,7 +3327,11 @@ class TestReviseRubricHeldOut:
             mock_cls.return_value.generate = generate_mock
 
             revised, cost = await revise_rubric_held_out(
-                rubric, "task", "diag", "hist", config,
+                rubric,
+                "task",
+                "diag",
+                "hist",
+                config,
             )
 
         # Should return original rubric, not the invalid revised one
@@ -3185,13 +3343,13 @@ class TestReviseRubricHeldOut:
     async def test_capture_populated(self):
         from autorubric.meta._improve import revise_rubric_held_out
 
-        rubric = Rubric([
-            Criterion(name="a", weight=1.0, requirement="R1"),
-        ])
+        rubric = Rubric(
+            [
+                Criterion(name="a", weight=1.0, requirement="R1"),
+            ]
+        )
 
-        revised_json = json.dumps([
-            {"name": "a", "weight": 1.0, "requirement": "Better R1"}
-        ])
+        revised_json = json.dumps([{"name": "a", "weight": 1.0, "requirement": "Better R1"}])
         gen_result = GenerateResult(content=revised_json, cost=0.03)
         generate_mock = AsyncMock(return_value=gen_result)
 
@@ -3205,7 +3363,11 @@ class TestReviseRubricHeldOut:
             mock_cls.return_value.generate = generate_mock
 
             await revise_rubric_held_out(
-                rubric, "task", "diag", "hist", config,
+                rubric,
+                "task",
+                "diag",
+                "hist",
+                config,
                 _capture=capture,
             )
 
@@ -3219,13 +3381,13 @@ class TestReviseRubricHeldOut:
     async def test_cost_is_returned(self):
         from autorubric.meta._improve import revise_rubric_held_out
 
-        rubric = Rubric([
-            Criterion(name="a", weight=1.0, requirement="R1"),
-        ])
+        rubric = Rubric(
+            [
+                Criterion(name="a", weight=1.0, requirement="R1"),
+            ]
+        )
 
-        revised_json = json.dumps([
-            {"name": "a", "weight": 1.0, "requirement": "R1v2"}
-        ])
+        revised_json = json.dumps([{"name": "a", "weight": 1.0, "requirement": "R1v2"}])
         gen_result = GenerateResult(content=revised_json, cost=0.07)
         generate_mock = AsyncMock(return_value=gen_result)
 
@@ -3237,7 +3399,11 @@ class TestReviseRubricHeldOut:
         with patch("autorubric.meta._improve.LLMClient") as mock_cls:
             mock_cls.return_value.generate = generate_mock
             _, cost = await revise_rubric_held_out(
-                rubric, "task", "diag", "hist", config,
+                rubric,
+                "task",
+                "diag",
+                "hist",
+                config,
             )
 
         assert cost == 0.07
@@ -3247,13 +3413,13 @@ class TestReviseRubricHeldOut:
         """Custom system_prompt is used when provided."""
         from autorubric.meta._improve import revise_rubric_held_out
 
-        rubric = Rubric([
-            Criterion(name="a", weight=1.0, requirement="R1"),
-        ])
+        rubric = Rubric(
+            [
+                Criterion(name="a", weight=1.0, requirement="R1"),
+            ]
+        )
 
-        revised_json = json.dumps([
-            {"name": "a", "weight": 1.0, "requirement": "R1v2"}
-        ])
+        revised_json = json.dumps([{"name": "a", "weight": 1.0, "requirement": "R1v2"}])
         gen_result = GenerateResult(content=revised_json, cost=0.01)
         generate_mock = AsyncMock(return_value=gen_result)
 
@@ -3266,7 +3432,11 @@ class TestReviseRubricHeldOut:
             mock_cls.return_value.generate = generate_mock
 
             await revise_rubric_held_out(
-                rubric, "task", "diag", "hist", config,
+                rubric,
+                "task",
+                "diag",
+                "hist",
+                config,
                 system_prompt="Custom system prompt",
             )
 
@@ -3283,9 +3453,11 @@ class TestHeldOutIntegration:
     """Integration tests for the held-out strategy."""
 
     def _make_dataset_and_rubric(self):
-        rubric = Rubric([
-            Criterion(name="accuracy", weight=1.0, requirement="Must be accurate"),
-        ])
+        rubric = Rubric(
+            [
+                Criterion(name="accuracy", weight=1.0, requirement="Must be accurate"),
+            ]
+        )
         dataset = RubricDataset(
             prompt="Evaluate this",
             rubric=rubric,
@@ -3333,7 +3505,9 @@ class TestHeldOutIntegration:
         )
 
         with patch.object(
-            rubric, "grade", new_callable=AsyncMock,
+            rubric,
+            "grade",
+            new_callable=AsyncMock,
             side_effect=[report_met, report_unmet],
         ):
             runner = ImprovementRunner(rubric, "Evaluate this", config=config)
@@ -3350,9 +3524,11 @@ class TestHeldOutIntegration:
         """held_out strategy raises if validation_data is None."""
         from autorubric.meta._improve import ImprovementRunner
 
-        rubric = Rubric([
-            Criterion(name="x", weight=1.0, requirement="Test"),
-        ])
+        rubric = Rubric(
+            [
+                Criterion(name="x", weight=1.0, requirement="Test"),
+            ]
+        )
 
         config = ImprovementConfig(
             eval_llm=LLMConfig(model="test"),
@@ -3372,19 +3548,23 @@ class TestHeldOutIntegration:
         """held_out strategy raises if any item lacks ground_truth."""
         from autorubric.meta._improve import ImprovementRunner
 
-        rubric = Rubric([
-            Criterion(name="x", weight=1.0, requirement="Test"),
-        ])
+        rubric = Rubric(
+            [
+                Criterion(name="x", weight=1.0, requirement="Test"),
+            ]
+        )
         dataset = RubricDataset(
             prompt="task",
             rubric=rubric,
             items=[
                 DataItem(
-                    submission="s1", description="d1",
+                    submission="s1",
+                    description="d1",
                     ground_truth=[CriterionVerdict.MET],
                 ),
                 DataItem(
-                    submission="s2", description="d2",
+                    submission="s2",
+                    description="d2",
                     ground_truth=None,
                 ),
             ],
@@ -3419,7 +3599,9 @@ class TestHeldOutIntegration:
         )
 
         with patch.object(
-            rubric, "grade", new_callable=AsyncMock,
+            rubric,
+            "grade",
+            new_callable=AsyncMock,
             side_effect=[report_met, report_unmet],
         ):
             result = await improve_rubric(
@@ -3440,8 +3622,8 @@ class TestHeldOutIntegration:
     async def test_revision_loop_with_held_out(self):
         """Held-out loop: bad accuracy -> revise -> good accuracy -> converge."""
         from autorubric.meta._improve import (
-            HeldOutValidationResult,
             CriterionErrorReport,
+            HeldOutValidationResult,
             ImprovementRunner,
         )
 
@@ -3487,9 +3669,9 @@ class TestHeldOutIntegration:
 
         validate_mock = AsyncMock(side_effect=[held_out_bad, held_out_good])
 
-        revised_json = json.dumps([
-            {"name": "accuracy", "weight": 1.0, "requirement": "Improved accuracy"}
-        ])
+        revised_json = json.dumps(
+            [{"name": "accuracy", "weight": 1.0, "requirement": "Improved accuracy"}]
+        )
         gen_result = GenerateResult(content=revised_json, cost=0.01)
         generate_mock = AsyncMock(return_value=gen_result)
 

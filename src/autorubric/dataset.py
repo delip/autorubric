@@ -7,8 +7,10 @@ ground truth labels, supporting both training and evaluation workflows.
 from __future__ import annotations
 
 import json
+import random
+from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Iterator
+from typing import TYPE_CHECKING, Any
 
 from autorubric.rubric import Rubric
 from autorubric.types import CriterionVerdict
@@ -77,9 +79,7 @@ class DataItem:
                         f"got {type(v).__name__}"
                     )
             # Validate ground_truth length against per-item rubric if present
-            if self.rubric is not None and len(self.ground_truth) != len(
-                self.rubric.rubric
-            ):
+            if self.rubric is not None and len(self.ground_truth) != len(self.rubric.rubric):
                 raise ValueError(
                     f"Ground truth has {len(self.ground_truth)} values, "
                     f"but item rubric has {len(self.rubric.rubric)} criteria"
@@ -139,9 +139,7 @@ class RubricDataset:
         for i, item in enumerate(self.items):
             # Validate prompt availability
             if item.prompt is None and self.prompt is None:
-                raise ValueError(
-                    f"Item {i} has no prompt and dataset has no global prompt"
-                )
+                raise ValueError(f"Item {i} has no prompt and dataset has no global prompt")
             effective_rubric = self.get_item_rubric(i)
             if item.ground_truth is not None and len(item.ground_truth) != len(
                 effective_rubric.rubric
@@ -168,9 +166,7 @@ class RubricDataset:
             return item.rubric
         if self.rubric is not None:
             return self.rubric
-        raise ValueError(
-            f"Item {idx} has no rubric and dataset has no global rubric"
-        )
+        raise ValueError(f"Item {idx} has no rubric and dataset has no global rubric")
 
     def get_item_reference_submission(self, idx: int) -> str | None:
         """Get the effective reference submission for an item.
@@ -206,9 +202,7 @@ class RubricDataset:
             return item.prompt
         if self.prompt is not None:
             return self.prompt
-        raise ValueError(
-            f"Item {idx} has no prompt and dataset has no global prompt"
-        )
+        raise ValueError(f"Item {idx} has no prompt and dataset has no global prompt")
 
     @property
     def criterion_names(self) -> list[str]:
@@ -222,7 +216,7 @@ class RubricDataset:
                 "Cannot access criterion_names: no global rubric set. "
                 "Use get_item_rubric(idx) for per-item rubrics."
             )
-        return [c.name or f"C{i+1}" for i, c in enumerate(self.rubric.rubric)]
+        return [c.name or f"C{i + 1}" for i, c in enumerate(self.rubric.rubric)]
 
     @property
     def num_criteria(self) -> int:
@@ -276,9 +270,7 @@ class RubricDataset:
         """
         effective_rubric = rubric if rubric is not None else self.rubric
         if effective_rubric is None:
-            raise ValueError(
-                "Cannot compute score: no rubric provided and no global rubric set"
-            )
+            raise ValueError("Cannot compute score: no rubric provided and no global rubric set")
 
         score = 0.0
         total_positive = 0.0
@@ -371,9 +363,7 @@ class RubricDataset:
             raise ValueError(
                 "Cannot add item: no per-item rubric provided and no global rubric set"
             )
-        if item.ground_truth is not None and len(item.ground_truth) != len(
-            effective_rubric.rubric
-        ):
+        if item.ground_truth is not None and len(item.ground_truth) != len(effective_rubric.rubric):
             raise ValueError(
                 f"Ground truth has {len(item.ground_truth)} values, "
                 f"but rubric has {len(effective_rubric.rubric)} criteria"
@@ -408,8 +398,7 @@ class RubricDataset:
             if c.options is not None:
                 criterion_data["scale_type"] = c.scale_type
                 criterion_data["options"] = [
-                    {"label": opt.label, "value": opt.value, "na": opt.na}
-                    for opt in c.options
+                    {"label": opt.label, "value": opt.value, "na": opt.na} for opt in c.options
                 ]
                 if c.aggregation is not None:
                     criterion_data["aggregation"] = c.aggregation
@@ -519,9 +508,7 @@ class RubricDataset:
         items: list[DataItem] = []
         for i, item_data in enumerate(data.get("items", [])):
             if not isinstance(item_data, dict):
-                raise ValueError(
-                    f"Item {i} must be a dict, got {type(item_data).__name__}"
-                )
+                raise ValueError(f"Item {i} must be a dict, got {type(item_data).__name__}")
 
             submission = item_data.get("submission")
             description = item_data.get("description")
@@ -540,9 +527,7 @@ class RubricDataset:
             # Validate that item has access to a rubric
             effective_rubric = item_rubric if item_rubric is not None else rubric
             if effective_rubric is None:
-                raise ValueError(
-                    f"Item {i} has no rubric and dataset has no global rubric"
-                )
+                raise ValueError(f"Item {i} has no rubric and dataset has no global rubric")
 
             # Parse ground truth against the effective rubric
             ground_truth_raw = item_data.get("ground_truth")
@@ -551,9 +536,7 @@ class RubricDataset:
                 ground_truth = []
                 for j, v in enumerate(ground_truth_raw):
                     criterion = (
-                        effective_rubric.rubric[j]
-                        if j < len(effective_rubric.rubric)
-                        else None
+                        effective_rubric.rubric[j] if j < len(effective_rubric.rubric) else None
                     )
 
                     if criterion is not None and criterion.is_multi_choice:
@@ -567,9 +550,7 @@ class RubricDataset:
                         try:
                             criterion.find_option_by_label(v)
                         except ValueError as e:
-                            raise ValueError(
-                                f"Item {i}, ground_truth[{j}]: {e}"
-                            ) from None
+                            raise ValueError(f"Item {i}, ground_truth[{j}]: {e}") from None
                         ground_truth.append(v)
                     else:
                         # Binary: parse as CriterionVerdict
@@ -661,14 +642,10 @@ class RubricDataset:
             >>> train, test = dataset.split_train_test(n_train=100, stratify=True, seed=42)
             >>> print(f"Train: {len(train)}, Test: {len(test)}")
         """
-        import random
-
         if n_train < 0:
             raise ValueError(f"n_train must be non-negative, got {n_train}")
         if n_train > len(self.items):
-            raise ValueError(
-                f"n_train ({n_train}) exceeds dataset size ({len(self.items)})"
-            )
+            raise ValueError(f"n_train ({n_train}) exceeds dataset size ({len(self.items)})")
 
         rng = random.Random(seed)
 
@@ -700,7 +677,7 @@ class RubricDataset:
     def _stratified_split(
         self,
         n_train: int,
-        rng: "random.Random",
+        rng: random.Random,
     ) -> tuple[list[DataItem], list[DataItem]]:
         """Perform stratified split based on verdict signature patterns.
 

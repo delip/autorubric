@@ -116,13 +116,9 @@ def build_configurations(
 
 async def run_ablation() -> None:
     dataset = RubricDataset.from_file(DATASET_PATH)
-    train_ds, test_ds = dataset.split_train_test(
-        n_train=N_TRAIN, stratify=True, seed=SEED
-    )
+    train_ds, test_ds = dataset.split_train_test(n_train=N_TRAIN, stratify=True, seed=SEED)
 
-    print(
-        f"Dataset: {dataset.name} ({len(dataset)} items, {dataset.num_criteria} criteria)"
-    )
+    print(f"Dataset: {dataset.name} ({len(dataset)} items, {dataset.num_criteria} criteria)")
     print(f"Split: {len(train_ds)} train / {len(test_ds)} test\n")
 
     configs = build_configurations(train_ds)
@@ -145,10 +141,7 @@ async def run_ablation() -> None:
         if grader.is_ensemble:
             agreements = []
             for ir in eval_result.filter_successful():
-                if (
-                    hasattr(ir.report, "mean_agreement")
-                    and ir.report.mean_agreement is not None
-                ):
+                if hasattr(ir.report, "mean_agreement") and ir.report.mean_agreement is not None:
                     agreements.append(ir.report.mean_agreement)
             if agreements:
                 mean_agreement = sum(agreements) / len(agreements)
