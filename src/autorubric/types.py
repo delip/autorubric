@@ -482,12 +482,17 @@ class CriterionReport(Criterion):
         shuffle_order: Permutation used when presenting multi-choice options to the LLM.
             Maps shuffled position → original index. None for binary criteria or when
             shuffle_options is disabled.
+        error: Set when this verdict was synthesized because the judge call failed,
+            rather than produced by a genuine judgment. The string is prefixed with the
+            failure category (``"infrastructure: ..."``, ``"parse: ..."``, or
+            ``"unknown: ..."``). None for genuine verdicts. See ``is_error``.
     """
 
     verdict: CriterionVerdict | None = None
     multi_choice_verdict: MultiChoiceVerdict | AggregatedMultiChoiceVerdict | None = None
     reason: str
     shuffle_order: list[int] | None = None
+    error: str | None = None
 
     @property
     def score_value(self) -> float:
@@ -515,6 +520,15 @@ class CriterionReport(Criterion):
         if self.multi_choice_verdict is not None:
             return self.multi_choice_verdict.na
         return False
+
+    @property
+    def is_error(self) -> bool:
+        """Whether this verdict was synthesized due to a judge-call failure.
+
+        Use this instead of inspecting ``reason`` to distinguish error-induced
+        verdicts from genuine judgments.
+        """
+        return self.error is not None
 
 
 class EvaluationReport(BaseModel):
@@ -642,12 +656,15 @@ class JudgeVote:
         verdict: The judge's verdict (MET/UNMET).
         reason: The judge's explanation for the verdict.
         weight: Judge's voting weight (default 1.0).
+        error: Set (with a category prefix) when this vote's verdict was synthesized
+            because the judge call failed. None for genuine votes.
     """
 
     judge_id: str
     verdict: CriterionVerdict
     reason: str
     weight: float = 1.0
+    error: str | None = None
 
 
 @dataclass
@@ -666,6 +683,9 @@ class EnsembleCriterionReport:
         agreement: Proportion of judges agreeing with final verdict (0-1).
         final_multi_choice_verdict: Aggregated multi-choice verdict. None for binary.
         multi_choice_votes: Individual multi-choice votes. Empty for binary.
+        error: Set (with a category prefix) when the final verdict was driven entirely by
+            judge-call failures (every contributing vote errored). None when at least one
+            genuine judgment was available. See ``is_error``.
     """
 
     criterion: Criterion
@@ -676,6 +696,7 @@ class EnsembleCriterionReport:
     # Multi-choice support
     final_multi_choice_verdict: AggregatedMultiChoiceVerdict | None = field(default=None)
     multi_choice_votes: list[MultiChoiceJudgeVote] = field(default_factory=list)
+    error: str | None = field(default=None)
 
     def __post_init__(self) -> None:
         """Compute agreement if not set."""
@@ -709,6 +730,11 @@ class EnsembleCriterionReport:
         if self.final_multi_choice_verdict is not None:
             return self.final_multi_choice_verdict.na
         return False
+
+    @property
+    def is_error(self) -> bool:
+        """Whether the final verdict was driven entirely by judge-call failures."""
+        return self.error is not None
 
 
 class EnsembleEvaluationReport(BaseModel):

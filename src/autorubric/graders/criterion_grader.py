@@ -10,10 +10,10 @@ import random
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
 from autorubric.graders.base import Grader
-from autorubric.llm import GenerateResult, LLMClient, LLMConfig
+from autorubric.llm import GenerateResult, LLMClient, LLMConfig, classify_grading_error
 from autorubric.prompts import (
     FEW_SHOT_SYSTEM_PROMPT_ADDITION,
     GRADER_SYSTEM_PROMPT_DEFAULT,
@@ -67,6 +67,23 @@ def _derive_shuffle_rng(
     key = f"{master_seed}:{item_key}:{criterion_idx}:{judge_id}"
     derived = int(hashlib.sha256(key.encode()).hexdigest()[:16], 16) % (2**31)
     return random.Random(derived)
+
+
+def _combine_errors(errors: list[str | None]) -> str | None:
+    """Combine per-judge error strings into an ensemble-level error.
+
+    Returns a combined message only when *every* contributing judge errored (so the
+    final verdict was driven entirely by failures). Returns None if any judge produced
+    a genuine judgment, or if there were no contributing judges.
+    """
+    if not errors or any(e is None for e in errors):
+        return None
+    return " | ".join(e for e in errors if e is not None)
+
+
+def _aggregate_error(votes: list[JudgeVote]) -> str | None:
+    """Ensemble error string for binary votes (see ``_combine_errors``)."""
+    return _combine_errors([v.error for v in votes])
 
 
 @dataclass
@@ -571,19 +588,29 @@ class CriterionGrader(Grader):
             )
             return CriterionResult(report=report, usage=result.usage, cost=result.cost)
 
-        except (ValidationError, Exception) as e:
-            # Conservative default: worst case for each criterion type
-            default_verdict = (
-                CriterionVerdict.MET if criterion.weight < 0 else CriterionVerdict.UNMET
-            )
+        except Exception as e:
+            # Classify the failure. Infrastructure (API/network) and parse/validation
+            # failures are not the submission's fault, so route them to CANNOT_ASSESS
+            # (excluded from scoring under the default SKIP strategy) instead of a
+            # score-affecting worst-case verdict. Only truly unknown errors keep the
+            # conservative worst-case default. The error is also surfaced structurally
+            # via CriterionReport.error / is_error.
+            category = classify_grading_error(e)
+            if category == "unknown":
+                verdict = (
+                    CriterionVerdict.MET if criterion.weight < 0 else CriterionVerdict.UNMET
+                )
+            else:
+                verdict = CriterionVerdict.CANNOT_ASSESS
             logger.warning(
                 f"Error evaluating criterion '{criterion.requirement[:50]}...' "
-                f"with judge '{judge.judge_id}': {e}"
+                f"with judge '{judge.judge_id}' [{category}]: {e}"
             )
             report = CriterionReport(
                 requirement=criterion.requirement,
-                verdict=default_verdict,
-                reason=f"Error parsing judge response: {str(e)}",
+                verdict=verdict,
+                reason=f"Judge call failed ({category}): {str(e)}",
+                error=f"{category}: {str(e)}",
                 weight=criterion.weight,
                 name=criterion.name,
                 options=criterion.options,
@@ -708,12 +735,15 @@ class CriterionGrader(Grader):
             )
             return CriterionResult(report=report, usage=result.usage, cost=result.cost)
 
-        except (ValidationError, Exception) as e:
-            # Conservative default for multi-choice: select lowest value option
-            # (or NA option if available)
+        except Exception as e:
+            # Classify the failure (see _judge_binary_criterion). Multi-choice has no
+            # CANNOT_ASSESS verdict, so for infrastructure/parse failures we mark the
+            # verdict na=True (excluded from scoring under the default SKIP strategy).
+            # Unknown errors keep the conservative worst-case option.
+            category = classify_grading_error(e)
             logger.warning(
                 f"Error evaluating multi-choice criterion '{criterion.requirement[:50]}...' "
-                f"with judge '{judge.judge_id}': {e}"
+                f"with judge '{judge.judge_id}' [{category}]: {e}"
             )
 
             # Find worst-case option (lowest value, or NA)
@@ -728,18 +758,28 @@ class CriterionGrader(Grader):
                     worst_value = opt.value
 
             worst_option = criterion.options[worst_idx]
-            multi_choice_verdict = MultiChoiceVerdict(
-                selected_index=worst_idx,
-                selected_label=worst_option.label,
-                value=worst_option.value,
-                na=worst_option.na,
-            )
+            if category == "unknown":
+                multi_choice_verdict = MultiChoiceVerdict(
+                    selected_index=worst_idx,
+                    selected_label=worst_option.label,
+                    value=worst_option.value,
+                    na=worst_option.na,
+                )
+            else:
+                # Exclude from scoring: na=True, zero contribution.
+                multi_choice_verdict = MultiChoiceVerdict(
+                    selected_index=worst_idx,
+                    selected_label=worst_option.label,
+                    value=0.0,
+                    na=True,
+                )
 
             report = CriterionReport(
                 requirement=criterion.requirement,
                 verdict=None,
                 multi_choice_verdict=multi_choice_verdict,
-                reason=f"Error parsing judge response: {str(e)}",
+                reason=f"Judge call failed ({category}): {str(e)}",
+                error=f"{category}: {str(e)}",
                 weight=criterion.weight,
                 name=criterion.name,
                 options=criterion.options,
@@ -816,8 +856,12 @@ class CriterionGrader(Grader):
             if criterion_report.is_multi_choice:
                 # Multi-choice: build MultiChoiceJudgeVote list
                 mc_votes: list[MultiChoiceJudgeVote] = []
+                # MultiChoiceJudgeVote has no error field; track per-judge errors here so
+                # we can surface an ensemble-level error when every judge call failed.
+                mc_errors: list[str | None] = []
                 for judge_result in judge_results:
                     cr = judge_result.criterion_results[criterion_idx]
+                    mc_errors.append(cr.report.error)
                     mcv = cr.report.multi_choice_verdict
                     if mcv is not None:
                         mc_votes.append(
@@ -853,6 +897,7 @@ class CriterionGrader(Grader):
                         votes=[],  # Binary votes empty for multi-choice
                         final_multi_choice_verdict=final_mc_verdict,
                         multi_choice_votes=mc_votes,
+                        error=_combine_errors(mc_errors),
                     )
                 )
             else:
@@ -866,6 +911,7 @@ class CriterionGrader(Grader):
                             verdict=cr.report.verdict,
                             reason=cr.report.reason,
                             weight=judge_result.weight,
+                            error=cr.report.error,
                         )
                     )
 
@@ -881,6 +927,7 @@ class CriterionGrader(Grader):
                         final_verdict=final_verdict,
                         final_reason=final_reason,
                         votes=votes,
+                        error=_aggregate_error(votes),
                     )
                 )
 

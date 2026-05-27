@@ -36,14 +36,28 @@ def _load_section_mapping(meta_rubric_path: Path) -> dict[str, str]:
     return mapping
 
 
+def _error_category(error: str | None) -> str:
+    """Extract the leading category from an error string (e.g. "infrastructure")."""
+    if not error:
+        return "unknown"
+    return error.split(":", 1)[0].strip() or "unknown"
+
+
 def _get_verdict_display(
-    verdict: CriterionVerdict | None, weight: float
+    verdict: CriterionVerdict | None, weight: float, error: str | None = None
 ) -> tuple[str, str]:
     """Get verdict text and color based on verdict and weight.
 
     For positive weights: MET is good (green), UNMET is bad (red)
     For negative weights (anti-patterns): MET is bad (red), UNMET is good (green)
+
+    When ``error`` is set, the verdict was synthesized from a failed judge call;
+    surface a distinct ERROR badge (bright_magenta) so it is visually separate from
+    a genuine N/A.
     """
+    if error is not None:
+        return f"ERROR ({_error_category(error)})", "bright_magenta"
+
     if verdict is None or verdict == CriterionVerdict.CANNOT_ASSESS:
         return "N/A", "yellow"
 
@@ -139,7 +153,8 @@ def display_to_stdout(
             weight = cr.criterion.weight
             name = cr.criterion.name or "unnamed"
 
-            status_text, status_color = _get_verdict_display(verdict, weight)
+            error = getattr(cr, "error", None)
+            status_text, status_color = _get_verdict_display(verdict, weight, error)
             weight_str = f"{'+' if weight > 0 else ''}{weight}"
 
             table.add_row(
@@ -300,6 +315,14 @@ def render_to_html(
         .status-detected { color: var(--red); background: rgba(239, 68, 68, 0.1); }
         .status-clear { color: var(--green); background: rgba(34, 197, 94, 0.1); }
         .status-na { color: var(--yellow); background: rgba(234, 179, 8, 0.1); }
+        .error-badge {
+            font-weight: 600;
+            padding: 0.25rem 0.75rem;
+            border-radius: 4px;
+            color: var(--magenta);
+            background: rgba(217, 70, 239, 0.12);
+            border: 1px solid var(--magenta);
+        }
         .issues-header {
             background: var(--bg-secondary);
             border-left: 4px solid var(--red);
@@ -394,14 +417,27 @@ def render_to_html(
             verdict = cr.final_verdict
             weight = cr.criterion.weight
             name = cr.criterion.name or "unnamed"
-            status_text, status_color = _get_verdict_display(verdict, weight)
-            status_class = f"status-{status_text.lower()}"
+            error = getattr(cr, "error", None)
+            status_text, status_color = _get_verdict_display(verdict, weight, error)
+            if error is not None:
+                status_class = "status-error"
+            else:
+                status_class = f"status-{status_text.lower()}"
             weight_str = f"{'+' if weight > 0 else ''}{weight}"
+
+            if error is not None:
+                badge_html = (
+                    f"<span class=\"error-badge\">{_escape_html(status_text)}</span>"
+                )
+            else:
+                badge_html = (
+                    f"<span class=\"status {status_class}\">{status_text}</span>"
+                )
 
             html_parts.append(f"""
             <tr>
                 <td>{_escape_html(name)}</td>
-                <td><span class="status {status_class}">{status_text}</span></td>
+                <td>{badge_html}</td>
                 <td>{weight_str}</td>
             </tr>
 """)

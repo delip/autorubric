@@ -17,9 +17,10 @@ from typing import TYPE_CHECKING, Any, Literal, TypeVar
 
 import diskcache
 import litellm
+import openai
 import yaml
 from dotenv import load_dotenv
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from tenacity import (
     retry,
     retry_if_exception_type,
@@ -43,6 +44,45 @@ logger = logging.getLogger(__name__)
 
 # Type variable for structured output
 T = TypeVar("T", bound=BaseModel)
+
+
+# ============================================================================
+# Grading error classification
+# ============================================================================
+
+ErrorCategory = Literal["infrastructure", "parse", "unknown"]
+"""Category of a failure encountered while grading a single criterion.
+
+- infrastructure: API/network failure (timeout, connection, rate limit, server error).
+  Not the submission's fault; the judge never produced a usable response.
+- parse: the judge responded but its output could not be parsed/validated into the
+  expected schema. Also not the submission's fault.
+- unknown: an unexpected error that does not fit the above categories.
+"""
+
+
+def classify_grading_error(exc: BaseException) -> ErrorCategory:
+    """Classify an exception raised while grading a criterion.
+
+    Reuses the underlying OpenAI exception taxonomy that LiteLLM builds on: every
+    transient API failure (``Timeout``, ``APIConnectionError``, ``RateLimitError``,
+    ``ServiceUnavailableError``, ``InternalServerError``, status errors, etc.) subclasses
+    ``openai.APIError`` (including ``litellm.APIError`` itself), while parse/validation
+    failures (``json.JSONDecodeError`` -> ``ValueError``, ``pydantic.ValidationError``)
+    do not.
+
+    Args:
+        exc: The exception raised during a judge call.
+
+    Returns:
+        ``"infrastructure"`` for API/network errors, ``"parse"`` for JSON/validation
+        errors, and ``"unknown"`` for anything else.
+    """
+    if isinstance(exc, openai.APIError):
+        return "infrastructure"
+    if isinstance(exc, (ValidationError, ValueError)):
+        return "parse"
+    return "unknown"
 
 
 # ============================================================================

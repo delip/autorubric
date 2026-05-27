@@ -209,6 +209,7 @@ def _serialize_ensemble_criterion_report(ecr: EnsembleCriterionReport) -> dict[s
         "final_verdict": ecr.final_verdict.value if ecr.final_verdict else None,
         "final_reason": ecr.final_reason,
         "agreement": ecr.agreement,
+        "error": ecr.error,
     }
     if ecr.votes:
         d["votes"] = [
@@ -217,6 +218,7 @@ def _serialize_ensemble_criterion_report(ecr: EnsembleCriterionReport) -> dict[s
                 "verdict": v.verdict.value,
                 "reason": v.reason,
                 "weight": v.weight,
+                "error": v.error,
             }
             for v in ecr.votes
         ]
@@ -281,6 +283,7 @@ def _deserialize_ensemble_report(
                 verdict=CriterionVerdict(v["verdict"]),
                 reason=v["reason"],
                 weight=v.get("weight", 1.0),
+                error=v.get("error"),
             )
             for v in ecr_data.get("votes", [])
         ]
@@ -314,6 +317,7 @@ def _deserialize_ensemble_report(
                 agreement=ecr_data.get("agreement", 0.0),
                 final_multi_choice_verdict=final_mc_verdict,
                 multi_choice_votes=mc_votes,
+                error=ecr_data.get("error"),
             )
         )
 

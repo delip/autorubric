@@ -60,9 +60,15 @@ async def test_per_criterion_grader_class_integration(
 
 @pytest.mark.asyncio
 async def test_per_criterion_grader_handles_invalid_json(sample_rubric, mock_llm_config):
-    """Parse failures use conservative defaults based on criterion type."""
+    """Parse failures route every criterion to CANNOT_ASSESS and surface as errors.
+
+    A ValueError (the canonical parse/validation failure, e.g. malformed JSON) is
+    classified as ``"parse"``. Parse failures are not the submission's fault, so the
+    criterion is marked CANNOT_ASSESS and excluded from scoring under the default SKIP
+    strategy, while the structured ``error`` field records the category.
+    """
     mock_client = MagicMock()
-    mock_client.generate = AsyncMock(side_effect=Exception("Parse error"))
+    mock_client.generate = AsyncMock(side_effect=ValueError("Parse error"))
 
     with patch(
         "autorubric.graders.criterion_grader.LLMClient",
@@ -75,24 +81,17 @@ async def test_per_criterion_grader_handles_invalid_json(sample_rubric, mock_llm
             rubric=sample_rubric.rubric,
         )
 
-        # Score is 0.0 because:
-        # - Positive criteria (weights 2.0, 1.0, 1.0) default to UNMET = 0 points
-        # - Negative criterion (weight -0.5) defaults to MET = -0.5 points (error assumed present)
-        # weighted_sum = -0.5, total_positive = 4.0, score = max(0, -0.5/4.0) = 0.0
-        assert report.score == 0.0
         assert report.report is not None
 
-        # Verify conservative defaults: positive->UNMET, negative->MET
-        verdicts = [r.final_verdict for r in report.report]
-        weights = [r.criterion.weight for r in report.report]
-        for verdict, weight in zip(verdicts, weights):
-            if weight < 0:
-                assert verdict == CriterionVerdict.MET, "Negative criteria should default to MET on parse failure"
-            else:
-                assert verdict == CriterionVerdict.UNMET, "Positive criteria should default to UNMET on parse failure"
-
+        # Every criterion is a parse failure -> CANNOT_ASSESS, flagged as an error.
         for criterion_report in report.report:
-            assert "Error parsing judge response" in criterion_report.final_reason
+            assert criterion_report.final_verdict == CriterionVerdict.CANNOT_ASSESS
+            assert criterion_report.is_error
+            assert criterion_report.error is not None
+            assert criterion_report.error.startswith("parse:")
+
+        # All criteria excluded from the denominator under default SKIP -> 0.0.
+        assert report.score == 0.0
 
 
 @pytest.mark.asyncio

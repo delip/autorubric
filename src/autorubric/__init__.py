@@ -2,6 +2,7 @@ from importlib.metadata import version, PackageNotFoundError
 
 from autorubric.dataset import DataItem, RubricDataset
 from autorubric.llm import (
+    ErrorCategory,
     GenerateResult,
     LLMClient,
     LLMConfig,
@@ -9,6 +10,7 @@ from autorubric.llm import (
     ThinkingLevel,
     ThinkingLevelLiteral,
     ThinkingParam,
+    classify_grading_error,
     generate,
 )
 from autorubric.rubric import Rubric
@@ -115,6 +117,7 @@ __all__ = [
     "DataItem",
     "RubricDataset",
     # LLM Infrastructure
+    "ErrorCategory",
     "GenerateResult",
     "LLMClient",
     "LLMConfig",
@@ -122,6 +125,7 @@ __all__ = [
     "ThinkingLevel",
     "ThinkingLevelLiteral",
     "ThinkingParam",
+    "classify_grading_error",
     "generate",
     # Core types
     "AggregationStrategy",
