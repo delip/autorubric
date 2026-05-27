@@ -36,7 +36,7 @@ The surviving grader treats a solo LLM as an ensemble of one, so the same code p
 
 ### Ensemble judging and agreement
 
-Verga et al. (2024) showed that panels of diverse models reduce the systematic errors inherent in any single judge. autorubric implements this directly: you compose a jury from different model families, each with its own temperature and weight, and the system reports inter-judge agreement via Cohen's kappa (binary), quadratic-weighted kappa (ordinal), and Fleiss' kappa (3+ judges), interpreted on the Landis & Koch (1977) scale.
+Verga et al. (2024) showed that panels of diverse models reduce the systematic errors inherent in any single judge. autorubric implements this directly: you compose a jury from different model families, each with its own temperature and weight. Inter-judge agreement is reported primarily via Krippendorff's alpha — the general, recommended statistic, which handles unequal/missing raters (errored or excluded votes) and is level-aware (nominal for binary/nominal criteria, ordinal for ordered scales). Fleiss' kappa is retained alongside it as the classic fixed-rater nominal measure, computed complete-case. Agreement-with-ground-truth uses Cohen's kappa (binary), quadratic-weighted kappa (ordinal), interpreted on the Landis & Koch (1977) scale.
 
 ### Richer criteria
 

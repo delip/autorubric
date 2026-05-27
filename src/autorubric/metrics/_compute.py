@@ -6,8 +6,9 @@ comprehensive evaluation metrics from an EvalResult and RubricDataset.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 from scipy import stats
@@ -46,14 +47,30 @@ from ._types import (
 )
 from .distribution import systematic_bias
 
-# Try to import Fleiss' kappa from statsmodels (optional dependency)
+# Try to import Fleiss' kappa from statsmodels (hard dep; guard kept for safety).
+# Import to a temp name and bind to a fresh variable so the guard's `= None` fallback
+# doesn't conflict with the imported symbol's declared type.
+_fleiss_kappa: Any = None
+HAS_STATSMODELS = False
 try:
-    from statsmodels.stats.inter_rater import fleiss_kappa as _fleiss_kappa
+    from statsmodels.stats.inter_rater import fleiss_kappa as _sm_fleiss_kappa
 
+    _fleiss_kappa = _sm_fleiss_kappa
     HAS_STATSMODELS = True
 except ImportError:
-    HAS_STATSMODELS = False
-    _fleiss_kappa = None
+    pass
+
+# Krippendorff's alpha is the general, recommended inter-judge agreement statistic
+# (handles unequal/missing raters and is level-aware). Hard dep; guard kept for safety.
+_krippendorff: Any = None
+HAS_KRIPPENDORFF = False
+try:
+    import krippendorff as _kd
+
+    _krippendorff = _kd
+    HAS_KRIPPENDORFF = True
+except ImportError:
+    pass
 
 if TYPE_CHECKING:
     from ..dataset import RubricDataset
@@ -214,7 +231,7 @@ def _compute_adjacent_accuracy(
 
 
 def _compute_fleiss_kappa(
-    ratings_matrix: list[list[int]],
+    ratings_matrix: list[list[int]] | None,
 ) -> float | None:
     """Compute Fleiss' kappa for multi-rater agreement.
 
@@ -236,9 +253,158 @@ def _compute_fleiss_kappa(
     try:
         # statsmodels expects numpy array
         matrix = np.array(ratings_matrix)
-        return float(_fleiss_kappa(matrix))
+        result = float(_fleiss_kappa(matrix))
     except Exception:
         return None
+
+    # Varying rater counts per subject (from error/CA exclusions) can yield NaN.
+    if math.isnan(result):
+        return None
+    return result
+
+
+def _compute_krippendorff_alpha(
+    reliability_data: list[list[float]] | None,
+    level: Literal["nominal", "ordinal"],
+) -> float | None:
+    """Compute Krippendorff's alpha — the general inter-judge agreement statistic.
+
+    Unlike Fleiss' kappa, alpha natively handles missing/unequal raters and is
+    level-aware (``"nominal"`` vs ``"ordinal"``), so it is the recommended statistic
+    for all criterion types.
+
+    Args:
+        reliability_data: 2D matrix shaped (raters x units). Cells are numeric codes,
+            with ``np.nan`` marking a missing rating (errored/excluded/absent judge).
+        level: ``"nominal"`` or ``"ordinal"``.
+
+    Returns:
+        Krippendorff's alpha, or None if krippendorff is unavailable, there are < 2
+        units, or the value is undefined (NaN) / computation fails.
+    """
+    if not HAS_KRIPPENDORFF or _krippendorff is None:
+        return None
+
+    if not reliability_data or len(reliability_data) < 1:
+        return None
+
+    # Need at least 2 units (columns) for agreement to be defined.
+    n_units = len(reliability_data[0]) if reliability_data else 0
+    if n_units < 2:
+        return None
+
+    try:
+        matrix = np.array(reliability_data, dtype=float)
+        result = float(_krippendorff.alpha(reliability_data=matrix, level_of_measurement=level))
+    except Exception:
+        return None
+
+    if math.isnan(result):
+        return None
+    return result
+
+
+def _build_fleiss_row(
+    cr: object,
+    criterion: Criterion,
+    c_type: str,
+    cannot_assess: CannotAssessMode,
+    n_judges: int,
+) -> list[int] | None:
+    """Build one complete-case Fleiss' kappa subject row for a criterion.
+
+    Counts genuine (error-free) ensemble votes per category for a single item. statsmodels'
+    ``fleiss_kappa`` requires a uniform number of raters per subject, so a row is included
+    ONLY if its counted votes sum to exactly ``n_judges`` (i.e. every judge cast a genuine,
+    counted vote). Items with any errored / excluded / CANNOT_ASSESS-under-``exclude`` vote
+    are dropped from the Fleiss matrix (they remain in Krippendorff's alpha as missing cells).
+
+    Args:
+        cr: An ``EnsembleCriterionReport`` (single-judge ``CriterionReport``s lack votes).
+        criterion: The criterion (supplies option count for multi-choice).
+        c_type: One of "binary", "ordinal", "nominal".
+        cannot_assess: How to map CANNOT_ASSESS for binary criteria.
+        n_judges: Number of judges in the ensemble (required complete-case rater count).
+
+    Returns:
+        A list of per-category counts summing to ``n_judges``, or None otherwise.
+    """
+    if c_type == "binary":
+        # MET=0, UNMET=1, CANNOT_ASSESS=2 (CA column only when as_category).
+        n_cats = 3 if cannot_assess == "as_category" else 2
+        votes = getattr(cr, "votes", None)
+        if votes is None:  # single-judge CriterionReport: no ensemble votes
+            return None
+        counts = [0] * n_cats
+        for v in votes:
+            if v.error is not None:
+                continue
+            verdict = v.verdict
+            if verdict == CriterionVerdict.CANNOT_ASSESS:
+                if cannot_assess == "exclude":
+                    continue
+                if cannot_assess == "as_unmet":
+                    counts[1] += 1
+                    continue
+                # as_category
+                counts[2] += 1
+                continue
+            if verdict == CriterionVerdict.MET:
+                counts[0] += 1
+            else:
+                counts[1] += 1
+    else:
+        # Multi-choice: one column per option; genuine NA is an ordinary column.
+        n_cats = len(criterion.options or [])
+        mc_votes = getattr(cr, "multi_choice_votes", None)
+        if mc_votes is None:
+            return None
+        counts = [0] * n_cats
+        for v in mc_votes:
+            if v.error is not None:
+                continue
+            if 0 <= v.selected_index < n_cats:
+                counts[v.selected_index] += 1
+
+    # Complete-case: only include subjects rated by every judge (uniform rater count).
+    if n_judges < 2 or sum(counts) != n_judges:
+        return None
+    return counts
+
+
+def _build_alpha_cell(
+    vote: object,
+    c_type: str,
+    cannot_assess: CannotAssessMode,
+) -> float:
+    """Map a single judge vote to its Krippendorff reliability-matrix cell value.
+
+    Errored votes, and CANNOT_ASSESS under ``exclude``, become ``np.nan`` (missing).
+
+    Args:
+        vote: A ``JudgeVote`` (binary) or ``MultiChoiceJudgeVote`` (multi-choice).
+        c_type: One of "binary", "ordinal", "nominal".
+        cannot_assess: How to map CANNOT_ASSESS for binary criteria.
+
+    Returns:
+        The numeric code for the cell, or ``np.nan`` when the rating is missing.
+    """
+    if getattr(vote, "error", None) is not None:
+        return float("nan")
+
+    if c_type == "binary":
+        # MET=0, UNMET=1, CANNOT_ASSESS=2 (only under as_category).
+        verdict = vote.verdict
+        if verdict == CriterionVerdict.CANNOT_ASSESS:
+            if cannot_assess == "exclude":
+                return float("nan")
+            if cannot_assess == "as_unmet":
+                return 1.0
+            return 2.0  # as_category
+        return 0.0 if verdict == CriterionVerdict.MET else 1.0
+
+    # Multi-choice (ordinal/nominal): code = selected option index (genuine NA included).
+    return float(vote.selected_index)
 
 
 def _compute_ordinal_criterion_metrics(
@@ -247,6 +413,7 @@ def _compute_ordinal_criterion_metrics(
     criterion: Criterion,
     index: int,
     fleiss_matrix: list[list[int]] | None = None,
+    krippendorff_alpha: float | None = None,
 ) -> OrdinalCriterionMetrics:
     """Compute metrics for an ordinal multi-choice criterion.
 
@@ -256,6 +423,7 @@ def _compute_ordinal_criterion_metrics(
         criterion: The ordinal criterion.
         index: Index of this criterion in the rubric.
         fleiss_matrix: Optional ratings matrix for Fleiss' kappa (ensemble).
+        krippendorff_alpha: Optional precomputed Krippendorff's alpha (ensemble).
 
     Returns:
         OrdinalCriterionMetrics with comprehensive ordinal metrics.
@@ -276,6 +444,7 @@ def _compute_ordinal_criterion_metrics(
             adjacent_accuracy=0.0,
             weighted_kappa=0.0,
             kappa_interpretation="undefined",
+            krippendorff_alpha=krippendorff_alpha,
             fleiss_kappa=None,
             spearman=CorrelationResult(
                 coefficient=0.0,
@@ -342,6 +511,7 @@ def _compute_ordinal_criterion_metrics(
         adjacent_accuracy=float(adjacent_accuracy),
         weighted_kappa=float(weighted_kappa),
         kappa_interpretation=_interpret_kappa(weighted_kappa),
+        krippendorff_alpha=krippendorff_alpha,
         fleiss_kappa=fleiss_kappa,
         spearman=spearman,
         kendall=kendall,
@@ -359,6 +529,7 @@ def _compute_nominal_criterion_metrics(
     criterion: Criterion,
     index: int,
     fleiss_matrix: list[list[int]] | None = None,
+    krippendorff_alpha: float | None = None,
 ) -> NominalCriterionMetrics:
     """Compute metrics for a nominal multi-choice criterion.
 
@@ -368,6 +539,7 @@ def _compute_nominal_criterion_metrics(
         criterion: The nominal criterion.
         index: Index of this criterion in the rubric.
         fleiss_matrix: Optional ratings matrix for Fleiss' kappa (ensemble).
+        krippendorff_alpha: Optional precomputed Krippendorff's alpha (ensemble).
 
     Returns:
         NominalCriterionMetrics with comprehensive nominal metrics.
@@ -387,6 +559,7 @@ def _compute_nominal_criterion_metrics(
             exact_accuracy=0.0,
             kappa=0.0,
             kappa_interpretation="undefined",
+            krippendorff_alpha=krippendorff_alpha,
             fleiss_kappa=None,
             per_option=[],
             confusion_matrix=[[0] * n_options for _ in range(n_options)],
@@ -421,6 +594,7 @@ def _compute_nominal_criterion_metrics(
         exact_accuracy=float(exact_accuracy),
         kappa=float(kappa),
         kappa_interpretation=_interpret_kappa(kappa),
+        krippendorff_alpha=krippendorff_alpha,
         fleiss_kappa=fleiss_kappa,
         per_option=per_option,
         confusion_matrix=conf_matrix,
@@ -543,17 +717,38 @@ def _compute_judge_metrics(
     judge_scores: list[float],
     true_scores: list[float],
     judge_verdicts: list[list[CriterionVerdict]],
-    true_verdicts: list[list[CriterionVerdict]],
+    judge_errors: list[list[str | None]],
+    true_verdicts: list[list[CriterionVerdict | int]],
+    criterion_types: list[str],
     cannot_assess: CannotAssessMode,
 ) -> JudgeMetrics:
-    """Compute metrics for a single judge."""
-    # Flatten verdicts across items, then build label (accuracy/kappa) and
-    # MET-vs-rest (precision/recall/f1) representations via the shared helper.
+    """Compute metrics for a single judge (binary criteria only).
+
+    ``judge_verdicts``, ``judge_errors`` and ``true_verdicts`` are all items x criteria
+    and aligned 1:1. Only binary criteria with a genuine (error-free) judge vote and a
+    ``CriterionVerdict`` ground truth are included.
+    """
+    # Flatten over binary criteria, skipping errored votes, then build label
+    # (accuracy/kappa) and MET-vs-rest (precision/recall/f1) representations.
     pred_flat: list[CriterionVerdict] = []
     true_flat: list[CriterionVerdict] = []
-    for pred_v, true_v in zip(judge_verdicts, true_verdicts):
-        pred_flat.extend(pred_v)
-        true_flat.extend(true_v)
+    for item_idx, pred_v in enumerate(judge_verdicts):
+        if item_idx >= len(true_verdicts):
+            break
+        true_v = true_verdicts[item_idx]
+        err_v = judge_errors[item_idx] if item_idx < len(judge_errors) else [None] * len(pred_v)
+        for c in range(len(pred_v)):
+            if c >= len(criterion_types) or criterion_types[c] != "binary":
+                continue
+            if c < len(err_v) and err_v[c] is not None:
+                continue
+            if c >= len(true_v):
+                continue
+            true_val = true_v[c]
+            if not isinstance(true_val, CriterionVerdict):
+                continue
+            pred_flat.append(pred_v[c])
+            true_flat.append(true_val)
 
     label_pred, label_true, met_pred, met_true = prepare_binary_metric_inputs(
         pred_flat, true_flat, cannot_assess
@@ -718,7 +913,20 @@ def compute_metrics(
     # For ensemble: per-judge data (binary only for now)
     judge_scores: dict[str, list[float]] = {}
     judge_verdicts: dict[str, list[list[CriterionVerdict]]] = {}
+    judge_errors: dict[str, list[list[str | None]]] = {}
     is_ensemble = False
+
+    # Per-item ground-truth verdicts (all criteria) aligned 1:1 with each item that
+    # contributes ensemble per-judge data; used for the per-judge metrics fix.
+    per_item_true: list[list[CriterionVerdict | int]] = []
+
+    # Fleiss' kappa ratings rows, per criterion (only ensemble reports produce rows).
+    fleiss_rows: dict[int, list[list[int]]] = {c: [] for c in range(n_criteria)}
+
+    # Krippendorff's alpha: per criterion, one dict per ensemble item mapping
+    # judge_id -> numeric cell value (np.nan = missing). Rows (judges) and columns
+    # (items) are assembled after the loop using the final judge id set.
+    alpha_cells: dict[int, list[dict[str, float]]] = {c: [] for c in range(n_criteria)}
 
     items_with_ground_truth = 0
 
@@ -798,24 +1006,59 @@ def compute_metrics(
                 if jid not in judge_scores:
                     judge_scores[jid] = []
                     judge_verdicts[jid] = []
+                    judge_errors[jid] = []
                 judge_scores[jid].append(score)
 
-            # Extract per-judge verdicts from EnsembleCriterionReport.votes (binary only)
+            # Align ground truth (all criteria) once per ensemble item.
+            per_item_true.append(list(true_all))
+
+            # Extract per-judge verdicts + errors from EnsembleCriterionReport.votes.
             if hasattr(report, "report") and report.report:
                 for jid in judge_scores.keys():
-                    judge_v = []
+                    judge_v: list[CriterionVerdict] = []
+                    judge_e: list[str | None] = []
                     for cr in report.report:
                         if hasattr(cr, "votes"):
                             for vote in cr.votes:
                                 if vote.judge_id == jid:
                                     judge_v.append(vote.verdict)
+                                    judge_e.append(vote.error)
                                     break
                             else:
                                 judge_v.append(CriterionVerdict.UNMET)
+                                judge_e.append(None)
                         else:
                             judge_v.append(CriterionVerdict.UNMET)
+                            judge_e.append(None)
                     if jid in judge_verdicts:
                         judge_verdicts[jid].append(judge_v)
+                        judge_errors[jid].append(judge_e)
+
+            # Inter-judge agreement collection (binary + multi-choice) from ensemble votes.
+            if hasattr(report, "report") and report.report:
+                n_judges = len(report.judge_scores)
+                for c_idx in range(n_criteria):
+                    cr = report.report[c_idx]
+                    c_type = criterion_types[c_idx]
+                    # Fleiss: complete-case ratings row (uniform rater count).
+                    row = _build_fleiss_row(
+                        cr,
+                        criteria[c_idx],
+                        c_type,
+                        cannot_assess,
+                        n_judges,
+                    )
+                    if row is not None:
+                        fleiss_rows[c_idx].append(row)
+                    # Krippendorff alpha: per-judge cells (missing handled natively).
+                    votes = (
+                        cr.votes if c_type == "binary" else getattr(cr, "multi_choice_votes", [])
+                    )
+                    cell_map: dict[str, float] = {
+                        v.judge_id: _build_alpha_cell(v, c_type, cannot_assess)
+                        for v in (votes or [])
+                    }
+                    alpha_cells[c_idx].append(cell_map)
 
     n_items = items_with_ground_truth
 
@@ -825,6 +1068,26 @@ def compute_metrics(
     # Compute per-criterion metrics by type
     per_criterion: list[CriterionMetricsUnion] = []
     criterion_kappas: list[float] = []
+
+    # Inter-judge agreement (Krippendorff's alpha + Fleiss' kappa) is only meaningful
+    # with an ensemble of >=2 judges (>=2 items is enforced downstream).
+    eligible = is_ensemble and len(judge_scores) >= 2
+
+    # Precompute Krippendorff's alpha per criterion from the collected reliability cells.
+    # Rows = judges (fixed judge-id order), columns = items; np.nan marks missing ratings.
+    # Alpha uses ALL items (missing handled natively) — no complete-case dropping.
+    judge_ids = list(judge_scores.keys())
+    krippendorff_alphas: dict[int, float | None] = dict.fromkeys(range(n_criteria))
+    if eligible:
+        for c_idx in range(n_criteria):
+            level: Literal["nominal", "ordinal"] = (
+                "ordinal" if criterion_types[c_idx] == "ordinal" else "nominal"
+            )
+            cell_maps = alpha_cells.get(c_idx, [])
+            reliability_data = [
+                [cm.get(jid, float("nan")) for cm in cell_maps] for jid in judge_ids
+            ]
+            krippendorff_alphas[c_idx] = _compute_krippendorff_alpha(reliability_data, level)
 
     # For binary-only aggregate metrics:
     # label_*_flat feed accuracy/kappa (may be 3-class under "as_category");
@@ -858,6 +1121,9 @@ def compute_metrics(
 
             name = criterion.name or f"Criterion {c_idx + 1}"
 
+            fleiss_kappa = _compute_fleiss_kappa(fleiss_rows.get(c_idx)) if eligible else None
+            krippendorff_alpha = krippendorff_alphas.get(c_idx) if eligible else None
+
             if not label_pred:
                 per_criterion.append(
                     CriterionMetrics(
@@ -870,6 +1136,8 @@ def compute_metrics(
                         f1=0.0,
                         kappa=0.0,
                         kappa_interpretation="undefined",
+                        krippendorff_alpha=krippendorff_alpha,
+                        fleiss_kappa=fleiss_kappa,
                         support_true=0,
                         support_pred=0,
                     )
@@ -899,6 +1167,8 @@ def compute_metrics(
                     f1=float(c_f1),
                     kappa=float(c_kappa),
                     kappa_interpretation=_interpret_kappa(c_kappa),
+                    krippendorff_alpha=krippendorff_alpha,
+                    fleiss_kappa=fleiss_kappa,
                     support_true=sum(met_true),
                     support_pred=sum(met_pred),
                 )
@@ -920,7 +1190,12 @@ def compute_metrics(
             total_na_fn += na_fn
 
             metrics = _compute_ordinal_criterion_metrics(
-                pred_filtered, true_filtered, criterion, c_idx
+                pred_filtered,
+                true_filtered,
+                criterion,
+                c_idx,
+                fleiss_matrix=(fleiss_rows.get(c_idx) if eligible else None),
+                krippendorff_alpha=(krippendorff_alphas.get(c_idx) if eligible else None),
             )
             per_criterion.append(metrics)
 
@@ -943,7 +1218,12 @@ def compute_metrics(
             total_na_fn += na_fn
 
             metrics = _compute_nominal_criterion_metrics(
-                pred_filtered, true_filtered, criterion, c_idx
+                pred_filtered,
+                true_filtered,
+                criterion,
+                c_idx,
+                fleiss_matrix=(fleiss_rows.get(c_idx) if eligible else None),
+                krippendorff_alpha=(krippendorff_alphas.get(c_idx) if eligible else None),
             )
             per_criterion.append(metrics)
 
@@ -1014,19 +1294,14 @@ def compute_metrics(
             if not jv:
                 continue
 
-            # Extract binary verdicts for this judge
-            binary_true_verdicts = []
-            for true_item in per_criterion_true:
-                binary_true_verdicts.append(
-                    [v for v in true_item if isinstance(v, CriterionVerdict)]
-                )
-
             per_judge_metrics[jid] = _compute_judge_metrics(
                 judge_id=jid,
                 judge_scores=judge_scores[jid],
                 true_scores=all_true_scores,
                 judge_verdicts=jv,
-                true_verdicts=binary_true_verdicts[0] if binary_true_verdicts else [],
+                judge_errors=judge_errors.get(jid, []),
+                true_verdicts=per_item_true,
+                criterion_types=list(criterion_types),
                 cannot_assess=cannot_assess,
             )
 

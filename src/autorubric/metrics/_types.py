@@ -222,6 +222,14 @@ class CriterionMetrics(BaseModel):
         f1: F1 score for MET class.
         kappa: Cohen's kappa coefficient.
         kappa_interpretation: Human-readable interpretation of kappa.
+        krippendorff_alpha: Krippendorff's alpha — the general, recommended inter-judge
+            agreement statistic. It natively handles unequal/missing raters (errored or
+            excluded votes) and is level-aware (nominal for binary criteria). None unless
+            this is an ensemble with >=2 judges and >=2 items.
+        fleiss_kappa: Fleiss' kappa — the classic fixed-rater nominal inter-judge agreement
+            measure, computed complete-case (only items where every judge cast a genuine
+            counted vote contribute). Prefer ``krippendorff_alpha`` as the general statistic.
+            None unless ensemble with >=2 judges and >=2 complete-case items.
         support_true: Count of MET in ground truth.
         support_pred: Count of MET in predictions.
     """
@@ -238,6 +246,8 @@ class CriterionMetrics(BaseModel):
     f1: float
     kappa: float
     kappa_interpretation: str
+    krippendorff_alpha: float | None = None
+    fleiss_kappa: float | None = None
     support_true: int
     support_pred: int
 
@@ -312,7 +322,14 @@ class OrdinalCriterionMetrics(BaseModel):
         adjacent_accuracy: Proportion within +/-1 position.
         weighted_kappa: Quadratic-weighted Cohen's kappa (accounts for distance).
         kappa_interpretation: Human-readable interpretation of kappa.
-        fleiss_kappa: Fleiss' kappa for multi-rater agreement (None if < 3 judges).
+        krippendorff_alpha: Krippendorff's alpha — the general, recommended inter-judge
+            agreement statistic. Computed with ``level_of_measurement="ordinal"`` so it
+            is distance-aware (near-miss disagreements penalized less than far-miss), and
+            it natively handles unequal/missing raters. None unless ensemble with >=2
+            judges and >=2 items.
+        fleiss_kappa: Fleiss' kappa — the classic fixed-rater *nominal* measure (ignores
+            ordering), computed complete-case. Prefer ``krippendorff_alpha`` for ordinal
+            criteria. None unless ensemble with >=2 judges and >=2 complete-case items.
         spearman: Spearman rank correlation result.
         kendall: Kendall tau correlation result.
         rmse: RMSE on option values (0-1 scale).
@@ -333,6 +350,7 @@ class OrdinalCriterionMetrics(BaseModel):
     adjacent_accuracy: float
     weighted_kappa: float
     kappa_interpretation: str
+    krippendorff_alpha: float | None = None
     fleiss_kappa: float | None = None
     spearman: CorrelationResult
     kendall: CorrelationResult
@@ -358,7 +376,13 @@ class NominalCriterionMetrics(BaseModel):
         exact_accuracy: Proportion of exact index matches.
         kappa: Unweighted Cohen's kappa (N×N).
         kappa_interpretation: Human-readable interpretation of kappa.
-        fleiss_kappa: Fleiss' kappa for multi-rater agreement (None if < 3 judges).
+        krippendorff_alpha: Krippendorff's alpha — the general, recommended inter-judge
+            agreement statistic. Computed with ``level_of_measurement="nominal"`` and
+            natively handles unequal/missing raters. None unless ensemble with >=2 judges
+            and >=2 items.
+        fleiss_kappa: Fleiss' kappa — the classic fixed-rater nominal measure, computed
+            complete-case. Prefer ``krippendorff_alpha`` as the general statistic. None
+            unless ensemble with >=2 judges and >=2 complete-case items.
         per_option: Per-option precision/recall/F1 breakdown.
         confusion_matrix: N×N confusion matrix (rows=true, cols=pred).
         option_labels: Labels for confusion matrix axes.
@@ -374,6 +398,7 @@ class NominalCriterionMetrics(BaseModel):
     exact_accuracy: float
     kappa: float
     kappa_interpretation: str
+    krippendorff_alpha: float | None = None
     fleiss_kappa: float | None = None
     per_option: list[OptionMetrics]
     confusion_matrix: list[list[int]]

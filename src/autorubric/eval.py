@@ -240,6 +240,7 @@ def _serialize_ensemble_criterion_report(ecr: EnsembleCriterionReport) -> dict[s
                 "weight": v.weight,
                 "na": v.na,
                 "shuffle_order": v.shuffle_order,
+                "error": v.error,
             }
             for v in ecr.multi_choice_votes
         ]
@@ -305,6 +306,7 @@ def _deserialize_ensemble_report(
                 weight=v.get("weight", 1.0),
                 na=v.get("na", False),
                 shuffle_order=v.get("shuffle_order"),
+                error=v.get("error"),
             )
             for v in ecr_data.get("multi_choice_votes", [])
         ]

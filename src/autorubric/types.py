@@ -444,7 +444,7 @@ class MultiChoiceJudgeVote:
     """Individual judge's vote for a multi-choice criterion (ensemble mode).
 
     Preserves full vote details for per-judge metrics and inter-judge agreement analysis
-    (e.g., Fleiss' kappa, per-judge accuracy).
+    (Krippendorff's alpha, Fleiss' kappa, per-judge accuracy).
 
     Attributes:
         judge_id: Identifier for the judge (e.g., "gpt-4", "claude-sonnet").
@@ -454,6 +454,10 @@ class MultiChoiceJudgeVote:
         reason: Judge's explanation for the selection.
         weight: Judge's voting weight (default 1.0).
         na: True if selected option is NA.
+        shuffle_order: Permutation used when presenting options to the judge.
+        error: Set (with a category prefix) when this vote's verdict was synthesized
+            because the judge call failed. None for genuine votes. Mirrors
+            ``JudgeVote.error`` for multi-choice criteria.
     """
 
     judge_id: str
@@ -464,6 +468,7 @@ class MultiChoiceJudgeVote:
     weight: float = 1.0
     na: bool = False
     shuffle_order: list[int] | None = None
+    error: str | None = None
 
 
 class CriterionReport(Criterion):

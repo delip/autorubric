@@ -48,6 +48,7 @@ src/autorubric/
 | `EvaluationReport`         | Full grading result with score, raw_score, report, token_usage, cost                |
 | `EnsembleEvaluationReport` | Adds judge_scores, mean_agreement, per-criterion votes                              |
 | `JudgeVote`                | Single judge's verdict + reason for a criterion; optional `error` (category-prefixed message) |
+| `MultiChoiceJudgeVote`     | Single judge's multi-choice vote (ensemble); optional `error` (category-prefixed message, parity with `JudgeVote`) |
 | `EnsembleCriterionReport`  | Per-criterion aggregate of judge votes; optional `error` (set only when ALL votes errored) + `is_error` property |
 | `LengthPenalty`            | Config: free_budget, max_cap, penalty_at_cap, exponent, penalty_type                |
 | `TokenUsage`               | prompt_tokens, completion_tokens, total_tokens, cache stats                         |
@@ -93,9 +94,9 @@ Note: `classify_grading_error` and `ErrorCategory` are in Public Exports.
 | Type                      | Purpose                                                                   |
 | ------------------------- | ------------------------------------------------------------------------- |
 | `MetricsResult`           | accuracy, precision, recall, f1, kappa, correlations, bias, per_criterion |
-| `CriterionMetrics`        | Per-criterion binary metrics                                              |
-| `OrdinalCriterionMetrics` | weighted_kappa, adjacent_accuracy, correlations                           |
-| `NominalCriterionMetrics` | kappa, per_option metrics                                                 |
+| `CriterionMetrics`        | Per-criterion binary metrics (incl. optional inter-judge agreement: `krippendorff_alpha` recommended, `fleiss_kappa` complete-case) |
+| `OrdinalCriterionMetrics` | weighted_kappa, adjacent_accuracy, correlations, optional `krippendorff_alpha` (ordinal-aware, recommended) + `fleiss_kappa` |
+| `NominalCriterionMetrics` | kappa, per_option metrics, optional `krippendorff_alpha` (recommended) + `fleiss_kappa` |
 
 ### Rubric Improvement Types (src/autorubric/meta/_improve.py)
 
@@ -156,7 +157,7 @@ Note: `classify_grading_error` and `ErrorCategory` are in Public Exports.
 6. Aggregates votes using strategy (majority/weighted/unanimous/any)
 7. Returns `EnsembleEvaluationReport` (consistent interface)
 
-When a judge call fails, the grader calls `classify_grading_error()` on the exception. `infrastructure` and `parse` failures are routed to `CANNOT_ASSESS` (binary) or `na=True` (multi-choice) — so under the default `CannotAssessStrategy.SKIP` they are excluded from the scoring denominator and do NOT penalize the submission. Only `unknown` errors keep the previous conservative worst-case verdict (UNMET for positive weight, MET for negative). The failure message (category-prefixed, e.g. `"infrastructure: ..."`) is stored on `JudgeVote.error`. `EnsembleCriterionReport.error` is set only when EVERY contributing judge vote errored; a mix of failed + successful judges yields a genuine verdict with `error is None`. The `is_error` property on `CriterionReport` / `EnsembleCriterionReport` lets downstream code distinguish error-induced verdicts from genuine ones without string-matching `reason`.
+When a judge call fails, the grader calls `classify_grading_error()` on the exception. `infrastructure` and `parse` failures are routed to `CANNOT_ASSESS` (binary) or `na=True` (multi-choice) — so under the default `CannotAssessStrategy.SKIP` they are excluded from the scoring denominator and do NOT penalize the submission. Only `unknown` errors keep the previous conservative worst-case verdict (UNMET for positive weight, MET for negative). The failure message (category-prefixed, e.g. `"infrastructure: ..."`) is stored on `JudgeVote.error` (binary) and `MultiChoiceJudgeVote.error` (multi-choice — same parity). `EnsembleCriterionReport.error` is set only when EVERY contributing judge vote errored; a mix of failed + successful judges yields a genuine verdict with `error is None`. The `is_error` property on `CriterionReport` / `EnsembleCriterionReport` lets downstream code distinguish error-induced verdicts from genuine ones without string-matching `reason`.
 
 ### Score Calculation
 ```python
@@ -187,6 +188,15 @@ Strategies: `SKIP` (adjust denominator), `ZERO`, `PARTIAL` (configurable), `FAIL
 
 Judge-call failures classified as `infrastructure` or `parse` (see Grading Flow / `classify_grading_error`) are mapped to `CANNOT_ASSESS` (binary) or `na=True` (multi-choice), so under the default `SKIP` strategy they drop out of the denominator instead of penalizing the submission. Only `unknown` errors fall back to the conservative worst-case verdict.
 
+### Inter-judge Agreement (Krippendorff's α + Fleiss' κ)
+`compute_metrics()` reports inter-judge agreement (judges vs. each other, independent of ground truth) for binary, ordinal, and nominal criteria, populated only when the report is an **ensemble with ≥2 judges and ≥2 items** — otherwise both stats are `None`. Per-vote errors (`JudgeVote.error` / `MultiChoiceJudgeVote.error`) are excluded so only genuine judgments count.
+
+**Krippendorff's α (`krippendorff_alpha`) is the general, recommended statistic.** It natively handles unequal/missing raters and is **level-aware** (`level="ordinal"` for ordinal criteria — distance-aware — vs `level="nominal"` for binary/nominal), fixing the latent issue that Fleiss ignores ordering. `_compute_krippendorff_alpha()` builds a per-criterion **reliability matrix** (rows = judges in `judge_scores` order, columns = items; cell = the judge's numeric code, or `np.nan` when errored/excluded/absent). Binary codes: MET=0, UNMET=1, CANNOT_ASSESS=2 (only under `as_category`; under `exclude` → `np.nan`, under `as_unmet` → coded as UNMET). Multi-choice cell = `selected_index` (genuine NA included). α uses ALL items (missing handled) — no complete-case dropping. Guards `<2` units / `NaN` / exceptions → `None`.
+
+**Fleiss' κ (`fleiss_kappa`) is the classic fixed-rater nominal measure, retained complete-case.** statsmodels requires uniform raters per subject, so `_build_fleiss_row()` includes a subject ONLY if its counted votes sum to exactly `n_judges` (items with any errored/excluded/CA-under-`exclude` vote are dropped from the Fleiss matrix but remain in α as missing cells). `_compute_fleiss_kappa` guards `NaN` → `None`. Binary categories follow `cannot_assess` (`exclude`/`as_unmet` → 2 columns, `as_category` → 3 incl. CANNOT_ASSESS); multi-choice uses one column per option with genuine NA as an ordinary column.
+
+`krippendorff` (numpy-only) and `statsmodels` are both **hard dependencies**; the graceful import guards (`HAS_KRIPPENDORFF` / `HAS_STATSMODELS`) in `_compute.py` stay for safety.
+
 ### Improvement Loop Artifact Persistence
 When `save_artifacts=True` and `artifacts_dir` is set, the improvement loop writes:
 - `rubric-iter-{NN}.json` — criteria array per iteration
@@ -202,7 +212,7 @@ When `save_artifacts=True` and `artifacts_dir` is set, the improvement loop writ
 - All graders return `EnsembleEvaluationReport` for consistent interface
 - `raw_score` always populated regardless of `normalize` setting
 - Judge-call failures are classified via `classify_grading_error()`: `infrastructure`/`parse` → CANNOT_ASSESS / `na=True` (excluded under default SKIP); only `unknown` keeps conservative defaults (UNMET for positive, MET for negative weights)
-- `JudgeVote.error` / `EnsembleCriterionReport.error` carry category-prefixed messages; `eval.py` serialization round-trips the `error` field on ensemble reports and judge votes
+- `JudgeVote.error` / `MultiChoiceJudgeVote.error` / `EnsembleCriterionReport.error` carry category-prefixed messages; `eval.py` serialization round-trips the `error` field on ensemble reports, binary judge votes, and multi-choice judge votes
 - Filter `error is not None` results in training pipelines
 - Rate limiting via `LLMConfig.max_parallel_requests` (per-provider semaphore)
 
