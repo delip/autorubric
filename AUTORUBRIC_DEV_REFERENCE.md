@@ -97,6 +97,7 @@ Note: `classify_grading_error` and `ErrorCategory` are in Public Exports.
 | `CriterionMetrics`        | Per-criterion binary metrics (incl. optional inter-judge agreement: `krippendorff_alpha` recommended, `fleiss_kappa` complete-case) |
 | `OrdinalCriterionMetrics` | weighted_kappa, adjacent_accuracy, correlations, optional `krippendorff_alpha` (ordinal-aware, recommended) + `fleiss_kappa` |
 | `NominalCriterionMetrics` | kappa, per_option metrics, optional `krippendorff_alpha` (recommended) + `fleiss_kappa` |
+| `NAStats`                 | NA-handling diagnostics for multi-choice criteria: `na_count_true`, `na_count_pred`, `na_false_positive`, `na_false_negative`, plus `na_kappa` (Cohen's kappa on the dichotomized {NA, not-NA} decision, pred vs truth) and its Landis & Koch `na_kappa_interpretation`. `na_kappa` / `na_kappa_interpretation` are `None` when the dichotomy is undefined (no paired NA observations, single class, NaN). |
 
 ### Rubric Improvement Types (src/autorubric/meta/_improve.py)
 
@@ -198,6 +199,8 @@ Judge-call failures classified as `infrastructure` or `parse` (see Grading Flow 
 `krippendorff` (numpy-only) and `statsmodels` are both **hard dependencies**; the graceful import guards (`HAS_KRIPPENDORFF` / `HAS_STATSMODELS`) in `_compute.py` stay for safety.
 
 Both stats are surfaced in `MetricsResult.summary()` and `MetricsResult.to_dataframe()` (in `_types.py`). `to_dataframe()` always emits `krippendorff_alpha` / `fleiss_kappa` columns (`None`/`NaN` where not applicable — aggregate/judge rows, single-judge criteria). `summary()` appends `Kripp-α` (recommended, leads) and `Fleiss` columns to a criterion-type table only when at least one criterion in that group has a non-`None` value, so single-judge output is unchanged; per-criterion `None` renders as `n/a`.
+
+**Framework principle: prediction-vs-ground-truth categorical agreement is reported as Cohen's kappa across the board.** Binary criteria use `CriterionMetrics.kappa` (unweighted Cohen's κ, possibly 3-class under `cannot_assess="as_category"`); ordinal multi-choice uses `OrdinalCriterionMetrics.weighted_kappa` (quadratic-weighted Cohen's κ); nominal multi-choice uses `NominalCriterionMetrics.kappa` (unweighted Cohen's κ); the orthogonal abstain decision uses `NAStats.na_kappa` (Cohen's κ on the {NA, not-NA} dichotomy). All are chance-corrected and Landis & Koch interpretable via `KappaResult.interpret_kappa`. This is **distinct** from inter-judge agreement (judges vs. each other), which uses `krippendorff_alpha` + `fleiss_kappa` per the section above. Any new pred-vs-truth categorical agreement metric should land kappa-shaped; do not introduce ad-hoc proportion metrics for paired categorical agreement.
 
 ### Improvement Loop Artifact Persistence
 When `save_artifacts=True` and `artifacts_dir` is set, the improvement loop writes:

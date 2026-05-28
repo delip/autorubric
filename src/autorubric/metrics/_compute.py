@@ -39,6 +39,7 @@ from ._types import (
     CriterionMetrics,
     CriterionMetricsUnion,
     JudgeMetrics,
+    KappaResult,
     MetricsResult,
     NAStats,
     NominalCriterionMetrics,
@@ -933,7 +934,6 @@ def compute_metrics(
     # NA tracking for multi-choice
     total_na_true = 0
     total_na_pred = 0
-    total_na_agreement = 0
     total_na_fp = 0
     total_na_fn = 0
 
@@ -1179,13 +1179,13 @@ def compute_metrics(
             pred_indices = [v for v in pred_data if isinstance(v, int)]
             true_indices = [v for v in true_data if isinstance(v, int)]
 
-            # Filter NA options
-            pred_filtered, true_filtered, na_agree, na_fp, na_fn = filter_na_multi_choice(
+            # Filter NA options. na_agree is unused here (the NAStats block below
+            # computes kappa on the {NA, not-NA} dichotomy from per-criterion data).
+            pred_filtered, true_filtered, _na_agree, na_fp, na_fn = filter_na_multi_choice(
                 pred_indices, true_indices, criterion, mode=na_mode
             )
 
-            # Track NA stats
-            total_na_agreement += na_agree
+            # Track NA stats (FP/FN feed the diagnostic counts on NAStats)
             total_na_fp += na_fp
             total_na_fn += na_fn
 
@@ -1207,13 +1207,13 @@ def compute_metrics(
             pred_indices = [v for v in pred_data if isinstance(v, int)]
             true_indices = [v for v in true_data if isinstance(v, int)]
 
-            # Filter NA options
-            pred_filtered, true_filtered, na_agree, na_fp, na_fn = filter_na_multi_choice(
+            # Filter NA options. na_agree is unused here (the NAStats block below
+            # computes kappa on the {NA, not-NA} dichotomy from per-criterion data).
+            pred_filtered, true_filtered, _na_agree, na_fp, na_fn = filter_na_multi_choice(
                 pred_indices, true_indices, criterion, mode=na_mode
             )
 
-            # Track NA stats
-            total_na_agreement += na_agree
+            # Track NA stats (FP/FN feed the diagnostic counts on NAStats)
             total_na_fp += na_fp
             total_na_fn += na_fn
 
@@ -1306,28 +1306,49 @@ def compute_metrics(
             )
 
     # NA stats (for multi-choice criteria)
+    # Cohen's kappa on the {NA, not-NA} dichotomy across all multi-choice
+    # criteria that define an NA option, paired pred-vs-truth. Reuses the
+    # same chance-corrected statistic as the rest of the framework's
+    # prediction-vs-ground-truth agreement metrics (binary `kappa`, ordinal
+    # `weighted_kappa`, nominal `kappa`). Returns None when undefined.
     na_stats = None
     if n_ordinal > 0 or n_nominal > 0:
-        # Calculate total NA counts
+        na_pred_bool: list[bool] = []
+        na_true_bool: list[bool] = []
         for c_idx in range(n_criteria):
-            if criterion_types[c_idx] != "binary":
-                criterion = criteria[c_idx]
-                na_indices = {i for i, opt in enumerate(criterion.options) if opt.na}
-                if na_indices:
-                    pred_data = per_criterion_pred[c_idx]
-                    true_data = per_criterion_true[c_idx]
-                    for p in pred_data:
-                        if isinstance(p, int) and p in na_indices:
-                            total_na_pred += 1
-                    for t in true_data:
-                        if isinstance(t, int) and t in na_indices:
-                            total_na_true += 1
+            if criterion_types[c_idx] == "binary":
+                continue
+            criterion = criteria[c_idx]
+            na_indices = {i for i, opt in enumerate(criterion.options) if opt.na}
+            if not na_indices:
+                continue
+            for p, t in zip(per_criterion_pred[c_idx], per_criterion_true[c_idx]):
+                if isinstance(p, int) and isinstance(t, int):
+                    p_is_na = p in na_indices
+                    t_is_na = t in na_indices
+                    na_pred_bool.append(p_is_na)
+                    na_true_bool.append(t_is_na)
+                    if p_is_na:
+                        total_na_pred += 1
+                    if t_is_na:
+                        total_na_true += 1
 
-        total_na = total_na_true + total_na_pred
+        na_kappa: float | None = None
+        if na_pred_bool:
+            try:
+                k = float(cohen_kappa_score(na_true_bool, na_pred_bool))
+                na_kappa = None if math.isnan(k) else k
+            except Exception:
+                na_kappa = None
+        na_kappa_interpretation = (
+            KappaResult.interpret_kappa(na_kappa) if na_kappa is not None else None
+        )
+
         na_stats = NAStats(
             na_count_true=total_na_true,
             na_count_pred=total_na_pred,
-            na_agreement=total_na_agreement / max(1, total_na) if total_na > 0 else 0.0,
+            na_kappa=na_kappa,
+            na_kappa_interpretation=na_kappa_interpretation,
             na_false_positive=total_na_fp,
             na_false_negative=total_na_fn,
         )

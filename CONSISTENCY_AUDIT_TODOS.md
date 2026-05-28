@@ -52,7 +52,7 @@ fix lands. This file is the working backlog — keep it updated as items are res
   - Fix direction: for `unknown` errors pick the option that minimizes score *with weight sign accounted for* (highest value for negative weight), and do **not** auto-select an NA option for `unknown` (reserve NA/skip for infra/parse). Mirror the binary worst-case intent.
   - Effort/risk: **low / med** (changes scores on errored multi-choice criteria). Related: **T2-B**.
 
-- [ ] **T1-E (M) — `na_agreement` denominator double-counts → not a clean rate.**
+- [x] **T1-E (M) — `na_agreement` denominator double-counts → not a clean rate.**
   - Inconsistency: `na_agreement = total_na_agreement / max(1, total_na)` where `total_na = total_na_true + total_na_pred` (a both-NA pair increments both), so the metric can't reach 1.0 even at perfect NA agreement.
   - Sites: `src/autorubric/metrics/_compute.py:1326-1330` (definition); counts at `:1308-1333`.
   - Why it matters: published agreement number is mathematically misleading; any future CANNOT_ASSESS-agreement stat (T2-C) must not copy it.

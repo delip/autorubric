@@ -286,13 +286,23 @@ class OptionMetrics(BaseModel):
 class NAStats(BaseModel):
     """Statistics for NA (not applicable) handling in multi-choice criteria.
 
-    Tracks how NA options are handled in both ground truth and predictions,
-    similar to CANNOT_ASSESS handling for binary criteria.
+    Tracks how the prediction and ground truth agree on the dichotomized
+    {NA, not-NA} decision per item, similar to how CANNOT_ASSESS is handled for
+    binary criteria.
 
     Attributes:
         na_count_true: Number of NA selections in ground truth.
         na_count_pred: Number of NA selections in predictions.
-        na_agreement: Proportion where both agreed on NA (0-1).
+        na_kappa: Cohen's kappa on the {NA, not-NA} dichotomy (pred vs truth).
+            Range [-1, 1]; 1.0 is perfect agreement, 0 is chance-level, negative is
+            worse than chance. None when undefined (no paired NA observations,
+            single class, or NaN). The framework reports prediction-vs-ground-truth
+            categorical agreement as Cohen's kappa across the board (binary `kappa`,
+            ordinal `weighted_kappa`, nominal `kappa`); na_kappa is the dichotomized
+            kappa for the orthogonal abstain decision. Readers who want a raw
+            proportion can derive `A / (A + fp + fn)` from the counts below.
+        na_kappa_interpretation: Landis & Koch interpretation of `na_kappa` via
+            `KappaResult.interpret_kappa`. None when na_kappa is None.
         na_false_positive: Count where prediction was NA but ground truth was not.
         na_false_negative: Count where ground truth was NA but prediction was not.
     """
@@ -301,7 +311,8 @@ class NAStats(BaseModel):
 
     na_count_true: int
     na_count_pred: int
-    na_agreement: float
+    na_kappa: float | None = None
+    na_kappa_interpretation: str | None = None
     na_false_positive: int
     na_false_negative: int
 
@@ -787,7 +798,9 @@ class MetricsResult(BaseModel):
             lines.append("NA Handling:")
             lines.append(f"  NA in Ground Truth: {self.na_stats.na_count_true}")
             lines.append(f"  NA in Predictions:  {self.na_stats.na_count_pred}")
-            lines.append(f"  NA Agreement:       {self.na_stats.na_agreement:.1%}")
+            if self.na_stats.na_kappa is not None:
+                interp = self.na_stats.na_kappa_interpretation or ""
+                lines.append(f"  NA Kappa:           {self.na_stats.na_kappa:.3f} ({interp})")
             if self.na_stats.na_false_positive > 0 or self.na_stats.na_false_negative > 0:
                 lines.append(
                     f"  NA FP/FN:           {self.na_stats.na_false_positive} / "

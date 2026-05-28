@@ -703,3 +703,223 @@ class TestBackwardsCompatibility:
         # All per_criterion should be binary
         for cm in metrics.per_criterion:
             assert cm.criterion_type == "binary"
+
+
+# =============================================================================
+# NA Kappa tests (T1-E): NAStats.na_kappa = Cohen's kappa on {NA, not-NA}
+# =============================================================================
+
+
+def _make_na_dataset(nominal_criterion_with_na, ground_truth_labels: list[str]) -> RubricDataset:
+    """Build a dataset of N items using the supplied criterion and per-item GT label."""
+    rubric = Rubric([nominal_criterion_with_na])
+    dataset = RubricDataset(prompt="Test", rubric=rubric)
+    for i, label in enumerate(ground_truth_labels):
+        dataset.add_item(
+            submission=f"S{i}",
+            description=f"D{i}",
+            ground_truth=[label],
+        )
+    return dataset
+
+
+def _make_na_report(selected_index: int, criterion: Criterion) -> EvaluationReport:
+    """Build a single-criterion EvaluationReport whose pick is ``selected_index``."""
+    option = criterion.options[selected_index]
+    return EvaluationReport(
+        score=float(option.value),
+        raw_score=float(option.value) * criterion.weight,
+        report=[
+            CriterionReport(
+                weight=criterion.weight,
+                requirement=criterion.requirement,
+                name=criterion.name,
+                verdict=(CriterionVerdict.MET if option.value >= 0.5 else CriterionVerdict.UNMET),
+                reason="Test",
+                multi_choice_verdict=MultiChoiceVerdict(
+                    selected_index=selected_index,
+                    selected_label=option.label,
+                    value=float(option.value),
+                ),
+            ),
+        ],
+    )
+
+
+def _wrap_eval_result(item_results: list[ItemResult]) -> EvalResult:
+    """Wrap ItemResults into an EvalResult with the metadata compute_metrics expects."""
+    from datetime import datetime
+
+    return EvalResult(
+        item_results=item_results,
+        total_items=len(item_results),
+        successful_items=len(item_results),
+        failed_items=0,
+        total_token_usage=None,
+        total_completion_cost=None,
+        timing_stats=None,
+        started_at=datetime.now(),
+        completed_at=datetime.now(),
+        errors=[],
+        experiment_name=None,
+        experiment_dir=None,
+    )
+
+
+class TestNaKappa:
+    """Cohen's kappa on the dichotomized {NA, not-NA} decision (T1-E)."""
+
+    def test_na_kappa_perfect_agreement_is_one(self, nominal_criterion_with_na):
+        """4 items, perfect NA-vs-not-NA agreement => kappa=1.0, interpretation 'almost perfect'.
+
+        items 1,2: both pred and GT pick N/A (index 3).
+        items 3,4: both pred and GT pick "Very specific" (index 2).
+        A=2, fp=0, fn=0, N=2. P_o=1.0, P_e=0.5, kappa=1.0.
+        """
+        labels = ["N/A", "N/A", "Very specific", "Very specific"]
+        preds = [3, 3, 2, 2]
+        dataset = _make_na_dataset(nominal_criterion_with_na, labels)
+        item_results = [
+            ItemResult(
+                item_idx=i,
+                item=dataset.items[i],
+                report=_make_na_report(preds[i], nominal_criterion_with_na),
+                duration_seconds=0.1,
+            )
+            for i in range(len(labels))
+        ]
+        eval_result = _wrap_eval_result(item_results)
+
+        metrics = compute_metrics(eval_result, dataset)
+
+        assert metrics.na_stats is not None
+        assert metrics.na_stats.na_kappa == pytest.approx(1.0)
+        assert metrics.na_stats.na_kappa_interpretation == "almost perfect"
+
+    def test_na_kappa_no_na_observed_is_none(self, nominal_criterion_with_na):
+        """3 items, no NA in either pred or GT => kappa is undefined (single class) => None."""
+        labels = ["Very specific", "Very specific", "Very specific"]
+        preds = [2, 2, 2]
+        dataset = _make_na_dataset(nominal_criterion_with_na, labels)
+        item_results = [
+            ItemResult(
+                item_idx=i,
+                item=dataset.items[i],
+                report=_make_na_report(preds[i], nominal_criterion_with_na),
+                duration_seconds=0.1,
+            )
+            for i in range(len(labels))
+        ]
+        eval_result = _wrap_eval_result(item_results)
+
+        metrics = compute_metrics(eval_result, dataset)
+
+        assert metrics.na_stats is not None
+        assert metrics.na_stats.na_kappa is None
+        assert metrics.na_stats.na_kappa_interpretation is None
+
+    def test_na_kappa_binary_only_rubric_leaves_na_stats_none(self):
+        """Regression guard: binary-only rubrics produce na_stats=None."""
+        rubric = Rubric([Criterion(name="C1", weight=10.0, requirement="R1")])
+        dataset = RubricDataset(prompt="Test", rubric=rubric)
+        dataset.add_item(submission="A", description="D1", ground_truth=[CriterionVerdict.MET])
+        dataset.add_item(submission="B", description="D2", ground_truth=[CriterionVerdict.UNMET])
+
+        item_results = [
+            ItemResult(
+                item_idx=0,
+                item=dataset.items[0],
+                report=EvaluationReport(
+                    score=1.0,
+                    raw_score=10.0,
+                    report=[
+                        CriterionReport(
+                            weight=10.0,
+                            requirement="R1",
+                            name="C1",
+                            verdict=CriterionVerdict.MET,
+                            reason="Test",
+                        ),
+                    ],
+                ),
+                duration_seconds=0.1,
+            ),
+            ItemResult(
+                item_idx=1,
+                item=dataset.items[1],
+                report=EvaluationReport(
+                    score=0.0,
+                    raw_score=0.0,
+                    report=[
+                        CriterionReport(
+                            weight=10.0,
+                            requirement="R1",
+                            name="C1",
+                            verdict=CriterionVerdict.UNMET,
+                            reason="Test",
+                        ),
+                    ],
+                ),
+                duration_seconds=0.1,
+            ),
+        ]
+        eval_result = _wrap_eval_result(item_results)
+
+        metrics = compute_metrics(eval_result, dataset)
+
+        assert metrics.na_stats is None
+
+    def test_na_kappa_disagreement_below_perfect(self, nominal_criterion_with_na):
+        """6 items, 2x2 mix gives na_kappa = 1/3.
+
+        Hand-built layout (pred, true):
+            (NA, NA), (NA, NA)         -> A=2
+            (NA, not-NA)               -> fp=1
+            (not-NA, NA)               -> fn=1
+            (not-NA, not-NA), (not-NA, not-NA) -> N=2
+        P_o=(2+2)/6=4/6; pred_NA=A+fp=3, true_NA=A+fn=3; P_e=(3/6)^2*2=0.5;
+        kappa=(4/6 - 0.5)/(1 - 0.5) = (1/6)/(1/2) = 1/3.
+        """
+        # Layout below; index 3 is NA, index 2 is "Very specific" (not-NA).
+        preds = [3, 3, 3, 2, 2, 2]
+        true_labels = ["N/A", "N/A", "Very specific", "N/A", "Very specific", "Very specific"]
+        dataset = _make_na_dataset(nominal_criterion_with_na, true_labels)
+        item_results = [
+            ItemResult(
+                item_idx=i,
+                item=dataset.items[i],
+                report=_make_na_report(preds[i], nominal_criterion_with_na),
+                duration_seconds=0.1,
+            )
+            for i in range(len(true_labels))
+        ]
+        eval_result = _wrap_eval_result(item_results)
+
+        metrics = compute_metrics(eval_result, dataset)
+
+        assert metrics.na_stats is not None
+        assert metrics.na_stats.na_kappa == pytest.approx(1 / 3, abs=1e-9)
+
+    def test_na_counts_preserved(self, nominal_criterion_with_na):
+        """Regression guard: na_count_* and na_false_* are still populated correctly."""
+        preds = [3, 3, 3, 2, 2, 2]
+        true_labels = ["N/A", "N/A", "Very specific", "N/A", "Very specific", "Very specific"]
+        dataset = _make_na_dataset(nominal_criterion_with_na, true_labels)
+        item_results = [
+            ItemResult(
+                item_idx=i,
+                item=dataset.items[i],
+                report=_make_na_report(preds[i], nominal_criterion_with_na),
+                duration_seconds=0.1,
+            )
+            for i in range(len(true_labels))
+        ]
+        eval_result = _wrap_eval_result(item_results)
+
+        metrics = compute_metrics(eval_result, dataset)
+
+        assert metrics.na_stats is not None
+        assert metrics.na_stats.na_count_true == 3
+        assert metrics.na_stats.na_count_pred == 3
+        assert metrics.na_stats.na_false_positive == 1
+        assert metrics.na_stats.na_false_negative == 1
