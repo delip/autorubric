@@ -51,7 +51,7 @@ from autorubric.utils import aggregate_completion_cost, aggregate_token_usage
 
 if TYPE_CHECKING:
     from autorubric.graders.base import Grader
-    from autorubric.metrics import MetricsResult
+    from autorubric.metrics import MetricsResult, NAMode
 
 logger = logging.getLogger(__name__)
 
@@ -569,7 +569,7 @@ class EvalResult:
         n_bootstrap: int = 1000,
         per_judge: bool = False,
         cannot_assess: Literal["exclude", "as_unmet"] = "exclude",
-        na_mode: Literal["exclude", "as_worst"] = "exclude",
+        na_mode: NAMode = "exclude",
         confidence_level: float = 0.95,
         seed: int | None = None,
     ) -> MetricsResult:
@@ -591,9 +591,16 @@ class EvalResult:
             cannot_assess: How to handle CANNOT_ASSESS verdicts:
                 - "exclude": Skip pairs where either is CANNOT_ASSESS (default)
                 - "as_unmet": Treat CANNOT_ASSESS as UNMET
-            na_mode: How to handle NA options in multi-choice criteria:
-                - "exclude": Skip pairs where either is NA (default)
-                - "as_worst": Keep NA in metrics computation
+            na_mode: How to handle NA options in multi-choice criteria.
+                Mirrors ``cannot_assess`` for binary:
+
+                - "exclude": Skip pairs where either is NA (default).
+                - "as_unmet": Remap NA → the score-minimizing non-NA option,
+                  weight-sign aware (shares ``Criterion.worst_scored_option()``
+                  with the grader's ``unknown``-error path).
+                - "as_category": Keep NA as a distinct categorical column.
+                  Refused for ordinal criteria with an NA option (raises
+                  ``ValueError``).
             confidence_level: Confidence level for bootstrap CIs (default 0.95).
             seed: Random seed for bootstrap reproducibility.
 

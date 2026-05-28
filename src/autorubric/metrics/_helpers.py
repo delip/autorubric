@@ -5,7 +5,7 @@ and the metric computation functions.
 """
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from ..types import (
     Criterion,
@@ -13,7 +13,7 @@ from ..types import (
     EnsembleEvaluationReport,
     EvaluationReport,
 )
-from ._types import CannotAssessMode, CriterionType
+from ._types import CannotAssessMode, CriterionType, NAMode
 
 if TYPE_CHECKING:
     pass
@@ -319,37 +319,83 @@ def filter_na_multi_choice(
     pred_indices: list[int],
     true_indices: list[int],
     criterion: Criterion,
-    mode: Literal["exclude", "as_worst"] = "exclude",
+    mode: NAMode = "exclude",
 ) -> tuple[list[int], list[int], int, int, int]:
     """Filter or transform NA options in multi-choice data.
 
-    NA options are treated similarly to CANNOT_ASSESS for binary criteria.
+    Mirrors :func:`filter_cannot_assess` (binary CANNOT_ASSESS handling) — NA
+    on multi-choice is the structural analog of CANNOT_ASSESS on binary.
 
     Args:
         pred_indices: Predicted option indices.
         true_indices: Ground truth option indices.
-        criterion: The criterion (used to check which options are NA).
+        criterion: The criterion (used to check which options are NA and, for
+            ``as_unmet``, to resolve the score-minimizing non-NA option via
+            :meth:`Criterion.worst_scored_option`).
         mode: How to handle NA:
-            - "exclude": Remove pairs where either is NA
-            - "as_worst": Keep NA but don't count as special
+
+            - ``"exclude"``: Remove pairs where either side is NA (default).
+            - ``"as_unmet"``: Remap NA → the score-minimizing non-NA option,
+              weight-sign aware (mirrors binary ``as_unmet`` which collapses
+              CANNOT_ASSESS → UNMET, the worst-scoring valid verdict). For
+              non-negative weight: NA → lowest-value option. For negative
+              weight: NA → highest-value option (the worst case flips).
+            - ``"as_category"``: Keep NA as a distinct categorical column. The
+              pair passes through unchanged so downstream kappa treats NA as
+              another label. **Refused for ordinal criteria with an NA option:
+              NA has no ordinal position, so quadratic-weighted Cohen's kappa
+              would assign NA a geometrically meaningless distance based on
+              its index. Raises** :class:`ValueError`.
 
     Returns:
         Tuple of (filtered_pred, filtered_true, na_agreement, na_fp, na_fn):
-        - filtered_pred: Filtered/transformed prediction indices
-        - filtered_true: Filtered/transformed ground truth indices
-        - na_agreement: Count where both agreed on NA
-        - na_fp: Count where pred was NA but true was not
-        - na_fn: Count where true was NA but pred was not
-    """
-    # Identify which options are NA
-    na_indices = {i for i, opt in enumerate(criterion.options) if opt.na}
 
+        - filtered_pred: Prediction indices (NA cells dropped under
+          ``exclude``, remapped under ``as_unmet``, passed through under
+          ``as_category``).
+        - filtered_true: Truth indices, same handling.
+        - na_agreement: Count of pairs where both sides were NA (mode-independent).
+        - na_fp: Count where pred was NA but true was not (mode-independent).
+        - na_fn: Count where true was NA but pred was not (mode-independent).
+
+    Raises:
+        ValueError: If ``mode="as_category"`` and ``criterion.scale_type`` is
+            ``"ordinal"`` and the criterion has at least one NA option.
+    """
+    # Identify which options are NA. If there are none, the criterion has
+    # nothing for any mode to operate on — short-circuit before validating
+    # mode (so callers don't get the ordinal+as_category guard for a
+    # criterion that doesn't actually have an NA option).
+    na_indices = {i for i, opt in enumerate(criterion.options) if opt.na}
     if not na_indices:
-        # No NA options - return as-is
         return list(pred_indices), list(true_indices), 0, 0, 0
 
-    filtered_pred = []
-    filtered_true = []
+    # Refuse the mathematically incoherent ordinal + as_category combination.
+    if mode == "as_category" and criterion.scale_type == "ordinal":
+        raise ValueError(
+            f"Criterion '{criterion.name}': na_mode='as_category' is not "
+            "supported for ordinal criteria with an NA option. NA has no "
+            "ordinal position, so quadratic-weighted Cohen's kappa would "
+            "assign NA a geometrically meaningless distance based on its "
+            "option index. Use 'exclude' or 'as_unmet'."
+        )
+
+    # Reject unknown / deprecated modes (incl. the old "as_worst" misnomer).
+    if mode not in ("exclude", "as_unmet", "as_category"):
+        raise ValueError(
+            f"Unknown na_mode value {mode!r}. "
+            "Valid modes are 'exclude', 'as_unmet', 'as_category'. "
+            "('as_worst' was renamed to 'as_category' in T1-C and is no "
+            "longer accepted.)"
+        )
+
+    # Resolve the worst-scored non-NA option once for the as_unmet remap.
+    worst_idx: int | None = None
+    if mode == "as_unmet":
+        worst_idx, _ = criterion.worst_scored_option()
+
+    filtered_pred: list[int] = []
+    filtered_true: list[int] = []
     na_agreement = 0
     na_fp = 0  # False positive: pred NA, true not NA
     na_fn = 0  # False negative: true NA, pred not NA
@@ -358,10 +404,11 @@ def filter_na_multi_choice(
         pred_is_na = p in na_indices
         true_is_na = t in na_indices
 
+        # NA diagnostic counts are mode-independent.
         if pred_is_na and true_is_na:
             na_agreement += 1
             if mode == "exclude":
-                continue  # Skip this pair
+                continue
         elif pred_is_na and not true_is_na:
             na_fp += 1
             if mode == "exclude":
@@ -371,9 +418,16 @@ def filter_na_multi_choice(
             if mode == "exclude":
                 continue
 
-        # Include this pair
-        filtered_pred.append(p)
-        filtered_true.append(t)
+        if mode == "as_unmet":
+            # worst_idx is resolved above when mode == "as_unmet".
+            assert worst_idx is not None
+            p_out = worst_idx if pred_is_na else p
+            t_out = worst_idx if true_is_na else t
+        else:  # as_category (or any pair with no NA cell under any mode)
+            p_out, t_out = p, t
+
+        filtered_pred.append(p_out)
+        filtered_true.append(t_out)
 
     return filtered_pred, filtered_true, na_agreement, na_fp, na_fn
 

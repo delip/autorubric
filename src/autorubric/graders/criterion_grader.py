@@ -751,14 +751,11 @@ class CriterionGrader(Grader):
                 # Conservative worst case, weight-sign-aware, among scored (non-NA)
                 # options only — mirrors the binary worst case (MET if weight < 0 else
                 # UNMET). Never auto-select an NA option for an unknown error; NA/skip
-                # is reserved for infrastructure/parse failures. min/max return the
-                # first option on ties (deterministic w.r.t. option order). The
-                # validator guarantees at least one non-NA option exists.
-                scored = [(i, opt) for i, opt in enumerate(options) if not opt.na]
-                if criterion.weight < 0:
-                    worst_idx, worst_option = max(scored, key=lambda io: io[1].value)
-                else:
-                    worst_idx, worst_option = min(scored, key=lambda io: io[1].value)
+                # is reserved for infrastructure/parse failures. Ties resolve to the
+                # first such option in declaration order (deterministic). The shared
+                # helper is also used by the metrics layer's na_mode="as_unmet" remap
+                # (T1-C) so the two layers cannot drift.
+                worst_idx, worst_option = criterion.worst_scored_option()
                 multi_choice_verdict = MultiChoiceVerdict(
                     selected_index=worst_idx,
                     selected_label=worst_option.label,

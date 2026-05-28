@@ -41,7 +41,7 @@ src/autorubric/
 
 | Type                       | Purpose                                                                             |
 | -------------------------- | ----------------------------------------------------------------------------------- |
-| `Criterion`                | Single evaluation criterion with weight, requirement, optional multi-choice options |
+| `Criterion`                | Single evaluation criterion with weight, requirement, optional multi-choice options. Method `worst_scored_option()` returns the score-minimizing non-NA option, weight-sign aware — shared by the grader's `unknown`-error worst-case path and the metrics' `na_mode="as_unmet"` remap |
 | `CriterionOption`          | Multi-choice option with label, value (0-1), optional `na` flag                     |
 | `CriterionVerdict`         | Enum: `MET`, `UNMET`, `CANNOT_ASSESS`                                               |
 | `CriterionReport`          | Criterion + verdict + reason; optional `error` (category-prefixed message) + `is_error` property |
@@ -98,6 +98,8 @@ Note: `classify_grading_error` and `ErrorCategory` are in Public Exports.
 | `OrdinalCriterionMetrics` | weighted_kappa, adjacent_accuracy, correlations, optional `krippendorff_alpha` (ordinal-aware, recommended) + `fleiss_kappa` |
 | `NominalCriterionMetrics` | kappa, per_option metrics, optional `krippendorff_alpha` (recommended) + `fleiss_kappa` |
 | `NAStats`                 | NA-handling diagnostics for multi-choice criteria: `na_count_true`, `na_count_pred`, `na_false_positive`, `na_false_negative`, plus `na_kappa` (Cohen's kappa on the dichotomized {NA, not-NA} decision, pred vs truth) and its Landis & Koch `na_kappa_interpretation`. `na_kappa` / `na_kappa_interpretation` are `None` when the dichotomy is undefined (no paired NA observations, single class, NaN). |
+| `CannotAssessMode`        | `Literal["exclude", "as_unmet", "as_category"]` — how binary CANNOT_ASSESS verdicts are handled at metrics time. See *CANNOT_ASSESS Handling* below. |
+| `NAMode`                  | `Literal["exclude", "as_unmet", "as_category"]` — multi-choice NA analog of `CannotAssessMode`. See *NA Handling (multi-choice metrics)* below. |
 
 ### Rubric Improvement Types (src/autorubric/meta/_improve.py)
 
@@ -187,7 +189,16 @@ score = clamp(weighted_sum / total_positive_weight, 0, 1)  # if normalized
 ### CANNOT_ASSESS Handling
 Strategies: `SKIP` (adjust denominator), `ZERO`, `PARTIAL` (configurable), `FAIL` (worst case)
 
-Judge-call failures classified as `infrastructure` or `parse` (see Grading Flow / `classify_grading_error`) are mapped to `CANNOT_ASSESS` (binary) or `na=True` (multi-choice), so under the default `SKIP` strategy they drop out of the denominator instead of penalizing the submission. Only `unknown` errors fall back to the conservative worst-case verdict. For multi-choice criteria, an `unknown` error selects the score-minimizing scored (non-NA) option — lowest `value` for non-negative weight, highest `value` for negative weight (mirroring the binary worst case) — and never auto-selects an NA option.
+Judge-call failures classified as `infrastructure` or `parse` (see Grading Flow / `classify_grading_error`) are mapped to `CANNOT_ASSESS` (binary) or `na=True` (multi-choice), so under the default `SKIP` strategy they drop out of the denominator instead of penalizing the submission. Only `unknown` errors fall back to the conservative worst-case verdict. For multi-choice criteria, an `unknown` error selects the score-minimizing scored (non-NA) option via the shared `Criterion.worst_scored_option()` helper — lowest `value` for non-negative weight, highest `value` for negative weight (mirroring the binary worst case) — and never auto-selects an NA option.
+
+### NA Handling (multi-choice metrics)
+NA is the multi-choice structural analog of binary CANNOT_ASSESS. At metrics time, `compute_metrics(..., na_mode=NAMode)` mirrors `cannot_assess: CannotAssessMode` one-for-one:
+
+- `"exclude"` — drop pairs where either side is NA (default).
+- `"as_unmet"` — remap NA → the score-minimizing non-NA option via the shared `Criterion.worst_scored_option()` (same helper as the grader's `unknown`-error path, so the two layers cannot drift). Weight-sign aware: lowest `value` for non-negative weight, highest `value` for negative weight.
+- `"as_category"` — keep NA as a distinct categorical column. **Refused for ordinal criteria with an NA option** (raises `ValueError`): NA has no ordinal position, so quadratic-weighted Cohen's kappa would assign NA a geometrically meaningless distance based on its index.
+
+The old `"as_worst"` literal was renamed to `"as_category"` (it described the wrong thing — the code kept NA as a column, it did not remap NA to a worst option); passing the old value raises a clear `ValueError`. The NAStats diagnostic counts (`na_count_true`, `na_count_pred`, `na_false_positive`, `na_false_negative`, `na_kappa`) are mode-independent: the FP/FN counters increment before any `exclude` skip, and `na_kappa` is computed from unfiltered per-criterion pred/true.
 
 ### Inter-judge Agreement (Krippendorff's α + Fleiss' κ)
 `compute_metrics()` reports inter-judge agreement (judges vs. each other, independent of ground truth) for binary, ordinal, and nominal criteria, populated only when the report is an **ensemble with ≥2 judges and ≥2 items** — otherwise both stats are `None`. Per-vote errors (`JudgeVote.error` / `MultiChoiceJudgeVote.error`) are excluded so only genuine judgments count.

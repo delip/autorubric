@@ -59,7 +59,7 @@ fix lands. This file is the working backlog — keep it updated as items are res
   - Fix direction: define a clean rate (e.g., agreement over the union of items where either side is NA, or Cohen-style over the NA/not-NA partition). Add a test pinning perfect-agreement → 1.0.
   - Effort/risk: **low / low**.
 
-- [ ] **T1-C `[V]` (H, naming/semantics) — `na_mode="as_worst"` is a misnomer/no-op.**
+- [x] **T1-C `[V]` (H, naming/semantics) — `na_mode="as_worst"` is a misnomer/no-op.**
   - Inconsistency: the `"as_worst"` branch of `filter_na_multi_choice` just *keeps* NA pairs unchanged ("Keep NA but don't count as special"); it does not remap NA to a worst option. Binary's analogous knob (`cannot_assess`) has three real modes (`exclude`/`as_unmet`/`as_category`); NA has only `exclude` + this no-op.
   - Sites: `src/autorubric/metrics/_helpers.py:318-378` (esp. docstring `:335` and the branch); param surface `src/autorubric/metrics/_compute.py:809`.
   - Why it matters: misleading public parameter; NA/CANNOT_ASSESS are documented as analogous yet expose different mode sets.

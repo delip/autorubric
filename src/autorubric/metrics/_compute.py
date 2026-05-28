@@ -41,6 +41,7 @@ from ._types import (
     JudgeMetrics,
     KappaResult,
     MetricsResult,
+    NAMode,
     NAStats,
     NominalCriterionMetrics,
     OptionMetrics,
@@ -807,7 +808,7 @@ def compute_metrics(
     n_bootstrap: int = 1000,
     per_judge: bool = False,
     cannot_assess: CannotAssessMode = "exclude",
-    na_mode: Literal["exclude", "as_worst"] = "exclude",
+    na_mode: NAMode = "exclude",
     confidence_level: float = 0.95,
     seed: int | None = None,
 ) -> MetricsResult:
@@ -830,9 +831,21 @@ def compute_metrics(
               Cohen's kappa are then computed over three classes (a CANNOT_ASSESS
               prediction matching a CANNOT_ASSESS ground truth counts as correct);
               precision/recall/f1 remain MET-vs-rest.
-        na_mode: How to handle NA options (multi-choice criteria):
-            - "exclude": Skip pairs where either is NA (default)
-            - "as_worst": Keep NA in metrics (no special treatment)
+        na_mode: How to handle NA options (multi-choice criteria). Mirrors
+            ``cannot_assess`` for binary — NA on multi-choice is the structural
+            analog of CANNOT_ASSESS on binary:
+
+            - "exclude": Skip pairs where either is NA (default).
+            - "as_unmet": Remap NA to the score-minimizing non-NA option,
+              weight-sign aware (lowest ``value`` for non-negative weight,
+              highest ``value`` for negative weight). Shares
+              ``Criterion.worst_scored_option()`` with the grader's
+              ``unknown``-error worst-case path so the layers cannot drift.
+            - "as_category": Keep NA as a distinct categorical column.
+              **Refused for ordinal criteria with an NA option** (raises
+              ``ValueError``): NA has no ordinal position, so quadratic
+              weighted Cohen's kappa would assign NA a geometrically
+              meaningless distance.
         confidence_level: Confidence level for bootstrap CIs (default 0.95).
         seed: Random seed for bootstrap reproducibility.
 

@@ -21,6 +21,23 @@ CannotAssessMode = Literal["exclude", "as_unmet", "as_category"]
 - "as_category": Treat CANNOT_ASSESS as a distinct third category (3-class classification)
 """
 
+# Type alias for NA-option handling in multi-choice metrics (mirrors CannotAssessMode).
+NAMode = Literal["exclude", "as_unmet", "as_category"]
+"""How to handle NA options in multi-choice metric calculations.
+
+Mirrors :data:`CannotAssessMode` — NA on multi-choice is the structural analog
+of CANNOT_ASSESS on binary.
+
+- "exclude": Skip pairs where either is NA (default)
+- "as_unmet": Remap NA → the score-minimizing non-NA option, weight-sign aware
+  (mirrors binary ``as_unmet`` which collapses CANNOT_ASSESS → UNMET, the
+  worst-scoring valid verdict). Shares ``Criterion.worst_scored_option()`` with
+  the grader's ``unknown``-error worst-case path.
+- "as_category": Keep NA as a distinct categorical column. Refused for ordinal
+  criteria that define an NA option (NA has no ordinal position; quadratic
+  weighted kappa would assign NA a meaningless geometric distance).
+"""
+
 
 class ConfidenceInterval(BaseModel):
     """Confidence interval for a statistic.

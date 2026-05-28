@@ -61,7 +61,12 @@ def nominal_criterion() -> Criterion:
 
 @pytest.fixture
 def nominal_criterion_with_na() -> Criterion:
-    """Create a nominal criterion with an NA option."""
+    """Create an ordinal criterion with an NA option.
+
+    NOTE: This fixture is misnamed for historical reasons — ``scale_type`` is
+    ``"ordinal"``. Existing tests rely on the name. For genuinely nominal NA
+    fixtures, see :func:`true_nominal_criterion_with_na` below.
+    """
     return Criterion(
         name="specificity",
         weight=6.0,
@@ -71,6 +76,45 @@ def nominal_criterion_with_na() -> Criterion:
             {"label": "Vague", "value": 0.0},
             {"label": "Somewhat specific", "value": 0.5},
             {"label": "Very specific", "value": 1.0},
+            {"label": "N/A", "value": 0.0, "na": True},
+        ],
+    )
+
+
+@pytest.fixture
+def true_nominal_criterion_with_na() -> Criterion:
+    """Genuinely nominal criterion with an NA option (for ``as_category`` tests)."""
+    return Criterion(
+        name="category",
+        weight=4.0,
+        requirement="Which category?",
+        scale_type="nominal",
+        options=[
+            {"label": "Alpha", "value": 1.0},
+            {"label": "Beta", "value": 0.0},
+            {"label": "Gamma", "value": 0.5},
+            {"label": "N/A", "value": 0.0, "na": True},
+        ],
+    )
+
+
+@pytest.fixture
+def negative_weight_criterion_with_na() -> Criterion:
+    """Ordinal criterion with NEGATIVE weight and an NA option.
+
+    For negative weight, the score-minimizing scored option is the HIGHEST
+    value (a high value on a negative-weight criterion subtracts more from
+    the score). Used to pin weight-sign aware ``as_unmet`` remapping.
+    """
+    return Criterion(
+        name="severity_penalty",
+        weight=-8.0,
+        requirement="How severe is the safety violation?",
+        scale_type="ordinal",
+        options=[
+            {"label": "None", "value": 0.0},
+            {"label": "Minor", "value": 0.5},
+            {"label": "Severe", "value": 1.0},
             {"label": "N/A", "value": 0.0, "na": True},
         ],
     )
@@ -219,6 +263,221 @@ class TestFilterNaMultiChoice:
         assert na_agree == 1
         assert na_fp == 1
         assert na_fn == 0
+
+    # ---- T1-C: the full mirror of cannot_assess ---------------------------
+
+    def test_as_worst_literal_is_rejected(self, nominal_criterion_with_na):
+        """The old 'as_worst' literal is gone (hard break).
+
+        Anyone passing it should get a clean ValueError pointing at the new
+        modes; we do not silently accept the misnomer.
+        """
+        with pytest.raises(ValueError, match="as_worst|na_mode|mode"):
+            filter_na_multi_choice(
+                [0, 1, 2],
+                [0, 1, 2],
+                nominal_criterion_with_na,
+                mode="as_worst",  # type: ignore[arg-type]
+            )
+
+    def test_as_category_keeps_na_as_column_nominal(self, true_nominal_criterion_with_na):
+        """Nominal + as_category: NA pairs pass through unchanged (NA is its own column)."""
+        # NA option is index 3.
+        pred = [0, 3, 1, 3, 2]
+        true = [0, 3, 2, 1, 2]
+        filtered_pred, filtered_true, na_agree, na_fp, na_fn = filter_na_multi_choice(
+            pred, true, true_nominal_criterion_with_na, mode="as_category"
+        )
+        # All pairs survive, including NA-on-NA, NA-on-non-NA, non-NA-on-NA.
+        assert filtered_pred == pred
+        assert filtered_true == true
+        # FP/FN diagnostics still populate (mode-independent).
+        assert na_agree == 1  # second pair (3, 3)
+        assert na_fp == 1  # fourth pair (3, 1)
+        assert na_fn == 0
+
+    def test_as_category_raises_on_ordinal_with_na(self, nominal_criterion_with_na):
+        """Ordinal + as_category + criterion has NA option → ValueError.
+
+        NA has no ordinal position; quadratic-weighted Cohen's kappa would
+        assign NA a geometrically meaningless distance based on its index.
+        """
+        # nominal_criterion_with_na is actually ordinal (see fixture docstring)
+        # and has an NA option.
+        with pytest.raises(ValueError, match="ordinal.*NA|as_category.*ordinal"):
+            filter_na_multi_choice(
+                [0, 3, 2],
+                [1, 3, 2],
+                nominal_criterion_with_na,
+                mode="as_category",
+            )
+
+    def test_as_category_allowed_on_ordinal_without_na(self, ordinal_criterion):
+        """Ordinal + as_category + criterion has NO NA option → no-op pass-through.
+
+        The ordinal-NA combination is what's incoherent; an ordinal criterion
+        without an NA option has no NA cells, so the guard does not fire.
+        """
+        pred = [0, 1, 2, 3]
+        true = [1, 2, 3, 0]
+        filtered_pred, filtered_true, na_agree, na_fp, na_fn = filter_na_multi_choice(
+            pred, true, ordinal_criterion, mode="as_category"
+        )
+        assert filtered_pred == pred
+        assert filtered_true == true
+        assert na_agree == 0
+        assert na_fp == 0
+        assert na_fn == 0
+
+    def test_as_unmet_remaps_na_to_lowest_value_positive_weight(self, nominal_criterion_with_na):
+        """as_unmet + positive weight: NA → lowest-value scored option (index 0)."""
+        # Options: [Vague(0.0), Somewhat(0.5), Very(1.0), N/A(na=True)]. Weight +6.
+        # Worst scored = Vague at index 0.
+        pred = [3, 1, 3, 2]  # NA at positions 0, 2
+        true = [3, 1, 0, 3]  # NA at positions 0, 3
+        filtered_pred, filtered_true, na_agree, na_fp, na_fn = filter_na_multi_choice(
+            pred, true, nominal_criterion_with_na, mode="as_unmet"
+        )
+        # NA → 0 (lowest-value scored)
+        assert filtered_pred == [0, 1, 0, 2]
+        assert filtered_true == [0, 1, 0, 0]
+        # All 4 pairs preserved (no drop under as_unmet).
+        assert len(filtered_pred) == 4
+        # FP/FN counts populate from the unremapped pairs.
+        assert na_agree == 1  # (3, 3) at index 0
+        assert na_fp == 1  # (3, 0) at index 2
+        assert na_fn == 1  # (2, 3) at index 3
+
+    def test_as_unmet_remaps_na_to_highest_value_negative_weight(
+        self, negative_weight_criterion_with_na
+    ):
+        """as_unmet + NEGATIVE weight: NA → HIGHEST-value scored option.
+
+        Pins weight-sign awareness: for negative weight, a high value subtracts
+        more from the score, so the worst case flips.
+        """
+        # Options: [None(0.0), Minor(0.5), Severe(1.0), N/A(na=True)]. Weight -8.
+        # Worst scored = Severe at index 2.
+        pred = [3, 0, 3]
+        true = [1, 3, 0]
+        filtered_pred, filtered_true, _na_agree, _na_fp, _na_fn = filter_na_multi_choice(
+            pred, true, negative_weight_criterion_with_na, mode="as_unmet"
+        )
+        # NA index 3 → index 2 (Severe, highest value, worst for negative weight).
+        assert filtered_pred == [2, 0, 2]
+        assert filtered_true == [1, 2, 0]
+
+    def test_as_unmet_matches_grader_worst_case(
+        self, nominal_criterion_with_na, negative_weight_criterion_with_na
+    ):
+        """The metrics ``as_unmet`` remap and the grader unknown-error worst case
+        resolve to the same option for the same criterion.
+
+        Pins the cross-layer reuse contract: both paths share
+        ``Criterion.worst_scored_option()``.
+        """
+        for criterion in (nominal_criterion_with_na, negative_weight_criterion_with_na):
+            method_idx, _method_opt = criterion.worst_scored_option()
+            na_idx = next(i for i, opt in enumerate(criterion.options) if opt.na)
+            filtered_pred, _filtered_true, _agree, _fp, _fn = filter_na_multi_choice(
+                [na_idx],
+                [na_idx],
+                criterion,
+                mode="as_unmet",
+            )
+            assert filtered_pred == [method_idx]
+
+    def test_fp_fn_counts_under_all_modes(self, true_nominal_criterion_with_na):
+        """na_fp and na_fn invariants: identical across modes; only dropping differs."""
+        # NA option index = 3.
+        pred = [0, 3, 1, 3]  # NA at positions 1, 3
+        true = [0, 3, 3, 1]  # NA at positions 1, 2
+        # (0,0) both non-NA. (3,3) both NA → agreement. (1,3) true NA → FN. (3,1) pred NA → FP.
+        expected_agree, expected_fp, expected_fn = 1, 1, 1
+
+        for mode in ("exclude", "as_unmet", "as_category"):
+            _fp, _ft, na_agree, na_fp, na_fn = filter_na_multi_choice(
+                pred, true, true_nominal_criterion_with_na, mode=mode
+            )
+            assert (na_agree, na_fp, na_fn) == (expected_agree, expected_fp, expected_fn), (
+                f"NA counts drifted under mode={mode!r}"
+            )
+
+    def test_no_na_option_is_passthrough_all_modes(self, ordinal_criterion):
+        """No NA option in criterion → all three modes pass through unchanged."""
+        pred = [0, 1, 2, 3]
+        true = [1, 2, 3, 0]
+        for mode in ("exclude", "as_unmet", "as_category"):
+            filtered_pred, filtered_true, na_agree, na_fp, na_fn = filter_na_multi_choice(
+                pred, true, ordinal_criterion, mode=mode
+            )
+            assert filtered_pred == pred, mode
+            assert filtered_true == true, mode
+            assert (na_agree, na_fp, na_fn) == (0, 0, 0), mode
+
+
+class TestCriterionWorstScoredOption:
+    """Tests for the shared ``Criterion.worst_scored_option`` helper.
+
+    This is the extracted worst-case selection used by both the grader's
+    ``unknown``-error path (``criterion_grader.py``) and the metrics layer's
+    ``na_mode="as_unmet"`` remap. The two paths cannot drift because they
+    share this method.
+    """
+
+    def test_positive_weight_picks_lowest_value(self, nominal_criterion_with_na):
+        """Positive weight → lowest-value scored option."""
+        idx, opt = nominal_criterion_with_na.worst_scored_option()
+        assert idx == 0
+        assert opt.value == 0.0
+        assert opt.na is False
+
+    def test_negative_weight_picks_highest_value(self, negative_weight_criterion_with_na):
+        """Negative weight → highest-value scored option (worst case flips)."""
+        idx, opt = negative_weight_criterion_with_na.worst_scored_option()
+        assert idx == 2  # Severe, value=1.0
+        assert opt.value == 1.0
+        assert opt.na is False
+
+    def test_skips_na_options(self):
+        """NA options are excluded from the search even if they have the lowest value."""
+        criterion = Criterion(
+            name="t",
+            weight=10.0,
+            requirement="R",
+            scale_type="nominal",
+            options=[
+                {"label": "A", "value": 0.5},
+                {"label": "B", "value": 0.7},
+                # NA has the lowest value but must be skipped.
+                {"label": "N/A", "value": 0.0, "na": True},
+            ],
+        )
+        idx, opt = criterion.worst_scored_option()
+        assert idx == 0
+        assert opt.value == 0.5
+
+    def test_ties_pick_first(self):
+        """Ties at the worst value resolve to the first declared option."""
+        criterion = Criterion(
+            name="t",
+            weight=10.0,
+            requirement="R",
+            scale_type="nominal",
+            options=[
+                {"label": "A", "value": 0.3},
+                {"label": "B", "value": 0.3},
+                {"label": "C", "value": 1.0},
+            ],
+        )
+        idx, opt = criterion.worst_scored_option()
+        assert idx == 0
+        assert opt.label == "A"
+
+    def test_binary_criterion_raises(self, binary_criterion):
+        """Calling on a binary criterion is a programmer error."""
+        with pytest.raises(ValueError, match="Binary criterion"):
+            binary_criterion.worst_scored_option()
 
 
 # =============================================================================

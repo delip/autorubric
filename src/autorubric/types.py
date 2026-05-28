@@ -308,6 +308,42 @@ class Criterion(BaseModel):
         available = [opt.label for opt in self.options]
         raise ValueError(f"Label '{label}' not found. Available: {available}")
 
+    def worst_scored_option(self) -> tuple[int, CriterionOption]:
+        """Return (index, option) of the score-minimizing scored (non-NA) option.
+
+        Weight-sign aware: for non-negative weight, returns the option with the
+        lowest ``value``; for negative weight, returns the option with the
+        highest ``value`` (the worst case flips because a high ``value`` on a
+        negative-weight criterion subtracts more from the score). NA options
+        are excluded — this returns the score-minimizing *scored* option, the
+        analog of binary UNMET (for positive weight) or MET (for negative
+        weight).
+
+        Ties resolve to the first such option in declaration order
+        (deterministic, matches ``min``/``max`` semantics).
+
+        Shared by the grader's ``unknown``-error worst-case path
+        (``criterion_grader.py``) and the metrics' ``na_mode="as_unmet"`` remap
+        (``metrics/_helpers.py``) so the two layers cannot drift.
+
+        Returns:
+            Tuple of ``(index, CriterionOption)`` for the score-minimizing
+            non-NA option.
+
+        Raises:
+            ValueError: If this is a binary criterion or has no non-NA option.
+                The ``Criterion`` validator guarantees ≥2 non-NA options for
+                multi-choice criteria, so the no-non-NA case is defensive.
+        """
+        if self.options is None:
+            raise ValueError("Binary criterion has no scored options")
+        scored = [(i, opt) for i, opt in enumerate(self.options) if not opt.na]
+        if not scored:
+            raise ValueError("Criterion has no non-NA option")
+        if self.weight < 0:
+            return max(scored, key=lambda io: io[1].value)
+        return min(scored, key=lambda io: io[1].value)
+
     @model_validator(mode="after")
     def validate_options(self) -> "Criterion":
         """Validate multi-choice options if present."""
