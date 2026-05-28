@@ -232,6 +232,18 @@ class CriterionOption(BaseModel):
         return self
 
 
+# Canonical abstain option auto-injected into multi-choice criteria that lack an NA
+# option (see ``Criterion.with_guaranteed_na_option`` and ``CriterionGrader.auto_na_option``).
+# It is the structural analog of binary ``CriterionVerdict.CANNOT_ASSESS``: ``na=True`` so it
+# flows through the ``CannotAssessStrategy`` abstain path (excluded under SKIP), and
+# ``value=0.0`` (unused for NA, since ``na=True`` excludes it from scoring).
+CANONICAL_NA_OPTION = CriterionOption(
+    label="Cannot assess / not applicable",
+    value=0.0,
+    na=True,
+)
+
+
 class Criterion(BaseModel):
     """A single evaluation criterion with a weight and requirement description.
 
@@ -333,6 +345,16 @@ class Criterion(BaseModel):
         available = [opt.label for opt in self.options]
         raise ValueError(f"Label '{label}' not found. Available: {available}")
 
+    @property
+    def na_option_index(self) -> int | None:
+        """Index of the first NA option, or ``None`` if there is none.
+
+        Returns ``None`` for binary criteria (no options). This is the single
+        source for the recurring "find the (first) NA option" lookup used by the
+        grader's error/abstain path and the ensemble aggregation NA-abstain paths.
+        """
+        return next((i for i, opt in enumerate(self.options or []) if opt.na), None)
+
     def worst_option_among(self, candidate_indices: Iterable[int]) -> int:
         """Return the score-minimizing option index among ``candidate_indices``.
 
@@ -403,6 +425,34 @@ class Criterion(BaseModel):
             raise ValueError("Criterion has no non-NA option")
         idx = self.worst_option_among(scored)
         return idx, self.options[idx]
+
+    def with_guaranteed_na_option(self) -> "Criterion":
+        """Return a multi-choice criterion guaranteed to expose an NA/abstain option.
+
+        Gives the judge a first-class "cannot assess" channel analogous to binary
+        ``CriterionVerdict.CANNOT_ASSESS`` (T2-A). If the criterion already has an
+        NA option (author intent), returns ``self`` unchanged. Otherwise returns a
+        copy with a single :data:`CANONICAL_NA_OPTION` **appended at the end**
+        (highest index) so existing option indices ``0..N-1`` stay stable for
+        ground-truth alignment, shuffle-order mapping, and
+        :meth:`worst_scored_option`.
+
+        This is a pure function of the criterion (no RNG, no external state), so the
+        grader and the metrics layer can both reconstruct the identical effective
+        option set without drifting.
+
+        Returns:
+            ``self`` when an NA option is already present, else a new ``Criterion``
+            with the canonical NA option appended.
+
+        Raises:
+            ValueError: If this is a binary criterion (no options).
+        """
+        if self.options is None:
+            raise ValueError("Binary criterion has no options")
+        if self.na_option_index is not None:
+            return self
+        return self.model_copy(update={"options": [*self.options, CANONICAL_NA_OPTION]})
 
     @model_validator(mode="after")
     def validate_options(self) -> "Criterion":

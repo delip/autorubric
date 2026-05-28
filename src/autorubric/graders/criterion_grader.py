@@ -229,6 +229,8 @@ class CriterionGrader(Grader):
         cannot_assess_config: CannotAssessConfig | None = None,
         # Position bias mitigation
         shuffle_options: bool = True,
+        # Multi-choice abstain channel
+        auto_na_option: bool = True,
         # Reproducibility
         seed: int | None = None,
         # Structured output override for binary criteria
@@ -259,6 +261,12 @@ class CriterionGrader(Grader):
                 presented to the LLM to mitigate position bias. Each judge/call sees a
                 different random order, and responses are mapped back to original indices.
                 Disable for deterministic behavior in tests.
+            auto_na_option: If True (default), auto-inject a canonical NA / "cannot assess"
+                option into any multi-choice criterion that lacks one, giving the judge a
+                first-class abstain channel analogous to binary CANNOT_ASSESS. The injected
+                option is appended at the end (highest index) so existing option indices are
+                preserved. Set False for forced-choice classification (the judge must pick a
+                scored option). Never strips an author-supplied NA option — author intent wins.
             seed: Master seed for all non-LLM randomness (option shuffling, few-shot
                 example selection). Auto-generated when None so that randomness is always
                 pinned and reproducible. Inspect via the ``seed`` property after construction.
@@ -291,6 +299,7 @@ class CriterionGrader(Grader):
         self._training_data = training_data
         self._cannot_assess_config = cannot_assess_config or CannotAssessConfig()
         self._shuffle_options = shuffle_options
+        self._auto_na_option = auto_na_option
         self._seed = seed if seed is not None else random.randint(0, 2**31 - 1)
 
         # Coordinate few-shot seed with master seed when unset
@@ -794,26 +803,35 @@ class CriterionGrader(Grader):
                     na=False,
                 )
             else:
-                # Infrastructure/parse: abstain (excluded under SKIP). Point at the NA
-                # option if one exists, else the lowest-value option, then force
-                # na=True with zero contribution. (The na=True-vs-non-NA-option
-                # contradiction when no NA option exists is tracked by T2-B.)
-                abstain_idx = 0
-                abstain_value = options[0].value
-                for i, opt in enumerate(options):
-                    if opt.na:
-                        abstain_idx = i
-                        break
-                    if opt.value < abstain_value:
-                        abstain_idx = i
-                        abstain_value = opt.value
-                abstain_option = options[abstain_idx]
-                multi_choice_verdict = MultiChoiceVerdict(
-                    selected_index=abstain_idx,
-                    selected_label=abstain_option.label,
-                    value=0.0,
-                    na=True,
-                )
+                # Infrastructure/parse: abstain (excluded under SKIP). Prefer a genuine
+                # NA option — guaranteed when auto_na_option is on — so the abstain verdict
+                # points at a real na=True option (resolves the T2-B contradiction for the
+                # default case). Only with no NA option (forced-choice + no author NA) fall
+                # back to the legacy lowest-value option forced to na=True; that residual
+                # na=True-against-a-scored-option case remains T2-B.
+                na_idx = criterion.na_option_index
+                if na_idx is not None:
+                    na_option = options[na_idx]
+                    multi_choice_verdict = MultiChoiceVerdict(
+                        selected_index=na_idx,
+                        selected_label=na_option.label,
+                        value=na_option.value,
+                        na=True,
+                    )
+                else:
+                    abstain_idx = 0
+                    abstain_value = options[0].value
+                    for i, opt in enumerate(options):
+                        if opt.value < abstain_value:
+                            abstain_idx = i
+                            abstain_value = opt.value
+                    abstain_option = options[abstain_idx]
+                    multi_choice_verdict = MultiChoiceVerdict(
+                        selected_index=abstain_idx,
+                        selected_label=abstain_option.label,
+                        value=0.0,
+                        na=True,
+                    )
 
             report = CriterionReport(
                 requirement=criterion.requirement,
@@ -856,6 +874,20 @@ class CriterionGrader(Grader):
     # Judge and Aggregate (Grader Interface)
     # =========================================================================
 
+    def _effective_criterion(self, criterion: Criterion) -> Criterion:
+        """Return the criterion as actually evaluated.
+
+        When ``auto_na_option`` is enabled, multi-choice criteria are guaranteed an
+        NA/"cannot assess" option (the abstain channel, T2-A) via
+        :meth:`Criterion.with_guaranteed_na_option`. Binary criteria and the
+        ``auto_na_option=False`` case are returned unchanged. Pure function of the
+        criterion, so prompt building, verdict mapping, scoring, ensemble aggregation,
+        and the metrics layer can all reconstruct the identical option set.
+        """
+        if self._auto_na_option and criterion.is_multi_choice:
+            return criterion.with_guaranteed_na_option()
+        return criterion
+
     async def judge(
         self,
         to_grade: str,
@@ -864,8 +896,14 @@ class CriterionGrader(Grader):
         reference_submission: str | None = None,
     ) -> list[JudgeCriterionResults]:
         """Judge all criteria with all judges (parallel across judges)."""
+        # Normalize once to the effective rubric (abstain channel guaranteed for
+        # multi-choice under auto_na_option). Same length/order, so criterion_idx — and
+        # thus the shuffle RNG key — stays aligned; the user's rubric is never mutated.
+        effective_rubric = [self._effective_criterion(c) for c in rubric]
         tasks = [
-            self._judge_all_criteria_for_judge(judge, rubric, to_grade, query, reference_submission)
+            self._judge_all_criteria_for_judge(
+                judge, effective_rubric, to_grade, query, reference_submission
+            )
             for judge in self._judges
         ]
         return list(await asyncio.gather(*tasks))
@@ -1122,12 +1160,12 @@ class CriterionGrader(Grader):
         if not votes:
             # Return NA verdict if no votes
             if criterion.options:
-                na_opt = next((o for o in criterion.options if o.na), None)
-                if na_opt:
-                    idx = criterion.options.index(na_opt)
+                na_idx = criterion.na_option_index
+                if na_idx is not None:
+                    na_opt = criterion.options[na_idx]
                     return (
                         AggregatedMultiChoiceVerdict(
-                            selected_index=idx,
+                            selected_index=na_idx,
                             selected_label=na_opt.label,
                             value=na_opt.value,
                             na=True,
@@ -1331,7 +1369,7 @@ class CriterionGrader(Grader):
                 # Judges disagree -> abstain via the NA option if one exists (na=True flows
                 # through the SKIP scoring path). Never set na=True against a real option
                 # (T2-B). With no NA option, fall back to mode and warn.
-                na_idx = next((i for i, o in enumerate(options) if o.na), None)
+                na_idx = criterion.na_option_index
                 if na_idx is not None:
                     most_common_idx = na_idx
                 else:

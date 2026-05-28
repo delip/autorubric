@@ -164,6 +164,9 @@ def _serialize_grader_config(grader: Grader) -> dict[str, Any]:
         shuffle_opts = getattr(grader, "_shuffle_options", None)
         if isinstance(shuffle_opts, bool):
             config["shuffle_options"] = shuffle_opts
+        auto_na = getattr(grader, "_auto_na_option", None)
+        if isinstance(auto_na, bool):
+            config["auto_na_option"] = auto_na
     except (TypeError, AttributeError):
         pass
 

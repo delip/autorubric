@@ -1078,6 +1078,22 @@ def compute_metrics(
     if n_items == 0:
         raise ValueError("No valid items with ground truth found")
 
+    # Reconstruct the effective criterion for any multi-choice criterion whose graded
+    # reports used an auto-injected NA option (T2-A). The grader appends that NA at index
+    # N = len(author.options) — out of range for the author rubric used above. We normalize
+    # only when an out-of-range prediction is actually observed (the appended NA), so
+    # forced-choice runs (auto_na_option=False) are unaffected and never gain a spurious
+    # NA column. ``with_guaranteed_na_option`` is the same pure helper the grader uses, so
+    # the two layers cannot drift.
+    effective_criteria = list(criteria)
+    for c_idx in range(n_criteria):
+        if criterion_types[c_idx] == "binary":
+            continue
+        author_c = criteria[c_idx]
+        n_author = len(author_c.options) if author_c.options else 0
+        if any(isinstance(v, int) and v >= n_author for v in per_criterion_pred[c_idx]):
+            effective_criteria[c_idx] = author_c.with_guaranteed_na_option()
+
     # Compute per-criterion metrics by type
     per_criterion: list[CriterionMetricsUnion] = []
     criterion_kappas: list[float] = []
@@ -1188,14 +1204,16 @@ def compute_metrics(
             )
 
         elif c_type == "ordinal":
-            # Ordinal multi-choice criterion metrics
+            # Ordinal multi-choice criterion metrics. Use the effective criterion so a
+            # predicted auto-injected NA index is recognized (T2-A).
+            eff_criterion = effective_criteria[c_idx]
             pred_indices = [v for v in pred_data if isinstance(v, int)]
             true_indices = [v for v in true_data if isinstance(v, int)]
 
             # Filter NA options. na_agree is unused here (the NAStats block below
             # computes kappa on the {NA, not-NA} dichotomy from per-criterion data).
             pred_filtered, true_filtered, _na_agree, na_fp, na_fn = filter_na_multi_choice(
-                pred_indices, true_indices, criterion, mode=na_mode
+                pred_indices, true_indices, eff_criterion, mode=na_mode
             )
 
             # Track NA stats (FP/FN feed the diagnostic counts on NAStats)
@@ -1205,7 +1223,7 @@ def compute_metrics(
             metrics = _compute_ordinal_criterion_metrics(
                 pred_filtered,
                 true_filtered,
-                criterion,
+                eff_criterion,
                 c_idx,
                 fleiss_matrix=(fleiss_rows.get(c_idx) if eligible else None),
                 krippendorff_alpha=(krippendorff_alphas.get(c_idx) if eligible else None),
@@ -1216,14 +1234,16 @@ def compute_metrics(
             criterion_kappas.append(metrics.weighted_kappa)
 
         else:  # nominal
-            # Nominal multi-choice criterion metrics
+            # Nominal multi-choice criterion metrics. Use the effective criterion so a
+            # predicted auto-injected NA index is recognized (T2-A).
+            eff_criterion = effective_criteria[c_idx]
             pred_indices = [v for v in pred_data if isinstance(v, int)]
             true_indices = [v for v in true_data if isinstance(v, int)]
 
             # Filter NA options. na_agree is unused here (the NAStats block below
             # computes kappa on the {NA, not-NA} dichotomy from per-criterion data).
             pred_filtered, true_filtered, _na_agree, na_fp, na_fn = filter_na_multi_choice(
-                pred_indices, true_indices, criterion, mode=na_mode
+                pred_indices, true_indices, eff_criterion, mode=na_mode
             )
 
             # Track NA stats (FP/FN feed the diagnostic counts on NAStats)
@@ -1233,7 +1253,7 @@ def compute_metrics(
             metrics = _compute_nominal_criterion_metrics(
                 pred_filtered,
                 true_filtered,
-                criterion,
+                eff_criterion,
                 c_idx,
                 fleiss_matrix=(fleiss_rows.get(c_idx) if eligible else None),
                 krippendorff_alpha=(krippendorff_alphas.get(c_idx) if eligible else None),
@@ -1331,7 +1351,7 @@ def compute_metrics(
         for c_idx in range(n_criteria):
             if criterion_types[c_idx] == "binary":
                 continue
-            criterion = criteria[c_idx]
+            criterion = effective_criteria[c_idx]
             na_indices = {i for i, opt in enumerate(criterion.options) if opt.na}
             if not na_indices:
                 continue

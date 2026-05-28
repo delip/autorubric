@@ -893,6 +893,7 @@ class TestManifestSeedPersistence:
         mock_grader = create_mock_grader()
         mock_grader._seed = 42
         mock_grader._shuffle_options = True
+        mock_grader._auto_na_option = False
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             config = EvalConfig(
@@ -912,3 +913,4 @@ class TestManifestSeedPersistence:
 
             assert manifest["grader_config"]["master_seed"] == 42
             assert manifest["grader_config"]["shuffle_options"] is True
+            assert manifest["grader_config"]["auto_na_option"] is False

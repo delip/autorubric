@@ -554,6 +554,111 @@ class TestCriterionWorstOptionAmong:
             assert idx == criterion.worst_option_among(non_na)
 
 
+class TestCriterionNaOptionIndex:
+    """Tests for the ``Criterion.na_option_index`` property (first NA index, else None)."""
+
+    def test_returns_first_na_index(self, nominal_criterion_with_na):
+        """Returns the index of the (first) NA option."""
+        assert nominal_criterion_with_na.na_option_index == 3
+
+    def test_none_when_no_na_option(self, ordinal_criterion):
+        """Multi-choice criterion without an NA option → None."""
+        assert ordinal_criterion.na_option_index is None
+
+    def test_none_for_binary(self, binary_criterion):
+        """Binary criterion (no options) → None (safe, no raise)."""
+        assert binary_criterion.na_option_index is None
+
+    def test_returns_first_when_multiple_na(self):
+        """With multiple NA options, returns the lowest index."""
+        criterion = Criterion(
+            name="t",
+            weight=10.0,
+            requirement="R",
+            scale_type="nominal",
+            options=[
+                {"label": "A", "value": 0.5},
+                {"label": "B", "value": 1.0},
+                {"label": "N/A one", "value": 0.0, "na": True},
+                {"label": "N/A two", "value": 0.0, "na": True},
+            ],
+        )
+        assert criterion.na_option_index == 2
+
+
+class TestCriterionWithGuaranteedNAOption:
+    """Tests for ``Criterion.with_guaranteed_na_option`` — the auto-inject helper (T2-A).
+
+    Appends a single canonical NA option when the criterion lacks one (so the judge
+    always has an abstain channel, the analog of binary CANNOT_ASSESS); returns self
+    unchanged when an author NA option already exists.
+    """
+
+    def test_appends_canonical_na_when_absent(self, ordinal_criterion):
+        """No NA option → a canonical NA option is appended at the END."""
+        from autorubric.types import CANONICAL_NA_OPTION
+
+        result = ordinal_criterion.with_guaranteed_na_option()
+
+        # One more option, appended at the highest index.
+        assert len(result.options) == len(ordinal_criterion.options) + 1
+        injected = result.options[-1]
+        assert injected.na is True
+        assert injected.value == 0.0
+        assert injected == CANONICAL_NA_OPTION
+
+    def test_preserves_original_indices(self, ordinal_criterion):
+        """Indices 0..N-1 (labels and values) are unchanged by the append."""
+        result = ordinal_criterion.with_guaranteed_na_option()
+        for i, opt in enumerate(ordinal_criterion.options):
+            assert result.options[i].label == opt.label
+            assert result.options[i].value == opt.value
+            assert result.options[i].na == opt.na
+
+    def test_does_not_mutate_original(self, ordinal_criterion):
+        """The author criterion (frozen) is never mutated."""
+        original_len = len(ordinal_criterion.options)
+        ordinal_criterion.with_guaranteed_na_option()
+        assert len(ordinal_criterion.options) == original_len
+        assert ordinal_criterion.na_option_index is None
+
+    def test_idempotent_when_author_na_present(self, nominal_criterion_with_na):
+        """Author already supplied an NA option → returns self unchanged (no 2nd NA)."""
+        result = nominal_criterion_with_na.with_guaranteed_na_option()
+        assert result is nominal_criterion_with_na
+        na_count = sum(1 for o in result.options if o.na)
+        assert na_count == 1
+
+    def test_idempotent_when_author_na_not_last(self):
+        """Author NA in a non-final position is respected — no canonical NA appended."""
+        criterion = Criterion(
+            name="t",
+            weight=10.0,
+            requirement="R",
+            scale_type="nominal",
+            options=[
+                {"label": "N/A", "value": 0.0, "na": True},  # NA first
+                {"label": "A", "value": 0.5},
+                {"label": "B", "value": 1.0},
+            ],
+        )
+        result = criterion.with_guaranteed_na_option()
+        assert result is criterion
+        assert sum(1 for o in result.options if o.na) == 1
+
+    def test_binary_raises(self, binary_criterion):
+        """Calling on a binary criterion is a programmer error."""
+        with pytest.raises(ValueError, match="Binary criterion"):
+            binary_criterion.with_guaranteed_na_option()
+
+    def test_result_passes_validator(self, ordinal_criterion):
+        """Appending an NA option keeps ≥2 non-NA options (validator still passes)."""
+        result = ordinal_criterion.with_guaranteed_na_option()
+        non_na = [o for o in result.options if not o.na]
+        assert len(non_na) == len(ordinal_criterion.options)  # non-NA count unchanged
+        assert len(non_na) >= 2
+
+
 # =============================================================================
 # Test get_option_value and is_na_option
 # =============================================================================
@@ -1256,3 +1361,106 @@ class TestNaKappa:
         assert metrics.na_stats.na_count_pred == 3
         assert metrics.na_stats.na_false_positive == 1
         assert metrics.na_stats.na_false_negative == 1
+
+
+def _make_effective_report(selected_index: int, effective_criterion: Criterion) -> EvaluationReport:
+    """A single-criterion report whose criterion carries the EFFECTIVE options.
+
+    Models what the grader produces with ``auto_na_option`` on: the report's criterion
+    has the injected NA appended at the end, and the verdict may point at it (an index
+    out of range for the author rubric).
+    """
+    option = effective_criterion.options[selected_index]
+    return EvaluationReport(
+        score=0.0 if option.na else float(option.value),
+        raw_score=0.0,
+        report=[
+            CriterionReport(
+                weight=effective_criterion.weight,
+                requirement=effective_criterion.requirement,
+                name=effective_criterion.name,
+                options=effective_criterion.options,
+                scale_type=effective_criterion.scale_type,
+                verdict=None,
+                reason="Test",
+                multi_choice_verdict=MultiChoiceVerdict(
+                    selected_index=selected_index,
+                    selected_label=option.label,
+                    value=float(option.value),
+                    na=option.na,
+                ),
+            ),
+        ],
+    )
+
+
+class TestMetricsAutoInjectedNA:
+    """compute_metrics must interpret predicted auto-injected NA indices (T2-A).
+
+    The grader appends the NA option at index ``N = len(author.options)`` (out of range
+    for the author rubric used by the metrics layer). Metrics must reconstruct the same
+    effective criterion so the prediction is recognized as NA rather than crashing.
+    """
+
+    def test_handles_predicted_injected_na(self, ordinal_criterion):
+        """A predicted index == N (injected NA) is recognized as NA, not a crash."""
+        effective = ordinal_criterion.with_guaranteed_na_option()
+        na_index = len(ordinal_criterion.options)  # injected NA appended at the end
+
+        dataset = RubricDataset(prompt="Test", rubric=Rubric([ordinal_criterion]))
+        # Two abstain (predicted NA); three scored pairs (with variation, so kappa is
+        # well-defined and no degenerate-confusion warning is emitted).
+        gt_labels = [
+            "Very satisfied",
+            "Dissatisfied",
+            "Satisfied",
+            "Very satisfied",
+            "Very dissatisfied",
+        ]
+        preds = [na_index, na_index, 2, 3, 0]
+        for i, label in enumerate(gt_labels):
+            dataset.add_item(submission=f"S{i}", description=f"D{i}", ground_truth=[label])
+
+        item_results = [
+            ItemResult(
+                item_idx=i,
+                item=dataset.items[i],
+                report=_make_effective_report(preds[i], effective),
+                duration_seconds=0.1,
+            )
+            for i in range(len(gt_labels))
+        ]
+        eval_result = _wrap_eval_result(item_results)
+
+        metrics = compute_metrics(eval_result, dataset)  # must not raise
+
+        assert metrics.na_stats is not None
+        # Two predictions abstained (NA); ground truth never NA.
+        assert metrics.na_stats.na_count_pred == 2
+        assert metrics.na_stats.na_count_true == 0
+        assert metrics.na_stats.na_false_positive == 2
+
+    def test_as_category_refused_for_autoinjected_ordinal(self, ordinal_criterion):
+        """na_mode='as_category' is refused once an ordinal criterion gains an NA option."""
+        effective = ordinal_criterion.with_guaranteed_na_option()
+        na_index = len(ordinal_criterion.options)
+
+        dataset = RubricDataset(prompt="Test", rubric=Rubric([ordinal_criterion]))
+        gt_labels = ["Very satisfied", "Dissatisfied"]
+        preds = [na_index, 2]
+        for i, label in enumerate(gt_labels):
+            dataset.add_item(submission=f"S{i}", description=f"D{i}", ground_truth=[label])
+
+        item_results = [
+            ItemResult(
+                item_idx=i,
+                item=dataset.items[i],
+                report=_make_effective_report(preds[i], effective),
+                duration_seconds=0.1,
+            )
+            for i in range(len(gt_labels))
+        ]
+        eval_result = _wrap_eval_result(item_results)
+
+        with pytest.raises(ValueError, match="ordinal|as_category"):
+            compute_metrics(eval_result, dataset, na_mode="as_category")
