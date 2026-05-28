@@ -14,6 +14,20 @@ from autorubric import (
 from autorubric.dataset import RubricDataset
 from autorubric.types import MultiChoiceJudgeVote
 
+
+def _mcvote(judge_id, selected_index, selected_label, value, weight=1.0, na=False):
+    """Concise MultiChoiceJudgeVote builder for aggregation tests."""
+    return MultiChoiceJudgeVote(
+        judge_id=judge_id,
+        selected_index=selected_index,
+        selected_label=selected_label,
+        value=value,
+        reason="",
+        weight=weight,
+        na=na,
+    )
+
+
 # =============================================================================
 # CriterionOption Tests
 # =============================================================================
@@ -398,35 +412,50 @@ class TestMultiChoiceAggregation:
     """Tests for multi-choice aggregation functions."""
 
     @pytest.fixture
-    def ordinal_options(self):
-        """Options for ordinal aggregation tests."""
-        return [
-            CriterionOption(label="1", value=0.0),
-            CriterionOption(label="2", value=0.33),
-            CriterionOption(label="3", value=0.67),
-            CriterionOption(label="4", value=1.0),
-        ]
+    def ordinal_criterion(self):
+        """Ordinal criterion (positive weight) for aggregation tests."""
+        return Criterion(
+            requirement="How satisfied?",
+            scale_type="ordinal",
+            weight=10.0,
+            options=[
+                CriterionOption(label="1", value=0.0),
+                CriterionOption(label="2", value=0.33),
+                CriterionOption(label="3", value=0.67),
+                CriterionOption(label="4", value=1.0),
+            ],
+        )
 
     @pytest.fixture
-    def nominal_options(self):
-        """Options for nominal aggregation tests."""
-        return [
-            CriterionOption(label="Too few", value=0.0),
-            CriterionOption(label="Too many", value=0.0),
-            CriterionOption(label="Just right", value=1.0),
-        ]
+    def nominal_criterion(self):
+        """Nominal criterion (positive weight) for aggregation tests."""
+        return Criterion(
+            requirement="Length?",
+            scale_type="nominal",
+            weight=5.0,
+            options=[
+                CriterionOption(label="Too few", value=0.0),
+                CriterionOption(label="Too many", value=0.0),
+                CriterionOption(label="Just right", value=1.0),
+            ],
+        )
 
     @pytest.fixture
-    def nominal_options_with_na(self):
-        """Nominal options including an explicit NA option (index 3)."""
-        return [
-            CriterionOption(label="Too few", value=0.0),
-            CriterionOption(label="Too many", value=0.0),
-            CriterionOption(label="Just right", value=1.0),
-            CriterionOption(label="NA - not applicable", value=0.0, na=True),
-        ]
+    def nominal_criterion_with_na(self):
+        """Nominal criterion with an explicit NA option (index 3)."""
+        return Criterion(
+            requirement="Length?",
+            scale_type="nominal",
+            weight=5.0,
+            options=[
+                CriterionOption(label="Too few", value=0.0),
+                CriterionOption(label="Too many", value=0.0),
+                CriterionOption(label="Just right", value=1.0),
+                CriterionOption(label="NA - not applicable", value=0.0, na=True),
+            ],
+        )
 
-    def test_ordinal_mean_aggregation(self, ordinal_options):
+    def test_ordinal_mean_aggregation(self, ordinal_criterion):
         """Mean aggregation snaps to nearest option value."""
         from autorubric import LLMConfig
         from autorubric.graders.criterion_grader import CriterionGrader
@@ -462,7 +491,7 @@ class TestMultiChoiceAggregation:
             ),
         ]
 
-        result = grader._aggregate_ordinal_votes(votes, ordinal_options, "mean")
+        result = grader._aggregate_ordinal_votes(votes, ordinal_criterion, "mean")
 
         # Mean of [0.33, 0.67, 1.0] = 0.667
         # Nearest option: "3" with value 0.67
@@ -471,7 +500,7 @@ class TestMultiChoiceAggregation:
         assert result.value == 0.67
         assert abs(result.aggregated_value - 0.667) < 0.01
 
-    def test_nominal_mode_aggregation(self, nominal_options):
+    def test_nominal_mode_aggregation(self, nominal_criterion):
         """Mode aggregation picks most common selection."""
         from autorubric import LLMConfig
         from autorubric.graders.criterion_grader import CriterionGrader
@@ -505,14 +534,14 @@ class TestMultiChoiceAggregation:
             ),
         ]
 
-        result = grader._aggregate_nominal_votes(votes, nominal_options, "mode")
+        result = grader._aggregate_nominal_votes(votes, nominal_criterion, "mode")
 
         # Mode: "Just right" appears twice
         assert result.selected_index == 2
         assert result.selected_label == "Just right"
         assert result.value == 1.0
 
-    def test_ordinal_min_picks_lowest_selected_option(self, ordinal_options):
+    def test_ordinal_min_picks_lowest_selected_option(self, ordinal_criterion):
         """Ordinal 'min' returns the lowest-value option any judge selected."""
         from autorubric import LLMConfig
         from autorubric.graders.criterion_grader import CriterionGrader
@@ -534,7 +563,7 @@ class TestMultiChoiceAggregation:
             ),
         ]
 
-        result = grader._aggregate_ordinal_votes(votes, ordinal_options, "min")
+        result = grader._aggregate_ordinal_votes(votes, ordinal_criterion, "min")
 
         # Conservative: lowest selected value (0.67), not the mean (which would snap to 1.0)
         assert result.selected_index == 2
@@ -543,7 +572,7 @@ class TestMultiChoiceAggregation:
         assert result.aggregated_value == 0.67
         assert result.na is False
 
-    def test_ordinal_max_picks_highest_selected_option(self, ordinal_options):
+    def test_ordinal_max_picks_highest_selected_option(self, ordinal_criterion):
         """Ordinal 'max' returns the highest-value option any judge selected."""
         from autorubric import LLMConfig
         from autorubric.graders.criterion_grader import CriterionGrader
@@ -565,7 +594,7 @@ class TestMultiChoiceAggregation:
             ),
         ]
 
-        result = grader._aggregate_ordinal_votes(votes, ordinal_options, "max")
+        result = grader._aggregate_ordinal_votes(votes, ordinal_criterion, "max")
 
         assert result.selected_index == 3
         assert result.selected_label == "4"
@@ -580,12 +609,17 @@ class TestMultiChoiceAggregation:
         grader = CriterionGrader(llm_config=LLMConfig(model="openai/gpt-4"))
 
         # Two distinct options share the same value (0.5).
-        options = [
-            CriterionOption(label="a", value=0.0),
-            CriterionOption(label="b", value=0.5),
-            CriterionOption(label="c", value=0.5),
-            CriterionOption(label="d", value=1.0),
-        ]
+        criterion = Criterion(
+            requirement="r",
+            scale_type="ordinal",
+            weight=10.0,
+            options=[
+                CriterionOption(label="a", value=0.0),
+                CriterionOption(label="b", value=0.5),
+                CriterionOption(label="c", value=0.5),
+                CriterionOption(label="d", value=1.0),
+            ],
+        )
         # Votes select the two tied options (idx 1, 2) plus the top option (idx 3).
         votes = [
             MultiChoiceJudgeVote(
@@ -600,7 +634,7 @@ class TestMultiChoiceAggregation:
         ]
 
         # min value is 0.5, shared by idx 1 and 2 -> lowest index (1) wins.
-        min_result = grader._aggregate_ordinal_votes(votes, options, "min")
+        min_result = grader._aggregate_ordinal_votes(votes, criterion, "min")
         assert min_result.selected_index == 1
 
         # For max, build a set whose max value is shared by idx 1 and 2.
@@ -615,10 +649,172 @@ class TestMultiChoiceAggregation:
                 judge_id="j3", selected_index=0, selected_label="a", value=0.0, reason=""
             ),
         ]
-        max_result = grader._aggregate_ordinal_votes(votes_max, options, "max")
+        max_result = grader._aggregate_ordinal_votes(votes_max, criterion, "max")
         assert max_result.selected_index == 1
 
-    def test_nominal_unanimous_all_agree_selects_that_option(self, nominal_options):
+    # -------------------------------------------------------------------------
+    # T3-B: deterministic, weight-sign-aware tie-breaking
+    #
+    # mode / weighted_mode count/weight ties and mean/median snap equidistant ties all
+    # resolve to the score-minimizing option by weight sign (lowest value for weight >= 0,
+    # highest for weight < 0; lowest index on a value tie) via Criterion.worst_option_among.
+    # Each case orders votes so the OLD first-seen / lowest-index behavior would pick the
+    # OTHER option, pinning both the new rule and order-independence.
+    # -------------------------------------------------------------------------
+
+    def _make_ordinal(self, weight):
+        return Criterion(
+            requirement="r",
+            scale_type="ordinal",
+            weight=weight,
+            options=[
+                CriterionOption(label="1", value=0.0),
+                CriterionOption(label="2", value=0.33),
+                CriterionOption(label="3", value=0.67),
+                CriterionOption(label="4", value=1.0),
+            ],
+        )
+
+    def _make_nominal(self, weight):
+        # Non-trivial values so worst-by-value is unambiguous: A=1.0, B=0.0, C=0.5.
+        return Criterion(
+            requirement="r",
+            scale_type="nominal",
+            weight=weight,
+            options=[
+                CriterionOption(label="A", value=1.0),
+                CriterionOption(label="B", value=0.0),
+                CriterionOption(label="C", value=0.5),
+            ],
+        )
+
+    def test_ordinal_mode_count_tie_breaks_to_worst_positive_weight(self):
+        """Mode count-tie, positive weight → lowest-value tied option (not first-seen)."""
+        from autorubric import LLMConfig
+        from autorubric.graders.criterion_grader import CriterionGrader
+
+        grader = CriterionGrader(llm_config=LLMConfig(model="openai/gpt-4"))
+        criterion = self._make_ordinal(weight=10.0)
+        # 2 votes idx 3 (1.0) then 2 votes idx 1 (0.33): count tie {1, 3}, high-value first.
+        votes = [
+            _mcvote("j1", 3, "4", 1.0),
+            _mcvote("j2", 3, "4", 1.0),
+            _mcvote("j3", 1, "2", 0.33),
+            _mcvote("j4", 1, "2", 0.33),
+        ]
+        result = grader._aggregate_ordinal_votes(votes, criterion, "mode")
+        assert result.selected_index == 1
+
+    def test_ordinal_mode_count_tie_breaks_to_worst_negative_weight(self):
+        """Mode count-tie, negative weight → highest-value tied option."""
+        from autorubric import LLMConfig
+        from autorubric.graders.criterion_grader import CriterionGrader
+
+        grader = CriterionGrader(llm_config=LLMConfig(model="openai/gpt-4"))
+        criterion = self._make_ordinal(weight=-10.0)
+        votes = [
+            _mcvote("j1", 3, "4", 1.0),
+            _mcvote("j2", 3, "4", 1.0),
+            _mcvote("j3", 1, "2", 0.33),
+            _mcvote("j4", 1, "2", 0.33),
+        ]
+        result = grader._aggregate_ordinal_votes(votes, criterion, "mode")
+        assert result.selected_index == 3
+
+    def test_ordinal_snap_equidistant_tie_breaks_to_worst_negative_weight(self):
+        """Mean snap equidistant-tie, negative weight → higher-value option."""
+        from autorubric import LLMConfig
+        from autorubric.graders.criterion_grader import CriterionGrader
+
+        grader = CriterionGrader(llm_config=LLMConfig(model="openai/gpt-4"))
+        criterion = Criterion(
+            requirement="r",
+            scale_type="ordinal",
+            weight=-10.0,
+            options=[
+                CriterionOption(label="a", value=0.0),
+                CriterionOption(label="b", value=0.4),
+                CriterionOption(label="c", value=0.6),
+                CriterionOption(label="d", value=1.0),
+            ],
+        )
+        # mean([0.4, 0.6]) = 0.5, equidistant from idx 1 (0.4) and idx 2 (0.6).
+        votes = [_mcvote("j1", 1, "b", 0.4), _mcvote("j2", 2, "c", 0.6)]
+        result = grader._aggregate_ordinal_votes(votes, criterion, "mean")
+        # Negative weight → worst is the higher-value option (idx 2); old snap picked idx 1.
+        assert result.selected_index == 2
+
+    def test_ordinal_snap_equidistant_tie_is_value_based_not_index_based(self):
+        """Snap tie is resolved by value (worst), not by lowest index."""
+        from autorubric import LLMConfig
+        from autorubric.graders.criterion_grader import CriterionGrader
+
+        grader = CriterionGrader(llm_config=LLMConfig(model="openai/gpt-4"))
+        # Non-monotonic values: lowest value (0.4) sits at the HIGHER index (1).
+        criterion = Criterion(
+            requirement="r",
+            scale_type="ordinal",
+            weight=10.0,
+            options=[
+                CriterionOption(label="a", value=0.6),
+                CriterionOption(label="b", value=0.4),
+                CriterionOption(label="c", value=1.0),
+            ],
+        )
+        votes = [_mcvote("j1", 0, "a", 0.6), _mcvote("j2", 1, "b", 0.4)]  # mean 0.5
+        result = grader._aggregate_ordinal_votes(votes, criterion, "mean")
+        # Positive weight → worst is the lower-value option (idx 1); old snap picked idx 0.
+        assert result.selected_index == 1
+
+    def test_nominal_mode_count_tie_breaks_to_worst_positive_weight(self):
+        """Nominal mode count-tie, positive weight → lowest-value tied option."""
+        from autorubric import LLMConfig
+        from autorubric.graders.criterion_grader import CriterionGrader
+
+        grader = CriterionGrader(llm_config=LLMConfig(model="openai/gpt-4"))
+        criterion = self._make_nominal(weight=5.0)
+        # 2 votes idx 0 (A, 1.0) then 2 votes idx 1 (B, 0.0): count tie {0, 1}, high first.
+        votes = [
+            _mcvote("j1", 0, "A", 1.0),
+            _mcvote("j2", 0, "A", 1.0),
+            _mcvote("j3", 1, "B", 0.0),
+            _mcvote("j4", 1, "B", 0.0),
+        ]
+        result = grader._aggregate_nominal_votes(votes, criterion, "mode")
+        assert result.selected_index == 1
+
+    def test_nominal_mode_count_tie_breaks_to_worst_negative_weight(self):
+        """Nominal mode count-tie, negative weight → highest-value tied option."""
+        from autorubric import LLMConfig
+        from autorubric.graders.criterion_grader import CriterionGrader
+
+        grader = CriterionGrader(llm_config=LLMConfig(model="openai/gpt-4"))
+        criterion = self._make_nominal(weight=-5.0)
+        votes = [
+            _mcvote("j1", 0, "A", 1.0),
+            _mcvote("j2", 0, "A", 1.0),
+            _mcvote("j3", 1, "B", 0.0),
+            _mcvote("j4", 1, "B", 0.0),
+        ]
+        result = grader._aggregate_nominal_votes(votes, criterion, "mode")
+        assert result.selected_index == 0
+
+    def test_nominal_weighted_mode_weight_tie_breaks_to_worst(self):
+        """Nominal weighted_mode weight-tie → lowest-value tied option (not first-seen)."""
+        from autorubric import LLMConfig
+        from autorubric.graders.criterion_grader import CriterionGrader
+
+        grader = CriterionGrader(llm_config=LLMConfig(model="openai/gpt-4"))
+        criterion = self._make_nominal(weight=5.0)
+        # Equal summed weight on idx 0 (A, 1.0) and idx 1 (B, 0.0); idx 0 seen first.
+        votes = [
+            _mcvote("j1", 0, "A", 1.0, weight=1.0),
+            _mcvote("j2", 1, "B", 0.0, weight=1.0),
+        ]
+        result = grader._aggregate_nominal_votes(votes, criterion, "weighted_mode")
+        assert result.selected_index == 1
+
+    def test_nominal_unanimous_all_agree_selects_that_option(self, nominal_criterion):
         """Nominal 'unanimous' returns the agreed option when all judges concur."""
         from autorubric import LLMConfig
         from autorubric.graders.criterion_grader import CriterionGrader
@@ -639,13 +835,13 @@ class TestMultiChoiceAggregation:
             for i in range(3)
         ]
 
-        result = grader._aggregate_nominal_votes(votes, nominal_options, "unanimous")
+        result = grader._aggregate_nominal_votes(votes, nominal_criterion, "unanimous")
 
         assert result.selected_index == 2
         assert result.selected_label == "Just right"
         assert result.na is False
 
-    def test_nominal_unanimous_disagreement_with_na_abstains(self, nominal_options_with_na):
+    def test_nominal_unanimous_disagreement_with_na_abstains(self, nominal_criterion_with_na):
         """Nominal 'unanimous' abstains via the NA option when judges disagree."""
         from autorubric import LLMConfig
         from autorubric.graders.criterion_grader import CriterionGrader
@@ -667,7 +863,7 @@ class TestMultiChoiceAggregation:
             ),
         ]
 
-        result = grader._aggregate_nominal_votes(votes, nominal_options_with_na, "unanimous")
+        result = grader._aggregate_nominal_votes(votes, nominal_criterion_with_na, "unanimous")
 
         # No consensus -> abstain via the NA option (index 3), not the mode.
         assert result.na is True
@@ -675,7 +871,7 @@ class TestMultiChoiceAggregation:
         assert result.selected_label == "NA - not applicable"
 
     def test_nominal_unanimous_disagreement_without_na_falls_back_to_mode_and_warns(
-        self, nominal_options, caplog
+        self, nominal_criterion, caplog
     ):
         """Without an NA option, disagreeing 'unanimous' falls back to mode and warns."""
         import logging
@@ -701,14 +897,14 @@ class TestMultiChoiceAggregation:
         ]
 
         with caplog.at_level(logging.WARNING):
-            result = grader._aggregate_nominal_votes(votes, nominal_options, "unanimous")
+            result = grader._aggregate_nominal_votes(votes, nominal_criterion, "unanimous")
 
         # Falls back to mode ("Just right", twice) without abstaining.
         assert result.selected_index == 2
         assert result.na is False
         assert any("unanimous" in r.message and "NA option" in r.message for r in caplog.records)
 
-    def test_nominal_unanimous_differs_from_mode_on_disagreement(self, nominal_options_with_na):
+    def test_nominal_unanimous_differs_from_mode_on_disagreement(self, nominal_criterion_with_na):
         """'unanimous' is no longer a no-op alias of 'mode' on disagreement."""
         from autorubric import LLMConfig
         from autorubric.graders.criterion_grader import CriterionGrader
@@ -728,9 +924,9 @@ class TestMultiChoiceAggregation:
         ]
 
         unanimous_result = grader._aggregate_nominal_votes(
-            votes, nominal_options_with_na, "unanimous"
+            votes, nominal_criterion_with_na, "unanimous"
         )
-        mode_result = grader._aggregate_nominal_votes(votes, nominal_options_with_na, "mode")
+        mode_result = grader._aggregate_nominal_votes(votes, nominal_criterion_with_na, "mode")
 
         assert unanimous_result.na is True
         assert mode_result.na is False

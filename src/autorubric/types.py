@@ -1,6 +1,6 @@
 """Type definitions for rubrics and evaluation components."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Literal, TypedDict
@@ -171,6 +171,12 @@ Conservative / permissive (the ordinal analogs of binary ``unanimous`` / ``any``
 ``min``/``max`` are gentle robust extremes: they return the lowest/highest option a
 judge actually selected, not a "reset to worst on any dissent". Example: selections
 {0.67, 0.67, 1.0} give min -> the 0.67 option, max -> the 1.0 option.
+
+Tie-breaking: a ``mode`` count tie and a ``mean``/``median``/``weighted_mean`` snap tie
+(value equidistant from two options) resolve to the **score-minimizing tied option by
+weight sign** (lowest value for weight ≥ 0, highest for weight < 0; lowest index on a
+value tie) via ``Criterion.worst_option_among`` — deterministic, independent of judge
+order. ``min``/``max`` value ties already resolve to the lowest index.
 """
 
 NominalAggregation = Literal["mode", "weighted_mode", "unanimous"]
@@ -182,6 +188,11 @@ NominalAggregation = Literal["mode", "weighted_mode", "unanimous"]
   selecting the criterion's NA option (verdict ``na=True``, excluded from scoring
   under the SKIP strategy); if the criterion has no NA option, fall back to ``mode``
   and emit a warning.
+
+Tie-breaking: a ``mode`` count tie or a ``weighted_mode`` equal-weight tie resolves to
+the **score-minimizing tied option by weight sign** (lowest value for weight ≥ 0,
+highest for weight < 0; lowest index on a value tie) via
+``Criterion.worst_option_among`` — deterministic, independent of judge order.
 """
 
 
@@ -322,6 +333,42 @@ class Criterion(BaseModel):
         available = [opt.label for opt in self.options]
         raise ValueError(f"Label '{label}' not found. Available: {available}")
 
+    def worst_option_among(self, candidate_indices: Iterable[int]) -> int:
+        """Return the score-minimizing option index among ``candidate_indices``.
+
+        Weight-sign aware: for non-negative weight the worst option has the lowest
+        ``value``; for negative weight it has the highest ``value`` (a high value on a
+        negative-weight criterion subtracts more from the score). Value ties resolve to
+        the **lowest index**, independent of the order of ``candidate_indices``.
+
+        This is the canonical tie-break shared by ensemble vote aggregation
+        (``mode``/``weighted_mode`` count/weight ties and ``mean``/``median`` snap ties,
+        in ``criterion_grader.py``) and :meth:`worst_scored_option`, so scoring, the
+        grader's ``unknown``-error path, and aggregation tie-breaking cannot drift.
+
+        Args:
+            candidate_indices: Indices into ``self.options`` to choose among.
+
+        Returns:
+            The score-minimizing index (lowest ``value`` for weight ≥ 0, highest for
+            weight < 0; lowest index on a value tie).
+
+        Raises:
+            ValueError: If this is a binary criterion (no options) or
+                ``candidate_indices`` is empty.
+        """
+        if self.options is None:
+            raise ValueError("Binary criterion has no scored options")
+        candidates = list(candidate_indices)
+        if not candidates:
+            raise ValueError("No candidate options to choose among")
+        options = self.options
+        if self.weight < 0:
+            # Highest value is worst; on a value tie prefer the lowest index (-i maximal).
+            return max(candidates, key=lambda i: (options[i].value, -i))
+        # Lowest value is worst; on a value tie prefer the lowest index.
+        return min(candidates, key=lambda i: (options[i].value, i))
+
     def worst_scored_option(self) -> tuple[int, CriterionOption]:
         """Return (index, option) of the score-minimizing scored (non-NA) option.
 
@@ -333,8 +380,8 @@ class Criterion(BaseModel):
         analog of binary UNMET (for positive weight) or MET (for negative
         weight).
 
-        Ties resolve to the first such option in declaration order
-        (deterministic, matches ``min``/``max`` semantics).
+        Ties resolve to the lowest index (delegates to
+        :meth:`worst_option_among` over the non-NA indices).
 
         Shared by the grader's ``unknown``-error worst-case path
         (``criterion_grader.py``) and the metrics' ``na_mode="as_unmet"`` remap
@@ -351,12 +398,11 @@ class Criterion(BaseModel):
         """
         if self.options is None:
             raise ValueError("Binary criterion has no scored options")
-        scored = [(i, opt) for i, opt in enumerate(self.options) if not opt.na]
+        scored = [i for i, opt in enumerate(self.options) if not opt.na]
         if not scored:
             raise ValueError("Criterion has no non-NA option")
-        if self.weight < 0:
-            return max(scored, key=lambda io: io[1].value)
-        return min(scored, key=lambda io: io[1].value)
+        idx = self.worst_option_among(scored)
+        return idx, self.options[idx]
 
     @model_validator(mode="after")
     def validate_options(self) -> "Criterion":
@@ -712,12 +758,17 @@ class MultiChoiceJudgment(BaseModel):
 # ============================================================================
 
 AggregationStrategy = Literal["majority", "weighted", "unanimous", "any"]
-"""Strategy for aggregating votes from multiple judges.
+"""Strategy for aggregating votes from multiple judges (binary criteria).
 
-- majority: Simple majority vote (> 50% must agree)
+- majority: Simple majority vote (> 50% of judges must agree)
 - weighted: Weighted vote based on judge weights
 - unanimous: All judges must agree for MET
 - any: Any judge voting MET results in MET
+
+Tie-breaking (``majority`` head-count tie or ``weighted`` equal-weight tie) resolves to
+the **score-minimizing verdict by weight sign**: UNMET for weight ≥ 0 (earns 0), MET for
+weight < 0 (applies the full penalty) — the binary analog of
+``Criterion.worst_scored_option``. ``unanimous``/``any`` are thresholds, not ties.
 """
 
 

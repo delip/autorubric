@@ -20,6 +20,8 @@ fix lands. This file is the working backlog — keep it updated as items are res
 > - Standard gates before done: `uv run pytest`, `uv run ruff check . && uv run ruff format --diff .`, `uv run ty check src/autorubric` (no new diagnostics).
 > - **No Claude/AI byline** in commits, PRs, or issues.
 > - Many items are public-API/behavior changes — confirm the intended semantics with the user before implementing rather than guessing.
+> - Things might have changed since these todo items were authored. If there is a discrepancy between what's claimed about the code in the todo item and what's actually in the code, the code is the source of truth.
+> - Sometimes, you might have decision points that you might feel like resolving it with a human. Before doing that make sure your question cannot be already answered by the choices we have made in the branch (or being consistent with that), or by thinking harder. 
 
 ## Legend & context
 
@@ -97,10 +99,11 @@ fix lands. This file is the working backlog — keep it updated as items are res
   - Fix direction (decide with user): document the orthogonal knobs clearly, and/or provide analogous strategies (e.g., an ordinal/nominal `unanimous`/`any`) so the cross-type semantics line up. Reuse existing enums where possible.
   - Effort/risk: **med / med**.
 
-- [ ] **T3-B (M) — Tie-breaking diverges and is undocumented.**
+- [x] **T3-B (M) — Tie-breaking diverges and is undocumented.**
   - Sites: binary tie→UNMET (`criterion_grader.py:1031`, the `>` makes equality fall to UNMET — note this *helps* a negative-weight criterion but penalizes a positive one); multi-choice tie→first-seen vote via `Counter.most_common` (`:1164, 1214, 1222`).
   - Fix direction: pick a documented, type-consistent tie rule (e.g., tie → conservative/worst-case by weight sign for both), and make it deterministic w.r.t. option order. Pairs naturally with T1-A.
   - Effort/risk: **low-med / med**.
+  - **Resolved:** one uniform rule at every tie site (binary `majority`/`weighted`; ordinal/nominal `mode`; nominal `weighted_mode`; ordinal `mean`/`median` snap) — tie → score-minimizing outcome by weight sign, lowest option index as final tie-break (deterministic, independent of judge/vote order). Binary uses the shared `_binary_worst_verdict(weight)` (also reused by the `unknown`-error path); multi-choice routes tied candidates through the new `Criterion.worst_option_among(indices)`, which `worst_scored_option()` now delegates to — so aggregation, scoring `FAIL`, the `unknown`-error path, and metrics `as_unmet` share one sign-aware key and cannot drift. The mislabeled "no votes → index 0" fallback now uses `worst_scored_option()`. `min`/`max` already resolved value ties to the lowest index and were left untouched. Tie behavior documented in the three strategy-type docstrings (`types.py`). Tests: `tests/graders/test_binary_aggregation.py`, `tests/graders/test_multi_choice.py` (`TestMultiChoiceAggregation`), `tests/metrics/test_multi_choice_metrics.py` (`TestCriterionWorstOptionAmong`).
 
 - [ ] **T2-A (M) — No first-class abstain channel for multi-choice.**
   - Inconsistency: binary `CANNOT_ASSESS` is a guaranteed enum verdict + schema field + dedicated prompt section; multi-choice NA is an optional author-supplied option with conditional prompt language and no dedicated response-schema channel.

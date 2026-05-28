@@ -6,8 +6,9 @@ import asyncio
 import dataclasses
 import hashlib
 import logging
+import math
 import random
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -89,6 +90,27 @@ def _aggregate_error(votes: Sequence[JudgeVote | MultiChoiceJudgeVote]) -> str |
     (``JudgeVote``) and multi-choice (``MultiChoiceJudgeVote``) aggregation paths.
     """
     return _combine_errors([v.error for v in votes])
+
+
+def _binary_worst_verdict(weight: float) -> CriterionVerdict:
+    """The score-minimizing binary verdict for a criterion of the given weight.
+
+    Positive (or zero) weight → UNMET (earns 0 instead of the weight); negative weight →
+    MET (subtracts the full penalty). Single source of the "binary worst case" — shared by
+    the ``unknown``-error synthesis path and majority/weighted tie-breaking. Binary analog
+    of ``Criterion.worst_scored_option`` / ``worst_option_among``.
+    """
+    return CriterionVerdict.MET if weight < 0 else CriterionVerdict.UNMET
+
+
+def _top_tied_keys(scores: Mapping[int, float]) -> list[int]:
+    """Option indices tied for the maximum score (vote count or summed judge weight).
+
+    Used to surface mode/weighted_mode tie candidates for resolution via
+    ``Criterion.worst_option_among`` (T3-B). A clear winner yields a single-element list.
+    """
+    top = max(scores.values())
+    return [i for i, s in scores.items() if s == top]
 
 
 @dataclass
@@ -613,7 +635,7 @@ class CriterionGrader(Grader):
             # via CriterionReport.error / is_error.
             category = classify_grading_error(e)
             if category == "unknown":
-                verdict = CriterionVerdict.MET if criterion.weight < 0 else CriterionVerdict.UNMET
+                verdict = _binary_worst_verdict(criterion.weight)
             else:
                 verdict = CriterionVerdict.CANNOT_ASSESS
             logger.warning(
@@ -937,7 +959,7 @@ class CriterionGrader(Grader):
                         )
                     )
 
-                final_verdict, final_reason = self._aggregate_votes(votes)
+                final_verdict, final_reason = self._aggregate_votes(votes, criterion_report.weight)
 
                 ensemble_reports.append(
                     EnsembleCriterionReport(
@@ -1027,8 +1049,15 @@ class CriterionGrader(Grader):
             completion_cost=total_cost if total_cost > 0 else None,
         )
 
-    def _aggregate_votes(self, votes: list[JudgeVote]) -> tuple[CriterionVerdict, str]:
-        """Aggregate votes from multiple judges into a single verdict."""
+    def _aggregate_votes(
+        self, votes: list[JudgeVote], weight: float
+    ) -> tuple[CriterionVerdict, str]:
+        """Aggregate votes from multiple judges into a single verdict.
+
+        ``weight`` is the criterion weight (not a judge weight); it is used only to break
+        ties in ``majority``/``weighted`` via :func:`_binary_worst_verdict` — UNMET for
+        weight ≥ 0, MET for weight < 0 (T3-B, consistent with ``worst_scored_option``).
+        """
         if not votes:
             return CriterionVerdict.CANNOT_ASSESS, "No votes"
 
@@ -1043,24 +1072,35 @@ class CriterionGrader(Grader):
         )
 
         if self._aggregation == "majority":
-            # True head-count: count judges, ignore weights (> 50%); tie -> UNMET.
+            # True head-count: count judges, ignore weights (> 50%); tie -> worst case.
             met_count = sum(1 for v in assessable_votes if v.verdict == CriterionVerdict.MET)
             unmet_count = sum(1 for v in assessable_votes if v.verdict == CriterionVerdict.UNMET)
-            verdict = CriterionVerdict.MET if met_count > unmet_count else CriterionVerdict.UNMET
+            verdict = self._decide_binary(met_count, unmet_count, weight)
         elif self._aggregation == "weighted":
-            verdict = CriterionVerdict.MET if met_weight > unmet_weight else CriterionVerdict.UNMET
+            verdict = self._decide_binary(met_weight, unmet_weight, weight)
         elif self._aggregation == "unanimous":
             verdict = CriterionVerdict.MET if unmet_weight == 0 else CriterionVerdict.UNMET
         elif self._aggregation == "any":
             verdict = CriterionVerdict.MET if met_weight > 0 else CriterionVerdict.UNMET
         else:
-            verdict = CriterionVerdict.MET if met_weight > unmet_weight else CriterionVerdict.UNMET
+            verdict = self._decide_binary(met_weight, unmet_weight, weight)
 
         # Combine reasons
         reasons = [f"{v.judge_id}: {v.reason}" for v in votes]
         combined_reason = " | ".join(reasons)
 
         return verdict, combined_reason
+
+    @staticmethod
+    def _decide_binary(met: float, unmet: float, weight: float) -> CriterionVerdict:
+        """MET if ``met`` strictly wins, UNMET if ``unmet`` strictly wins, else the
+        weight-sign worst case (T3-B). ``met``/``unmet`` are head-counts or summed
+        weights depending on the strategy."""
+        if met > unmet:
+            return CriterionVerdict.MET
+        if unmet > met:
+            return CriterionVerdict.UNMET
+        return _binary_worst_verdict(weight)
 
     def _aggregate_multi_choice_votes(
         self,
@@ -1095,13 +1135,26 @@ class CriterionGrader(Grader):
                         ),
                         "No votes",
                     )
-            # Fallback: return first option as worst case
+            # No NA option to abstain into: fall back to the weight-sign worst case
+            # (consistent with worst_scored_option / the unknown-error path).
+            if criterion.options:
+                worst_idx, worst_opt = criterion.worst_scored_option()
+                return (
+                    AggregatedMultiChoiceVerdict(
+                        selected_index=worst_idx,
+                        selected_label=worst_opt.label,
+                        value=worst_opt.value,
+                        na=worst_opt.na,
+                        aggregated_value=worst_opt.value,
+                    ),
+                    "No votes",
+                )
             return (
                 AggregatedMultiChoiceVerdict(
                     selected_index=0,
-                    selected_label=criterion.options[0].label if criterion.options else "",
-                    value=criterion.options[0].value if criterion.options else 0.0,
-                    na=criterion.options[0].na if criterion.options else False,
+                    selected_label="",
+                    value=0.0,
+                    na=False,
                     aggregated_value=0.0,
                 ),
                 "No votes",
@@ -1131,10 +1184,10 @@ class CriterionGrader(Grader):
         # Determine which aggregation to use
         if scale_type == "ordinal":
             agg = agg_strategy or self._ordinal_aggregation
-            result = self._aggregate_ordinal_votes(assessable_votes, criterion.options or [], agg)
+            result = self._aggregate_ordinal_votes(assessable_votes, criterion, agg)
         else:  # nominal
             agg = agg_strategy or self._nominal_aggregation
-            result = self._aggregate_nominal_votes(assessable_votes, criterion.options or [], agg)
+            result = self._aggregate_nominal_votes(assessable_votes, criterion, agg)
 
         # Combine reasons
         reasons = [f"{v.judge_id}: {v.reason}" for v in votes]
@@ -1145,7 +1198,7 @@ class CriterionGrader(Grader):
     def _aggregate_ordinal_votes(
         self,
         votes: list[MultiChoiceJudgeVote],
-        options: list,  # list[CriterionOption]
+        criterion: Criterion,
         strategy: str,
     ) -> AggregatedMultiChoiceVerdict:
         """Aggregate ordinal multi-choice votes.
@@ -1158,9 +1211,15 @@ class CriterionGrader(Grader):
         - min: Lowest-value option any judge selected (conservative; analog of binary
           ``unanimous``)
         - max: Highest-value option any judge selected (permissive; analog of binary ``any``)
+
+        Tie-breaking (mode count tie, mean/median snap equidistance): the
+        score-minimizing tied option by weight sign via ``criterion.worst_option_among``
+        (lowest value for weight ≥ 0, highest for weight < 0; lowest index on a value
+        tie). ``min``/``max`` already resolve value ties to the lowest index.
         """
         from collections import Counter
 
+        options = criterion.options or []
         values = [v.value for v in votes]
         weights = [v.weight for v in votes]
 
@@ -1180,9 +1239,9 @@ class CriterionGrader(Grader):
             else:
                 aggregated_value = sum(values) / len(values)
         elif strategy == "mode":
-            # For mode on ordinal, we use the index
+            # Most common selection; count ties -> worst tied option by weight sign.
             indices = [v.selected_index for v in votes]
-            most_common_idx = Counter(indices).most_common(1)[0][0]
+            most_common_idx = criterion.worst_option_among(_top_tied_keys(Counter(indices)))
             selected_option = options[most_common_idx]
             return AggregatedMultiChoiceVerdict(
                 selected_index=most_common_idx,
@@ -1211,15 +1270,14 @@ class CriterionGrader(Grader):
             # Default to mean
             aggregated_value = sum(values) / len(values)
 
-        # Snap to nearest option by value
-        closest_idx = 0
-        closest_diff = float("inf")
-        for i, opt in enumerate(options):
-            if not opt.na:
-                diff = abs(opt.value - aggregated_value)
-                if diff < closest_diff:
-                    closest_diff = diff
-                    closest_idx = i
+        # Snap to nearest non-NA option by value; equidistant ties -> worst tied option
+        # by weight sign (deterministic, independent of option declaration order).
+        distances = [
+            (abs(opt.value - aggregated_value), i) for i, opt in enumerate(options) if not opt.na
+        ]
+        min_diff = min(d for d, _ in distances)
+        tied = [i for d, i in distances if math.isclose(d, min_diff, abs_tol=1e-9)]
+        closest_idx = criterion.worst_option_among(tied)
 
         selected_option = options[closest_idx]
         return AggregatedMultiChoiceVerdict(
@@ -1233,7 +1291,7 @@ class CriterionGrader(Grader):
     def _aggregate_nominal_votes(
         self,
         votes: list[MultiChoiceJudgeVote],
-        options: list,  # list[CriterionOption]
+        criterion: Criterion,
         strategy: str,
     ) -> AggregatedMultiChoiceVerdict:
         """Aggregate nominal multi-choice votes.
@@ -1244,21 +1302,27 @@ class CriterionGrader(Grader):
         - unanimous: All judges must select the same option. On disagreement, abstain
           via the criterion's NA option (verdict na=True); if there is no NA option,
           fall back to mode and warn.
+
+        Tie-breaking (mode count tie, weighted_mode equal-weight tie): the
+        score-minimizing tied option by weight sign via ``criterion.worst_option_among``
+        (lowest value for weight ≥ 0, highest for weight < 0; lowest index on a value
+        tie) — deterministic, independent of judge order.
         """
         from collections import Counter
 
+        options = criterion.options or []
         indices = [v.selected_index for v in votes]
 
         if strategy == "mode":
-            most_common_idx = Counter(indices).most_common(1)[0][0]
+            most_common_idx = criterion.worst_option_among(_top_tied_keys(Counter(indices)))
         elif strategy == "weighted_mode":
-            # Accumulate weights per index
+            # Accumulate weights per index; equal-weight ties -> worst tied option.
             weight_per_idx: dict[int, float] = {}
             for v in votes:
                 weight_per_idx[v.selected_index] = (
                     weight_per_idx.get(v.selected_index, 0.0) + v.weight
                 )
-            most_common_idx = max(weight_per_idx, key=weight_per_idx.get)  # type: ignore
+            most_common_idx = criterion.worst_option_among(_top_tied_keys(weight_per_idx))
         elif strategy == "unanimous":
             unique_indices = set(indices)
             if len(unique_indices) == 1:
@@ -1276,10 +1340,7 @@ class CriterionGrader(Grader):
                         "and the criterion has no NA option; falling back to mode.",
                         sorted(unique_indices),
                     )
-                    most_common_idx = Counter(indices).most_common(1)[0][0]
-        else:
-            # Default to mode
-            most_common_idx = Counter(indices).most_common(1)[0][0]
+                    most_common_idx = criterion.worst_option_among(_top_tied_keys(Counter(indices)))
 
         selected_option = options[most_common_idx]
         return AggregatedMultiChoiceVerdict(

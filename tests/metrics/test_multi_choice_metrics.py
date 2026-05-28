@@ -480,6 +480,80 @@ class TestCriterionWorstScoredOption:
             binary_criterion.worst_scored_option()
 
 
+class TestCriterionWorstOptionAmong:
+    """Tests for ``Criterion.worst_option_among`` — the score-minimizing option among a
+    candidate subset, weight-sign aware with a deterministic lowest-index tie-break.
+
+    This is the canonical tie-break shared by ensemble vote aggregation
+    (mode/weighted_mode/snap, ``criterion_grader.py``) and ``worst_scored_option`` itself,
+    so scoring, the unknown-error path, and aggregation cannot drift.
+    """
+
+    def test_positive_weight_picks_lowest_value_among_candidates(self, ordinal_criterion):
+        """Positive weight → the lowest-value candidate (not the global lowest)."""
+        # ordinal_criterion values: [0.0, 0.33, 0.67, 1.0]. Among {1, 2, 3} the worst is 1.
+        assert ordinal_criterion.worst_option_among([3, 2, 1]) == 1
+
+    def test_negative_weight_picks_highest_value_among_candidates(
+        self, negative_weight_criterion_with_na
+    ):
+        """Negative weight → the highest-value candidate (worst case flips)."""
+        # values: None=0.0(0), Minor=0.5(1), Severe=1.0(2). Among {0, 1, 2} the worst is 2.
+        assert negative_weight_criterion_with_na.worst_option_among([0, 1, 2]) == 2
+
+    def test_value_tie_breaks_to_lowest_index_order_independent(self):
+        """Positive weight, value tie → lowest index, regardless of candidate order."""
+        criterion = Criterion(
+            name="t",
+            weight=10.0,
+            requirement="R",
+            scale_type="nominal",
+            options=[
+                {"label": "A", "value": 0.0},  # idx 0  ─┐ tie at the worst value
+                {"label": "B", "value": 0.5},  # idx 1   │
+                {"label": "C", "value": 0.0},  # idx 2  ─┘
+            ],
+        )
+        assert criterion.worst_option_among([2, 0]) == 0
+        assert criterion.worst_option_among([0, 2]) == 0
+
+    def test_negative_weight_value_tie_breaks_to_lowest_index(self):
+        """Negative weight, value tie at the highest value → lowest index."""
+        criterion = Criterion(
+            name="t",
+            weight=-3.0,
+            requirement="R",
+            scale_type="nominal",
+            options=[
+                {"label": "A", "value": 1.0},  # idx 0  ─┐ tie at the worst (highest) value
+                {"label": "B", "value": 0.5},  # idx 1   │
+                {"label": "C", "value": 1.0},  # idx 2  ─┘
+            ],
+        )
+        assert criterion.worst_option_among([2, 0]) == 0
+        assert criterion.worst_option_among([0, 2]) == 0
+
+    def test_single_candidate_returned_as_is(self, ordinal_criterion):
+        assert ordinal_criterion.worst_option_among([2]) == 2
+
+    def test_empty_candidates_raises(self, ordinal_criterion):
+        with pytest.raises(ValueError):
+            ordinal_criterion.worst_option_among([])
+
+    def test_binary_criterion_raises(self, binary_criterion):
+        with pytest.raises(ValueError, match="Binary criterion"):
+            binary_criterion.worst_option_among([0])
+
+    def test_worst_scored_option_delegates_consistently(
+        self, ordinal_criterion, negative_weight_criterion_with_na
+    ):
+        """``worst_scored_option`` equals ``worst_option_among`` over all non-NA indices."""
+        for criterion in (ordinal_criterion, negative_weight_criterion_with_na):
+            non_na = [i for i, o in enumerate(criterion.options) if not o.na]
+            idx, _ = criterion.worst_scored_option()
+            assert idx == criterion.worst_option_among(non_na)
+
+
 # =============================================================================
 # Test get_option_value and is_na_option
 # =============================================================================
