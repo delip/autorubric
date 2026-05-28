@@ -506,6 +506,15 @@ class MultiChoiceJudgeVote:
     shuffle_order: list[int] | None = None
     error: str | None = None
 
+    @property
+    def is_error(self) -> bool:
+        """Whether this vote's verdict was synthesized due to a judge-call failure.
+
+        Use this instead of inspecting ``reason`` to distinguish error-induced
+        votes from genuine judgments.
+        """
+        return self.error is not None
+
 
 class CriterionReport(Criterion):
     """A criterion with its evaluation result.
@@ -710,6 +719,15 @@ class JudgeVote:
     reason: str
     weight: float = 1.0
     error: str | None = None
+
+    @property
+    def is_error(self) -> bool:
+        """Whether this vote's verdict was synthesized due to a judge-call failure.
+
+        Use this instead of inspecting ``reason`` to distinguish error-induced
+        votes from genuine judgments.
+        """
+        return self.error is not None
 
 
 @dataclass

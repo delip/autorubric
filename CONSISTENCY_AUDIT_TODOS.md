@@ -11,6 +11,7 @@ fix lands. This file is the working backlog — keep it updated as items are res
 
 ## Working directives (apply to every fix taken from this list)
 
+> ALWAYS read CLAUDE.md and reorient yourself with the directives there before planning or starting work on anything
 > **ultrathink** on each item before coding.
 > - Use **Opus**, including for subtasks/subagents. **Create subagents generously** to manage context.
 > - **TDD**: write a failing test that pins the inconsistency, then fix.
@@ -66,7 +67,7 @@ fix lands. This file is the working backlog — keep it updated as items are res
   - Fix direction (decide with user): either (a) rename to `"keep"`/`"include"` and document; and/or (b) give NA real `as_unmet`-style and `as_category`-style analogs to match `cannot_assess`. Cross-ref **T1-B**, **T2-C**.
   - Effort/risk: **low / med** (public param rename = API change).
 
-- [ ] **T5-A (M-L) — `JudgeVote` / `MultiChoiceJudgeVote` lack the `is_error` property their report counterparts have.**
+- [x] **T5-A (M-L) — `JudgeVote` / `MultiChoiceJudgeVote` lack the `is_error` property their report counterparts have.**
   - Inconsistency: `CriterionReport.is_error` and `EnsembleCriterionReport.is_error` exist; the per-vote types only carry an `error` field. Report docstrings advise "use `is_error` instead of inspecting reason" — impossible at vote level.
   - Sites: `src/autorubric/types.py` — `CriterionReport.is_error` (~`:526-533`), `EnsembleCriterionReport.is_error` (~`:740-743`); `JudgeVote` (~`:659-676`), `MultiChoiceJudgeVote` (~`:442-471`).
   - Fix direction: add a trivial `is_error` property (`self.error is not None`) to both vote dataclasses. Reuse, no new types.

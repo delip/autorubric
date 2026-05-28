@@ -339,7 +339,7 @@ def _build_fleiss_row(
             return None
         counts = [0] * n_cats
         for v in votes:
-            if v.error is not None:
+            if v.is_error:
                 continue
             verdict = v.verdict
             if verdict == CriterionVerdict.CANNOT_ASSESS:
@@ -363,7 +363,7 @@ def _build_fleiss_row(
             return None
         counts = [0] * n_cats
         for v in mc_votes:
-            if v.error is not None:
+            if v.is_error:
                 continue
             if 0 <= v.selected_index < n_cats:
                 counts[v.selected_index] += 1

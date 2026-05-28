@@ -32,7 +32,12 @@ from autorubric.dataset import DataItem
 from autorubric.eval import ItemResult
 from autorubric.graders import CriterionGrader, JudgeSpec
 from autorubric.llm import GenerateResult, LLMConfig
-from autorubric.types import CriterionJudgment, MultiChoiceJudgment
+from autorubric.types import (
+    CriterionJudgment,
+    JudgeVote,
+    MultiChoiceJudgeVote,
+    MultiChoiceJudgment,
+)
 
 
 @pytest.fixture
@@ -650,3 +655,57 @@ async def test_error_survives_serialization_round_trip(mock_llm_config):
     assert len(restored_cr.votes) == 2
     assert all(v.error is not None for v in restored_cr.votes)
     assert all(v.error.startswith("infrastructure:") for v in restored_cr.votes)
+
+
+# =============================================================================
+# JudgeVote / MultiChoiceJudgeVote is_error property parity
+# =============================================================================
+
+
+class TestVoteIsErrorProperty:
+    """``is_error`` parity on the per-vote dataclasses (T5-A).
+
+    ``CriterionReport`` / ``EnsembleCriterionReport`` advise using ``is_error`` instead
+    of inspecting ``reason``; the per-vote types must expose the same property so the
+    advised pattern is possible at vote level.
+    """
+
+    def test_binary_vote_is_error_true_when_error_set(self):
+        vote = JudgeVote(
+            judge_id="j",
+            verdict=CriterionVerdict.UNMET,
+            reason="r",
+            error="infrastructure: x",
+        )
+        assert vote.is_error is True
+
+    def test_binary_vote_is_error_false_when_error_none(self):
+        vote = JudgeVote(
+            judge_id="j",
+            verdict=CriterionVerdict.UNMET,
+            reason="r",
+            error=None,
+        )
+        assert vote.is_error is False
+
+    def test_multi_choice_vote_is_error_true_when_error_set(self):
+        vote = MultiChoiceJudgeVote(
+            judge_id="j",
+            selected_index=0,
+            selected_label="L",
+            value=0.0,
+            reason="r",
+            error="infrastructure: x",
+        )
+        assert vote.is_error is True
+
+    def test_multi_choice_vote_is_error_false_when_error_none(self):
+        vote = MultiChoiceJudgeVote(
+            judge_id="j",
+            selected_index=0,
+            selected_label="L",
+            value=0.0,
+            reason="r",
+            error=None,
+        )
+        assert vote.is_error is False
