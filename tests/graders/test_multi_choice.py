@@ -932,6 +932,75 @@ class TestMultiChoiceAggregation:
         assert mode_result.na is False
         assert unanimous_result.selected_index != mode_result.selected_index
 
+    def test_all_na_prefers_genuine_na_index_over_none(self, nominal_criterion_with_na):
+        """All-NA aggregation: prefer a vote that abstained into a real NA option (T2-B).
+
+        When NA votes mix a clean None-abstain (error, no option) with a genuine NA-option
+        abstain, the aggregate surfaces the real NA index, not None.
+        """
+        from autorubric import LLMConfig
+        from autorubric.graders.criterion_grader import CriterionGrader
+
+        grader = CriterionGrader(llm_config=LLMConfig(model="openai/gpt-4"))
+
+        votes = [
+            MultiChoiceJudgeVote(
+                judge_id="j1",
+                selected_index=None,
+                selected_label=None,
+                value=0.0,
+                reason="",
+                na=True,
+                error="infrastructure: down",
+            ),
+            MultiChoiceJudgeVote(
+                judge_id="j2",
+                selected_index=3,
+                selected_label="NA - not applicable",
+                value=0.0,
+                reason="",
+                na=True,
+            ),
+        ]
+
+        result, _ = grader._aggregate_multi_choice_votes(votes, nominal_criterion_with_na)
+        assert result.na is True
+        assert result.selected_index == 3
+        assert result.selected_label == "NA - not applicable"
+
+    def test_all_na_all_none_yields_clean_abstain(self, nominal_criterion):
+        """All-NA aggregation where every NA vote is a None-abstain -> clean None aggregate."""
+        from autorubric import LLMConfig
+        from autorubric.graders.criterion_grader import CriterionGrader
+
+        grader = CriterionGrader(llm_config=LLMConfig(model="openai/gpt-4"))
+
+        votes = [
+            MultiChoiceJudgeVote(
+                judge_id="j1",
+                selected_index=None,
+                selected_label=None,
+                value=0.0,
+                reason="",
+                na=True,
+                error="infrastructure: a",
+            ),
+            MultiChoiceJudgeVote(
+                judge_id="j2",
+                selected_index=None,
+                selected_label=None,
+                value=0.0,
+                reason="",
+                na=True,
+                error="infrastructure: b",
+            ),
+        ]
+
+        result, _ = grader._aggregate_multi_choice_votes(votes, nominal_criterion)
+        assert result.na is True
+        assert result.selected_index is None
+        assert result.selected_label is None
+
 
 # =============================================================================
 # Option Shuffling Tests (Position Bias Mitigation)

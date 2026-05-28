@@ -806,9 +806,10 @@ class CriterionGrader(Grader):
                 # Infrastructure/parse: abstain (excluded under SKIP). Prefer a genuine
                 # NA option — guaranteed when auto_na_option is on — so the abstain verdict
                 # points at a real na=True option (resolves the T2-B contradiction for the
-                # default case). Only with no NA option (forced-choice + no author NA) fall
-                # back to the legacy lowest-value option forced to na=True; that residual
-                # na=True-against-a-scored-option case remains T2-B.
+                # default case). With no NA option (forced-choice + no author NA) emit a
+                # GENUINE abstain that selects no option (selected_index/label=None), rather
+                # than forcing na=True onto a scored option (the old T2-B contradiction). It
+                # stays na=True → excluded under SKIP, so infra/parse never penalizes.
                 na_idx = criterion.na_option_index
                 if na_idx is not None:
                     na_option = options[na_idx]
@@ -819,16 +820,9 @@ class CriterionGrader(Grader):
                         na=True,
                     )
                 else:
-                    abstain_idx = 0
-                    abstain_value = options[0].value
-                    for i, opt in enumerate(options):
-                        if opt.value < abstain_value:
-                            abstain_idx = i
-                            abstain_value = opt.value
-                    abstain_option = options[abstain_idx]
                     multi_choice_verdict = MultiChoiceVerdict(
-                        selected_index=abstain_idx,
-                        selected_label=abstain_option.label,
+                        selected_index=None,
+                        selected_label=None,
                         value=0.0,
                         na=True,
                     )
@@ -1198,11 +1192,17 @@ class CriterionGrader(Grader):
                 "No votes",
             )
 
-        # Filter out NA votes for aggregation (unless all are NA)
-        assessable_votes = [v for v in votes if not v.na]
+        # Filter out NA votes for aggregation (unless all are NA). The extra
+        # ``selected_index is not None`` is redundant at runtime (a None index always
+        # carries na=True, so it is already excluded by ``not v.na``) but narrows the
+        # type so the downstream index reads need no None-guards.
+        assessable_votes = [v for v in votes if not v.na and v.selected_index is not None]
         if not assessable_votes:
-            # All votes are NA
-            na_vote = votes[0]
+            # All votes are NA. Prefer a vote that abstained into a GENUINE NA option
+            # (selected_index is not None) so the aggregate keeps a real NA index where one
+            # exists (the default auto_na_option case); fall back to a clean None-abstain
+            # only when every NA vote is itself a no-NA-option error-abstain (T2-B).
+            na_vote = next((v for v in votes if v.selected_index is not None), votes[0])
             reasons = [f"{v.judge_id}: {v.reason}" for v in votes]
             return (
                 AggregatedMultiChoiceVerdict(
@@ -1260,6 +1260,10 @@ class CriterionGrader(Grader):
         options = criterion.options or []
         values = [v.value for v in votes]
         weights = [v.weight for v in votes]
+        # Assessable votes always carry a concrete index (None is reserved for the
+        # error-abstain, filtered out before aggregation). The guard makes that contract
+        # explicit and narrows the type to ``int`` for the index-based strategies.
+        indices = [v.selected_index for v in votes if v.selected_index is not None]
 
         if strategy == "mean":
             aggregated_value = sum(values) / len(values)
@@ -1278,7 +1282,6 @@ class CriterionGrader(Grader):
                 aggregated_value = sum(values) / len(values)
         elif strategy == "mode":
             # Most common selection; count ties -> worst tied option by weight sign.
-            indices = [v.selected_index for v in votes]
             most_common_idx = criterion.worst_option_among(_top_tied_keys(Counter(indices)))
             selected_option = options[most_common_idx]
             return AggregatedMultiChoiceVerdict(
@@ -1292,13 +1295,14 @@ class CriterionGrader(Grader):
             # Conservative / permissive analogs of binary unanimous / any: the lowest-
             # (min) or highest- (max) value option any judge selected. Value ties resolve
             # to the lowest option index (deterministic; T3-B tie rules out of scope).
+            scored = [(v.value, idx) for v in votes if (idx := v.selected_index) is not None]
             if strategy == "min":
-                chosen = min(votes, key=lambda v: (v.value, v.selected_index))
+                _, chosen_idx = min(scored, key=lambda t: (t[0], t[1]))
             else:
-                chosen = max(votes, key=lambda v: (v.value, -v.selected_index))
-            selected_option = options[chosen.selected_index]
+                _, chosen_idx = max(scored, key=lambda t: (t[0], -t[1]))
+            selected_option = options[chosen_idx]
             return AggregatedMultiChoiceVerdict(
-                selected_index=chosen.selected_index,
+                selected_index=chosen_idx,
                 selected_label=selected_option.label,
                 value=selected_option.value,
                 na=selected_option.na,
@@ -1349,7 +1353,10 @@ class CriterionGrader(Grader):
         from collections import Counter
 
         options = criterion.options or []
-        indices = [v.selected_index for v in votes]
+        # Assessable votes always carry a concrete index (None is reserved for the
+        # error-abstain, filtered out before aggregation). The guard makes that contract
+        # explicit and narrows the type to ``int``.
+        indices = [v.selected_index for v in votes if v.selected_index is not None]
 
         if strategy == "mode":
             most_common_idx = criterion.worst_option_among(_top_tied_keys(Counter(indices)))
@@ -1357,6 +1364,8 @@ class CriterionGrader(Grader):
             # Accumulate weights per index; equal-weight ties -> worst tied option.
             weight_per_idx: dict[int, float] = {}
             for v in votes:
+                if v.selected_index is None:
+                    continue
                 weight_per_idx[v.selected_index] = (
                     weight_per_idx.get(v.selected_index, 0.0) + v.weight
                 )

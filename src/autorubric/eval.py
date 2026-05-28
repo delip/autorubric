@@ -302,8 +302,9 @@ def _deserialize_ensemble_report(
         mc_votes = [
             MultiChoiceJudgeVote(
                 judge_id=v["judge_id"],
-                selected_index=v["selected_index"],
-                selected_label=v["selected_label"],
+                # None for a genuine no-option abstain (T2-B); use .get for robustness.
+                selected_index=v.get("selected_index"),
+                selected_label=v.get("selected_label"),
                 value=v["value"],
                 reason=v["reason"],
                 weight=v.get("weight", 1.0),

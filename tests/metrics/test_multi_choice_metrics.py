@@ -1464,3 +1464,111 @@ class TestMetricsAutoInjectedNA:
 
         with pytest.raises(ValueError, match="ordinal|as_category"):
             compute_metrics(eval_result, dataset, na_mode="as_category")
+
+
+def _make_forced_choice_report(
+    selected_index: int | None, criterion: Criterion
+) -> EvaluationReport:
+    """Single-criterion report for a forced-choice (no-NA) criterion.
+
+    ``selected_index=None`` models the grader's genuine error-abstain (T2-B): na=True
+    with no option selected (selected_index/label=None), value 0.0.
+    """
+    if selected_index is None:
+        mcv = MultiChoiceVerdict(selected_index=None, selected_label=None, value=0.0, na=True)
+        score = 0.0
+    else:
+        option = criterion.options[selected_index]
+        mcv = MultiChoiceVerdict(
+            selected_index=selected_index,
+            selected_label=option.label,
+            value=float(option.value),
+            na=False,
+        )
+        score = float(option.value)
+    return EvaluationReport(
+        score=score,
+        raw_score=score * criterion.weight,
+        report=[
+            CriterionReport(
+                weight=criterion.weight,
+                requirement=criterion.requirement,
+                name=criterion.name,
+                options=criterion.options,
+                scale_type=criterion.scale_type,
+                verdict=None,
+                reason="Test",
+                multi_choice_verdict=mcv,
+            ),
+        ],
+    )
+
+
+class TestForcedChoiceNoneAbstain:
+    """compute_metrics must treat a forced-choice None error-abstain as NA (T2-B).
+
+    A forced-choice criterion has no NA option, so an infrastructure/parse error yields a
+    verdict with selected_index=None (na=True). Metrics must recognize that as an abstain
+    (reconstructing an effective NA option), NOT silently count it as option 0.
+    """
+
+    def test_none_abstain_recognized_as_na_not_option_zero(self, nominal_criterion):
+        """nominal_criterion = [Too brief(0), Too verbose(1), Just right(2)], no NA.
+
+        Three scored pairs are perfectly correct; one item is a None error-abstain whose
+        ground truth is 'Just right' (index 2). If the abstain were miscounted as option 0,
+        it would be a wrong pair AND na_count_pred would be 0. With the fix it is NA:
+        excluded under the default na_mode, and counted in na_count_pred / na_false_positive.
+        """
+        dataset = RubricDataset(prompt="Test", rubric=Rubric([nominal_criterion]))
+        gt_labels = ["Too brief", "Too verbose", "Just right", "Just right"]
+        preds: list[int | None] = [0, 1, 2, None]
+        for i, label in enumerate(gt_labels):
+            dataset.add_item(submission=f"S{i}", description=f"D{i}", ground_truth=[label])
+
+        item_results = [
+            ItemResult(
+                item_idx=i,
+                item=dataset.items[i],
+                report=_make_forced_choice_report(preds[i], nominal_criterion),
+                duration_seconds=0.1,
+            )
+            for i in range(len(gt_labels))
+        ]
+        eval_result = _wrap_eval_result(item_results)
+
+        metrics = compute_metrics(eval_result, dataset)  # must not raise
+
+        assert metrics.na_stats is not None
+        # The abstain is recognized as a predicted NA (not as option 0).
+        assert metrics.na_stats.na_count_pred == 1
+        assert metrics.na_stats.na_count_true == 0
+        assert metrics.na_stats.na_false_positive == 1
+        # The three scored pairs are perfect; the abstain is excluded (n_samples == 3).
+        assert metrics.per_criterion[0].n_samples == 3
+        assert metrics.per_criterion[0].exact_accuracy == pytest.approx(1.0)
+
+    def test_none_abstain_as_unmet_remaps_to_worst(self, nominal_criterion):
+        """Under na_mode='as_unmet' the None-abstain remaps to the worst scored option
+        (here value-0 options) rather than being excluded — and never crashes on None."""
+        dataset = RubricDataset(prompt="Test", rubric=Rubric([nominal_criterion]))
+        gt_labels = ["Just right", "Just right"]
+        preds: list[int | None] = [2, None]
+        for i, label in enumerate(gt_labels):
+            dataset.add_item(submission=f"S{i}", description=f"D{i}", ground_truth=[label])
+
+        item_results = [
+            ItemResult(
+                item_idx=i,
+                item=dataset.items[i],
+                report=_make_forced_choice_report(preds[i], nominal_criterion),
+                duration_seconds=0.1,
+            )
+            for i in range(len(gt_labels))
+        ]
+        eval_result = _wrap_eval_result(item_results)
+
+        # Must not raise; the abstain is handled, not a None crashing kappa.
+        metrics = compute_metrics(eval_result, dataset, na_mode="as_unmet")
+        assert metrics.na_stats is not None
+        assert metrics.na_stats.na_count_pred == 1

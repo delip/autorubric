@@ -86,6 +86,26 @@ def _routing_client(mc_selected_option: int, binary_verdict: CriterionVerdict) -
     return client
 
 
+def _routing_client_mc_raises(binary_verdict: CriterionVerdict, exc: BaseException) -> MagicMock:
+    """Routes by prompt: raises ``exc`` on multi-choice prompts, returns ``binary_verdict``
+    on binary prompts."""
+
+    async def gen(
+        system_prompt: str,
+        user_prompt: str,
+        response_format: type | None = None,
+        return_result: bool = False,
+        **kwargs: Any,
+    ) -> GenerateResult:
+        if "<options>" in user_prompt:
+            raise exc
+        return _ok_binary_result(binary_verdict)
+
+    client = MagicMock()
+    client.generate = AsyncMock(side_effect=gen)
+    return client
+
+
 def _na_free_ordinal(weight: float = 5.0) -> Criterion:
     return Criterion(
         name="quality",
@@ -251,4 +271,72 @@ async def test_injected_na_excluded_under_skip_like_binary(mock_llm_config):
     # A clean abstain (judge selected the injected NA), NOT an error-induced NA.
     assert not mc_cr.is_error
     # Only the binary MET (weight 5) counts: 5 / 5 = 1.0.
+    assert report.score == pytest.approx(1.0)
+
+
+@pytest.mark.asyncio
+async def test_forced_choice_infra_error_is_genuine_abstain(mock_llm_config):
+    """T2-B residual fix: forced-choice (auto_na_option=False) criterion with no NA option.
+
+    On an infrastructure/parse error there is no NA option to abstain into. The verdict
+    must be a GENUINE abstain — na=True with selected_index/selected_label = None — never
+    na=True pointing at a real scored option (the old contradiction).
+    """
+    rubric = Rubric([_na_free_ordinal()])
+    with patch(
+        "autorubric.graders.criterion_grader.LLMClient",
+        return_value=_client_raising(litellm.Timeout("timed out", model="m", llm_provider="p")),
+    ):
+        grader = CriterionGrader(
+            llm_config=mock_llm_config, shuffle_options=False, auto_na_option=False
+        )
+        report = await rubric.grade("submission", grader=grader)
+
+    cr = report.report[0]
+    # No NA option was injected (forced choice).
+    assert len(cr.criterion.options) == 3
+    assert all(not o.na for o in cr.criterion.options)
+    mcv = cr.final_multi_choice_verdict
+    assert mcv is not None
+    assert mcv.na is True
+    # Genuine abstain: no option is selected.
+    assert mcv.selected_index is None
+    assert mcv.selected_label is None
+    assert mcv.value == 0.0
+    assert cr.is_error
+    assert cr.error is not None and cr.error.startswith("infrastructure:")
+    assert cr.is_na is True
+    # Single abstained criterion → excluded under SKIP → empty denominator → 0.0.
+    assert report.score == 0.0
+
+
+@pytest.mark.asyncio
+async def test_forced_choice_infra_error_excluded_under_skip(mock_llm_config):
+    """The genuine abstain stays na=True, so under the default SKIP strategy it drops out
+    of the denominator and never penalizes the submission — exactly like binary CANNOT_ASSESS.
+    """
+    rubric = Rubric(
+        [
+            Criterion(name="accurate", requirement="Is it accurate?", weight=5.0),
+            _na_free_ordinal(weight=8.0),
+        ]
+    )
+    with patch(
+        "autorubric.graders.criterion_grader.LLMClient",
+        return_value=_routing_client_mc_raises(
+            binary_verdict=CriterionVerdict.MET,
+            exc=litellm.Timeout("timed out", model="m", llm_provider="p"),
+        ),
+    ):
+        grader = CriterionGrader(
+            llm_config=mock_llm_config, shuffle_options=False, auto_na_option=False
+        )
+        report = await rubric.grade("submission", grader=grader)
+
+    mc_cr = report.report[1]
+    assert mc_cr.is_na is True
+    assert mc_cr.is_error
+    assert mc_cr.final_multi_choice_verdict is not None
+    assert mc_cr.final_multi_choice_verdict.selected_index is None
+    # Only the binary MET (weight 5) counts: 5 / 5 = 1.0; the errored multi-choice is excluded.
     assert report.score == pytest.approx(1.0)

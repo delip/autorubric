@@ -916,8 +916,11 @@ def compute_metrics(
 
     # Per-criterion data storage
     # For binary: list[CriterionVerdict]
-    # For multi-choice: list[int] (option indices)
-    per_criterion_pred: list[list[CriterionVerdict | int]] = [[] for _ in range(n_criteria)]
+    # For multi-choice: list[int] (option indices). A predicted index may transiently be
+    # None for a genuine multi-choice error-abstain (T2-B); it is normalized to the
+    # effective NA index right after the effective criteria are built, so consumers below
+    # only ever see CriterionVerdict | int.
+    per_criterion_pred: list[list[CriterionVerdict | int | None]] = [[] for _ in range(n_criteria)]
     per_criterion_true: list[list[CriterionVerdict | int]] = [[] for _ in range(n_criteria)]
 
     # Overall scores
@@ -979,12 +982,13 @@ def compute_metrics(
             pred_val = pred_all[c_idx]
             true_val = true_all[c_idx]
 
-            # Handle None predictions (failed extraction)
-            if pred_val is None:
-                if criterion_types[c_idx] == "binary":
-                    pred_val = CriterionVerdict.UNMET
-                else:
-                    pred_val = 0  # Default to first option
+            # Handle None predictions (failed extraction). Binary None -> UNMET (the
+            # conservative default). A multi-choice None is a GENUINE error-abstain (no NA
+            # option, forced-choice; T2-B): leave it as None here and normalize it to the
+            # effective criterion's NA index after the effective criteria are built below,
+            # so it is recognized as NA instead of being silently counted as option 0.
+            if pred_val is None and criterion_types[c_idx] == "binary":
+                pred_val = CriterionVerdict.UNMET
 
             per_criterion_pred[c_idx].append(pred_val)
             per_criterion_true[c_idx].append(true_val)
@@ -1079,20 +1083,35 @@ def compute_metrics(
         raise ValueError("No valid items with ground truth found")
 
     # Reconstruct the effective criterion for any multi-choice criterion whose graded
-    # reports used an auto-injected NA option (T2-A). The grader appends that NA at index
-    # N = len(author.options) — out of range for the author rubric used above. We normalize
-    # only when an out-of-range prediction is actually observed (the appended NA), so
-    # forced-choice runs (auto_na_option=False) are unaffected and never gain a spurious
-    # NA column. ``with_guaranteed_na_option`` is the same pure helper the grader uses, so
-    # the two layers cannot drift.
+    # reports used an auto-injected NA option (T2-A) OR produced a genuine None error-abstain
+    # (T2-B). The grader appends an auto-injected NA at index N = len(author.options) — out of
+    # range for the author rubric used above — and emits selected_index=None when it had to
+    # abstain with no NA option. We normalize only when an out-of-range OR a None prediction
+    # is actually observed, so forced-choice runs without abstains are unaffected and never
+    # gain a spurious NA column. ``with_guaranteed_na_option`` is the same pure helper the
+    # grader uses, so the two layers cannot drift.
     effective_criteria = list(criteria)
     for c_idx in range(n_criteria):
         if criterion_types[c_idx] == "binary":
             continue
         author_c = criteria[c_idx]
         n_author = len(author_c.options) if author_c.options else 0
-        if any(isinstance(v, int) and v >= n_author for v in per_criterion_pred[c_idx]):
+        if any(
+            (isinstance(v, int) and v >= n_author) or v is None for v in per_criterion_pred[c_idx]
+        ):
             effective_criteria[c_idx] = author_c.with_guaranteed_na_option()
+
+    # Normalize any remaining None multi-choice predictions (genuine error-abstains, T2-B) to
+    # the effective criterion's NA index, so every downstream consumer sees only ints and the
+    # abstain is recognized as NA (FP/FN, na_kappa, filtering) under every na_mode. The
+    # reconstruction above guarantees a NA option exists for any criterion that had a None.
+    for c_idx in range(n_criteria):
+        if criterion_types[c_idx] == "binary":
+            continue
+        na_idx = effective_criteria[c_idx].na_option_index
+        if na_idx is None:
+            continue
+        per_criterion_pred[c_idx] = [na_idx if v is None else v for v in per_criterion_pred[c_idx]]
 
     # Compute per-criterion metrics by type
     per_criterion: list[CriterionMetricsUnion] = []

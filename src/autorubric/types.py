@@ -543,7 +543,12 @@ class MultiChoiceVerdict(BaseModel):
 
     Attributes:
         selected_index: Zero-based index of the selected option. STABLE for metrics.
+            ``None`` for a genuine abstain synthesized on an infrastructure/parse failure
+            when the criterion has no NA option (forced-choice, ``auto_na_option=False``):
+            the verdict is ``na=True`` but no real option was selected, so it never
+            contradicts itself by pointing ``na=True`` at a scored option (T2-B).
         selected_label: Label text of the selected option. READABLE for reports.
+            ``None`` in the same no-option-selected abstain case as ``selected_index``.
         value: Score contribution of the selected option (0.0-1.0).
         na: True if the selected option is marked as NA (not applicable).
 
@@ -558,8 +563,8 @@ class MultiChoiceVerdict(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    selected_index: int
-    selected_label: str
+    selected_index: int | None = None
+    selected_label: str | None = None
     value: float
     na: bool = False
 
@@ -601,7 +606,10 @@ class MultiChoiceJudgeVote:
     Attributes:
         judge_id: Identifier for the judge (e.g., "gpt-4", "claude-sonnet").
         selected_index: Zero-based index of selected option. STABLE for metrics.
-        selected_label: Label of selected option. READABLE for reports.
+            ``None`` for a genuine abstain synthesized on a judge-call failure when the
+            criterion has no NA option (forced-choice); otherwise identifies the option.
+        selected_label: Label of selected option. READABLE for reports. ``None`` in the
+            same no-option-selected abstain case as ``selected_index``.
         value: Score value of selected option.
         reason: Judge's explanation for the selection.
         weight: Judge's voting weight (default 1.0).
@@ -613,8 +621,8 @@ class MultiChoiceJudgeVote:
     """
 
     judge_id: str
-    selected_index: int
-    selected_label: str
+    selected_index: int | None
+    selected_label: str | None
     value: float
     reason: str
     weight: float = 1.0
@@ -889,9 +897,16 @@ class EnsembleCriterionReport:
                 agreeing = sum(1 for v in self.votes if v.verdict == self.final_verdict)
                 self.agreement = agreeing / len(self.votes)
             elif self.multi_choice_votes and self.final_multi_choice_verdict:
-                # For multi-choice, count votes matching the final selected index
+                # For multi-choice, count votes matching the final selected index.
                 final_idx = self.final_multi_choice_verdict.selected_index
-                agreeing = sum(1 for v in self.multi_choice_votes if v.selected_index == final_idx)
+                if final_idx is None:
+                    # Genuine abstain with no option selected (forced-choice error, no NA
+                    # option): agreement is the fraction of votes that likewise abstained.
+                    agreeing = sum(1 for v in self.multi_choice_votes if v.selected_index is None)
+                else:
+                    agreeing = sum(
+                        1 for v in self.multi_choice_votes if v.selected_index == final_idx
+                    )
                 self.agreement = agreeing / len(self.multi_choice_votes)
 
     @property

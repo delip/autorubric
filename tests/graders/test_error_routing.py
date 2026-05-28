@@ -675,6 +675,65 @@ async def test_ensemble_multi_choice_all_judges_fail_error_flagged():
     assert all(v.error is not None for v in cr.multi_choice_votes)
 
 
+@pytest.mark.asyncio
+async def test_ensemble_forced_choice_all_fail_clean_abstain():
+    """Forced-choice (auto_na_option=False), no NA option, every judge fails (infra).
+
+    With no NA option to abstain into, each per-judge error-abstain has selected_index=None
+    (na=True), and the aggregate must be a GENUINE abstain: na=True with selected_index/label
+    None — never na=True pointing at a real scored option (T2-B). Excluded under SKIP -> 0.0.
+    """
+    rubric = Rubric(
+        [
+            Criterion(
+                name="quality",
+                requirement="How good is it?",
+                weight=5.0,
+                scale_type="ordinal",
+                options=[
+                    CriterionOption(label="Bad", value=0.0),
+                    CriterionOption(label="Ok", value=0.5),
+                    CriterionOption(label="Great", value=1.0),
+                ],
+            ),
+        ]
+    )
+
+    client_a = _client_raising(litellm.Timeout("a down", model="m", llm_provider="p"))
+    client_b = _client_raising(litellm.RateLimitError("b down", model="m", llm_provider="p"))
+
+    def fake_client(config: LLMConfig) -> MagicMock:
+        return client_a if config.model == "judge-a-model" else client_b
+
+    with patch(
+        "autorubric.graders.criterion_grader.LLMClient",
+        side_effect=fake_client,
+    ):
+        grader = CriterionGrader(
+            judges=[
+                JudgeSpec(LLMConfig(model="judge-a-model"), "judge_a"),
+                JudgeSpec(LLMConfig(model="judge-b-model"), "judge_b"),
+            ],
+            aggregation="majority",
+            shuffle_options=False,
+            auto_na_option=False,
+        )
+        report = await rubric.grade("submission", grader=grader)
+
+    assert report.report is not None
+    cr = report.report[0]
+    mcv = cr.final_multi_choice_verdict
+    assert mcv is not None
+    assert mcv.na is True
+    assert mcv.selected_index is None
+    assert mcv.selected_label is None
+    assert cr.is_error
+    # Every per-judge vote is a clean None-abstain.
+    assert cr.multi_choice_votes
+    assert all(v.na and v.selected_index is None for v in cr.multi_choice_votes)
+    assert report.score == 0.0
+
+
 # =============================================================================
 # Serialization round-trip
 # =============================================================================
@@ -720,6 +779,62 @@ async def test_error_survives_serialization_round_trip(mock_llm_config):
     assert len(restored_cr.votes) == 2
     assert all(v.error is not None for v in restored_cr.votes)
     assert all(v.error.startswith("infrastructure:") for v in restored_cr.votes)
+
+
+@pytest.mark.asyncio
+async def test_none_abstain_survives_serialization_round_trip():
+    """A genuine None-abstain (T2-B) round-trips: selected_index/label stay None on the
+    aggregated verdict and on each multi-choice vote."""
+    rubric = Rubric(
+        [
+            Criterion(
+                name="quality",
+                requirement="How good is it?",
+                weight=5.0,
+                scale_type="ordinal",
+                options=[
+                    CriterionOption(label="Bad", value=0.0),
+                    CriterionOption(label="Ok", value=0.5),
+                    CriterionOption(label="Great", value=1.0),
+                ],
+            ),
+        ]
+    )
+
+    client_a = _client_raising(litellm.Timeout("a down", model="m", llm_provider="p"))
+    client_b = _client_raising(litellm.RateLimitError("b down", model="m", llm_provider="p"))
+
+    def fake_client(config: LLMConfig) -> MagicMock:
+        return client_a if config.model == "judge-a-model" else client_b
+
+    with patch(
+        "autorubric.graders.criterion_grader.LLMClient",
+        side_effect=fake_client,
+    ):
+        grader = CriterionGrader(
+            judges=[
+                JudgeSpec(LLMConfig(model="judge-a-model"), "judge_a"),
+                JudgeSpec(LLMConfig(model="judge-b-model"), "judge_b"),
+            ],
+            aggregation="majority",
+            shuffle_options=False,
+            auto_na_option=False,
+        )
+        report = await rubric.grade("submission", grader=grader)
+
+    item = DataItem(submission="submission", description="test item")
+    item_result = ItemResult(item_idx=0, item=item, report=report, duration_seconds=0.1)
+    payload = json.loads(json.dumps(item_result.to_dict()))
+    restored = ItemResult.from_dict(payload, item)
+
+    assert restored.report.report is not None
+    restored_cr = restored.report.report[0]
+    assert restored_cr.final_multi_choice_verdict is not None
+    assert restored_cr.final_multi_choice_verdict.na is True
+    assert restored_cr.final_multi_choice_verdict.selected_index is None
+    assert restored_cr.final_multi_choice_verdict.selected_label is None
+    assert restored_cr.multi_choice_votes
+    assert all(v.selected_index is None for v in restored_cr.multi_choice_votes)
 
 
 # =============================================================================
