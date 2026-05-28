@@ -71,10 +71,15 @@ from autorubric.graders import CriterionGrader
 grader = CriterionGrader(
     judges=[...],
     aggregation="majority",           # For binary criteria
-    ordinal_aggregation="mean",       # "mean", "median", "weighted_mean", "mode"
+    ordinal_aggregation="mean",       # "mean", "median", "weighted_mean", "mode", "min", "max"
     nominal_aggregation="mode",       # "mode", "weighted_mode", "unanimous"
 )
 ```
+
+The three knobs are independent. For ordinal criteria, `min`/`max` are the conservative/
+permissive analogs of binary `unanimous`/`any` (lowest/highest option any judge selected).
+For nominal criteria, `unanimous` abstains via the NA option on disagreement (falling back
+to `mode` and warning if there is no NA option).
 
 ## Position Bias Mitigation
 

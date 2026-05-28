@@ -416,6 +416,16 @@ class TestMultiChoiceAggregation:
             CriterionOption(label="Just right", value=1.0),
         ]
 
+    @pytest.fixture
+    def nominal_options_with_na(self):
+        """Nominal options including an explicit NA option (index 3)."""
+        return [
+            CriterionOption(label="Too few", value=0.0),
+            CriterionOption(label="Too many", value=0.0),
+            CriterionOption(label="Just right", value=1.0),
+            CriterionOption(label="NA - not applicable", value=0.0, na=True),
+        ]
+
     def test_ordinal_mean_aggregation(self, ordinal_options):
         """Mean aggregation snaps to nearest option value."""
         from autorubric import LLMConfig
@@ -501,6 +511,230 @@ class TestMultiChoiceAggregation:
         assert result.selected_index == 2
         assert result.selected_label == "Just right"
         assert result.value == 1.0
+
+    def test_ordinal_min_picks_lowest_selected_option(self, ordinal_options):
+        """Ordinal 'min' returns the lowest-value option any judge selected."""
+        from autorubric import LLMConfig
+        from autorubric.graders.criterion_grader import CriterionGrader
+
+        grader = CriterionGrader(
+            llm_config=LLMConfig(model="openai/gpt-4"),
+            ordinal_aggregation="min",
+        )
+
+        votes = [
+            MultiChoiceJudgeVote(
+                judge_id="j1", selected_index=2, selected_label="3", value=0.67, reason=""
+            ),
+            MultiChoiceJudgeVote(
+                judge_id="j2", selected_index=2, selected_label="3", value=0.67, reason=""
+            ),
+            MultiChoiceJudgeVote(
+                judge_id="j3", selected_index=3, selected_label="4", value=1.0, reason=""
+            ),
+        ]
+
+        result = grader._aggregate_ordinal_votes(votes, ordinal_options, "min")
+
+        # Conservative: lowest selected value (0.67), not the mean (which would snap to 1.0)
+        assert result.selected_index == 2
+        assert result.selected_label == "3"
+        assert result.value == 0.67
+        assert result.aggregated_value == 0.67
+        assert result.na is False
+
+    def test_ordinal_max_picks_highest_selected_option(self, ordinal_options):
+        """Ordinal 'max' returns the highest-value option any judge selected."""
+        from autorubric import LLMConfig
+        from autorubric.graders.criterion_grader import CriterionGrader
+
+        grader = CriterionGrader(
+            llm_config=LLMConfig(model="openai/gpt-4"),
+            ordinal_aggregation="max",
+        )
+
+        votes = [
+            MultiChoiceJudgeVote(
+                judge_id="j1", selected_index=2, selected_label="3", value=0.67, reason=""
+            ),
+            MultiChoiceJudgeVote(
+                judge_id="j2", selected_index=2, selected_label="3", value=0.67, reason=""
+            ),
+            MultiChoiceJudgeVote(
+                judge_id="j3", selected_index=3, selected_label="4", value=1.0, reason=""
+            ),
+        ]
+
+        result = grader._aggregate_ordinal_votes(votes, ordinal_options, "max")
+
+        assert result.selected_index == 3
+        assert result.selected_label == "4"
+        assert result.value == 1.0
+        assert result.aggregated_value == 1.0
+
+    def test_ordinal_min_max_value_tie_breaks_to_lowest_index(self):
+        """Value ties in 'min'/'max' resolve to the lowest option index (deterministic)."""
+        from autorubric import LLMConfig
+        from autorubric.graders.criterion_grader import CriterionGrader
+
+        grader = CriterionGrader(llm_config=LLMConfig(model="openai/gpt-4"))
+
+        # Two distinct options share the same value (0.5).
+        options = [
+            CriterionOption(label="a", value=0.0),
+            CriterionOption(label="b", value=0.5),
+            CriterionOption(label="c", value=0.5),
+            CriterionOption(label="d", value=1.0),
+        ]
+        # Votes select the two tied options (idx 1, 2) plus the top option (idx 3).
+        votes = [
+            MultiChoiceJudgeVote(
+                judge_id="j1", selected_index=2, selected_label="c", value=0.5, reason=""
+            ),
+            MultiChoiceJudgeVote(
+                judge_id="j2", selected_index=1, selected_label="b", value=0.5, reason=""
+            ),
+            MultiChoiceJudgeVote(
+                judge_id="j3", selected_index=3, selected_label="d", value=1.0, reason=""
+            ),
+        ]
+
+        # min value is 0.5, shared by idx 1 and 2 -> lowest index (1) wins.
+        min_result = grader._aggregate_ordinal_votes(votes, options, "min")
+        assert min_result.selected_index == 1
+
+        # For max, build a set whose max value is shared by idx 1 and 2.
+        votes_max = [
+            MultiChoiceJudgeVote(
+                judge_id="j1", selected_index=2, selected_label="c", value=0.5, reason=""
+            ),
+            MultiChoiceJudgeVote(
+                judge_id="j2", selected_index=1, selected_label="b", value=0.5, reason=""
+            ),
+            MultiChoiceJudgeVote(
+                judge_id="j3", selected_index=0, selected_label="a", value=0.0, reason=""
+            ),
+        ]
+        max_result = grader._aggregate_ordinal_votes(votes_max, options, "max")
+        assert max_result.selected_index == 1
+
+    def test_nominal_unanimous_all_agree_selects_that_option(self, nominal_options):
+        """Nominal 'unanimous' returns the agreed option when all judges concur."""
+        from autorubric import LLMConfig
+        from autorubric.graders.criterion_grader import CriterionGrader
+
+        grader = CriterionGrader(
+            llm_config=LLMConfig(model="openai/gpt-4"),
+            nominal_aggregation="unanimous",
+        )
+
+        votes = [
+            MultiChoiceJudgeVote(
+                judge_id=f"j{i}",
+                selected_index=2,
+                selected_label="Just right",
+                value=1.0,
+                reason="",
+            )
+            for i in range(3)
+        ]
+
+        result = grader._aggregate_nominal_votes(votes, nominal_options, "unanimous")
+
+        assert result.selected_index == 2
+        assert result.selected_label == "Just right"
+        assert result.na is False
+
+    def test_nominal_unanimous_disagreement_with_na_abstains(self, nominal_options_with_na):
+        """Nominal 'unanimous' abstains via the NA option when judges disagree."""
+        from autorubric import LLMConfig
+        from autorubric.graders.criterion_grader import CriterionGrader
+
+        grader = CriterionGrader(
+            llm_config=LLMConfig(model="openai/gpt-4"),
+            nominal_aggregation="unanimous",
+        )
+
+        votes = [
+            MultiChoiceJudgeVote(
+                judge_id="j1", selected_index=0, selected_label="Too few", value=0.0, reason=""
+            ),
+            MultiChoiceJudgeVote(
+                judge_id="j2", selected_index=1, selected_label="Too many", value=0.0, reason=""
+            ),
+            MultiChoiceJudgeVote(
+                judge_id="j3", selected_index=2, selected_label="Just right", value=1.0, reason=""
+            ),
+        ]
+
+        result = grader._aggregate_nominal_votes(votes, nominal_options_with_na, "unanimous")
+
+        # No consensus -> abstain via the NA option (index 3), not the mode.
+        assert result.na is True
+        assert result.selected_index == 3
+        assert result.selected_label == "NA - not applicable"
+
+    def test_nominal_unanimous_disagreement_without_na_falls_back_to_mode_and_warns(
+        self, nominal_options, caplog
+    ):
+        """Without an NA option, disagreeing 'unanimous' falls back to mode and warns."""
+        import logging
+
+        from autorubric import LLMConfig
+        from autorubric.graders.criterion_grader import CriterionGrader
+
+        grader = CriterionGrader(
+            llm_config=LLMConfig(model="openai/gpt-4"),
+            nominal_aggregation="unanimous",
+        )
+
+        votes = [
+            MultiChoiceJudgeVote(
+                judge_id="j1", selected_index=2, selected_label="Just right", value=1.0, reason=""
+            ),
+            MultiChoiceJudgeVote(
+                judge_id="j2", selected_index=0, selected_label="Too few", value=0.0, reason=""
+            ),
+            MultiChoiceJudgeVote(
+                judge_id="j3", selected_index=2, selected_label="Just right", value=1.0, reason=""
+            ),
+        ]
+
+        with caplog.at_level(logging.WARNING):
+            result = grader._aggregate_nominal_votes(votes, nominal_options, "unanimous")
+
+        # Falls back to mode ("Just right", twice) without abstaining.
+        assert result.selected_index == 2
+        assert result.na is False
+        assert any("unanimous" in r.message and "NA option" in r.message for r in caplog.records)
+
+    def test_nominal_unanimous_differs_from_mode_on_disagreement(self, nominal_options_with_na):
+        """'unanimous' is no longer a no-op alias of 'mode' on disagreement."""
+        from autorubric import LLMConfig
+        from autorubric.graders.criterion_grader import CriterionGrader
+
+        grader = CriterionGrader(llm_config=LLMConfig(model="openai/gpt-4"))
+
+        votes = [
+            MultiChoiceJudgeVote(
+                judge_id="j1", selected_index=0, selected_label="Too few", value=0.0, reason=""
+            ),
+            MultiChoiceJudgeVote(
+                judge_id="j2", selected_index=1, selected_label="Too many", value=0.0, reason=""
+            ),
+            MultiChoiceJudgeVote(
+                judge_id="j3", selected_index=2, selected_label="Just right", value=1.0, reason=""
+            ),
+        ]
+
+        unanimous_result = grader._aggregate_nominal_votes(
+            votes, nominal_options_with_na, "unanimous"
+        )
+        mode_result = grader._aggregate_nominal_votes(votes, nominal_options_with_na, "mode")
+
+        assert unanimous_result.na is True
+        assert mode_result.na is False
+        assert unanimous_result.selected_index != mode_result.selected_index
 
 
 # =============================================================================

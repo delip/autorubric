@@ -153,13 +153,24 @@ ScaleType = Literal["ordinal", "nominal"]
 - nominal: Options are unordered categories (e.g., "too few", "too many", "just right")
 """
 
-OrdinalAggregation = Literal["mean", "median", "weighted_mean", "mode"]
+OrdinalAggregation = Literal["mean", "median", "weighted_mean", "mode", "min", "max"]
 """Aggregation strategy for ordinal multi-choice criteria.
 
-- mean: Average of score values across judges
-- median: Median of score values
-- weighted_mean: Weighted average by judge weight
+Central tendency:
+
+- mean: Average of score values across judges, snapped to the nearest option
+- median: Median of score values, snapped to the nearest option
+- weighted_mean: Weighted average by judge weight, snapped to the nearest option
 - mode: Most common selection
+
+Conservative / permissive (the ordinal analogs of binary ``unanimous`` / ``any``):
+
+- min: The option with the lowest value any judge selected (conservative).
+- max: The option with the highest value any judge selected (permissive).
+
+``min``/``max`` are gentle robust extremes: they return the lowest/highest option a
+judge actually selected, not a "reset to worst on any dissent". Example: selections
+{0.67, 0.67, 1.0} give min -> the 0.67 option, max -> the 1.0 option.
 """
 
 NominalAggregation = Literal["mode", "weighted_mode", "unanimous"]
@@ -167,7 +178,10 @@ NominalAggregation = Literal["mode", "weighted_mode", "unanimous"]
 
 - mode: Most common selection (majority vote)
 - weighted_mode: Weight votes by judge weight
-- unanimous: All judges must agree
+- unanimous: All judges must select the same option. On disagreement, abstain by
+  selecting the criterion's NA option (verdict ``na=True``, excluded from scoring
+  under the SKIP strategy); if the criterion has no NA option, fall back to ``mode``
+  and emit a warning.
 """
 
 

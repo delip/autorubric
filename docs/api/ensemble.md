@@ -49,6 +49,11 @@ for cr in result.report:
 | `unanimous` | All judges must vote MET |
 | `any` | Any judge voting MET results in MET |
 
+These apply to **binary** criteria only and are independent of multi-choice aggregation
+(`ordinal_aggregation` / `nominal_aggregation`). Conceptually, binary `unanimous` ≡ the
+**min** over the {0, 1} option values and `any` ≡ the **max**; the ordinal analogs are the
+`min` / `max` strategies (see the [multi-choice cookbook](../cookbook/multi-choice-rubrics.md)).
+
 ---
 
 ## AggregationStrategy

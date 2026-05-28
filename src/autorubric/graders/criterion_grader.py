@@ -219,9 +219,13 @@ class CriterionGrader(Grader):
             judges: List of JudgeSpec for ensemble mode. Mutually exclusive with llm_config.
             aggregation: Strategy for aggregating votes in ensemble mode (binary criteria).
             ordinal_aggregation: Strategy for aggregating ordinal multi-choice votes.
-                Options: "mean", "median", "weighted_mean", "mode".
+                Central tendency: "mean", "median", "weighted_mean", "mode". Conservative/
+                permissive (analogs of binary unanimous/any): "min" (lowest selected
+                option) / "max" (highest selected option).
             nominal_aggregation: Strategy for aggregating nominal multi-choice votes.
-                Options: "mode", "weighted_mode", "unanimous".
+                Options: "mode", "weighted_mode", "unanimous". "unanimous" abstains via the
+                NA option on disagreement, or falls back to mode + warns if there is no NA
+                option.
             training_data: Dataset for few-shot examples. If provided, enables few-shot prompting.
             few_shot_config: Configuration for few-shot example selection.
             system_prompt: Custom system prompt for binary criteria.
@@ -1151,6 +1155,9 @@ class CriterionGrader(Grader):
         - median: Median of score values, snap to nearest option
         - weighted_mean: Weighted average by judge weight
         - mode: Most common selection
+        - min: Lowest-value option any judge selected (conservative; analog of binary
+          ``unanimous``)
+        - max: Highest-value option any judge selected (permissive; analog of binary ``any``)
         """
         from collections import Counter
 
@@ -1183,6 +1190,22 @@ class CriterionGrader(Grader):
                 value=selected_option.value,
                 na=selected_option.na,
                 aggregated_value=selected_option.value,  # For mode, no continuous value
+            )
+        elif strategy in ("min", "max"):
+            # Conservative / permissive analogs of binary unanimous / any: the lowest-
+            # (min) or highest- (max) value option any judge selected. Value ties resolve
+            # to the lowest option index (deterministic; T3-B tie rules out of scope).
+            if strategy == "min":
+                chosen = min(votes, key=lambda v: (v.value, v.selected_index))
+            else:
+                chosen = max(votes, key=lambda v: (v.value, -v.selected_index))
+            selected_option = options[chosen.selected_index]
+            return AggregatedMultiChoiceVerdict(
+                selected_index=chosen.selected_index,
+                selected_label=selected_option.label,
+                value=selected_option.value,
+                na=selected_option.na,
+                aggregated_value=selected_option.value,
             )
         else:
             # Default to mean
@@ -1218,7 +1241,9 @@ class CriterionGrader(Grader):
         Strategies:
         - mode: Most common selection (majority)
         - weighted_mode: Weight votes by judge weight
-        - unanimous: All judges must agree (else pick most common)
+        - unanimous: All judges must select the same option. On disagreement, abstain
+          via the criterion's NA option (verdict na=True); if there is no NA option,
+          fall back to mode and warn.
         """
         from collections import Counter
 
@@ -1239,8 +1264,19 @@ class CriterionGrader(Grader):
             if len(unique_indices) == 1:
                 most_common_idx = indices[0]
             else:
-                # Not unanimous, fall back to mode
-                most_common_idx = Counter(indices).most_common(1)[0][0]
+                # Judges disagree -> abstain via the NA option if one exists (na=True flows
+                # through the SKIP scoring path). Never set na=True against a real option
+                # (T2-B). With no NA option, fall back to mode and warn.
+                na_idx = next((i for i, o in enumerate(options) if o.na), None)
+                if na_idx is not None:
+                    most_common_idx = na_idx
+                else:
+                    logger.warning(
+                        "Nominal 'unanimous' aggregation: judges disagreed (indices %s) "
+                        "and the criterion has no NA option; falling back to mode.",
+                        sorted(unique_indices),
+                    )
+                    most_common_idx = Counter(indices).most_common(1)[0][0]
         else:
             # Default to mode
             most_common_idx = Counter(indices).most_common(1)[0][0]
