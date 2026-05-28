@@ -7,6 +7,7 @@ import dataclasses
 import hashlib
 import logging
 import random
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -81,8 +82,12 @@ def _combine_errors(errors: list[str | None]) -> str | None:
     return " | ".join(e for e in errors if e is not None)
 
 
-def _aggregate_error(votes: list[JudgeVote]) -> str | None:
-    """Ensemble error string for binary votes (see ``_combine_errors``)."""
+def _aggregate_error(votes: Sequence[JudgeVote | MultiChoiceJudgeVote]) -> str | None:
+    """Ensemble error string for a list of votes (see ``_combine_errors``).
+
+    Single source of truth for the ensemble-level ``error`` across both the binary
+    (``JudgeVote``) and multi-choice (``MultiChoiceJudgeVote``) aggregation paths.
+    """
     return _combine_errors([v.error for v in votes])
 
 
@@ -868,12 +873,12 @@ class CriterionGrader(Grader):
             if criterion_report.is_multi_choice:
                 # Multi-choice: build MultiChoiceJudgeVote list
                 mc_votes: list[MultiChoiceJudgeVote] = []
-                # MultiChoiceJudgeVote has no error field; track per-judge errors here so
-                # we can surface an ensemble-level error when every judge call failed.
-                mc_errors: list[str | None] = []
+                # Each MultiChoiceJudgeVote carries its own .error (parity with JudgeVote),
+                # so the ensemble error is derived from the votes via _aggregate_error,
+                # mirroring the binary path. Every judge call synthesizes a verdict, so the
+                # `mcv is not None` guard below never drops an errored vote.
                 for judge_result in judge_results:
                     cr = judge_result.criterion_results[criterion_idx]
-                    mc_errors.append(cr.report.error)
                     mcv = cr.report.multi_choice_verdict
                     if mcv is not None:
                         mc_votes.append(
@@ -910,7 +915,7 @@ class CriterionGrader(Grader):
                         votes=[],  # Binary votes empty for multi-choice
                         final_multi_choice_verdict=final_mc_verdict,
                         multi_choice_votes=mc_votes,
-                        error=_combine_errors(mc_errors),
+                        error=_aggregate_error(mc_votes),
                     )
                 )
             else:

@@ -73,7 +73,7 @@ fix lands. This file is the working backlog — keep it updated as items are res
   - Fix direction: add a trivial `is_error` property (`self.error is not None`) to both vote dataclasses. Reuse, no new types.
   - Effort/risk: **low / low**.
 
-- [ ] **T5-B (M-L) — Multi-choice ensemble tracks errors twice; stale comment.**
+- [x] **T5-B (M-L) — Multi-choice ensemble tracks errors twice; stale comment.**
   - Inconsistency: post-Issue-#2, `MultiChoiceJudgeVote.error` exists, yet the ensemble assembly still maintains a separate transient `mc_errors` list and carries a comment claiming the field doesn't exist. Binary uses a single source (`_aggregate_error(votes)`).
   - Sites: `src/autorubric/graders/criterion_grader.py:865-870, 884, 907` (multi-choice dual tracking + stale comment) vs `:84-86, 937` (binary single source).
   - Fix direction: derive the combined ensemble error from `[v.error for v in mc_votes]` (matching the binary path) and delete `mc_errors` + the stale comment; confirm the `mcv is None` guard at `:872` can't drop an errored vote (it can't today since errors always synthesize a verdict).

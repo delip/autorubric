@@ -610,6 +610,71 @@ async def test_ensemble_multi_choice_vote_carries_error():
     assert by_id["judge_b"].error is None
 
 
+@pytest.mark.asyncio
+async def test_ensemble_multi_choice_all_judges_fail_error_flagged():
+    """Every judge fails (infra) on a multi-choice criterion -> ensemble flagged.
+
+    Behavior-lock (T5-B): the ensemble-level error must combine BOTH judges' failures
+    (joined by `` | ``), the ensemble report must be flagged via ``is_error``, and every
+    per-judge ``MultiChoiceJudgeVote`` must itself be flagged via ``is_error``. This
+    pins the all-judges-fail multi-choice behavior so the single-source ``_aggregate_error``
+    refactor is provably behavior-preserving.
+    """
+    rubric = Rubric(
+        [
+            Criterion(
+                name="quality",
+                requirement="How good is it?",
+                weight=5.0,
+                scale_type="ordinal",
+                options=[
+                    CriterionOption(label="Bad", value=0.0),
+                    CriterionOption(label="Ok", value=0.5),
+                    CriterionOption(label="Great", value=1.0),
+                ],
+            ),
+        ]
+    )
+
+    client_a = _client_raising(litellm.Timeout("a down", model="m", llm_provider="p"))
+    client_b = _client_raising(litellm.RateLimitError("b down", model="m", llm_provider="p"))
+
+    def fake_client(config: LLMConfig) -> MagicMock:
+        return client_a if config.model == "judge-a-model" else client_b
+
+    with patch(
+        "autorubric.graders.criterion_grader.LLMClient",
+        side_effect=fake_client,
+    ):
+        grader = CriterionGrader(
+            judges=[
+                JudgeSpec(LLMConfig(model="judge-a-model"), "judge_a"),
+                JudgeSpec(LLMConfig(model="judge-b-model"), "judge_b"),
+            ],
+            aggregation="majority",
+            shuffle_options=False,
+        )
+        report = await rubric.grade("submission", grader=grader)
+
+    assert report.report is not None
+    cr = report.report[0]
+
+    # Ensemble flagged as error (every judge failed).
+    assert cr.is_error
+    assert cr.error is not None
+    # Combined message references BOTH judges' failures, joined by " | ".
+    assert " | " in cr.error
+    assert cr.error.count("infrastructure:") == 2
+    assert "a down" in cr.error
+    assert "b down" in cr.error
+
+    # Every per-judge vote is itself flagged (T5-A is_error parity).
+    assert cr.multi_choice_votes
+    assert len(cr.multi_choice_votes) == 2
+    assert all(v.is_error for v in cr.multi_choice_votes)
+    assert all(v.error is not None for v in cr.multi_choice_votes)
+
+
 # =============================================================================
 # Serialization round-trip
 # =============================================================================
