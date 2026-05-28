@@ -15,6 +15,7 @@ src/autorubric/
 ├── prompts.py               # Centralized prompt definitions
 ├── rate_limit.py            # Per-model rate limiting
 ├── rubric.py                # Core Rubric class
+├── scoring.py               # score_reports() shared weighted-scoring core
 ├── types.py                 # Criterion, LengthPenalty, ensemble types, etc.
 ├── utils.py                 # JSON parsing, length penalty utilities
 ├── graders/
@@ -41,7 +42,7 @@ src/autorubric/
 
 | Type                       | Purpose                                                                             |
 | -------------------------- | ----------------------------------------------------------------------------------- |
-| `Criterion`                | Single evaluation criterion with weight, requirement, optional multi-choice options. Method `worst_scored_option()` returns the score-minimizing non-NA option, weight-sign aware — shared by the grader's `unknown`-error worst-case path and the metrics' `na_mode="as_unmet"` remap |
+| `Criterion`                | Single evaluation criterion with weight, requirement, optional multi-choice options. Method `worst_scored_option()` returns the score-minimizing non-NA option, weight-sign aware — shared by the grader's `unknown`-error worst-case path, the scoring core's multi-choice `FAIL` contribution (`scoring.py`), and the metrics' `na_mode="as_unmet"` remap |
 | `CriterionOption`          | Multi-choice option with label, value (0-1), optional `na` flag                     |
 | `CriterionVerdict`         | Enum: `MET`, `UNMET`, `CANNOT_ASSESS`                                               |
 | `CriterionReport`          | Criterion + verdict + reason; optional `error` (category-prefixed message) + `is_error` property |
@@ -163,19 +164,25 @@ Note: `classify_grading_error` and `ErrorCategory` are in Public Exports.
 When a judge call fails, the grader calls `classify_grading_error()` on the exception. `infrastructure` and `parse` failures are routed to `CANNOT_ASSESS` (binary) or `na=True` (multi-choice) — so under the default `CannotAssessStrategy.SKIP` they are excluded from the scoring denominator and do NOT penalize the submission. Only `unknown` errors keep the previous conservative worst-case verdict (UNMET for positive weight, MET for negative). For multi-choice criteria, an `unknown` error selects the score-minimizing scored (non-NA) option — lowest `value` for non-negative weight, highest `value` for negative weight (mirroring the binary worst case) — and never auto-selects an NA option (NA/skip is reserved for infrastructure/parse). The failure message (category-prefixed, e.g. `"infrastructure: ..."`) is stored on `JudgeVote.error` (binary) and `MultiChoiceJudgeVote.error` (multi-choice — same parity). `EnsembleCriterionReport.error` is set only when EVERY contributing judge vote errored; a mix of failed + successful judges yields a genuine verdict with `error is None`. This ensemble-level `error` is derived from the per-vote `.error` fields via a single shared helper, `_aggregate_error(votes)`, used by BOTH the binary and multi-choice aggregation paths (the multi-choice path no longer keeps a separate error list — the per-vote `MultiChoiceJudgeVote.error` is the single source). The `is_error` property on `CriterionReport` / `EnsembleCriterionReport` — and on the per-vote types `JudgeVote` / `MultiChoiceJudgeVote` — lets downstream code distinguish error-induced verdicts from genuine ones without string-matching `reason`.
 
 ### Score Calculation
+A **single scoring core** — `score_reports(reports, config, normalize=True)` in `scoring.py` — is the one source of truth for weighted-criterion scoring. It is shared by all three scorers: the live grader (`CriterionGrader._calculate_score_from_reports`), `Rubric.compute_score` (ground-truth / expected scores, which parses verdicts into `CriterionReport`s and delegates), and `RubricDataset.compute_weighted_score` (which delegates to `Rubric.compute_score`). Because every path builds `CriterionReport`s and runs the same core, they agree exactly across every `CannotAssessStrategy` x {binary, multi-choice} x {+/- weight}.
+
 ```python
 # Positive criteria: MET earns weight, UNMET earns 0
 # Negative criteria: MET subtracts weight, UNMET contributes 0
-weighted_sum = sum(verdict_value * criterion.weight for each criterion)
+weighted_sum = sum(report.score_value * report.weight for non-abstained reports)
+#   + sum(_abstain_contribution(report, config) for abstained reports)  # NA / CANNOT_ASSESS
 score = clamp(weighted_sum / total_positive_weight, 0, 1)  # if normalized
+# Negative-weight-only fallback (no positive weight): 1 + weighted_sum / total_negative_weight
 # Length penalty subtracted after base calculation
 ```
+
+`CannotAssessStrategy` is applied uniformly to binary CANNOT_ASSESS and multi-choice NA via `_abstain_contribution`: `SKIP` excludes the criterion from **both** numerator and denominator; `ZERO`/`PARTIAL`/`FAIL` keep it in the denominator with a weight-sign-aware contribution. `FAIL` uses the score-minimizing realizable outcome — for multi-choice this is `Criterion.worst_scored_option()` (the same canonical worst-case helper as the grader's `unknown`-error path and metrics `na_mode="as_unmet"`, so the layers cannot drift); for binary it is UNMET for positive weight (0) and MET for negative weight (the full weight). The legacy `Rubric._apply_cannot_assess_strategy` helper was removed when `compute_score` was routed through the core (it carried a SKIP double-subtraction bug — it both excluded the abstained criterion *and* subtracted its weight from the denominator — that the core fixes).
 
 ### Multi-Choice Criteria
 - `scale_type`: "ordinal" (weighted kappa) or "nominal" (unweighted kappa)
 - Options have explicit `value` (0-1) to avoid position bias
 - `shuffle_options=True` (default) mitigates position bias
-- NA options (`na: true`) excluded from scoring like CANNOT_ASSESS
+- NA options (`na: true`) are the structural analog of binary CANNOT_ASSESS and flow through the same `score_reports` abstain path under whichever `CannotAssessStrategy` is configured
 
 ### Reproducibility & Seed Coordination
 `CriterionGrader(seed=...)` controls all non-LLM randomness (option shuffling, few-shot example selection). Auto-generated when `None` so shuffles are always pinned.
@@ -187,7 +194,7 @@ score = clamp(weighted_sum / total_positive_weight, 0, 1)  # if normalized
 - Helper: `_derive_shuffle_rng()` in `criterion_grader.py`.
 
 ### CANNOT_ASSESS Handling
-Strategies: `SKIP` (adjust denominator), `ZERO`, `PARTIAL` (configurable), `FAIL` (worst case)
+Strategies: `SKIP` (excludes the criterion from both numerator and denominator), `ZERO`, `PARTIAL` (configurable), `FAIL` (weight-sign-aware worst case). All four are applied by the single `score_reports` core (`scoring.py`), so binary CANNOT_ASSESS and multi-choice NA are handled identically wherever a score is computed (grader, `Rubric.compute_score`, `RubricDataset.compute_weighted_score`). `FAIL` uses `Criterion.worst_scored_option()` for multi-choice (the same canonical worst case as the grader's `unknown`-error path and metrics `na_mode="as_unmet"`) and UNMET-for-positive / MET-for-negative for binary.
 
 Judge-call failures classified as `infrastructure` or `parse` (see Grading Flow / `classify_grading_error`) are mapped to `CANNOT_ASSESS` (binary) or `na=True` (multi-choice), so under the default `SKIP` strategy they drop out of the denominator instead of penalizing the submission. Only `unknown` errors fall back to the conservative worst-case verdict. For multi-choice criteria, an `unknown` error selects the score-minimizing scored (non-NA) option via the shared `Criterion.worst_scored_option()` helper — lowest `value` for non-negative weight, highest `value` for negative weight (mirroring the binary worst case) — and never auto-selects an NA option.
 

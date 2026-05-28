@@ -83,7 +83,7 @@ fix lands. This file is the working backlog — keep it updated as items are res
 
 ## P2 — Parity gaps needing small design calls (confirm semantics with user)
 
-- [ ] **T4-A + T1-B (H) — Two divergent scorers; `CannotAssessStrategy` not applied to multi-choice NA.**
+- [x] **T4-A + T1-B (H) — Two divergent scorers; `CannotAssessStrategy` not applied to multi-choice NA.**
   - Inconsistency: there are two scoring implementations — `_calculate_score_from_reports` (grader) and `Rubric.compute_score`/`_apply_cannot_assess_strategy` — and they disagree for NA under FAIL/ZERO. In the grader, multi-choice NA under `FAIL`/`ZERO` is a pass-through no-op (`[V]` `criterion_grader.py:1265-1267, 1289-1291`), so a negative-weight multi-choice criterion is never penalized under FAIL, unlike binary; `Rubric.compute_score` routes NA through `_apply_cannot_assess_strategy` and *does* apply it.
   - Sites: `src/autorubric/graders/criterion_grader.py:1243-1334` vs `src/autorubric/rubric.py:236-354`.
   - Why it matters: live-grading scores and recomputed/ground-truth scores can disagree for the same verdicts; `CannotAssessStrategy` silently doesn't cover multi-choice in one path.

@@ -371,12 +371,18 @@ class CriterionVerdict(str, Enum):
 
 
 class CannotAssessStrategy(str, Enum):
-    """Strategy for handling CANNOT_ASSESS verdicts in score calculation.
+    """Strategy for handling CANNOT_ASSESS (binary) / NA (multi-choice) in scoring.
 
-    - SKIP: Exclude the criterion from scoring entirely (adjust denominator)
+    Applied uniformly to binary CANNOT_ASSESS and multi-choice NA by the shared
+    ``scoring.score_reports`` core.
+
+    - SKIP: Exclude the criterion from scoring entirely (both numerator and denominator)
     - ZERO: Treat as 0 contribution (same as UNMET for positive criteria)
-    - PARTIAL: Treat as partial credit (configurable fraction)
-    - FAIL: Treat as worst case (UNMET for positive, MET for negative)
+    - PARTIAL: Treat as partial credit (configurable fraction, positive weight only)
+    - FAIL: Treat as worst case, weight-sign aware. Binary: UNMET for positive, MET
+      for negative. Multi-choice: the score-minimizing scored option via
+      ``Criterion.worst_scored_option()`` (lowest value for positive weight, highest
+      for negative) — the same canonical worst case as the grader's unknown-error path.
     """
 
     SKIP = "skip"

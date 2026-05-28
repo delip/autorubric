@@ -25,11 +25,11 @@ from autorubric.prompts import (
     build_multi_choice_user_prompt,
     build_user_prompt,
 )
+from autorubric.scoring import score_reports
 from autorubric.types import (
     AggregatedMultiChoiceVerdict,
     AggregationStrategy,
     CannotAssessConfig,
-    CannotAssessStrategy,
     Criterion,
     CriterionJudgment,
     CriterionReport,
@@ -1257,92 +1257,5 @@ class CriterionGrader(Grader):
     def _calculate_score_from_reports(
         self, reports: list[CriterionReport], normalize: bool
     ) -> float:
-        """Calculate score from criterion reports using CANNOT_ASSESS config.
-
-        Supports both binary and multi-choice criteria using the score_value property.
-        """
-        config = self._cannot_assess_config
-
-        # Separate assessable from cannot_assess (handles both binary CANNOT_ASSESS
-        # and multi-choice NA options via the is_na property)
-        assessable = [r for r in reports if not r.is_na]
-        cannot_assess = [r for r in reports if r.is_na]
-
-        # Apply strategy
-        if config.strategy == CannotAssessStrategy.SKIP:
-            working_reports = assessable
-        elif config.strategy == CannotAssessStrategy.FAIL:
-            # For binary: UNMET for positive, MET for negative
-            # For multi-choice NA: use score_value of 0.0 (worst case for positive weight)
-            fail_reports = []
-            for r in cannot_assess:
-                if r.is_multi_choice:
-                    # For multi-choice, we don't modify - the NA value is already 0
-                    fail_reports.append(r)
-                else:
-                    # For binary, convert to worst case verdict
-                    fail_reports.append(
-                        CriterionReport(
-                            requirement=r.requirement,
-                            verdict=CriterionVerdict.UNMET
-                            if r.weight > 0
-                            else CriterionVerdict.MET,
-                            reason=r.reason,
-                            weight=r.weight,
-                            name=r.name,
-                            options=r.options,
-                            scale_type=r.scale_type,
-                            aggregation=r.aggregation,
-                        )
-                    )
-            working_reports = assessable + fail_reports
-        elif config.strategy == CannotAssessStrategy.ZERO:
-            # Treat as UNMET (0 contribution) for both binary and multi-choice
-            zero_reports = []
-            for r in cannot_assess:
-                if r.is_multi_choice:
-                    # Already has value from NA option
-                    zero_reports.append(r)
-                else:
-                    zero_reports.append(
-                        CriterionReport(
-                            requirement=r.requirement,
-                            verdict=CriterionVerdict.UNMET,
-                            reason=r.reason,
-                            weight=r.weight,
-                            name=r.name,
-                            options=r.options,
-                            scale_type=r.scale_type,
-                            aggregation=r.aggregation,
-                        )
-                    )
-            working_reports = assessable + zero_reports
-        else:  # PARTIAL
-            working_reports = assessable
-
-        # Calculate weights
-        if config.strategy == CannotAssessStrategy.SKIP:
-            total_positive_weight = sum(max(0.0, r.weight) for r in working_reports)
-            total_negative_weight = sum(abs(r.weight) for r in working_reports if r.weight < 0)
-        else:
-            total_positive_weight = sum(max(0.0, r.weight) for r in reports)
-            total_negative_weight = sum(abs(r.weight) for r in reports if r.weight < 0)
-
-        # Calculate weighted sum using score_value (handles both binary and multi-choice)
-        weighted_sum = sum(r.score_value * r.weight for r in working_reports)
-
-        # Add partial credit for PARTIAL strategy
-        if config.strategy == CannotAssessStrategy.PARTIAL:
-            for r in cannot_assess:
-                if r.weight > 0:
-                    weighted_sum += config.partial_credit * r.weight
-
-        if not normalize:
-            return weighted_sum
-
-        if total_positive_weight > 0:
-            return max(0.0, min(1.0, weighted_sum / total_positive_weight))
-        elif total_negative_weight > 0:
-            return max(0.0, min(1.0, 1.0 + weighted_sum / total_negative_weight))
-        else:
-            return 0.0
+        """Calculate score from criterion reports via the shared scoring core."""
+        return score_reports(reports, self._cannot_assess_config, normalize)
