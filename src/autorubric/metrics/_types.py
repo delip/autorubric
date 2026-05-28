@@ -334,6 +334,57 @@ class NAStats(BaseModel):
     na_false_negative: int
 
 
+class CannotAssessStats(BaseModel):
+    """Statistics for CANNOT_ASSESS handling in binary criteria.
+
+    The binary parallel of :class:`NAStats`: tracks how the prediction and ground truth
+    agree on the dichotomized {CANNOT_ASSESS, not-CANNOT_ASSESS} decision per item.
+
+    Both CANNOT_ASSESS (binary) and NA (multi-choice) are *abstentions* that flow through
+    the same SKIP scoring path (``score_reports``), and both get a parallel dichotomized
+    Cohen's-kappa diagnostic block. They are nonetheless **distinct kinds of abstention**,
+    which is exactly why they are tracked by separate stats types rather than merged:
+
+    - Binary **CANNOT_ASSESS** is the judge being unable to determine MET-vs-UNMET — an
+      *epistemic* abstention on a yes/no question ("I cannot decide whether this
+      requirement is met").
+    - Multi-choice **NA** is "not applicable / cannot pick an applicable option" —
+      abstaining because no scored category fits, a statement about the *option space*
+      rather than a yes/no decision.
+
+    Keeping them separate (and prefixing these fields ``ca_``) makes the semantic
+    distinction explicit in the data model while preserving the structural analogy.
+
+    Attributes:
+        ca_count_true: Number of CANNOT_ASSESS verdicts in ground truth.
+        ca_count_pred: Number of CANNOT_ASSESS verdicts in predictions.
+        ca_kappa: Cohen's kappa on the {CANNOT_ASSESS, not-CANNOT_ASSESS} dichotomy
+            (pred vs truth). Range [-1, 1]; 1.0 is perfect agreement, 0 is chance-level,
+            negative is worse than chance. None when undefined (no paired CANNOT_ASSESS
+            observations, single class, or NaN). The framework reports
+            prediction-vs-ground-truth categorical agreement as Cohen's kappa across the
+            board (binary `kappa`, ordinal `weighted_kappa`, nominal `kappa`, and NA's
+            `na_kappa`); ca_kappa is the dichotomized kappa for the orthogonal binary
+            abstain decision. Readers who want a raw proportion can derive
+            `A / (A + ca_fp + ca_fn)` from the counts below.
+        ca_kappa_interpretation: Landis & Koch interpretation of `ca_kappa` via
+            `KappaResult.interpret_kappa`. None when ca_kappa is None.
+        ca_false_positive: Count where prediction was CANNOT_ASSESS but ground truth
+            was not.
+        ca_false_negative: Count where ground truth was CANNOT_ASSESS but prediction
+            was not.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    ca_count_true: int
+    ca_count_pred: int
+    ca_kappa: float | None = None
+    ca_kappa_interpretation: str | None = None
+    ca_false_positive: int
+    ca_false_negative: int
+
+
 class OrdinalCriterionMetrics(BaseModel):
     """Metrics for an ordinal multi-choice criterion.
 
@@ -715,6 +766,9 @@ class MetricsResult(BaseModel):
         n_ordinal_criteria: Number of ordinal multi-choice criteria.
         n_nominal_criteria: Number of nominal multi-choice criteria.
         na_stats: Statistics for NA handling in multi-choice criteria.
+        cannot_assess_stats: Statistics for CANNOT_ASSESS handling in binary criteria —
+            the binary parallel to ``na_stats`` (a distinct kind of abstention; see
+            CannotAssessStats).
         warnings: Any warnings generated during computation.
     """
 
@@ -751,6 +805,7 @@ class MetricsResult(BaseModel):
     n_ordinal_criteria: int = 0
     n_nominal_criteria: int = 0
     na_stats: NAStats | None = None
+    cannot_assess_stats: CannotAssessStats | None = None
     warnings: list[str] = []
 
     def summary(self) -> str:
@@ -822,6 +877,22 @@ class MetricsResult(BaseModel):
                 lines.append(
                     f"  NA FP/FN:           {self.na_stats.na_false_positive} / "
                     f"{self.na_stats.na_false_negative}"
+                )
+
+        # CANNOT_ASSESS stats for binary criteria (parallel to NA Handling above; a
+        # distinct kind of abstention — epistemic MET/UNMET rather than "no option").
+        if self.cannot_assess_stats:
+            ca = self.cannot_assess_stats
+            lines.append("")
+            lines.append("CANNOT_ASSESS Handling:")
+            lines.append(f"  CA in Ground Truth: {ca.ca_count_true}")
+            lines.append(f"  CA in Predictions:  {ca.ca_count_pred}")
+            if ca.ca_kappa is not None:
+                interp = ca.ca_kappa_interpretation or ""
+                lines.append(f"  CA Kappa:           {ca.ca_kappa:.3f} ({interp})")
+            if ca.ca_false_positive > 0 or ca.ca_false_negative > 0:
+                lines.append(
+                    f"  CA FP/FN:           {ca.ca_false_positive} / {ca.ca_false_negative}"
                 )
 
         if self.bootstrap:

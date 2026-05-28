@@ -1362,6 +1362,27 @@ class TestNaKappa:
         assert metrics.na_stats.na_false_positive == 1
         assert metrics.na_stats.na_false_negative == 1
 
+    def test_multi_choice_only_rubric_leaves_ca_stats_none(self, nominal_criterion_with_na):
+        """Dual of the binary-only -> na_stats None guard (T2-C): a multi-choice-only
+        rubric has no binary criteria, so cannot_assess_stats is None."""
+        labels = ["N/A", "Very specific", "Very specific"]
+        preds = [3, 2, 2]
+        dataset = _make_na_dataset(nominal_criterion_with_na, labels)
+        item_results = [
+            ItemResult(
+                item_idx=i,
+                item=dataset.items[i],
+                report=_make_na_report(preds[i], nominal_criterion_with_na),
+                duration_seconds=0.1,
+            )
+            for i in range(len(labels))
+        ]
+        eval_result = _wrap_eval_result(item_results)
+
+        metrics = compute_metrics(eval_result, dataset)
+
+        assert metrics.cannot_assess_stats is None
+
 
 def _make_effective_report(selected_index: int, effective_criterion: Criterion) -> EvaluationReport:
     """A single-criterion report whose criterion carries the EFFECTIVE options.

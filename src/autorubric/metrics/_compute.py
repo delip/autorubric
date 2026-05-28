@@ -35,6 +35,7 @@ from ._helpers import (
 from ._types import (
     BootstrapResults,
     CannotAssessMode,
+    CannotAssessStats,
     CorrelationResult,
     CriterionMetrics,
     CriterionMetricsUnion,
@@ -1405,6 +1406,61 @@ def compute_metrics(
             na_false_negative=total_na_fn,
         )
 
+    # CANNOT_ASSESS stats (for binary criteria) — the binary parallel of NA stats above.
+    # Cohen's kappa on the {CANNOT_ASSESS, not-CANNOT_ASSESS} dichotomy across all binary
+    # criteria, paired pred-vs-truth. CANNOT_ASSESS is a DISTINCT kind of abstention from
+    # multi-choice NA (epistemic MET-vs-UNMET abstention rather than "no applicable
+    # option"), so it is tracked by a separate stats type (CannotAssessStats) even though
+    # both share the SKIP scoring path. Counts are mode-independent: read from the raw
+    # per-criterion verdicts (set at the top of this function), never the
+    # cannot_assess-filtered lists. Returns None when there are no binary criteria.
+    cannot_assess_stats = None
+    if n_binary > 0:
+        ca_pred_bool: list[bool] = []
+        ca_true_bool: list[bool] = []
+        total_ca_true = 0
+        total_ca_pred = 0
+        total_ca_fp = 0
+        total_ca_fn = 0
+        CA = CriterionVerdict.CANNOT_ASSESS
+        for c_idx in range(n_criteria):
+            if criterion_types[c_idx] != "binary":
+                continue
+            for p, t in zip(per_criterion_pred[c_idx], per_criterion_true[c_idx]):
+                if isinstance(p, CriterionVerdict) and isinstance(t, CriterionVerdict):
+                    p_is_ca = p == CA
+                    t_is_ca = t == CA
+                    ca_pred_bool.append(p_is_ca)
+                    ca_true_bool.append(t_is_ca)
+                    if p_is_ca:
+                        total_ca_pred += 1
+                    if t_is_ca:
+                        total_ca_true += 1
+                    if p_is_ca and not t_is_ca:
+                        total_ca_fp += 1
+                    if t_is_ca and not p_is_ca:
+                        total_ca_fn += 1
+
+        ca_kappa: float | None = None
+        if ca_pred_bool:
+            try:
+                k = float(cohen_kappa_score(ca_true_bool, ca_pred_bool))
+                ca_kappa = None if math.isnan(k) else k
+            except Exception:
+                ca_kappa = None
+        ca_kappa_interpretation = (
+            KappaResult.interpret_kappa(ca_kappa) if ca_kappa is not None else None
+        )
+
+        cannot_assess_stats = CannotAssessStats(
+            ca_count_true=total_ca_true,
+            ca_count_pred=total_ca_pred,
+            ca_kappa=ca_kappa,
+            ca_kappa_interpretation=ca_kappa_interpretation,
+            ca_false_positive=total_ca_fp,
+            ca_false_negative=total_ca_fn,
+        )
+
     return MetricsResult(
         criterion_accuracy=float(criterion_accuracy),
         criterion_precision=float(criterion_precision),
@@ -1426,5 +1482,6 @@ def compute_metrics(
         n_ordinal_criteria=n_ordinal,
         n_nominal_criteria=n_nominal,
         na_stats=na_stats,
+        cannot_assess_stats=cannot_assess_stats,
         warnings=result_warnings,
     )

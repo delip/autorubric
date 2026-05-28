@@ -463,3 +463,118 @@ class TestComputeMetricsCannotAssess:
         # MET-vs-rest: truth MET = item0,item3 -> 2 ; pred MET = item0 -> 1
         assert cm.support_true == 2
         assert cm.support_pred == 1
+
+
+class TestCaKappa:
+    """CANNOT_ASSESS stats (T2-C): the binary parallel of multi-choice NAStats.
+
+    Cohen's kappa on the dichotomized {CANNOT_ASSESS, not-CANNOT_ASSESS} decision plus
+    counts/FP/FN, mirroring TestNaKappa. CANNOT_ASSESS is a distinct kind of abstention
+    from NA but gets the same structural diagnostic block.
+    """
+
+    CA = CriterionVerdict.CANNOT_ASSESS
+    MET = CriterionVerdict.MET
+    UNMET = CriterionVerdict.UNMET
+
+    def test_cannot_assess_stats_populated_for_binary(self):
+        """A binary rubric with CANNOT_ASSESS in truth/pred populates cannot_assess_stats."""
+        gts = [[self.MET], [self.CA], [self.UNMET], [self.CA]]
+        preds = [[self.MET], [self.CA], [self.UNMET], [self.MET]]
+        dataset = create_single_criterion_dataset(gts)
+        eval_result = create_mock_eval_result(dataset, preds)
+
+        metrics = compute_metrics(eval_result, dataset)
+
+        assert metrics.cannot_assess_stats is not None
+
+    def test_ca_kappa_perfect_agreement_is_one(self):
+        """Perfect {CA, not-CA} agreement => ca_kappa=1.0, interpretation 'almost perfect'.
+
+        items 0,1: both pred and truth CA; items 2,3: both not-CA.
+        A=2, fp=0, fn=0, N=2 => P_o=1.0, P_e=0.5, kappa=1.0.
+        """
+        gts = [[self.CA], [self.CA], [self.MET], [self.UNMET]]
+        preds = [[self.CA], [self.CA], [self.MET], [self.UNMET]]
+        dataset = create_single_criterion_dataset(gts)
+        eval_result = create_mock_eval_result(dataset, preds)
+
+        metrics = compute_metrics(eval_result, dataset)
+
+        assert metrics.cannot_assess_stats is not None
+        assert metrics.cannot_assess_stats.ca_kappa == pytest.approx(1.0)
+        assert metrics.cannot_assess_stats.ca_kappa_interpretation == "almost perfect"
+
+    def test_ca_kappa_no_ca_observed_is_none(self):
+        """No CA in either side => single class => ca_kappa undefined => None."""
+        gts = [[self.MET], [self.UNMET], [self.MET]]
+        preds = [[self.MET], [self.UNMET], [self.MET]]
+        dataset = create_single_criterion_dataset(gts)
+        eval_result = create_mock_eval_result(dataset, preds)
+
+        metrics = compute_metrics(eval_result, dataset)
+
+        # The block is still populated for a binary rubric (counts 0), kappa undefined.
+        assert metrics.cannot_assess_stats is not None
+        assert metrics.cannot_assess_stats.ca_kappa is None
+        assert metrics.cannot_assess_stats.ca_kappa_interpretation is None
+        assert metrics.cannot_assess_stats.ca_count_true == 0
+        assert metrics.cannot_assess_stats.ca_count_pred == 0
+
+    def test_ca_kappa_disagreement_below_perfect(self):
+        """6-item 2x2 mix gives ca_kappa = 1/3 (mirrors the NA disagreement test)."""
+        gts = [[self.CA], [self.CA], [self.MET], [self.CA], [self.MET], [self.UNMET]]
+        preds = [[self.CA], [self.CA], [self.CA], [self.MET], [self.MET], [self.UNMET]]
+        dataset = create_single_criterion_dataset(gts)
+        eval_result = create_mock_eval_result(dataset, preds)
+
+        metrics = compute_metrics(eval_result, dataset)
+
+        assert metrics.cannot_assess_stats is not None
+        assert metrics.cannot_assess_stats.ca_kappa == pytest.approx(1 / 3, abs=1e-9)
+
+    def test_ca_counts_preserved(self):
+        """ca_count_* and ca_false_* populate correctly for the disagreement layout."""
+        gts = [[self.CA], [self.CA], [self.MET], [self.CA], [self.MET], [self.UNMET]]
+        preds = [[self.CA], [self.CA], [self.CA], [self.MET], [self.MET], [self.UNMET]]
+        dataset = create_single_criterion_dataset(gts)
+        eval_result = create_mock_eval_result(dataset, preds)
+
+        metrics = compute_metrics(eval_result, dataset)
+
+        assert metrics.cannot_assess_stats is not None
+        ca = metrics.cannot_assess_stats
+        assert ca.ca_count_true == 3
+        assert ca.ca_count_pred == 3
+        assert ca.ca_false_positive == 1
+        assert ca.ca_false_negative == 1
+
+    def test_ca_stats_mode_independent(self):
+        """The CA stats come from raw verdicts, so they are identical across cannot_assess
+        modes (exclude/as_unmet/as_category)."""
+        gts = [[self.CA], [self.CA], [self.MET], [self.CA], [self.MET], [self.UNMET]]
+        preds = [[self.CA], [self.CA], [self.CA], [self.MET], [self.MET], [self.UNMET]]
+        dataset = create_single_criterion_dataset(gts)
+        eval_result = create_mock_eval_result(dataset, preds)
+
+        for mode in ("exclude", "as_unmet", "as_category"):
+            ca = compute_metrics(eval_result, dataset, cannot_assess=mode).cannot_assess_stats
+            assert ca is not None
+            assert ca.ca_count_true == 3
+            assert ca.ca_count_pred == 3
+            assert ca.ca_false_positive == 1
+            assert ca.ca_false_negative == 1
+            assert ca.ca_kappa == pytest.approx(1 / 3, abs=1e-9)
+
+    def test_summary_renders_cannot_assess_section(self):
+        """summary() shows a CANNOT_ASSESS Handling section for a binary rubric with CA."""
+        gts = [[self.CA], [self.CA], [self.MET], [self.UNMET]]
+        preds = [[self.CA], [self.CA], [self.MET], [self.UNMET]]
+        dataset = create_single_criterion_dataset(gts)
+        eval_result = create_mock_eval_result(dataset, preds)
+
+        text = compute_metrics(eval_result, dataset).summary()
+
+        assert "CANNOT_ASSESS Handling:" in text
+        assert "CA in Ground Truth:" in text
+        assert "CA Kappa:" in text
