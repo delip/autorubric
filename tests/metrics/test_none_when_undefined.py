@@ -6,6 +6,7 @@ NEVER a fake ``0.0``. Counts (``n_samples``, ``support_*``, confusion-matrix cel
 (empty-data criteria→None), and the bootstrap-CI undefined→None changes.
 """
 
+import warnings
 from datetime import datetime
 
 import pytest
@@ -486,6 +487,20 @@ def test_correlation_constant_array_coefficient_none():
     assert res.interpretation == "undefined"
     assert res.n_samples == 3
     assert res.method == "spearman"
+
+
+def test_correlation_constant_array_suppresses_scipy_warning():
+    """A constant input array is a handled case (coefficient → None), so scipy's
+    ConstantInputWarning / NearConstantInputWarning must NOT leak to the caller — it is
+    suppressed locally around the scipy call. Behavior (None coefficient) is unchanged."""
+    for method in ("spearman", "kendall", "pearson"):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            res = _compute_correlation([1.0, 2.0, 3.0, 4.0], [5.0, 5.0, 5.0, 5.0], method)
+        assert res.coefficient is None, method
+        assert res.interpretation == "undefined", method
+        leaked = [w for w in caught if "constant" in str(w.message).lower()]
+        assert not leaked, (method, [str(w.message) for w in leaked])
 
 
 def test_correlation_fewer_than_three_samples_coefficient_none():

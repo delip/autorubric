@@ -7,6 +7,7 @@ comprehensive evaluation metrics from an EvalResult and RubricDataset.
 from __future__ import annotations
 
 import math
+import warnings
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -627,12 +628,19 @@ def _compute_correlation(x: list[float], y: list[float], method: str) -> Correla
     x_arr = np.array(x)
     y_arr = np.array(y)
 
-    if method == "spearman":
-        coef, p_val = stats.spearmanr(x_arr, y_arr)
-    elif method == "kendall":
-        coef, p_val = stats.kendalltau(x_arr, y_arr)
-    else:  # pearson
-        coef, p_val = stats.pearsonr(x_arr, y_arr)
+    # A constant / near-constant input array (zero variance) makes scipy return NaN AND
+    # emit ConstantInputWarning / NearConstantInputWarning. We deliberately handle the NaN
+    # just below (coefficient → None), so that warning is spurious noise for an already
+    # handled case — suppress only those two messages, locally, around the scipy calls.
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message="An input array is constant")
+        warnings.filterwarnings("ignore", message="An input array is nearly constant")
+        if method == "spearman":
+            coef, p_val = stats.spearmanr(x_arr, y_arr)
+        elif method == "kendall":
+            coef, p_val = stats.kendalltau(x_arr, y_arr)
+        else:  # pearson
+            coef, p_val = stats.pearsonr(x_arr, y_arr)
 
     # A constant input array (zero variance) makes scipy return NaN: the coefficient is
     # genuinely undefined → None (never a fake 0.0), and _interpret_correlation is only
