@@ -66,7 +66,16 @@ from autorubric import (
     RubricDataset,
 )
 from autorubric.graders import CriterionGrader, JudgeSpec
-from autorubric.metrics._types import _fmt_opt
+
+
+def _fmt_opt(value: float | None, spec: str, width: int = 0) -> str:
+    """None-safe fixed-width formatter: render the value, or right-aligned 'n/a' if None.
+
+    Defined locally (rather than importing autorubric's private helper) so this dev script
+    stays self-contained and runs against any autorubric version.
+    """
+    return format(value, spec) if value is not None else f"{'n/a':>{width}}"
+
 
 # Silence known-benign third-party noise so the dashboard / plain report stays signal-only:
 # - litellm serializes its non-streaming `Choices` against a `StreamingChoices` schema
@@ -251,9 +260,15 @@ def headline(metrics) -> tuple[float | None, float | None, float | None, float |
     if metrics is None:
         return None, None, None, None
     alphas = [
-        c.krippendorff_alpha for c in metrics.per_criterion if c.krippendorff_alpha is not None
+        getattr(c, "krippendorff_alpha", None)
+        for c in metrics.per_criterion
+        if getattr(c, "krippendorff_alpha", None) is not None
     ]
-    fleiss = [c.fleiss_kappa for c in metrics.per_criterion if c.fleiss_kappa is not None]
+    fleiss = [
+        getattr(c, "fleiss_kappa", None)
+        for c in metrics.per_criterion
+        if getattr(c, "fleiss_kappa", None) is not None
+    ]
     alpha = sum(alphas) / len(alphas) if alphas else None
     fl = sum(fleiss) / len(fleiss) if fleiss else None
     return metrics.criterion_accuracy, metrics.mean_kappa, alpha, fl
