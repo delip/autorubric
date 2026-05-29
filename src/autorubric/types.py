@@ -1,7 +1,7 @@
 """Type definitions for rubrics and evaluation components."""
 
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Literal, TypedDict
 
@@ -596,8 +596,7 @@ class AggregatedMultiChoiceVerdict(MultiChoiceVerdict):
     aggregated_value: float
 
 
-@dataclass
-class MultiChoiceJudgeVote:
+class MultiChoiceJudgeVote(BaseModel):
     """Individual judge's vote for a multi-choice criterion (ensemble mode).
 
     Preserves full vote details for per-judge metrics and inter-judge agreement analysis
@@ -623,6 +622,8 @@ class MultiChoiceJudgeVote:
             only when thinking is enabled; None otherwise). ``reason`` is the conclusion
             distilled from it. Mirrors ``JudgeVote.reasoning`` for multi-choice criteria.
     """
+
+    model_config = ConfigDict(frozen=True)
 
     judge_id: str
     selected_index: int | None
@@ -855,8 +856,7 @@ weight < 0 (applies the full penalty) — the binary analog of
 """
 
 
-@dataclass
-class JudgeVote:
+class JudgeVote(BaseModel):
     """A single judge's vote on a criterion.
 
     Attributes:
@@ -871,6 +871,8 @@ class JudgeVote:
             only when thinking is enabled; None otherwise). ``reason`` is the conclusion
             distilled from it. Carried from this judge's ``CriterionReport.reasoning``.
     """
+
+    model_config = ConfigDict(frozen=True)
 
     judge_id: str
     verdict: CriterionVerdict
@@ -889,8 +891,7 @@ class JudgeVote:
         return self.error is not None
 
 
-@dataclass
-class EnsembleCriterionReport:
+class EnsembleCriterionReport(BaseModel):
     """A criterion report with ensemble voting details.
 
     Supports both binary and multi-choice criteria:
@@ -910,22 +911,30 @@ class EnsembleCriterionReport:
             genuine judgment was available. See ``is_error``.
     """
 
+    model_config = ConfigDict(frozen=True)
+
     criterion: Criterion
     final_verdict: CriterionVerdict | None
     final_reason: str
-    votes: list[JudgeVote] = field(default_factory=list)
-    agreement: float = field(default=0.0)
+    votes: list[JudgeVote] = Field(default_factory=list)
+    agreement: float = 0.0
     # Multi-choice support
-    final_multi_choice_verdict: AggregatedMultiChoiceVerdict | None = field(default=None)
-    multi_choice_votes: list[MultiChoiceJudgeVote] = field(default_factory=list)
-    error: str | None = field(default=None)
+    final_multi_choice_verdict: AggregatedMultiChoiceVerdict | None = None
+    multi_choice_votes: list[MultiChoiceJudgeVote] = Field(default_factory=list)
+    error: str | None = None
 
-    def __post_init__(self) -> None:
-        """Compute agreement if not set."""
+    @model_validator(mode="after")
+    def _compute_agreement(self) -> "EnsembleCriterionReport":
+        """Compute ``agreement`` from the votes when it was not supplied (default 0.0).
+
+        Frozen model, so the assignment goes through ``object.__setattr__``. Idempotent:
+        a genuine 0.0 (total disagreement) recomputes to 0.0, and a supplied non-zero
+        value is left untouched — preserving the prior ``__post_init__`` semantics.
+        """
         if self.agreement == 0.0:
             if self.votes:
                 agreeing = sum(1 for v in self.votes if v.verdict == self.final_verdict)
-                self.agreement = agreeing / len(self.votes)
+                object.__setattr__(self, "agreement", agreeing / len(self.votes))
             elif self.multi_choice_votes and self.final_multi_choice_verdict:
                 # For multi-choice, count votes matching the final selected index.
                 final_idx = self.final_multi_choice_verdict.selected_index
@@ -937,7 +946,8 @@ class EnsembleCriterionReport:
                     agreeing = sum(
                         1 for v in self.multi_choice_votes if v.selected_index == final_idx
                     )
-                self.agreement = agreeing / len(self.multi_choice_votes)
+                object.__setattr__(self, "agreement", agreeing / len(self.multi_choice_votes))
+        return self
 
     @property
     def score_value(self) -> float:

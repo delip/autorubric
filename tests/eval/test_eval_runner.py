@@ -661,6 +661,253 @@ class TestItemResult:
         assert result.report.report is None
         assert result.report.score == 0.5
 
+    def test_roundtrip_ensemble_mixed_binary_and_multi_choice(self):
+        """T6-D: a report mixing a binary and a multi-choice criterion round-trips."""
+        item = DataItem(submission="Test", description="Test")
+        binary_crit = Criterion(weight=10.0, requirement="Is accurate")
+        options = [
+            CriterionOption(label="Low", value=0.0),
+            CriterionOption(label="High", value=1.0),
+        ]
+        mc_crit = Criterion(weight=5.0, requirement="Quality?", options=options)
+        ecr_binary = EnsembleCriterionReport(
+            criterion=binary_crit,
+            final_verdict=CriterionVerdict.MET,
+            final_reason="agree",
+            votes=[JudgeVote(judge_id="j1", verdict=CriterionVerdict.MET, reason="y")],
+        )
+        ecr_mc = EnsembleCriterionReport(
+            criterion=mc_crit,
+            final_verdict=None,
+            final_reason="agg",
+            final_multi_choice_verdict=AggregatedMultiChoiceVerdict(
+                selected_index=1, selected_label="High", value=1.0, aggregated_value=1.0
+            ),
+            multi_choice_votes=[
+                MultiChoiceJudgeVote(
+                    judge_id="j1", selected_index=1, selected_label="High", value=1.0, reason="hi"
+                )
+            ],
+        )
+        report = EnsembleEvaluationReport(
+            score=1.0, raw_score=15.0, report=[ecr_binary, ecr_mc], judge_scores={"j1": 1.0}
+        )
+        result = ItemResult(item_idx=0, item=item, report=report, duration_seconds=1.0)
+
+        restored = ItemResult.from_dict(json.loads(json.dumps(result.to_dict())), item)
+
+        assert isinstance(restored.report, EnsembleEvaluationReport)
+        assert len(restored.report.report) == 2
+        rb, rm = restored.report.report
+        assert rb.final_verdict == CriterionVerdict.MET
+        assert len(rb.votes) == 1 and not rb.multi_choice_votes
+        assert rm.final_verdict is None
+        assert rm.final_multi_choice_verdict is not None
+        assert rm.final_multi_choice_verdict.selected_index == 1
+        assert len(rm.multi_choice_votes) == 1 and not rm.votes
+
+    def test_roundtrip_ensemble_vote_error(self):
+        """Category-prefixed vote/criterion error round-trips (binary + is_error)."""
+        item = DataItem(submission="Test", description="Test")
+        criterion = Criterion(weight=10.0, requirement="Is accurate")
+        ecr = EnsembleCriterionReport(
+            criterion=criterion,
+            final_verdict=CriterionVerdict.UNMET,
+            final_reason="failed",
+            votes=[
+                JudgeVote(
+                    judge_id="j1",
+                    verdict=CriterionVerdict.UNMET,
+                    reason="x",
+                    error="parse: bad json",
+                )
+            ],
+            error="parse: bad json",
+        )
+        report = EnsembleEvaluationReport(
+            score=0.0, raw_score=0.0, report=[ecr], judge_scores={"j1": 0.0}
+        )
+        result = ItemResult(item_idx=0, item=item, report=report, duration_seconds=1.0)
+
+        restored = ItemResult.from_dict(json.loads(json.dumps(result.to_dict())), item)
+
+        rcr = restored.report.report[0]
+        assert rcr.error == "parse: bad json"
+        assert rcr.is_error
+        assert rcr.votes[0].error == "parse: bad json"
+        assert rcr.votes[0].is_error
+
+    def test_roundtrip_ensemble_multi_choice_vote_error_and_none_abstain(self):
+        """T2-B: an errored no-option abstain (selected_index=None) round-trips on a vote."""
+        item = DataItem(submission="Test", description="Test")
+        options = [
+            CriterionOption(label="Low", value=0.0),
+            CriterionOption(label="High", value=1.0),
+        ]
+        criterion = Criterion(weight=10.0, requirement="Quality?", options=options)
+        ecr = EnsembleCriterionReport(
+            criterion=criterion,
+            final_verdict=None,
+            final_reason="all failed",
+            final_multi_choice_verdict=AggregatedMultiChoiceVerdict(
+                selected_index=None, selected_label=None, value=0.0, aggregated_value=0.0, na=True
+            ),
+            multi_choice_votes=[
+                MultiChoiceJudgeVote(
+                    judge_id="j1",
+                    selected_index=None,
+                    selected_label=None,
+                    value=0.0,
+                    reason="abstain",
+                    na=True,
+                    error="infrastructure: timeout",
+                )
+            ],
+            error="infrastructure: timeout",
+        )
+        report = EnsembleEvaluationReport(
+            score=0.0, raw_score=0.0, report=[ecr], judge_scores={"j1": 0.0}
+        )
+        result = ItemResult(item_idx=0, item=item, report=report, duration_seconds=1.0)
+
+        restored = ItemResult.from_dict(json.loads(json.dumps(result.to_dict())), item)
+
+        rcr = restored.report.report[0]
+        assert rcr.final_multi_choice_verdict is not None
+        assert rcr.final_multi_choice_verdict.selected_index is None
+        assert rcr.final_multi_choice_verdict.na is True
+        assert rcr.multi_choice_votes[0].selected_index is None
+        assert rcr.multi_choice_votes[0].error == "infrastructure: timeout"
+
+    def test_roundtrip_llm_raw_score_aliased(self):
+        """llm_raw_score round-trips (aliased to raw_score on load)."""
+        item = DataItem(submission="Test", description="Test")
+        criterion = Criterion(weight=10.0, requirement="Is accurate")
+        ecr = EnsembleCriterionReport(
+            criterion=criterion,
+            final_verdict=CriterionVerdict.MET,
+            final_reason="ok",
+            votes=[JudgeVote(judge_id="j1", verdict=CriterionVerdict.MET, reason="y")],
+        )
+        report = EnsembleEvaluationReport(
+            score=1.0, raw_score=10.0, llm_raw_score=10.0, report=[ecr], judge_scores={"j1": 1.0}
+        )
+        result = ItemResult(item_idx=0, item=item, report=report, duration_seconds=1.0)
+
+        restored = ItemResult.from_dict(json.loads(json.dumps(result.to_dict())), item)
+
+        assert restored.report.raw_score == 10.0
+        assert restored.report.llm_raw_score == 10.0
+
+    def test_roundtrip_ensemble_agreement_zero_genuine_disagreement(self):
+        """agreement=0.0 (genuine total disagreement) round-trips idempotently."""
+        item = DataItem(submission="Test", description="Test")
+        criterion = Criterion(weight=10.0, requirement="Is accurate")
+        # final_verdict=MET but the only vote is UNMET -> 0 agreeing -> agreement 0.0.
+        ecr = EnsembleCriterionReport(
+            criterion=criterion,
+            final_verdict=CriterionVerdict.MET,
+            final_reason="forced",
+            votes=[JudgeVote(judge_id="j1", verdict=CriterionVerdict.UNMET, reason="n")],
+        )
+        assert ecr.agreement == 0.0  # auto-computed by the validator
+        report = EnsembleEvaluationReport(
+            score=1.0, raw_score=10.0, report=[ecr], judge_scores={"j1": 0.0}
+        )
+        result = ItemResult(item_idx=0, item=item, report=report, duration_seconds=1.0)
+
+        restored = ItemResult.from_dict(json.loads(json.dumps(result.to_dict())), item)
+        assert restored.report.report[0].agreement == 0.0
+
+
+# -----------------------------------------------------------------------------
+# T6-D: ensemble report/vote types are frozen pydantic models with native
+# model_dump/model_validate (symmetric with the single-report CriterionReport).
+# -----------------------------------------------------------------------------
+
+
+class TestEnsembleTypePydanticRoundtrip:
+    """Each ensemble type round-trips via pydantic model_dump/model_validate."""
+
+    def test_judge_vote_pydantic_roundtrip(self):
+        jv = JudgeVote(
+            judge_id="j1",
+            verdict=CriterionVerdict.UNMET,
+            reason="No",
+            weight=2.0,
+            error="parse: bad json",
+            reasoning="long deliberation trace",
+        )
+        restored = JudgeVote.model_validate(jv.model_dump(mode="json"))
+        assert restored == jv
+        assert restored.is_error
+
+    def test_multi_choice_judge_vote_pydantic_roundtrip_none_abstain(self):
+        """T2-B: a no-option abstain (selected_index/label None) round-trips."""
+        mcv = MultiChoiceJudgeVote(
+            judge_id="j1",
+            selected_index=None,
+            selected_label=None,
+            value=0.0,
+            reason="abstain",
+            na=True,
+            shuffle_order=[1, 0],
+            error="infrastructure: timeout",
+            reasoning="trace",
+        )
+        restored = MultiChoiceJudgeVote.model_validate(mcv.model_dump(mode="json"))
+        assert restored == mcv
+        assert restored.selected_index is None
+        assert restored.selected_label is None
+
+    def test_ensemble_criterion_report_pydantic_roundtrip_binary(self):
+        criterion = Criterion(weight=10.0, requirement="Is accurate")
+        ecr = EnsembleCriterionReport(
+            criterion=criterion,
+            final_verdict=CriterionVerdict.UNMET,
+            final_reason="split",
+            votes=[
+                JudgeVote(judge_id="j1", verdict=CriterionVerdict.MET, reason="y"),
+                JudgeVote(judge_id="j2", verdict=CriterionVerdict.UNMET, reason="n"),
+            ],
+        )
+        assert ecr.agreement == 0.5  # 1 of 2 agree with UNMET
+        restored = EnsembleCriterionReport.model_validate(ecr.model_dump(mode="json"))
+        assert restored == ecr
+        assert restored.agreement == 0.5
+
+    def test_ensemble_criterion_report_pydantic_roundtrip_multi_choice(self):
+        options = [
+            CriterionOption(label="Low", value=0.0),
+            CriterionOption(label="Mid", value=0.5),
+            CriterionOption(label="High", value=1.0),
+        ]
+        criterion = Criterion(
+            weight=10.0, requirement="Quality?", options=options, scale_type="ordinal"
+        )
+        ecr = EnsembleCriterionReport(
+            criterion=criterion,
+            final_verdict=None,
+            final_reason="mean",
+            final_multi_choice_verdict=AggregatedMultiChoiceVerdict(
+                selected_index=1, selected_label="Mid", value=0.5, aggregated_value=0.42
+            ),
+            multi_choice_votes=[
+                MultiChoiceJudgeVote(
+                    judge_id="j1", selected_index=0, selected_label="Low", value=0.0, reason="low"
+                ),
+                MultiChoiceJudgeVote(
+                    judge_id="j2", selected_index=1, selected_label="Mid", value=0.5, reason="mid"
+                ),
+            ],
+        )
+        restored = EnsembleCriterionReport.model_validate(ecr.model_dump(mode="json"))
+        assert restored == ecr
+        # Continuous aggregate (0.42) preserved distinctly from snapped option value (0.5).
+        assert restored.final_multi_choice_verdict is not None
+        assert restored.final_multi_choice_verdict.aggregated_value == 0.42
+        assert restored.final_multi_choice_verdict.value == 0.5
+
 
 # -----------------------------------------------------------------------------
 # ExperimentManifest Tests

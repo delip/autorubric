@@ -37,14 +37,10 @@ from rich.progress import (
 
 from autorubric.dataset import DataItem, RubricDataset
 from autorubric.types import (
-    AggregatedMultiChoiceVerdict,
     CriterionReport,
-    CriterionVerdict,
     EnsembleCriterionReport,
     EnsembleEvaluationReport,
     EvaluationReport,
-    JudgeVote,
-    MultiChoiceJudgeVote,
     TokenUsage,
 )
 from autorubric.utils import aggregate_completion_cost, aggregate_token_usage
@@ -211,45 +207,14 @@ def _serialize_eval_config(config: EvalConfig) -> dict[str, Any]:
 
 
 def _serialize_ensemble_criterion_report(ecr: EnsembleCriterionReport) -> dict[str, Any]:
-    """Serialize an EnsembleCriterionReport dataclass to a dict."""
-    d: dict[str, Any] = {
-        "criterion": ecr.criterion.model_dump(mode="json"),
-        "final_verdict": ecr.final_verdict.value if ecr.final_verdict else None,
-        "final_reason": ecr.final_reason,
-        "agreement": ecr.agreement,
-        "error": ecr.error,
-    }
-    if ecr.votes:
-        d["votes"] = [
-            {
-                "judge_id": v.judge_id,
-                "verdict": v.verdict.value,
-                "reason": v.reason,
-                "weight": v.weight,
-                "error": v.error,
-                "reasoning": v.reasoning,
-            }
-            for v in ecr.votes
-        ]
-    if ecr.final_multi_choice_verdict is not None:
-        d["final_multi_choice_verdict"] = ecr.final_multi_choice_verdict.model_dump(mode="json")
-    if ecr.multi_choice_votes:
-        d["multi_choice_votes"] = [
-            {
-                "judge_id": v.judge_id,
-                "selected_index": v.selected_index,
-                "selected_label": v.selected_label,
-                "value": v.value,
-                "reason": v.reason,
-                "weight": v.weight,
-                "na": v.na,
-                "shuffle_order": v.shuffle_order,
-                "error": v.error,
-                "reasoning": v.reasoning,
-            }
-            for v in ecr.multi_choice_votes
-        ]
-    return d
+    """Serialize an EnsembleCriterionReport to a JSON-safe dict.
+
+    Thin pydantic delegation (T6-D): the report and its votes are frozen pydantic models,
+    so ``model_dump`` covers every field automatically — symmetric with the single-report
+    path (``CriterionReport.model_dump``). Shared by checkpoint persistence and the
+    meta-rubric improvement-loop artifacts.
+    """
+    return ecr.model_dump(mode="json")
 
 
 def _deserialize_single_report(
@@ -274,63 +239,19 @@ def _deserialize_single_report(
 def _deserialize_ensemble_report(
     report_data: dict[str, Any], token_usage: TokenUsage | None
 ) -> EnsembleEvaluationReport:
-    """Reconstruct EnsembleEvaluationReport with full criterion reports."""
-    from autorubric.types import Criterion
+    """Reconstruct EnsembleEvaluationReport with full criterion reports.
 
-    ensemble_reports = []
-    for ecr_data in report_data["criterion_reports"]:
-        criterion = Criterion.model_validate(ecr_data["criterion"])
-        final_verdict = (
-            CriterionVerdict(ecr_data["final_verdict"]) if ecr_data.get("final_verdict") else None
-        )
-
-        votes = [
-            JudgeVote(
-                judge_id=v["judge_id"],
-                verdict=CriterionVerdict(v["verdict"]),
-                reason=v["reason"],
-                weight=v.get("weight", 1.0),
-                error=v.get("error"),
-                reasoning=v.get("reasoning"),
-            )
-            for v in ecr_data.get("votes", [])
-        ]
-
-        final_mc_verdict = None
-        if ecr_data.get("final_multi_choice_verdict"):
-            final_mc_verdict = AggregatedMultiChoiceVerdict.model_validate(
-                ecr_data["final_multi_choice_verdict"]
-            )
-
-        mc_votes = [
-            MultiChoiceJudgeVote(
-                judge_id=v["judge_id"],
-                # None for a genuine no-option abstain (T2-B); use .get for robustness.
-                selected_index=v.get("selected_index"),
-                selected_label=v.get("selected_label"),
-                value=v["value"],
-                reason=v["reason"],
-                weight=v.get("weight", 1.0),
-                na=v.get("na", False),
-                shuffle_order=v.get("shuffle_order"),
-                error=v.get("error"),
-                reasoning=v.get("reasoning"),
-            )
-            for v in ecr_data.get("multi_choice_votes", [])
-        ]
-
-        ensemble_reports.append(
-            EnsembleCriterionReport(
-                criterion=criterion,
-                final_verdict=final_verdict,
-                final_reason=ecr_data["final_reason"],
-                votes=votes,
-                agreement=ecr_data.get("agreement", 0.0),
-                final_multi_choice_verdict=final_mc_verdict,
-                multi_choice_votes=mc_votes,
-                error=ecr_data.get("error"),
-            )
-        )
+    The per-criterion reports are frozen pydantic models (T6-D), so ``model_validate``
+    covers every field automatically — including legacy checkpoints, where missing keys
+    fall back to field defaults (``votes``/``multi_choice_votes`` -> [],
+    ``reasoning``/``error``/``shuffle_order`` -> None, ``weight`` -> 1.0, ``na`` -> False,
+    a missing/0.0 ``agreement`` -> recomputed from the votes). Only the surrounding
+    envelope (scores, ``judge_scores``, ``mean_agreement``, token usage, cost) is rebuilt
+    here, with the same ``.get`` backcompat defaults as the single-report path.
+    """
+    ensemble_reports = [
+        EnsembleCriterionReport.model_validate(ecr) for ecr in report_data["criterion_reports"]
+    ]
 
     return EnsembleEvaluationReport(
         score=report_data["score"],
