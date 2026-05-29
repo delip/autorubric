@@ -144,17 +144,18 @@ def hybrid_rubric(binary_criterion, ordinal_criterion, nominal_criterion) -> Rub
 class TestClassifyCriterion:
     """Tests for classify_criterion helper."""
 
-    def test_binary_criterion(self, binary_criterion):
-        """Binary criteria are classified as 'binary'."""
-        assert classify_criterion(binary_criterion) == "binary"
-
-    def test_ordinal_criterion(self, ordinal_criterion):
-        """Ordinal criteria are classified as 'ordinal'."""
-        assert classify_criterion(ordinal_criterion) == "ordinal"
-
-    def test_nominal_criterion(self, nominal_criterion):
-        """Nominal criteria are classified as 'nominal'."""
-        assert classify_criterion(nominal_criterion) == "nominal"
+    @pytest.mark.parametrize(
+        "criterion_fixture,expected",
+        [
+            ("binary_criterion", "binary"),
+            ("ordinal_criterion", "ordinal"),
+            ("nominal_criterion", "nominal"),
+        ],
+    )
+    def test_scale_type_classification(self, criterion_fixture, expected, request):
+        """scale_type maps to its type via the PUBLIC classify_criterion symbol."""
+        criterion = request.getfixturevalue(criterion_fixture)
+        assert classify_criterion(criterion) == expected
 
 
 class TestClassifyCriteria:
@@ -233,19 +234,6 @@ class TestResolveGroundTruth:
 
 class TestFilterNaMultiChoice:
     """Tests for filter_na_multi_choice helper."""
-
-    def test_no_na_options(self, ordinal_criterion):
-        """No NA options returns data unchanged."""
-        pred = [0, 1, 2, 3]
-        true = [1, 2, 3, 0]
-        filtered_pred, filtered_true, na_agree, na_fp, na_fn = filter_na_multi_choice(
-            pred, true, ordinal_criterion
-        )
-        assert filtered_pred == pred
-        assert filtered_true == true
-        assert na_agree == 0
-        assert na_fp == 0
-        assert na_fn == 0
 
     def test_exclude_na(self, nominal_criterion_with_na):
         """Exclude mode removes NA pairs."""
@@ -329,43 +317,59 @@ class TestFilterNaMultiChoice:
         assert na_fp == 0
         assert na_fn == 0
 
-    def test_as_unmet_remaps_na_to_lowest_value_positive_weight(self, nominal_criterion_with_na):
-        """as_unmet + positive weight: NA → lowest-value scored option (index 0)."""
-        # Options: [Vague(0.0), Somewhat(0.5), Very(1.0), N/A(na=True)]. Weight +6.
-        # Worst scored = Vague at index 0.
-        pred = [3, 1, 3, 2]  # NA at positions 0, 2
-        true = [3, 1, 0, 3]  # NA at positions 0, 3
-        filtered_pred, filtered_true, na_agree, na_fp, na_fn = filter_na_multi_choice(
-            pred, true, nominal_criterion_with_na, mode="as_unmet"
-        )
-        # NA → 0 (lowest-value scored)
-        assert filtered_pred == [0, 1, 0, 2]
-        assert filtered_true == [0, 1, 0, 0]
-        # All 4 pairs preserved (no drop under as_unmet).
-        assert len(filtered_pred) == 4
-        # FP/FN counts populate from the unremapped pairs.
-        assert na_agree == 1  # (3, 3) at index 0
-        assert na_fp == 1  # (3, 0) at index 2
-        assert na_fn == 1  # (2, 3) at index 3
-
-    def test_as_unmet_remaps_na_to_highest_value_negative_weight(
-        self, negative_weight_criterion_with_na
+    @pytest.mark.parametrize(
+        "criterion_fixture,pred,true,expected_pred,expected_true,expected_counts",
+        [
+            # Positive weight: NA → lowest-value scored option (index 0).
+            # Options: [Vague(0.0), Somewhat(0.5), Very(1.0), N/A(na=True)]. Weight +6.
+            # Worst scored = Vague at index 0. FP/FN counts populate from unremapped pairs:
+            # (3,3) agree at idx 0, (3,0) FP at idx 2, (2,3) FN at idx 3.
+            (
+                "nominal_criterion_with_na",
+                [3, 1, 3, 2],  # NA at positions 0, 2
+                [3, 1, 0, 3],  # NA at positions 0, 3
+                [0, 1, 0, 2],
+                [0, 1, 0, 0],
+                (1, 1, 1),
+            ),
+            # NEGATIVE weight: NA → HIGHEST-value scored option (worst case flips).
+            # Options: [None(0.0), Minor(0.5), Severe(1.0), N/A(na=True)]. Weight -8.
+            # Worst scored = Severe at index 2 (a high value subtracts more from the score).
+            (
+                "negative_weight_criterion_with_na",
+                [3, 0, 3],
+                [1, 3, 0],
+                [2, 0, 2],
+                [1, 2, 0],
+                None,
+            ),
+        ],
+    )
+    def test_as_unmet_remaps_na_weight_sign_aware(
+        self,
+        criterion_fixture,
+        pred,
+        true,
+        expected_pred,
+        expected_true,
+        expected_counts,
+        request,
     ):
-        """as_unmet + NEGATIVE weight: NA → HIGHEST-value scored option.
+        """as_unmet remaps NA → the score-minimizing scored option, weight-sign aware.
 
-        Pins weight-sign awareness: for negative weight, a high value subtracts
-        more from the score, so the worst case flips.
+        Positive weight → lowest-value scored option; negative weight → highest-value
+        (a high value on a negative-weight criterion subtracts more from the score).
         """
-        # Options: [None(0.0), Minor(0.5), Severe(1.0), N/A(na=True)]. Weight -8.
-        # Worst scored = Severe at index 2.
-        pred = [3, 0, 3]
-        true = [1, 3, 0]
-        filtered_pred, filtered_true, _na_agree, _na_fp, _na_fn = filter_na_multi_choice(
-            pred, true, negative_weight_criterion_with_na, mode="as_unmet"
+        criterion = request.getfixturevalue(criterion_fixture)
+        filtered_pred, filtered_true, na_agree, na_fp, na_fn = filter_na_multi_choice(
+            pred, true, criterion, mode="as_unmet"
         )
-        # NA index 3 → index 2 (Severe, highest value, worst for negative weight).
-        assert filtered_pred == [2, 0, 2]
-        assert filtered_true == [1, 2, 0]
+        assert filtered_pred == expected_pred
+        assert filtered_true == expected_true
+        # No pairs dropped under as_unmet.
+        assert len(filtered_pred) == len(pred)
+        if expected_counts is not None:
+            assert (na_agree, na_fp, na_fn) == expected_counts
 
     def test_as_unmet_matches_grader_worst_case(
         self, nominal_criterion_with_na, negative_weight_criterion_with_na
@@ -425,18 +429,27 @@ class TestCriterionWorstScoredOption:
     share this method.
     """
 
-    def test_positive_weight_picks_lowest_value(self, nominal_criterion_with_na):
-        """Positive weight → lowest-value scored option."""
-        idx, opt = nominal_criterion_with_na.worst_scored_option()
-        assert idx == 0
-        assert opt.value == 0.0
-        assert opt.na is False
+    @pytest.mark.parametrize(
+        "criterion_fixture,expected_idx,expected_value",
+        [
+            # Positive weight → lowest-value scored option (Vague, idx 0, value 0.0).
+            ("nominal_criterion_with_na", 0, 0.0),
+            # Negative weight → highest-value scored option (Severe, idx 2, value 1.0).
+            ("negative_weight_criterion_with_na", 2, 1.0),
+        ],
+    )
+    def test_picks_score_minimizing_scored_option(
+        self, criterion_fixture, expected_idx, expected_value, request
+    ):
+        """Returns the (index, CriterionOption) tuple for the score-minimizing scored option.
 
-    def test_negative_weight_picks_highest_value(self, negative_weight_criterion_with_na):
-        """Negative weight → highest-value scored option (worst case flips)."""
-        idx, opt = negative_weight_criterion_with_na.worst_scored_option()
-        assert idx == 2  # Severe, value=1.0
-        assert opt.value == 1.0
+        Positive weight → lowest value; negative weight → highest value (worst case flips).
+        Pins the returned OPTION object (value + non-NA), not just the index.
+        """
+        criterion = request.getfixturevalue(criterion_fixture)
+        idx, opt = criterion.worst_scored_option()
+        assert idx == expected_idx
+        assert opt.value == expected_value
         assert opt.na is False
 
     def test_skips_na_options(self):
@@ -489,49 +502,61 @@ class TestCriterionWorstOptionAmong:
     so scoring, the unknown-error path, and aggregation cannot drift.
     """
 
-    def test_positive_weight_picks_lowest_value_among_candidates(self, ordinal_criterion):
-        """Positive weight → the lowest-value candidate (not the global lowest)."""
-        # ordinal_criterion values: [0.0, 0.33, 0.67, 1.0]. Among {1, 2, 3} the worst is 1.
-        assert ordinal_criterion.worst_option_among([3, 2, 1]) == 1
-
-    def test_negative_weight_picks_highest_value_among_candidates(
-        self, negative_weight_criterion_with_na
+    @pytest.mark.parametrize(
+        "criterion_factory,candidate_lists,expected",
+        [
+            # Positive weight → the lowest-value candidate (not the global lowest).
+            # ordinal_criterion values: [0.0, 0.33, 0.67, 1.0]. Among {1, 2, 3} the worst is 1.
+            (lambda r: r.getfixturevalue("ordinal_criterion"), [[3, 2, 1]], 1),
+            # Negative weight → the highest-value candidate (worst case flips).
+            # values: None=0.0(0), Minor=0.5(1), Severe=1.0(2). Among {0, 1, 2} the worst is 2.
+            (
+                lambda r: r.getfixturevalue("negative_weight_criterion_with_na"),
+                [[0, 1, 2]],
+                2,
+            ),
+            # Positive weight, value tie → lowest index, regardless of candidate order.
+            (
+                lambda r: Criterion(
+                    name="t",
+                    weight=10.0,
+                    requirement="R",
+                    scale_type="nominal",
+                    options=[
+                        {"label": "A", "value": 0.0},  # idx 0  ─┐ tie at the worst value
+                        {"label": "B", "value": 0.5},  # idx 1   │
+                        {"label": "C", "value": 0.0},  # idx 2  ─┘
+                    ],
+                ),
+                [[2, 0], [0, 2]],
+                0,
+            ),
+            # Negative weight, value tie at the highest value → lowest index.
+            (
+                lambda r: Criterion(
+                    name="t",
+                    weight=-3.0,
+                    requirement="R",
+                    scale_type="nominal",
+                    options=[
+                        {"label": "A", "value": 1.0},  # idx 0  ─┐ tie at the worst (highest) value
+                        {"label": "B", "value": 0.5},  # idx 1   │
+                        {"label": "C", "value": 1.0},  # idx 2  ─┘
+                    ],
+                ),
+                [[2, 0], [0, 2]],
+                0,
+            ),
+        ],
+    )
+    def test_picks_score_minimizing_candidate_order_independent(
+        self, criterion_factory, candidate_lists, expected, request
     ):
-        """Negative weight → the highest-value candidate (worst case flips)."""
-        # values: None=0.0(0), Minor=0.5(1), Severe=1.0(2). Among {0, 1, 2} the worst is 2.
-        assert negative_weight_criterion_with_na.worst_option_among([0, 1, 2]) == 2
-
-    def test_value_tie_breaks_to_lowest_index_order_independent(self):
-        """Positive weight, value tie → lowest index, regardless of candidate order."""
-        criterion = Criterion(
-            name="t",
-            weight=10.0,
-            requirement="R",
-            scale_type="nominal",
-            options=[
-                {"label": "A", "value": 0.0},  # idx 0  ─┐ tie at the worst value
-                {"label": "B", "value": 0.5},  # idx 1   │
-                {"label": "C", "value": 0.0},  # idx 2  ─┘
-            ],
-        )
-        assert criterion.worst_option_among([2, 0]) == 0
-        assert criterion.worst_option_among([0, 2]) == 0
-
-    def test_negative_weight_value_tie_breaks_to_lowest_index(self):
-        """Negative weight, value tie at the highest value → lowest index."""
-        criterion = Criterion(
-            name="t",
-            weight=-3.0,
-            requirement="R",
-            scale_type="nominal",
-            options=[
-                {"label": "A", "value": 1.0},  # idx 0  ─┐ tie at the worst (highest) value
-                {"label": "B", "value": 0.5},  # idx 1   │
-                {"label": "C", "value": 1.0},  # idx 2  ─┘
-            ],
-        )
-        assert criterion.worst_option_among([2, 0]) == 0
-        assert criterion.worst_option_among([0, 2]) == 0
+        """Score-minimizing candidate, weight-sign aware, with order-independent lowest-index
+        tie-break (both candidate orderings resolve to the same index)."""
+        criterion = criterion_factory(request)
+        for candidates in candidate_lists:
+            assert criterion.worst_option_among(candidates) == expected
 
     def test_single_candidate_returned_as_is(self, ordinal_criterion):
         assert ordinal_criterion.worst_option_among([2]) == 2
@@ -1207,15 +1232,49 @@ def _wrap_eval_result(item_results: list[ItemResult]) -> EvalResult:
 class TestNaKappa:
     """Cohen's kappa on the dichotomized {NA, not-NA} decision (T1-E)."""
 
-    def test_na_kappa_perfect_agreement_is_one(self, nominal_criterion_with_na):
-        """4 items, perfect NA-vs-not-NA agreement => kappa=1.0, interpretation 'almost perfect'.
-
-        items 1,2: both pred and GT pick N/A (index 3).
-        items 3,4: both pred and GT pick "Very specific" (index 2).
-        A=2, fp=0, fn=0, N=2. P_o=1.0, P_e=0.5, kappa=1.0.
-        """
-        labels = ["N/A", "N/A", "Very specific", "Very specific"]
-        preds = [3, 3, 2, 2]
+    @pytest.mark.parametrize(
+        "labels,preds,expected_kappa,expected_interpretation,expected_counts",
+        [
+            # 4 items, perfect NA-vs-not-NA agreement => kappa=1.0, 'almost perfect'.
+            # items 1,2: both pred and GT pick N/A (index 3).
+            # items 3,4: both pred and GT pick "Very specific" (index 2).
+            # A=2, fp=0, fn=0, N=2. P_o=1.0, P_e=0.5, kappa=1.0.
+            (
+                ["N/A", "N/A", "Very specific", "Very specific"],
+                [3, 3, 2, 2],
+                1.0,
+                "almost perfect",
+                None,
+            ),
+            # 6 items, 2x2 mix gives na_kappa = 1/3, with na_count_*/na_false_* populated.
+            # Layout (pred, true); index 3 is NA, index 2 is "Very specific" (not-NA):
+            #     (NA, NA), (NA, NA)                  -> A=2
+            #     (NA, not-NA)                        -> fp=1
+            #     (not-NA, NA)                        -> fn=1
+            #     (not-NA, not-NA), (not-NA, not-NA)  -> N=2
+            # P_o=(2+2)/6=4/6; pred_NA=A+fp=3, true_NA=A+fn=3; P_e=(3/6)^2*2=0.5;
+            # kappa=(4/6 - 0.5)/(1 - 0.5) = (1/6)/(1/2) = 1/3.
+            (
+                ["N/A", "N/A", "Very specific", "N/A", "Very specific", "Very specific"],
+                [3, 3, 3, 2, 2, 2],
+                1 / 3,
+                None,
+                # (na_count_true, na_count_pred, na_false_positive, na_false_negative)
+                (3, 3, 1, 1),
+            ),
+        ],
+    )
+    def test_na_kappa_and_counts(
+        self,
+        nominal_criterion_with_na,
+        labels,
+        preds,
+        expected_kappa,
+        expected_interpretation,
+        expected_counts,
+    ):
+        """na_kappa is Cohen's kappa on the dichotomized {NA, not-NA} decision, with the
+        na_count_*/na_false_* diagnostics populated on the same na_stats object."""
         dataset = _make_na_dataset(nominal_criterion_with_na, labels)
         item_results = [
             ItemResult(
@@ -1231,8 +1290,15 @@ class TestNaKappa:
         metrics = compute_metrics(eval_result, dataset)
 
         assert metrics.na_stats is not None
-        assert metrics.na_stats.na_kappa == pytest.approx(1.0)
-        assert metrics.na_stats.na_kappa_interpretation == "almost perfect"
+        assert metrics.na_stats.na_kappa == pytest.approx(expected_kappa, abs=1e-9)
+        if expected_interpretation is not None:
+            assert metrics.na_stats.na_kappa_interpretation == expected_interpretation
+        if expected_counts is not None:
+            count_true, count_pred, fp, fn = expected_counts
+            assert metrics.na_stats.na_count_true == count_true
+            assert metrics.na_stats.na_count_pred == count_pred
+            assert metrics.na_stats.na_false_positive == fp
+            assert metrics.na_stats.na_false_negative == fn
 
     def test_na_kappa_no_na_observed_is_none(self, nominal_criterion_with_na):
         """3 items, no NA in either pred or GT => kappa is undefined (single class) => None."""
@@ -1306,61 +1372,6 @@ class TestNaKappa:
         metrics = compute_metrics(eval_result, dataset)
 
         assert metrics.na_stats is None
-
-    def test_na_kappa_disagreement_below_perfect(self, nominal_criterion_with_na):
-        """6 items, 2x2 mix gives na_kappa = 1/3.
-
-        Hand-built layout (pred, true):
-            (NA, NA), (NA, NA)         -> A=2
-            (NA, not-NA)               -> fp=1
-            (not-NA, NA)               -> fn=1
-            (not-NA, not-NA), (not-NA, not-NA) -> N=2
-        P_o=(2+2)/6=4/6; pred_NA=A+fp=3, true_NA=A+fn=3; P_e=(3/6)^2*2=0.5;
-        kappa=(4/6 - 0.5)/(1 - 0.5) = (1/6)/(1/2) = 1/3.
-        """
-        # Layout below; index 3 is NA, index 2 is "Very specific" (not-NA).
-        preds = [3, 3, 3, 2, 2, 2]
-        true_labels = ["N/A", "N/A", "Very specific", "N/A", "Very specific", "Very specific"]
-        dataset = _make_na_dataset(nominal_criterion_with_na, true_labels)
-        item_results = [
-            ItemResult(
-                item_idx=i,
-                item=dataset.items[i],
-                report=_make_na_report(preds[i], nominal_criterion_with_na),
-                duration_seconds=0.1,
-            )
-            for i in range(len(true_labels))
-        ]
-        eval_result = _wrap_eval_result(item_results)
-
-        metrics = compute_metrics(eval_result, dataset)
-
-        assert metrics.na_stats is not None
-        assert metrics.na_stats.na_kappa == pytest.approx(1 / 3, abs=1e-9)
-
-    def test_na_counts_preserved(self, nominal_criterion_with_na):
-        """Regression guard: na_count_* and na_false_* are still populated correctly."""
-        preds = [3, 3, 3, 2, 2, 2]
-        true_labels = ["N/A", "N/A", "Very specific", "N/A", "Very specific", "Very specific"]
-        dataset = _make_na_dataset(nominal_criterion_with_na, true_labels)
-        item_results = [
-            ItemResult(
-                item_idx=i,
-                item=dataset.items[i],
-                report=_make_na_report(preds[i], nominal_criterion_with_na),
-                duration_seconds=0.1,
-            )
-            for i in range(len(true_labels))
-        ]
-        eval_result = _wrap_eval_result(item_results)
-
-        metrics = compute_metrics(eval_result, dataset)
-
-        assert metrics.na_stats is not None
-        assert metrics.na_stats.na_count_true == 3
-        assert metrics.na_stats.na_count_pred == 3
-        assert metrics.na_stats.na_false_positive == 1
-        assert metrics.na_stats.na_false_negative == 1
 
     def test_multi_choice_only_rubric_leaves_ca_stats_none(self, nominal_criterion_with_na):
         """Dual of the binary-only -> na_stats None guard (T2-C): a multi-choice-only

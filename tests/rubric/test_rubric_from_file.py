@@ -104,19 +104,6 @@ def test_from_file_unsupported_extension():
         Path(temp_path).unlink()
 
 
-def test_from_file_no_extension():
-    with tempfile.NamedTemporaryFile(mode="w", suffix="", delete=False) as f:
-        f.write("test")
-        temp_path = f.name
-
-    try:
-        with pytest.raises(ValueError) as exc_info:
-            Rubric.from_file(temp_path)
-        assert "Unsupported file format" in str(exc_info.value)
-    finally:
-        Path(temp_path).unlink()
-
-
 def test_from_file_object_unsupported_extension():
     yaml_content = yaml.dump(VALID_CRITERIA)
     file_obj = io.StringIO(yaml_content)

@@ -201,13 +201,35 @@ async def test_skip_strategy_all_cannot_assess_returns_zero(mock_llm_config):
 
 
 # =============================================================================
-# FAIL strategy tests
+# Strategy scoring tests (FAIL / ZERO / PARTIAL)
 # =============================================================================
 
 
+@pytest.mark.parametrize(
+    "cannot_assess_config, expected_score",
+    [
+        # FAIL: CANNOT_ASSESS (weight=10) -> worst case UNMET = 0 points
+        (CannotAssessConfig(strategy=CannotAssessStrategy.FAIL), 5.0 / 15.0),
+        # ZERO: CANNOT_ASSESS (weight=10) -> UNMET = 0 contribution
+        (CannotAssessConfig(strategy=CannotAssessStrategy.ZERO), 5.0 / 15.0),
+        # PARTIAL (0.5): CANNOT_ASSESS (weight=10) -> 0.5 * 10 = 5 points
+        (
+            CannotAssessConfig(strategy=CannotAssessStrategy.PARTIAL, partial_credit=0.5),
+            10.0 / 15.0,
+        ),
+    ],
+    ids=["fail", "zero", "partial_0.5"],
+)
 @pytest.mark.asyncio
-async def test_fail_strategy_treats_cannot_assess_as_worst_case(mock_llm_config, sample_rubric):
-    """Test that FAIL strategy treats CANNOT_ASSESS as worst case."""
+async def test_cannot_assess_strategy_scoring(
+    mock_llm_config, sample_rubric, cannot_assess_config, expected_score
+):
+    """Each CANNOT_ASSESS strategy is wired through ``Rubric.grade`` to the expected score.
+
+    Same rubric (weights 10/5/-3) and verdict sequence (CANNOT_ASSESS / MET / UNMET) for
+    every strategy; only the config and expected score differ. The strategy semantics are
+    exhaustively covered by the scoring core; this guards the grader-level wiring.
+    """
     call_count = 0
 
     async def mock_generate(
@@ -219,7 +241,7 @@ async def test_fail_strategy_treats_cannot_assess_as_worst_case(mock_llm_config,
     ) -> GenerateResult | CriterionJudgment:
         nonlocal call_count
         call_count += 1
-        # First criterion (positive, weight=10): CANNOT_ASSESS -> treated as UNMET
+        # First criterion (positive, weight=10): CANNOT_ASSESS
         if call_count == 1:
             judgment = CriterionJudgment(
                 criterion_status=CriterionVerdict.CANNOT_ASSESS,
@@ -248,16 +270,11 @@ async def test_fail_strategy_treats_cannot_assess_as_worst_case(mock_llm_config,
     ):
         grader = CriterionGrader(
             llm_config=mock_llm_config,
-            cannot_assess_config=CannotAssessConfig(strategy=CannotAssessStrategy.FAIL),
+            cannot_assess_config=cannot_assess_config,
         )
         result = await sample_rubric.grade("Test", grader=grader)
 
-        # With FAIL: CANNOT_ASSESS (weight=10) is treated as UNMET = 0 points
-        # fact2 (weight=5): MET = 5 points
-        # error (weight=-3): UNMET = 0 points (no penalty)
-        # Total positive weight = 10 + 5 = 15
-        # Score = 5 / 15 = 0.333...
-        assert result.score == pytest.approx(5.0 / 15.0)
+        assert result.score == pytest.approx(expected_score)
 
 
 @pytest.mark.asyncio
@@ -317,122 +334,8 @@ async def test_fail_strategy_negative_criterion_cannot_assess(mock_llm_config):
 
 
 # =============================================================================
-# ZERO strategy tests
+# PARTIAL strategy tests (custom credit)
 # =============================================================================
-
-
-@pytest.mark.asyncio
-async def test_zero_strategy_treats_cannot_assess_as_unmet(mock_llm_config, sample_rubric):
-    """Test that ZERO strategy treats CANNOT_ASSESS as UNMET (0 contribution)."""
-    call_count = 0
-
-    async def mock_generate(
-        system_prompt: str,
-        user_prompt: str,
-        response_format: type | None = None,
-        return_result: bool = False,
-        **kwargs: Any,
-    ) -> GenerateResult | CriterionJudgment:
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            judgment = CriterionJudgment(
-                criterion_status=CriterionVerdict.CANNOT_ASSESS,
-                explanation="Cannot assess",
-            )
-        elif call_count == 2:
-            judgment = CriterionJudgment(
-                criterion_status=CriterionVerdict.MET,
-                explanation="Met",
-            )
-        else:
-            judgment = CriterionJudgment(
-                criterion_status=CriterionVerdict.UNMET,
-                explanation="No error",
-            )
-        return _wrap_in_generate_result(judgment, return_result)
-
-    mock_client = MagicMock()
-    mock_client.generate = AsyncMock(side_effect=mock_generate)
-
-    with patch(
-        "autorubric.graders.criterion_grader.LLMClient",
-        return_value=mock_client,
-    ):
-        grader = CriterionGrader(
-            llm_config=mock_llm_config,
-            cannot_assess_config=CannotAssessConfig(strategy=CannotAssessStrategy.ZERO),
-        )
-        result = await sample_rubric.grade("Test", grader=grader)
-
-        # CANNOT_ASSESS (weight=10): treated as UNMET = 0
-        # MET (weight=5): 5 points
-        # UNMET (weight=-3): 0 points
-        # Total positive = 15, Score = 5/15 = 0.333...
-        assert result.score == pytest.approx(5.0 / 15.0)
-
-
-# =============================================================================
-# PARTIAL strategy tests
-# =============================================================================
-
-
-@pytest.mark.asyncio
-async def test_partial_strategy_gives_partial_credit(mock_llm_config, sample_rubric):
-    """Test that PARTIAL strategy gives partial credit for CANNOT_ASSESS."""
-    call_count = 0
-
-    async def mock_generate(
-        system_prompt: str,
-        user_prompt: str,
-        response_format: type | None = None,
-        return_result: bool = False,
-        **kwargs: Any,
-    ) -> GenerateResult | CriterionJudgment:
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            # Positive criterion (weight=10): CANNOT_ASSESS
-            judgment = CriterionJudgment(
-                criterion_status=CriterionVerdict.CANNOT_ASSESS,
-                explanation="Cannot assess",
-            )
-        elif call_count == 2:
-            # Positive criterion (weight=5): MET
-            judgment = CriterionJudgment(
-                criterion_status=CriterionVerdict.MET,
-                explanation="Met",
-            )
-        else:
-            # Negative criterion (weight=-3): UNMET
-            judgment = CriterionJudgment(
-                criterion_status=CriterionVerdict.UNMET,
-                explanation="No error",
-            )
-        return _wrap_in_generate_result(judgment, return_result)
-
-    mock_client = MagicMock()
-    mock_client.generate = AsyncMock(side_effect=mock_generate)
-
-    with patch(
-        "autorubric.graders.criterion_grader.LLMClient",
-        return_value=mock_client,
-    ):
-        grader = CriterionGrader(
-            llm_config=mock_llm_config,
-            cannot_assess_config=CannotAssessConfig(
-                strategy=CannotAssessStrategy.PARTIAL,
-                partial_credit=0.5,  # 50% credit
-            ),
-        )
-        result = await sample_rubric.grade("Test", grader=grader)
-
-        # CANNOT_ASSESS (weight=10): 0.5 * 10 = 5 points
-        # MET (weight=5): 5 points
-        # UNMET (weight=-3): 0 points
-        # Total = 10, total_positive = 15
-        # Score = 10/15 = 0.667...
-        assert result.score == pytest.approx(10.0 / 15.0)
 
 
 @pytest.mark.asyncio

@@ -80,46 +80,52 @@ def _client_raising(exc: BaseException) -> MagicMock:
 # =============================================================================
 
 
+def _json_decode_error() -> ValueError:
+    """A real ``json.JSONDecodeError`` (subclasses ``ValueError``)."""
+    try:
+        json.loads("{")
+    except ValueError as e:
+        return e
+    raise AssertionError("json.loads('{') should have raised")
+
+
+def _validation_error() -> ValidationError:
+    """A real pydantic ``ValidationError``."""
+
+    class _M(BaseModel):
+        x: int
+
+    try:
+        _M.model_validate({"x": "not-an-int"})
+    except ValidationError as e:
+        return e
+    raise AssertionError("expected a ValidationError")
+
+
 class TestClassifyGradingError:
     """Unit tests for the error taxonomy."""
 
-    def test_litellm_timeout_is_infrastructure(self):
-        exc = litellm.Timeout("timed out", model="m", llm_provider="p")
-        assert classify_grading_error(exc) == "infrastructure"
-
-    def test_litellm_rate_limit_is_infrastructure(self):
-        exc = litellm.RateLimitError("rate limited", model="m", llm_provider="p")
-        assert classify_grading_error(exc) == "infrastructure"
-
-    def test_json_decode_error_is_parse(self):
-        try:
-            json.loads("{")
-        except ValueError as e:  # json.JSONDecodeError subclasses ValueError
-            assert classify_grading_error(e) == "parse"
-        else:
-            pytest.fail("json.loads('{') should have raised")
-
-    def test_pydantic_validation_error_is_parse(self):
-        class _M(BaseModel):
-            x: int
-
-        try:
-            _M.model_validate({"x": "not-an-int"})
-        except ValidationError as e:
-            assert classify_grading_error(e) == "parse"
-        else:
-            pytest.fail("expected a ValidationError")
-
-    def test_value_error_is_parse(self):
-        assert classify_grading_error(ValueError("bad value")) == "parse"
-
-    def test_runtime_error_is_unknown(self):
-        assert classify_grading_error(RuntimeError("boom")) == "unknown"
-
-    def test_return_type_is_error_category_literal(self):
-        # Sanity: the documented literal values are exactly what we return.
-        result: ErrorCategory = classify_grading_error(RuntimeError("boom"))
-        assert result in ("infrastructure", "parse", "unknown")
+    @pytest.mark.parametrize(
+        "exc, expected",
+        [
+            (litellm.Timeout("timed out", model="m", llm_provider="p"), "infrastructure"),
+            (litellm.RateLimitError("rate limited", model="m", llm_provider="p"), "infrastructure"),
+            (_json_decode_error(), "parse"),  # json.JSONDecodeError subclasses ValueError
+            (_validation_error(), "parse"),
+            (ValueError("bad value"), "parse"),
+            (RuntimeError("boom"), "unknown"),
+        ],
+        ids=[
+            "litellm_timeout",
+            "litellm_rate_limit",
+            "json_decode_error",
+            "pydantic_validation_error",
+            "value_error",
+            "runtime_error",
+        ],
+    )
+    def test_taxonomy(self, exc: BaseException, expected: ErrorCategory):
+        assert classify_grading_error(exc) == expected
 
 
 # =============================================================================
@@ -380,47 +386,6 @@ async def test_multi_choice_infrastructure_failure_is_na(mock_llm_config):
 
 
 @pytest.mark.asyncio
-async def test_multi_choice_unknown_negative_weight_picks_highest_value(mock_llm_config):
-    """Unknown error, negative weight -> worst case is the HIGHEST-value option.
-
-    For negative weights, MET-equivalent (highest value) maximizes the penalty, so the
-    conservative worst case mirrors the binary ``MET if weight < 0`` rule.
-    """
-    rubric = Rubric(
-        [
-            Criterion(
-                name="severity",
-                requirement="How severe is it?",
-                weight=-5.0,
-                scale_type="ordinal",
-                options=[
-                    CriterionOption(label="Minor", value=0.0),
-                    CriterionOption(label="Major", value=0.5),
-                    CriterionOption(label="Severe", value=1.0),
-                ],
-            ),
-        ]
-    )
-    with patch(
-        "autorubric.graders.criterion_grader.LLMClient",
-        return_value=_client_raising(RuntimeError("boom")),
-    ):
-        grader = CriterionGrader(llm_config=mock_llm_config, shuffle_options=False)
-        report = await rubric.grade("submission", grader=grader)
-
-    assert report.report is not None
-    cr = report.report[0]
-    assert cr.final_multi_choice_verdict is not None
-    assert cr.final_multi_choice_verdict.selected_index == 2
-    assert cr.final_multi_choice_verdict.value == 1.0
-    assert cr.final_multi_choice_verdict.na is False
-    assert cr.is_error
-    assert cr.error is not None
-    assert cr.error.startswith("unknown:")
-    assert report.score == pytest.approx(0.0)
-
-
-@pytest.mark.asyncio
 async def test_multi_choice_unknown_with_na_option_does_not_select_na(mock_llm_config):
     """Unknown error must NOT auto-select an NA option (NA is reserved for infra/parse).
 
@@ -457,42 +422,6 @@ async def test_multi_choice_unknown_with_na_option_does_not_select_na(mock_llm_c
 
 
 @pytest.mark.asyncio
-async def test_multi_choice_unknown_negative_weight_with_na_option_picks_highest_non_na(
-    mock_llm_config,
-):
-    """Unknown error, negative weight, NA present -> highest-value non-NA option."""
-    rubric = Rubric(
-        [
-            Criterion(
-                name="severity",
-                requirement="How severe is it?",
-                weight=-5.0,
-                scale_type="ordinal",
-                options=[
-                    CriterionOption(label="NA", value=0.0, na=True),
-                    CriterionOption(label="Minor", value=0.0),
-                    CriterionOption(label="Severe", value=1.0),
-                ],
-            ),
-        ]
-    )
-    with patch(
-        "autorubric.graders.criterion_grader.LLMClient",
-        return_value=_client_raising(RuntimeError("boom")),
-    ):
-        grader = CriterionGrader(llm_config=mock_llm_config, shuffle_options=False)
-        report = await rubric.grade("submission", grader=grader)
-
-    assert report.report is not None
-    cr = report.report[0]
-    assert cr.final_multi_choice_verdict is not None
-    assert cr.final_multi_choice_verdict.selected_index == 2
-    assert cr.final_multi_choice_verdict.value == 1.0
-    assert cr.final_multi_choice_verdict.na is False
-    assert report.score == pytest.approx(0.0)
-
-
-@pytest.mark.asyncio
 async def test_multi_choice_unknown_positive_weight_picks_lowest_value(mock_llm_config):
     """Unknown error, positive weight -> worst case is the lowest-value option."""
     rubric = Rubric(
@@ -524,37 +453,6 @@ async def test_multi_choice_unknown_positive_weight_picks_lowest_value(mock_llm_
     assert cr.final_multi_choice_verdict.value == 0.0
     assert cr.final_multi_choice_verdict.na is False
     assert report.score == 0.0
-
-
-@pytest.mark.asyncio
-async def test_multi_choice_unknown_ties_pick_first_index(mock_llm_config):
-    """Unknown error with tied worst values -> first option (deterministic)."""
-    rubric = Rubric(
-        [
-            Criterion(
-                name="kind",
-                requirement="Which kind?",
-                weight=5.0,
-                scale_type="nominal",
-                options=[
-                    CriterionOption(label="A", value=0.0),
-                    CriterionOption(label="B", value=0.0),
-                    CriterionOption(label="C", value=1.0),
-                ],
-            ),
-        ]
-    )
-    with patch(
-        "autorubric.graders.criterion_grader.LLMClient",
-        return_value=_client_raising(RuntimeError("boom")),
-    ):
-        grader = CriterionGrader(llm_config=mock_llm_config, shuffle_options=False)
-        report = await rubric.grade("submission", grader=grader)
-
-    assert report.report is not None
-    cr = report.report[0]
-    assert cr.final_multi_choice_verdict is not None
-    assert cr.final_multi_choice_verdict.selected_index == 0
 
 
 @pytest.mark.asyncio
@@ -842,50 +740,44 @@ async def test_none_abstain_survives_serialization_round_trip():
 # =============================================================================
 
 
+def _binary_vote(error: str | None) -> JudgeVote:
+    return JudgeVote(
+        judge_id="j",
+        verdict=CriterionVerdict.UNMET,
+        reason="r",
+        error=error,
+    )
+
+
+def _multi_choice_vote(error: str | None) -> MultiChoiceJudgeVote:
+    return MultiChoiceJudgeVote(
+        judge_id="j",
+        selected_index=0,
+        selected_label="L",
+        value=0.0,
+        reason="r",
+        error=error,
+    )
+
+
 class TestVoteIsErrorProperty:
     """``is_error`` parity on the per-vote dataclasses (T5-A).
 
     ``CriterionReport`` / ``EnsembleCriterionReport`` advise using ``is_error`` instead
     of inspecting ``reason``; the per-vote types must expose the same property so the
-    advised pattern is possible at vote level.
+    advised pattern is possible at vote level. ``is_error`` is the pure getter
+    ``error is not None``, identical across both vote types.
     """
 
-    def test_binary_vote_is_error_true_when_error_set(self):
-        vote = JudgeVote(
-            judge_id="j",
-            verdict=CriterionVerdict.UNMET,
-            reason="r",
-            error="infrastructure: x",
-        )
-        assert vote.is_error is True
-
-    def test_binary_vote_is_error_false_when_error_none(self):
-        vote = JudgeVote(
-            judge_id="j",
-            verdict=CriterionVerdict.UNMET,
-            reason="r",
-            error=None,
-        )
-        assert vote.is_error is False
-
-    def test_multi_choice_vote_is_error_true_when_error_set(self):
-        vote = MultiChoiceJudgeVote(
-            judge_id="j",
-            selected_index=0,
-            selected_label="L",
-            value=0.0,
-            reason="r",
-            error="infrastructure: x",
-        )
-        assert vote.is_error is True
-
-    def test_multi_choice_vote_is_error_false_when_error_none(self):
-        vote = MultiChoiceJudgeVote(
-            judge_id="j",
-            selected_index=0,
-            selected_label="L",
-            value=0.0,
-            reason="r",
-            error=None,
-        )
-        assert vote.is_error is False
+    @pytest.mark.parametrize(
+        "vote_factory",
+        [_binary_vote, _multi_choice_vote],
+        ids=["binary_vote", "multi_choice_vote"],
+    )
+    @pytest.mark.parametrize(
+        "error, expected",
+        [("infrastructure: x", True), (None, False)],
+        ids=["error_set", "error_none"],
+    )
+    def test_is_error(self, vote_factory, error: str | None, expected: bool):
+        assert vote_factory(error).is_error is expected

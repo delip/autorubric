@@ -184,20 +184,27 @@ def _binary_report(verdicts: list[CriterionVerdict], criteria: list[Criterion]) 
 # =============================================================================
 
 
-def test_kappa_or_none_degenerate_single_class_returns_none():
-    """Single-class data makes cohen_kappa_score return NaN with NO exception; the helper
-    must catch the NaN and return None (the latent bug the old `except: 0.0` missed)."""
-    assert _kappa_or_none([0, 0, 0], [0, 0, 0]) is None
-
-
-def test_kappa_or_none_quadratic_degenerate_returns_none():
-    assert _kappa_or_none([0, 0], [0, 0], weights="quadratic") is None
-
-
-def test_kappa_or_none_normal_returns_float():
-    k = _kappa_or_none([0, 1, 0, 1], [0, 1, 0, 1])
-    assert k is not None
-    assert k == pytest.approx(1.0)
+@pytest.mark.parametrize(
+    ("y1", "y2", "weights", "expected"),
+    [
+        # Single-class data makes cohen_kappa_score return NaN with NO exception; the
+        # helper must catch the NaN and return None (the latent bug the old `except: 0.0`
+        # missed).
+        ([0, 0, 0], [0, 0, 0], None, None),
+        # Quadratic-weighted degenerate single-class → None.
+        ([0, 0], [0, 0], "quadratic", None),
+        # Normal varied input → a real float (perfect agreement → 1.0).
+        ([0, 1, 0, 1], [0, 1, 0, 1], None, pytest.approx(1.0)),
+    ],
+)
+def test_kappa_or_none(y1, y2, weights, expected):
+    kwargs = {} if weights is None else {"weights": weights}
+    k = _kappa_or_none(y1, y2, **kwargs)
+    if expected is None:
+        assert k is None
+    else:
+        assert k is not None
+        assert k == expected
 
 
 # =============================================================================

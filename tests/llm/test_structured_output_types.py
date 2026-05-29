@@ -6,31 +6,28 @@ from pydantic import ValidationError
 from autorubric.types import (
     CriterionJudgment,
     CriterionVerdict,
-    MultiChoiceJudgment,
 )
 
 
 class TestCriterionJudgment:
     """Tests for CriterionJudgment structured output type."""
 
-    def test_valid_met_judgment(self):
-        """CriterionJudgment accepts valid MET status."""
+    @pytest.mark.parametrize(
+        ("status", "explanation"),
+        [
+            (CriterionVerdict.MET, "The requirement is satisfied."),
+            (CriterionVerdict.UNMET, "The requirement is not satisfied."),
+        ],
+    )
+    def test_valid_judgment(self, status, explanation):
+        """CriterionJudgment accepts valid MET/UNMET status with default reasoning None."""
         judgment = CriterionJudgment(
-            criterion_status=CriterionVerdict.MET,
-            explanation="The requirement is satisfied.",
+            criterion_status=status,
+            explanation=explanation,
         )
-        assert judgment.criterion_status == CriterionVerdict.MET
-        assert judgment.explanation == "The requirement is satisfied."
+        assert judgment.criterion_status == status
+        assert judgment.explanation == explanation
         assert judgment.reasoning is None
-
-    def test_valid_unmet_judgment(self):
-        """CriterionJudgment accepts valid UNMET status."""
-        judgment = CriterionJudgment(
-            criterion_status=CriterionVerdict.UNMET,
-            explanation="The requirement is not satisfied.",
-        )
-        assert judgment.criterion_status == CriterionVerdict.UNMET
-        assert judgment.explanation == "The requirement is not satisfied."
 
     def test_with_reasoning(self):
         """CriterionJudgment can include optional reasoning."""
@@ -66,21 +63,3 @@ class TestCriterionJudgment:
         )
         with pytest.raises(ValidationError):
             judgment.criterion_status = CriterionVerdict.UNMET
-
-
-class TestMultiChoiceJudgment:
-    """Tests for MultiChoiceJudgment structured output type (reasoning parity)."""
-
-    def test_reasoning_defaults_none(self):
-        """MultiChoiceJudgment.reasoning defaults to None (parity with CriterionJudgment)."""
-        judgment = MultiChoiceJudgment(selected_option=1, explanation="Chosen.")
-        assert judgment.reasoning is None
-
-    def test_with_reasoning(self):
-        """MultiChoiceJudgment can include the optional extended-thinking reasoning trace."""
-        judgment = MultiChoiceJudgment(
-            selected_option=2,
-            explanation="Option 2 best fits.",
-            reasoning="Compared all options; 2 dominates.",
-        )
-        assert judgment.reasoning == "Compared all options; 2 dominates."

@@ -30,7 +30,7 @@ def test_na_option_is_marked_in_rendered_options():
     # The NA option line carries the marker.
     assert f"3. Insufficient data {_NA_MARKER}" in prompt
     # Scored options are NOT marked.
-    assert "1. Vague\n" in prompt or prompt.rstrip().endswith("1. Vague") or "1. Vague" in prompt
+    assert "1. Vague" in prompt
     assert _NA_MARKER not in prompt.split("Vague")[0]
 
 

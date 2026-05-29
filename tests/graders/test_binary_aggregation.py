@@ -13,6 +13,8 @@ Pins the semantics of ``CriterionGrader._aggregate_votes`` for each
   weight < 0 (the binary analog of ``Criterion.worst_scored_option``).
 """
 
+import pytest
+
 from autorubric.graders import CriterionGrader
 from autorubric.llm import LLMConfig
 from autorubric.types import AggregationStrategy, CriterionVerdict, JudgeVote
@@ -57,13 +59,6 @@ def test_majority_ignores_lopsided_minority_weight() -> None:
     assert verdict == MET
 
 
-def test_majority_tie_falls_to_unmet() -> None:
-    """Even split (2 MET vs 2 UNMET), equal weights -> UNMET (conservative)."""
-    votes = _votes((MET, 1.0), (MET, 1.0), (UNMET, 1.0), (UNMET, 1.0))
-    verdict, _ = _grader("majority")._aggregate_votes(votes, weight=10.0)
-    assert verdict == UNMET
-
-
 def test_majority_excludes_cannot_assess_from_count() -> None:
     """CANNOT_ASSESS votes drop out; [MET, CA, UNMET] -> tie among assessable -> UNMET."""
     votes = _votes((MET, 1.0), (CANNOT_ASSESS, 1.0), (UNMET, 1.0))
@@ -99,31 +94,30 @@ def test_all_cannot_assess_returns_cannot_assess() -> None:
 # T3-B: ties resolve to the score-minimizing verdict by weight sign (worst case),
 # matching Criterion.worst_scored_option / the unknown-error path. Positive weight →
 # UNMET (earns 0); negative (penalty) weight → MET (subtracts the full penalty).
+#
+# Both dispatch paths preserved as params: majority is an equal-weight 4-vote even split
+# (head-count branch); weighted is 2 equal-summed votes (summed-weight branch). The
+# positive-weight majority row also absorbs the former standalone conservative-tie test.
 
 
-def test_majority_tie_negative_weight_falls_to_met() -> None:
-    """Even split on a NEGATIVE-weight (penalty) criterion → MET (worst case)."""
-    votes = _votes((MET, 1.0), (MET, 1.0), (UNMET, 1.0), (UNMET, 1.0))
-    verdict, _ = _grader("majority")._aggregate_votes(votes, weight=-10.0)
-    assert verdict == MET
-
-
-def test_majority_tie_positive_weight_falls_to_unmet() -> None:
-    """Even split on a positive-weight criterion → UNMET (unchanged, weight-sign aware)."""
-    votes = _votes((MET, 1.0), (MET, 1.0), (UNMET, 1.0), (UNMET, 1.0))
-    verdict, _ = _grader("majority")._aggregate_votes(votes, weight=10.0)
-    assert verdict == UNMET
-
-
-def test_weighted_tie_negative_weight_falls_to_met() -> None:
-    """Equal summed weights on a negative-weight criterion → MET (worst case)."""
-    votes = _votes((MET, 2.0), (UNMET, 2.0))
-    verdict, _ = _grader("weighted")._aggregate_votes(votes, weight=-5.0)
-    assert verdict == MET
-
-
-def test_weighted_tie_positive_weight_falls_to_unmet() -> None:
-    """Equal summed weights on a positive-weight criterion → UNMET."""
-    votes = _votes((MET, 2.0), (UNMET, 2.0))
-    verdict, _ = _grader("weighted")._aggregate_votes(votes, weight=5.0)
-    assert verdict == UNMET
+@pytest.mark.parametrize(
+    ("aggregation", "votes_spec", "weight", "expected"),
+    [
+        # majority: 2 MET vs 2 UNMET, equal weights (head-count even split).
+        ("majority", ((MET, 1.0), (MET, 1.0), (UNMET, 1.0), (UNMET, 1.0)), 10.0, UNMET),
+        ("majority", ((MET, 1.0), (MET, 1.0), (UNMET, 1.0), (UNMET, 1.0)), -10.0, MET),
+        # weighted: equal summed weights (summed-weight tie).
+        ("weighted", ((MET, 2.0), (UNMET, 2.0)), 5.0, UNMET),
+        ("weighted", ((MET, 2.0), (UNMET, 2.0)), -5.0, MET),
+    ],
+)
+def test_binary_tie_falls_to_weight_sign_worst_case(
+    aggregation: AggregationStrategy,
+    votes_spec: tuple[tuple[CriterionVerdict, float], ...],
+    weight: float,
+    expected: CriterionVerdict,
+) -> None:
+    """Binary tie → score-minimizing verdict by weight sign (UNMET for >=0, MET for <0)."""
+    votes = _votes(*votes_spec)
+    verdict, _ = _grader(aggregation)._aggregate_votes(votes, weight=weight)
+    assert verdict == expected

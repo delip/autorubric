@@ -90,29 +90,27 @@ class TestLLMClientCacheKey:
         assert key1 == key2
         assert len(key1) == 64  # SHA256 hex digest length
 
-    def test_cache_key_differs_for_different_inputs(self):
-        """Cache keys differ when inputs differ."""
+    @pytest.mark.parametrize(
+        "varied_args",
+        [
+            pytest.param(("openai/gpt-5.2", "System B", "User prompt", None), id="system"),
+            pytest.param(("openai/gpt-5.2", "System A", "Different prompt", None), id="user"),
+            pytest.param(("gpt-3.5", "System A", "User prompt", None), id="model"),
+            pytest.param(
+                ("openai/gpt-5.2", "System A", "User prompt", MockResponse),
+                id="response_format",
+            ),
+        ],
+    )
+    def test_cache_key_differs_for_different_inputs(self, varied_args):
+        """Cache keys differ when any input field differs (model/system/user/response_format)."""
         config = LLMConfig(model="openai/gpt-5.2")
         client = LLMClient(config)
 
-        key1 = client._cache_key("openai/gpt-5.2", "System A", "User prompt", None)
-        key2 = client._cache_key("openai/gpt-5.2", "System B", "User prompt", None)
-        key3 = client._cache_key("openai/gpt-5.2", "System A", "Different prompt", None)
-        key4 = client._cache_key("gpt-3.5", "System A", "User prompt", None)
+        baseline = client._cache_key("openai/gpt-5.2", "System A", "User prompt", None)
+        varied = client._cache_key(*varied_args)
 
-        assert key1 != key2
-        assert key1 != key3
-        assert key1 != key4
-
-    def test_cache_key_includes_response_format(self):
-        """Cache key includes the response format class name."""
-        config = LLMConfig(model="openai/gpt-5.2")
-        client = LLMClient(config)
-
-        key_no_format = client._cache_key("openai/gpt-5.2", "System", "User", None)
-        key_with_format = client._cache_key("openai/gpt-5.2", "System", "User", MockResponse)
-
-        assert key_no_format != key_with_format
+        assert baseline != varied
 
 
 class TestLLMClientCacheStats:
@@ -308,12 +306,33 @@ class TestLLMClientGenerate:
             assert result.value == 42
 
     @pytest.mark.asyncio
-    async def test_generate_with_thinking_budget_tokens(self):
-        """generate includes thinking parameter when budget_tokens specified."""
-        config = LLMConfig(
-            model="anthropic/claude-sonnet-4-5-20250929",
-            thinking=10000,  # Direct token budget
-        )
+    @pytest.mark.parametrize(
+        ("model", "thinking", "assert_thinking_params"),
+        [
+            pytest.param(
+                "anthropic/claude-sonnet-4-5-20250929",
+                10000,  # Direct token budget
+                lambda kw: (
+                    "thinking" in kw
+                    and kw["thinking"]["type"] == "enabled"
+                    and kw["thinking"]["budget_tokens"] == 10000
+                ),
+                id="budget_tokens",
+            ),
+            pytest.param(
+                "openai/responses/gpt-5-mini",
+                "high",  # Level-based thinking
+                lambda kw: "reasoning_effort" in kw and kw["reasoning_effort"] == "high",
+                id="level",
+            ),
+        ],
+    )
+    async def test_generate_with_thinking(self, model, thinking, assert_thinking_params):
+        """generate routes thinking config to the correct provider param.
+
+        budget_tokens -> params['thinking'] dict; level -> params['reasoning_effort'].
+        """
+        config = LLMConfig(model=model, thinking=thinking)
         client = LLMClient(config)
 
         mock_message = MagicMock()
@@ -335,40 +354,7 @@ class TestLLMClientGenerate:
             )
 
             call_kwargs = mock_completion.call_args.kwargs
-            assert "thinking" in call_kwargs
-            assert call_kwargs["thinking"]["type"] == "enabled"
-            assert call_kwargs["thinking"]["budget_tokens"] == 10000
-
-    @pytest.mark.asyncio
-    async def test_generate_with_thinking_level(self):
-        """generate includes reasoning_effort parameter when level specified."""
-        config = LLMConfig(
-            model="openai/responses/gpt-5-mini",
-            thinking="high",  # Level-based thinking
-        )
-        client = LLMClient(config)
-
-        mock_message = MagicMock()
-        mock_message.content = "Response"
-        mock_message.reasoning_content = "I reasoned about this..."
-
-        mock_choice = MagicMock()
-        mock_choice.message = mock_message
-
-        mock_response = MagicMock()
-        mock_response.choices = [mock_choice]
-
-        with patch("autorubric.llm.litellm.acompletion", new_callable=AsyncMock) as mock_completion:
-            mock_completion.return_value = mock_response
-
-            await client.generate(
-                system_prompt="You are helpful.",
-                user_prompt="Think carefully",
-            )
-
-            call_kwargs = mock_completion.call_args.kwargs
-            assert "reasoning_effort" in call_kwargs
-            assert call_kwargs["reasoning_effort"] == "high"
+            assert assert_thinking_params(call_kwargs)
 
     @pytest.mark.asyncio
     async def test_generate_use_cache_override(self):

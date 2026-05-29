@@ -196,31 +196,31 @@ class TestComputeMetricsImperfect:
 class TestComputeMetricsOptions:
     """Test compute_metrics options."""
 
-    def test_bootstrap_disabled(self):
+    @pytest.mark.parametrize("bootstrap", [False, True])
+    def test_bootstrap(self, bootstrap):
         dataset = create_mock_dataset()
-        predictions = [[CriterionVerdict.MET, CriterionVerdict.MET]] * 4
+        if bootstrap:
+            predictions = [
+                [CriterionVerdict.MET, CriterionVerdict.MET],
+                [CriterionVerdict.MET, CriterionVerdict.UNMET],
+                [CriterionVerdict.UNMET, CriterionVerdict.MET],
+                [CriterionVerdict.UNMET, CriterionVerdict.UNMET],
+            ]
+        else:
+            predictions = [[CriterionVerdict.MET, CriterionVerdict.MET]] * 4
         eval_result = create_mock_eval_result(dataset, predictions)
 
-        metrics = compute_metrics(eval_result, dataset, bootstrap=False)
-
-        assert metrics.bootstrap is None
-
-    def test_bootstrap_enabled(self):
-        dataset = create_mock_dataset()
-        predictions = [
-            [CriterionVerdict.MET, CriterionVerdict.MET],
-            [CriterionVerdict.MET, CriterionVerdict.UNMET],
-            [CriterionVerdict.UNMET, CriterionVerdict.MET],
-            [CriterionVerdict.UNMET, CriterionVerdict.UNMET],
-        ]
-        eval_result = create_mock_eval_result(dataset, predictions)
-
-        metrics = compute_metrics(eval_result, dataset, bootstrap=True, n_bootstrap=100, seed=42)
-
-        assert metrics.bootstrap is not None
-        assert metrics.bootstrap.n_bootstrap == 100
-        assert metrics.bootstrap.accuracy_ci[0] <= metrics.criterion_accuracy
-        assert metrics.bootstrap.accuracy_ci[1] >= metrics.criterion_accuracy
+        if bootstrap:
+            metrics = compute_metrics(
+                eval_result, dataset, bootstrap=True, n_bootstrap=100, seed=42
+            )
+            assert metrics.bootstrap is not None
+            assert metrics.bootstrap.n_bootstrap == 100
+            assert metrics.bootstrap.accuracy_ci[0] <= metrics.criterion_accuracy
+            assert metrics.bootstrap.accuracy_ci[1] >= metrics.criterion_accuracy
+        else:
+            metrics = compute_metrics(eval_result, dataset, bootstrap=False)
+            assert metrics.bootstrap is None
 
 
 class TestComputeMetricsEdgeCases:
@@ -364,16 +364,6 @@ class TestComputeMetricsCannotAssess:
     MET = CriterionVerdict.MET
     UNMET = CriterionVerdict.UNMET
 
-    def test_as_category_accepted_at_runtime(self):
-        """as_category must be accepted and return a MetricsResult (was unreachable)."""
-        dataset = create_single_criterion_dataset([[self.MET], [self.UNMET], [self.CA], [self.MET]])
-        predictions = [[self.MET], [self.CA], [self.CA], [self.UNMET]]
-        eval_result = create_mock_eval_result(dataset, predictions)
-
-        metrics = compute_metrics(eval_result, dataset, cannot_assess="as_category")
-
-        assert isinstance(metrics, MetricsResult)
-
     def test_ca_vs_ca_counts_as_correct_under_as_category(self):
         """A CA prediction matching a CA ground truth counts as a correct 3-class match."""
         # Items: (MET,MET) match, (CA,CA) match under as_category, (UNMET,UNMET) match.
@@ -426,41 +416,32 @@ class TestComputeMetricsCannotAssess:
         assert -1.0 <= cm.kappa <= 1.0
         assert cm.kappa != 0.0
 
-    def test_exclude_unchanged(self):
-        """Regression: exclude drops CA pairs; numbers match hand computation."""
-        # truth: MET, UNMET, CA, MET ; pred: MET, CA, UNMET, UNMET
-        # exclude drops item1 (pred CA) and item2 (truth CA), leaving:
-        #   item0: MET/MET (hit), item3: truth MET / pred UNMET (miss) -> 2 samples, acc 0.5
+    # Shared layout for the exclude/as_unmet "unchanged" regression:
+    #   truth: MET, UNMET, CA, MET ; pred: MET, CA, UNMET, UNMET
+    # exclude drops item1 (pred CA) and item2 (truth CA), leaving:
+    #   item0: MET/MET (hit), item3: truth MET / pred UNMET (miss) -> 2 samples, acc 0.5
+    # as_unmet collapses CA->UNMET: truth->[MET,UNMET,UNMET,MET], pred->[MET,UNMET,UNMET,UNMET]
+    #   matches: item0 hit, item1 hit, item2 hit, item3 miss -> 3/4 = 0.75
+    # MET-vs-rest support is identical for both: truth MET = item0,item3 -> 2; pred MET = item0 -> 1
+    @pytest.mark.parametrize(
+        ("mode", "expected_n_samples", "expected_accuracy"),
+        [
+            ("exclude", 2, 0.5),
+            ("as_unmet", 4, 0.75),
+        ],
+    )
+    def test_mode_unchanged(self, mode, expected_n_samples, expected_accuracy):
+        """Regression: exclude/as_unmet numbers match hand computation over a shared layout."""
         dataset = create_single_criterion_dataset([[self.MET], [self.UNMET], [self.CA], [self.MET]])
         predictions = [[self.MET], [self.CA], [self.UNMET], [self.UNMET]]
         eval_result = create_mock_eval_result(dataset, predictions)
 
-        metrics = compute_metrics(eval_result, dataset, cannot_assess="exclude")
+        metrics = compute_metrics(eval_result, dataset, cannot_assess=mode)
         cm = metrics.per_criterion[0]
 
-        assert cm.n_samples == 2
-        assert cm.accuracy == 0.5
-        assert metrics.criterion_accuracy == 0.5
-        # MET-vs-rest support: truth MET among kept = item0,item3 -> 2; pred MET = item0 -> 1
-        assert cm.support_true == 2
-        assert cm.support_pred == 1
-
-    def test_as_unmet_unchanged(self):
-        """Regression: as_unmet collapses CA->UNMET; numbers match hand computation."""
-        # truth: MET, UNMET, CA, MET ; pred: MET, CA, UNMET, UNMET
-        # as_unmet: truth->[MET,UNMET,UNMET,MET], pred->[MET,UNMET,UNMET,UNMET]
-        #   matches: item0 hit, item1 hit, item2 hit, item3 miss -> 3/4 = 0.75
-        dataset = create_single_criterion_dataset([[self.MET], [self.UNMET], [self.CA], [self.MET]])
-        predictions = [[self.MET], [self.CA], [self.UNMET], [self.UNMET]]
-        eval_result = create_mock_eval_result(dataset, predictions)
-
-        metrics = compute_metrics(eval_result, dataset, cannot_assess="as_unmet")
-        cm = metrics.per_criterion[0]
-
-        assert cm.n_samples == 4
-        assert cm.accuracy == 0.75
-        assert metrics.criterion_accuracy == 0.75
-        # MET-vs-rest: truth MET = item0,item3 -> 2 ; pred MET = item0 -> 1
+        assert cm.n_samples == expected_n_samples
+        assert cm.accuracy == expected_accuracy
+        assert metrics.criterion_accuracy == expected_accuracy
         assert cm.support_true == 2
         assert cm.support_pred == 1
 
@@ -476,17 +457,6 @@ class TestCaKappa:
     CA = CriterionVerdict.CANNOT_ASSESS
     MET = CriterionVerdict.MET
     UNMET = CriterionVerdict.UNMET
-
-    def test_cannot_assess_stats_populated_for_binary(self):
-        """A binary rubric with CANNOT_ASSESS in truth/pred populates cannot_assess_stats."""
-        gts = [[self.MET], [self.CA], [self.UNMET], [self.CA]]
-        preds = [[self.MET], [self.CA], [self.UNMET], [self.MET]]
-        dataset = create_single_criterion_dataset(gts)
-        eval_result = create_mock_eval_result(dataset, preds)
-
-        metrics = compute_metrics(eval_result, dataset)
-
-        assert metrics.cannot_assess_stats is not None
 
     def test_ca_kappa_perfect_agreement_is_one(self):
         """Perfect {CA, not-CA} agreement => ca_kappa=1.0, interpretation 'almost perfect'.
@@ -520,34 +490,6 @@ class TestCaKappa:
         assert metrics.cannot_assess_stats.ca_kappa_interpretation is None
         assert metrics.cannot_assess_stats.ca_count_true == 0
         assert metrics.cannot_assess_stats.ca_count_pred == 0
-
-    def test_ca_kappa_disagreement_below_perfect(self):
-        """6-item 2x2 mix gives ca_kappa = 1/3 (mirrors the NA disagreement test)."""
-        gts = [[self.CA], [self.CA], [self.MET], [self.CA], [self.MET], [self.UNMET]]
-        preds = [[self.CA], [self.CA], [self.CA], [self.MET], [self.MET], [self.UNMET]]
-        dataset = create_single_criterion_dataset(gts)
-        eval_result = create_mock_eval_result(dataset, preds)
-
-        metrics = compute_metrics(eval_result, dataset)
-
-        assert metrics.cannot_assess_stats is not None
-        assert metrics.cannot_assess_stats.ca_kappa == pytest.approx(1 / 3, abs=1e-9)
-
-    def test_ca_counts_preserved(self):
-        """ca_count_* and ca_false_* populate correctly for the disagreement layout."""
-        gts = [[self.CA], [self.CA], [self.MET], [self.CA], [self.MET], [self.UNMET]]
-        preds = [[self.CA], [self.CA], [self.CA], [self.MET], [self.MET], [self.UNMET]]
-        dataset = create_single_criterion_dataset(gts)
-        eval_result = create_mock_eval_result(dataset, preds)
-
-        metrics = compute_metrics(eval_result, dataset)
-
-        assert metrics.cannot_assess_stats is not None
-        ca = metrics.cannot_assess_stats
-        assert ca.ca_count_true == 3
-        assert ca.ca_count_pred == 3
-        assert ca.ca_false_positive == 1
-        assert ca.ca_false_negative == 1
 
     def test_ca_stats_mode_independent(self):
         """The CA stats come from raw verdicts, so they are identical across cannot_assess

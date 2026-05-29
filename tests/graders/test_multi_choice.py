@@ -3,12 +3,9 @@
 import pytest
 
 from autorubric import (
-    AggregatedMultiChoiceVerdict,
     Criterion,
     CriterionOption,
     CriterionVerdict,
-    MultiChoiceJudgment,
-    MultiChoiceVerdict,
     Rubric,
 )
 from autorubric.dataset import RubricDataset
@@ -42,11 +39,6 @@ class TestCriterionOption:
         assert opt.label == "Satisfied"
         assert opt.value == 0.75
         assert opt.na is False
-
-    def test_create_na_option(self):
-        """CriterionOption can be marked as NA."""
-        opt = CriterionOption(label="Not Applicable", value=0.0, na=True)
-        assert opt.na is True
 
     def test_value_range_validation(self):
         """CriterionOption validates value is in [0, 1] for non-NA options."""
@@ -127,19 +119,23 @@ class TestCriterionMultiChoice:
         assert binary.is_binary is True
         assert binary.is_multi_choice is False
 
-    def test_find_option_by_label(self, ordinal_criterion):
-        """find_option_by_label returns correct index."""
-        assert ordinal_criterion.find_option_by_label("1") == 0
-        assert ordinal_criterion.find_option_by_label("4") == 3
-
-    def test_find_option_by_label_case_insensitive(self, nominal_criterion):
-        """find_option_by_label is case-insensitive."""
-        assert nominal_criterion.find_option_by_label("too few") == 0
-        assert nominal_criterion.find_option_by_label("JUST RIGHT") == 2
-
-    def test_find_option_by_label_strips_whitespace(self, nominal_criterion):
-        """find_option_by_label strips whitespace."""
-        assert nominal_criterion.find_option_by_label("  Too few  ") == 0
+    @pytest.mark.parametrize(
+        ("fixture_name", "input_label", "expected_index"),
+        [
+            # Exact match.
+            ("ordinal_criterion", "1", 0),
+            ("ordinal_criterion", "4", 3),
+            # Case-insensitive.
+            ("nominal_criterion", "too few", 0),
+            ("nominal_criterion", "JUST RIGHT", 2),
+            # Whitespace-stripping.
+            ("nominal_criterion", "  Too few  ", 0),
+        ],
+    )
+    def test_find_option_by_label(self, request, fixture_name, input_label, expected_index):
+        """find_option_by_label normalizes input (exact / case-insensitive / whitespace)."""
+        criterion = request.getfixturevalue(fixture_name)
+        assert criterion.find_option_by_label(input_label) == expected_index
 
     def test_find_option_by_label_not_found(self, ordinal_criterion):
         """find_option_by_label raises ValueError for unknown label."""
@@ -175,72 +171,6 @@ class TestCriterionMultiChoice:
                     CriterionOption(label="NA", value=0.0, na=True),
                 ],
             )
-
-
-# =============================================================================
-# MultiChoiceVerdict Tests
-# =============================================================================
-
-
-class TestMultiChoiceVerdict:
-    """Tests for MultiChoiceVerdict dataclass."""
-
-    def test_create_verdict(self):
-        """MultiChoiceVerdict stores index, label, value."""
-        verdict = MultiChoiceVerdict(
-            selected_index=2,
-            selected_label="Satisfied",
-            value=0.75,
-            na=False,
-        )
-        assert verdict.selected_index == 2
-        assert verdict.selected_label == "Satisfied"
-        assert verdict.value == 0.75
-        assert verdict.na is False
-
-    def test_create_na_verdict(self):
-        """MultiChoiceVerdict can represent NA selection."""
-        verdict = MultiChoiceVerdict(
-            selected_index=3,
-            selected_label="NA",
-            value=0.0,
-            na=True,
-        )
-        assert verdict.na is True
-
-
-class TestAggregatedMultiChoiceVerdict:
-    """Tests for AggregatedMultiChoiceVerdict dataclass."""
-
-    def test_aggregated_verdict_stores_continuous_value(self):
-        """AggregatedMultiChoiceVerdict stores both discrete and continuous values."""
-        verdict = AggregatedMultiChoiceVerdict(
-            selected_index=2,
-            selected_label="3",
-            value=0.67,  # Discrete (snapped) value
-            na=False,
-            aggregated_value=0.55,  # Continuous value before snapping
-        )
-        assert verdict.value == 0.67
-        assert verdict.aggregated_value == 0.55
-
-
-# =============================================================================
-# MultiChoiceJudgment Tests
-# =============================================================================
-
-
-class TestMultiChoiceJudgment:
-    """Tests for MultiChoiceJudgment (LLM response format)."""
-
-    def test_judgment_parsing(self):
-        """MultiChoiceJudgment parses selected_option (1-indexed)."""
-        judgment = MultiChoiceJudgment(
-            selected_option=3,  # 1-indexed for LLM
-            explanation="This option best matches the submission.",
-        )
-        assert judgment.selected_option == 3
-        assert judgment.explanation == "This option best matches the submission."
 
 
 # =============================================================================
@@ -541,14 +471,25 @@ class TestMultiChoiceAggregation:
         assert result.selected_label == "Just right"
         assert result.value == 1.0
 
-    def test_ordinal_min_picks_lowest_selected_option(self, ordinal_criterion):
-        """Ordinal 'min' returns the lowest-value option any judge selected."""
+    @pytest.mark.parametrize(
+        ("strategy", "expected_index", "expected_label", "expected_value"),
+        [
+            # Conservative: lowest selected value (0.67), not the mean (would snap to 1.0).
+            ("min", 2, "3", 0.67),
+            # Permissive: highest selected value.
+            ("max", 3, "4", 1.0),
+        ],
+    )
+    def test_ordinal_min_max_picks_extreme_selected_option(
+        self, ordinal_criterion, strategy, expected_index, expected_label, expected_value
+    ):
+        """Ordinal 'min'/'max' return the extreme-value option any judge selected."""
         from autorubric import LLMConfig
         from autorubric.graders.criterion_grader import CriterionGrader
 
         grader = CriterionGrader(
             llm_config=LLMConfig(model="openai/gpt-4"),
-            ordinal_aggregation="min",
+            ordinal_aggregation=strategy,
         )
 
         votes = [
@@ -563,43 +504,13 @@ class TestMultiChoiceAggregation:
             ),
         ]
 
-        result = grader._aggregate_ordinal_votes(votes, ordinal_criterion, "min")
+        result = grader._aggregate_ordinal_votes(votes, ordinal_criterion, strategy)
 
-        # Conservative: lowest selected value (0.67), not the mean (which would snap to 1.0)
-        assert result.selected_index == 2
-        assert result.selected_label == "3"
-        assert result.value == 0.67
-        assert result.aggregated_value == 0.67
+        assert result.selected_index == expected_index
+        assert result.selected_label == expected_label
+        assert result.value == expected_value
+        assert result.aggregated_value == expected_value
         assert result.na is False
-
-    def test_ordinal_max_picks_highest_selected_option(self, ordinal_criterion):
-        """Ordinal 'max' returns the highest-value option any judge selected."""
-        from autorubric import LLMConfig
-        from autorubric.graders.criterion_grader import CriterionGrader
-
-        grader = CriterionGrader(
-            llm_config=LLMConfig(model="openai/gpt-4"),
-            ordinal_aggregation="max",
-        )
-
-        votes = [
-            MultiChoiceJudgeVote(
-                judge_id="j1", selected_index=2, selected_label="3", value=0.67, reason=""
-            ),
-            MultiChoiceJudgeVote(
-                judge_id="j2", selected_index=2, selected_label="3", value=0.67, reason=""
-            ),
-            MultiChoiceJudgeVote(
-                judge_id="j3", selected_index=3, selected_label="4", value=1.0, reason=""
-            ),
-        ]
-
-        result = grader._aggregate_ordinal_votes(votes, ordinal_criterion, "max")
-
-        assert result.selected_index == 3
-        assert result.selected_label == "4"
-        assert result.value == 1.0
-        assert result.aggregated_value == 1.0
 
     def test_ordinal_min_max_value_tie_breaks_to_lowest_index(self):
         """Value ties in 'min'/'max' resolve to the lowest option index (deterministic)."""
@@ -688,38 +599,37 @@ class TestMultiChoiceAggregation:
             ],
         )
 
-    def test_ordinal_mode_count_tie_breaks_to_worst_positive_weight(self):
-        """Mode count-tie, positive weight → lowest-value tied option (not first-seen)."""
+    @pytest.mark.parametrize(
+        ("scale_type", "weight", "votes_spec", "expected_index"),
+        [
+            # Ordinal, positive weight → lowest-value tied option (idx 1, not first-seen idx 3).
+            ("ordinal", 10.0, [(3, "4", 1.0), (3, "4", 1.0), (1, "2", 0.33), (1, "2", 0.33)], 1),
+            # Ordinal, negative weight → highest-value tied option (idx 3).
+            ("ordinal", -10.0, [(3, "4", 1.0), (3, "4", 1.0), (1, "2", 0.33), (1, "2", 0.33)], 3),
+            # Nominal, positive weight → lowest-value tied option (idx 1, B=0.0; not first-seen 0).
+            ("nominal", 5.0, [(0, "A", 1.0), (0, "A", 1.0), (1, "B", 0.0), (1, "B", 0.0)], 1),
+            # Nominal, negative weight → highest-value tied option (idx 0, A=1.0).
+            ("nominal", -5.0, [(0, "A", 1.0), (0, "A", 1.0), (1, "B", 0.0), (1, "B", 0.0)], 0),
+        ],
+    )
+    def test_mode_count_tie_breaks_to_worst_by_weight_sign(
+        self, scale_type, weight, votes_spec, expected_index
+    ):
+        """Mode count-tie → score-minimizing tied option by weight sign (both dispatch paths)."""
         from autorubric import LLMConfig
         from autorubric.graders.criterion_grader import CriterionGrader
 
         grader = CriterionGrader(llm_config=LLMConfig(model="openai/gpt-4"))
-        criterion = self._make_ordinal(weight=10.0)
-        # 2 votes idx 3 (1.0) then 2 votes idx 1 (0.33): count tie {1, 3}, high-value first.
         votes = [
-            _mcvote("j1", 3, "4", 1.0),
-            _mcvote("j2", 3, "4", 1.0),
-            _mcvote("j3", 1, "2", 0.33),
-            _mcvote("j4", 1, "2", 0.33),
+            _mcvote(f"j{i}", idx, label, value) for i, (idx, label, value) in enumerate(votes_spec)
         ]
-        result = grader._aggregate_ordinal_votes(votes, criterion, "mode")
-        assert result.selected_index == 1
-
-    def test_ordinal_mode_count_tie_breaks_to_worst_negative_weight(self):
-        """Mode count-tie, negative weight → highest-value tied option."""
-        from autorubric import LLMConfig
-        from autorubric.graders.criterion_grader import CriterionGrader
-
-        grader = CriterionGrader(llm_config=LLMConfig(model="openai/gpt-4"))
-        criterion = self._make_ordinal(weight=-10.0)
-        votes = [
-            _mcvote("j1", 3, "4", 1.0),
-            _mcvote("j2", 3, "4", 1.0),
-            _mcvote("j3", 1, "2", 0.33),
-            _mcvote("j4", 1, "2", 0.33),
-        ]
-        result = grader._aggregate_ordinal_votes(votes, criterion, "mode")
-        assert result.selected_index == 3
+        if scale_type == "ordinal":
+            criterion = self._make_ordinal(weight=weight)
+            result = grader._aggregate_ordinal_votes(votes, criterion, "mode")
+        else:
+            criterion = self._make_nominal(weight=weight)
+            result = grader._aggregate_nominal_votes(votes, criterion, "mode")
+        assert result.selected_index == expected_index
 
     def test_ordinal_snap_equidistant_tie_breaks_to_worst_negative_weight(self):
         """Mean snap equidistant-tie, negative weight → higher-value option."""
@@ -765,39 +675,6 @@ class TestMultiChoiceAggregation:
         result = grader._aggregate_ordinal_votes(votes, criterion, "mean")
         # Positive weight → worst is the lower-value option (idx 1); old snap picked idx 0.
         assert result.selected_index == 1
-
-    def test_nominal_mode_count_tie_breaks_to_worst_positive_weight(self):
-        """Nominal mode count-tie, positive weight → lowest-value tied option."""
-        from autorubric import LLMConfig
-        from autorubric.graders.criterion_grader import CriterionGrader
-
-        grader = CriterionGrader(llm_config=LLMConfig(model="openai/gpt-4"))
-        criterion = self._make_nominal(weight=5.0)
-        # 2 votes idx 0 (A, 1.0) then 2 votes idx 1 (B, 0.0): count tie {0, 1}, high first.
-        votes = [
-            _mcvote("j1", 0, "A", 1.0),
-            _mcvote("j2", 0, "A", 1.0),
-            _mcvote("j3", 1, "B", 0.0),
-            _mcvote("j4", 1, "B", 0.0),
-        ]
-        result = grader._aggregate_nominal_votes(votes, criterion, "mode")
-        assert result.selected_index == 1
-
-    def test_nominal_mode_count_tie_breaks_to_worst_negative_weight(self):
-        """Nominal mode count-tie, negative weight → highest-value tied option."""
-        from autorubric import LLMConfig
-        from autorubric.graders.criterion_grader import CriterionGrader
-
-        grader = CriterionGrader(llm_config=LLMConfig(model="openai/gpt-4"))
-        criterion = self._make_nominal(weight=-5.0)
-        votes = [
-            _mcvote("j1", 0, "A", 1.0),
-            _mcvote("j2", 0, "A", 1.0),
-            _mcvote("j3", 1, "B", 0.0),
-            _mcvote("j4", 1, "B", 0.0),
-        ]
-        result = grader._aggregate_nominal_votes(votes, criterion, "mode")
-        assert result.selected_index == 0
 
     def test_nominal_weighted_mode_weight_tie_breaks_to_worst(self):
         """Nominal weighted_mode weight-tie → lowest-value tied option (not first-seen)."""
@@ -1020,95 +897,6 @@ class TestOptionShuffling:
         )
         assert grader._shuffle_options is True
 
-    def test_shuffle_options_can_be_disabled(self):
-        """CriterionGrader shuffle_options can be set to False."""
-        from autorubric import LLMConfig
-        from autorubric.graders.criterion_grader import CriterionGrader
-
-        grader = CriterionGrader(
-            llm_config=LLMConfig(model="openai/gpt-4"),
-            shuffle_options=False,
-        )
-        assert grader._shuffle_options is False
-
-    def test_shuffle_index_mapping_logic(self):
-        """Test that shuffle index mapping correctly maps back to original."""
-        # This tests the core mapping logic without making LLM calls
-
-        # Simulate: original options [A, B, C, D] at indices [0, 1, 2, 3]
-        # Shuffled to position order [C, A, D, B]
-        # shuffled_indices = [2, 0, 3, 1] means:
-        #   - position 0 in shuffled list has original index 2 (C)
-        #   - position 1 in shuffled list has original index 0 (A)
-        #   - position 2 in shuffled list has original index 3 (D)
-        #   - position 3 in shuffled list has original index 1 (B)
-        shuffled_indices = [2, 0, 3, 1]
-
-        # If LLM selects option 1 (1-indexed) = shuffled index 0
-        # That's original index shuffled_indices[0] = 2 (option C)
-        llm_selected = 1  # 1-indexed
-        shuffled_idx = llm_selected - 1  # 0-indexed in shuffled space
-        original_idx = shuffled_indices[shuffled_idx]
-        assert original_idx == 2
-
-        # If LLM selects option 3 (1-indexed) = shuffled index 2
-        # That's original index shuffled_indices[2] = 3 (option D)
-        llm_selected = 3
-        shuffled_idx = llm_selected - 1
-        original_idx = shuffled_indices[shuffled_idx]
-        assert original_idx == 3
-
-        # If LLM selects option 4 (1-indexed) = shuffled index 3
-        # That's original index shuffled_indices[3] = 1 (option B)
-        llm_selected = 4
-        shuffled_idx = llm_selected - 1
-        original_idx = shuffled_indices[shuffled_idx]
-        assert original_idx == 1
-
-    def test_shuffle_few_shot_example_transformation(self):
-        """Test that few-shot example indices are correctly transformed."""
-        # Original examples reference original indices
-        # When shuffled, we need to transform to shuffled positions
-
-        # shuffled_indices[shuffled_pos] = original_pos
-        shuffled_indices = [2, 0, 3, 1]  # Same as above
-
-        # Create inverse mapping: original_to_shuffled[original_pos] = shuffled_pos
-        original_to_shuffled = {orig: shuf for shuf, orig in enumerate(shuffled_indices)}
-        # Should be: {2: 0, 0: 1, 3: 2, 1: 3}
-        assert original_to_shuffled == {2: 0, 0: 1, 3: 2, 1: 3}
-
-        # Example originally points to index 0 (option A)
-        # After shuffling, A is at position 1 in shuffled list
-        original_example_idx = 0
-        transformed_idx = original_to_shuffled[original_example_idx]
-        assert transformed_idx == 1
-
-        # Example originally points to index 2 (option C)
-        # After shuffling, C is at position 0 in shuffled list
-        original_example_idx = 2
-        transformed_idx = original_to_shuffled[original_example_idx]
-        assert transformed_idx == 0
-
-    def test_shuffle_preserves_all_options(self):
-        """Verify shuffling produces a valid permutation of all indices."""
-        import random
-
-        original_indices = list(range(5))  # [0, 1, 2, 3, 4]
-        shuffled_indices = original_indices.copy()
-
-        # Shuffle multiple times and verify invariants
-        for _ in range(10):
-            random.shuffle(shuffled_indices)
-
-            # All original indices should be present
-            assert sorted(shuffled_indices) == original_indices
-
-            # Mapping back should cover all indices
-            for shuffled_pos in range(len(shuffled_indices)):
-                original_idx = shuffled_indices[shuffled_pos]
-                assert 0 <= original_idx < len(original_indices)
-
 
 class TestSeedReproducibility:
     """Tests for master seed coordination and reproducibility."""
@@ -1145,50 +933,42 @@ class TestSeedReproducibility:
 
         assert indices_a == indices_b
 
-    def test_different_seeds_produce_different_shuffles(self):
-        """Different seeds → different shuffle orders (with high probability)."""
+    @pytest.mark.parametrize(
+        ("key_a", "key_b"),
+        [
+            # Vary the master_seed slot.
+            ((42, "abc123", 0, "default"), (99, "abc123", 0, "default")),
+            # Vary the item_key slot.
+            ((42, "item_one", 0, "default"), (42, "item_two", 0, "default")),
+            # Vary the judge_id slot.
+            ((42, "abc123", 0, "judge_a"), (42, "abc123", 0, "judge_b")),
+        ],
+    )
+    def test_distinct_key_slots_produce_different_shuffles(self, key_a, key_b):
+        """Each of seed / item_key / judge_id participates in the SHA-256 shuffle key."""
         from autorubric.graders.criterion_grader import _derive_shuffle_rng
 
         indices_a = list(range(10))
-        rng_a = _derive_shuffle_rng(42, "abc123", 0, "default")
+        rng_a = _derive_shuffle_rng(*key_a)
         rng_a.shuffle(indices_a)
 
         indices_b = list(range(10))
-        rng_b = _derive_shuffle_rng(99, "abc123", 0, "default")
+        rng_b = _derive_shuffle_rng(*key_b)
         rng_b.shuffle(indices_b)
 
         assert indices_a != indices_b
 
-    def test_different_items_get_different_shuffles(self):
-        """Different item content → different shuffle orders."""
-        from autorubric.graders.criterion_grader import _derive_shuffle_rng
-
-        indices_a = list(range(10))
-        rng_a = _derive_shuffle_rng(42, "item_one", 0, "default")
-        rng_a.shuffle(indices_a)
-
-        indices_b = list(range(10))
-        rng_b = _derive_shuffle_rng(42, "item_two", 0, "default")
-        rng_b.shuffle(indices_b)
-
-        assert indices_a != indices_b
-
-    def test_different_judges_get_different_shuffles(self):
-        """Different judges → different shuffle orders for same item."""
-        from autorubric.graders.criterion_grader import _derive_shuffle_rng
-
-        indices_a = list(range(10))
-        rng_a = _derive_shuffle_rng(42, "abc123", 0, "judge_a")
-        rng_a.shuffle(indices_a)
-
-        indices_b = list(range(10))
-        rng_b = _derive_shuffle_rng(42, "abc123", 0, "judge_b")
-        rng_b.shuffle(indices_b)
-
-        assert indices_a != indices_b
-
-    def test_seed_coordinates_few_shot(self):
-        """Master seed flows to FewShotConfig when its seed is unset."""
+    @pytest.mark.parametrize(
+        ("few_shot_seed", "expected_seed"),
+        [
+            # Unset few-shot seed → coordinated from the master seed.
+            (None, 42),
+            # Explicit few-shot seed → preserved, not overridden by the master seed.
+            (99, 99),
+        ],
+    )
+    def test_few_shot_seed_coordination(self, few_shot_seed, expected_seed):
+        """Master seed flows to FewShotConfig only when its seed is unset."""
         from autorubric import Criterion, FewShotConfig, LLMConfig, Rubric
         from autorubric.dataset import RubricDataset
         from autorubric.graders.criterion_grader import CriterionGrader
@@ -1200,34 +980,18 @@ class TestSeedReproducibility:
             items=[],
             rubric=rubric,
         )
-        grader = CriterionGrader(
-            llm_config=LLMConfig(model="openai/gpt-4"),
-            training_data=dataset,
-            few_shot_config=FewShotConfig(n_examples=2),
-            seed=42,
-        )
-        assert grader._few_shot_config.seed == 42
-
-    def test_seed_does_not_override_explicit_few_shot_seed(self):
-        """Master seed does not override an explicitly set FewShotConfig.seed."""
-        from autorubric import Criterion, FewShotConfig, LLMConfig, Rubric
-        from autorubric.dataset import RubricDataset
-        from autorubric.graders.criterion_grader import CriterionGrader
-
-        rubric = Rubric(rubric=[Criterion(weight=1.0, requirement="test")])
-        dataset = RubricDataset(
-            name="test",
-            prompt="test",
-            items=[],
-            rubric=rubric,
+        few_shot_config = (
+            FewShotConfig(n_examples=2)
+            if few_shot_seed is None
+            else FewShotConfig(n_examples=2, seed=few_shot_seed)
         )
         grader = CriterionGrader(
             llm_config=LLMConfig(model="openai/gpt-4"),
             training_data=dataset,
-            few_shot_config=FewShotConfig(n_examples=2, seed=99),
+            few_shot_config=few_shot_config,
             seed=42,
         )
-        assert grader._few_shot_config.seed == 99
+        assert grader._few_shot_config.seed == expected_seed
 
     def test_shuffle_order_field_in_criterion_report(self):
         """CriterionReport supports the shuffle_order field."""

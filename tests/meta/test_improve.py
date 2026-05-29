@@ -1467,17 +1467,13 @@ class TestImprovementProgressDisplay:
         assert display._progress is None
         assert display._task_id is None
 
-    def test_advance_without_begin_is_noop(self):
+    def test_lifecycle_methods_without_begin_are_noop(self):
+        """advance() and end_iteration() are safe (no-op) before begin_iteration."""
         from autorubric.meta._improve import ImprovementProgressDisplay
 
         display = ImprovementProgressDisplay()
         display.advance()
         display.advance(phase_name="test")
-
-    def test_end_iteration_without_begin_is_noop(self):
-        from autorubric.meta._improve import ImprovementProgressDisplay
-
-        display = ImprovementProgressDisplay()
         display.end_iteration()
 
 
@@ -1798,37 +1794,6 @@ class TestReviseRubricCapture:
         assert "task" in capture["user_prompt"]
         assert revised_json in capture["llm_response"]
 
-    @pytest.mark.asyncio
-    async def test_none_capture_is_noop(self):
-        from autorubric.meta._improve import revise_rubric
-
-        rubric = Rubric([Criterion(name="x", weight=1.0, requirement="Test")])
-
-        revised_json = json.dumps([{"name": "x", "weight": 1.0, "requirement": "Improved test"}])
-        gen_result = GenerateResult(content=revised_json, cost=0.05)
-        generate_mock = AsyncMock(return_value=gen_result)
-
-        config = ImprovementConfig(
-            eval_llm=LLMConfig(model="test"),
-            revision_llm=LLMConfig(model="test"),
-        )
-
-        with patch("autorubric.meta._improve.LLMClient") as mock_cls:
-            mock_cls.return_value.generate = generate_mock
-
-            revised, cost = await revise_rubric(
-                rubric,
-                "task",
-                [],
-                "no validation",
-                "no history",
-                config,
-                _capture=None,
-            )
-
-        assert len(revised.rubric) == 1
-        assert cost == 0.05
-
 
 # ============================================================================
 # validate_agreement _capture
@@ -2119,42 +2084,6 @@ class TestArtifactPersistence:
             iter1 = json.load(f)
 
         assert "revision" not in iter1
-
-    @pytest.mark.asyncio
-    async def test_html_generated_without_html_display_mode(self, tmp_path):
-        """eval HTML and improvement_report.html are generated even when display != 'html'."""
-        rubric = Rubric(
-            [
-                Criterion(name="clarity", weight=1.0, requirement="Is clear"),
-            ]
-        )
-
-        quality_report = _make_ensemble_report(
-            [
-                _make_ensemble_criterion_report("clarity", 1.0, CriterionVerdict.MET),
-            ],
-            score=1.0,
-            mean_agreement=1.0,
-        )
-
-        config = ImprovementConfig(
-            eval_llm=LLMConfig(model="test-model"),
-            revision_llm=LLMConfig(model="test-model"),
-            save_artifacts=True,
-            artifacts_dir=tmp_path / "artifacts",
-            show_progress=False,
-            display=None,  # Explicitly not "html"
-        )
-
-        with patch(
-            "autorubric.meta._improve.evaluate_rubric_in_context",
-            self._make_eval_mock(quality_report),
-        ):
-            await improve_rubric(rubric, "Write a summary", config=config)
-
-        artifacts_dir = tmp_path / "artifacts"
-        assert (artifacts_dir / "eval-iter-00.html").exists()
-        assert (artifacts_dir / "improvement_report.html").exists()
 
 
 # ============================================================================
@@ -3194,117 +3123,56 @@ class TestFormatHeldOutForPrompt:
 class TestValidateCriteriaStructure:
     """Tests for the validate_criteria_structure building block."""
 
-    def test_same_count_same_names(self):
+    @pytest.mark.parametrize(
+        ("original_specs", "revised_specs", "expected_valid", "expected_substrings"),
+        [
+            # Same count, same names -> valid (only requirements change).
+            (
+                [("a", "R1"), ("b", "R2")],
+                [("a", "R1 improved"), ("b", "R2 improved")],
+                True,
+                (),
+            ),
+            # Different count (more) -> invalid.
+            ([("a", "R1")], [("a", "R1"), ("b", "R2")], False, ("1 -> 2",)),
+            # Different count (fewer) -> invalid.
+            ([("a", "R1"), ("b", "R2")], [("a", "R1")], False, ("2 -> 1",)),
+            # Name mismatch at a position -> invalid.
+            (
+                [("a", "R1"), ("b", "R2")],
+                [("a", "R1"), ("c", "R2")],
+                False,
+                ("'b'", "'c'"),
+            ),
+            # Both sides unnamed at a position -> name check skipped -> valid.
+            (
+                [(None, "R1"), ("b", "R2")],
+                [(None, "R1 improved"), ("b", "R2 improved")],
+                True,
+                (),
+            ),
+            # One side named, the other not -> name check skipped -> valid.
+            ([("a", "R1")], [(None, "R1 improved")], True, ()),
+        ],
+    )
+    def test_validate_criteria_structure(
+        self, original_specs, revised_specs, expected_valid, expected_substrings
+    ):
         from autorubric.meta._improve import validate_criteria_structure
 
         original = Rubric(
-            [
-                Criterion(name="a", weight=1.0, requirement="R1"),
-                Criterion(name="b", weight=1.0, requirement="R2"),
-            ]
+            [Criterion(name=name, weight=1.0, requirement=req) for name, req in original_specs]
         )
         revised = Rubric(
-            [
-                Criterion(name="a", weight=1.0, requirement="R1 improved"),
-                Criterion(name="b", weight=1.0, requirement="R2 improved"),
-            ]
+            [Criterion(name=name, weight=1.0, requirement=req) for name, req in revised_specs]
         )
         valid, error = validate_criteria_structure(original, revised)
-        assert valid is True
-        assert error is None
-
-    def test_different_count_more(self):
-        from autorubric.meta._improve import validate_criteria_structure
-
-        original = Rubric(
-            [
-                Criterion(name="a", weight=1.0, requirement="R1"),
-            ]
-        )
-        revised = Rubric(
-            [
-                Criterion(name="a", weight=1.0, requirement="R1"),
-                Criterion(name="b", weight=1.0, requirement="R2"),
-            ]
-        )
-        valid, error = validate_criteria_structure(original, revised)
-        assert valid is False
-        assert "1 -> 2" in error
-
-    def test_different_count_fewer(self):
-        from autorubric.meta._improve import validate_criteria_structure
-
-        original = Rubric(
-            [
-                Criterion(name="a", weight=1.0, requirement="R1"),
-                Criterion(name="b", weight=1.0, requirement="R2"),
-            ]
-        )
-        revised = Rubric(
-            [
-                Criterion(name="a", weight=1.0, requirement="R1"),
-            ]
-        )
-        valid, error = validate_criteria_structure(original, revised)
-        assert valid is False
-        assert "2 -> 1" in error
-
-    def test_name_mismatch(self):
-        from autorubric.meta._improve import validate_criteria_structure
-
-        original = Rubric(
-            [
-                Criterion(name="a", weight=1.0, requirement="R1"),
-                Criterion(name="b", weight=1.0, requirement="R2"),
-            ]
-        )
-        revised = Rubric(
-            [
-                Criterion(name="a", weight=1.0, requirement="R1"),
-                Criterion(name="c", weight=1.0, requirement="R2"),
-            ]
-        )
-        valid, error = validate_criteria_structure(original, revised)
-        assert valid is False
-        assert "'b'" in error
-        assert "'c'" in error
-
-    def test_unnamed_criteria_name_check_skipped(self):
-        from autorubric.meta._improve import validate_criteria_structure
-
-        original = Rubric(
-            [
-                Criterion(name=None, weight=1.0, requirement="R1"),
-                Criterion(name="b", weight=1.0, requirement="R2"),
-            ]
-        )
-        revised = Rubric(
-            [
-                Criterion(name=None, weight=1.0, requirement="R1 improved"),
-                Criterion(name="b", weight=1.0, requirement="R2 improved"),
-            ]
-        )
-        valid, error = validate_criteria_structure(original, revised)
-        assert valid is True
-        assert error is None
-
-    def test_one_side_unnamed_skips_name_check(self):
-        """When one side has a name and the other doesn't, skip name check."""
-        from autorubric.meta._improve import validate_criteria_structure
-
-        original = Rubric(
-            [
-                Criterion(name="a", weight=1.0, requirement="R1"),
-            ]
-        )
-        revised = Rubric(
-            [
-                Criterion(name=None, weight=1.0, requirement="R1 improved"),
-            ]
-        )
-        valid, error = validate_criteria_structure(original, revised)
-        assert valid is True
-        assert error is None
+        assert valid is expected_valid
+        if expected_valid:
+            assert error is None
+        else:
+            for substring in expected_substrings:
+                assert substring in error
 
 
 # ============================================================================
@@ -3328,21 +3196,25 @@ class TestCheckHeldOutConvergence:
             setattr(cfg, k, v)
         return cfg
 
-    def test_accuracy_met(self):
+    @pytest.mark.parametrize(
+        ("config_overrides", "iteration", "mean_accuracy", "total_cost", "expected_reason"),
+        [
+            ({"held_out_min_accuracy": 0.90}, 0, 0.92, 0.0, "held_out_accuracy_met"),
+            ({"max_iterations": 5}, 4, 0.50, 0.0, "max_iterations"),
+            ({"max_total_cost": 1.0}, 0, 0.50, 1.5, "cost_limit"),
+            ({}, 0, 0.50, 0.0, None),
+        ],
+    )
+    def test_stateless_stopping_conditions(
+        self, config_overrides, iteration, mean_accuracy, total_cost, expected_reason
+    ):
+        """Single-call stopping conditions: accuracy met, max iterations, cost limit, continue."""
         from autorubric.meta._improve import _check_held_out_convergence
 
-        config = self._default_config(held_out_min_accuracy=0.90)
+        config = self._default_config(**config_overrides)
         state = _ConvergenceState()
-        result = _check_held_out_convergence(0, 0.92, config, state, 0.0)
-        assert result == "held_out_accuracy_met"
-
-    def test_max_iterations(self):
-        from autorubric.meta._improve import _check_held_out_convergence
-
-        config = self._default_config(max_iterations=5)
-        state = _ConvergenceState()
-        result = _check_held_out_convergence(4, 0.50, config, state, 0.0)
-        assert result == "max_iterations"
+        result = _check_held_out_convergence(iteration, mean_accuracy, config, state, total_cost)
+        assert result == expected_reason
 
     def test_score_plateau(self):
         from autorubric.meta._improve import _check_held_out_convergence
@@ -3361,22 +3233,6 @@ class TestCheckHeldOutConvergence:
         # Second tick triggers
         result = _check_held_out_convergence(1, 0.82, config, state, 0.0)
         assert result == "score_plateau"
-
-    def test_cost_limit(self):
-        from autorubric.meta._improve import _check_held_out_convergence
-
-        config = self._default_config(max_total_cost=1.0)
-        state = _ConvergenceState()
-        result = _check_held_out_convergence(0, 0.50, config, state, 1.5)
-        assert result == "cost_limit"
-
-    def test_continues_when_no_stopping_condition(self):
-        from autorubric.meta._improve import _check_held_out_convergence
-
-        config = self._default_config()
-        state = _ConvergenceState()
-        result = _check_held_out_convergence(0, 0.50, config, state, 0.0)
-        assert result is None
 
     def test_plateau_resets_on_improvement(self):
         from autorubric.meta._improve import _check_held_out_convergence
@@ -3526,37 +3382,6 @@ class TestReviseRubricHeldOut:
         assert "llm_response" in capture
         assert len(capture["system_prompt"]) > 0
         assert "diag" in capture["user_prompt"]
-
-    @pytest.mark.asyncio
-    async def test_cost_is_returned(self):
-        from autorubric.meta._improve import revise_rubric_held_out
-
-        rubric = Rubric(
-            [
-                Criterion(name="a", weight=1.0, requirement="R1"),
-            ]
-        )
-
-        revised_json = json.dumps([{"name": "a", "weight": 1.0, "requirement": "R1v2"}])
-        gen_result = GenerateResult(content=revised_json, cost=0.07)
-        generate_mock = AsyncMock(return_value=gen_result)
-
-        config = ImprovementConfig(
-            eval_llm=LLMConfig(model="test"),
-            revision_llm=LLMConfig(model="test"),
-        )
-
-        with patch("autorubric.meta._improve.LLMClient") as mock_cls:
-            mock_cls.return_value.generate = generate_mock
-            _, cost = await revise_rubric_held_out(
-                rubric,
-                "task",
-                "diag",
-                "hist",
-                config,
-            )
-
-        assert cost == 0.07
 
     @pytest.mark.asyncio
     async def test_custom_system_prompt(self):

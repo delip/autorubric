@@ -167,40 +167,46 @@ class TestEvalConfig:
 class TestEvalTimingStats:
     """Tests for EvalTimingStats computation."""
 
-    def test_from_durations_basic(self):
-        """Test computing timing stats from durations."""
-        durations = [1.0, 2.0, 3.0, 4.0, 5.0]
-        total_duration = 10.0
-
+    @pytest.mark.parametrize(
+        (
+            "durations",
+            "total_duration",
+            "expected_total",
+            "expected_mean",
+            "expected_min",
+            "expected_max",
+            "expected_p50",
+            "expected_items_per_second",
+        ),
+        [
+            # Empty-list guard branch.
+            ([], 10.0, 10.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+            # Multi-element non-empty branch.
+            ([1.0, 2.0, 3.0, 4.0, 5.0], 10.0, 10.0, 3.0, 1.0, 5.0, 3.0, 0.5),
+            # Single-element non-empty branch.
+            ([2.5], 2.5, 2.5, 2.5, 2.5, 2.5, 2.5, 0.4),
+        ],
+    )
+    def test_from_durations(
+        self,
+        durations,
+        total_duration,
+        expected_total,
+        expected_mean,
+        expected_min,
+        expected_max,
+        expected_p50,
+        expected_items_per_second,
+    ):
+        """Test computing timing stats from durations (empty / multi / single)."""
         stats = EvalTimingStats.from_durations(durations, total_duration)
 
-        assert stats.total_duration_seconds == 10.0
-        assert stats.mean_item_duration_seconds == 3.0
-        assert stats.min_item_duration_seconds == 1.0
-        assert stats.max_item_duration_seconds == 5.0
-        assert stats.p50_item_duration_seconds == 3.0
-        assert stats.items_per_second == 0.5
-
-    def test_from_durations_empty(self):
-        """Test timing stats with empty durations list."""
-        stats = EvalTimingStats.from_durations([], 10.0)
-
-        assert stats.total_duration_seconds == 10.0
-        assert stats.mean_item_duration_seconds == 0.0
-        assert stats.min_item_duration_seconds == 0.0
-        assert stats.max_item_duration_seconds == 0.0
-        assert stats.p50_item_duration_seconds == 0.0
-        assert stats.items_per_second == 0.0
-
-    def test_from_durations_single_item(self):
-        """Test timing stats with single duration."""
-        stats = EvalTimingStats.from_durations([2.5], 2.5)
-
-        assert stats.mean_item_duration_seconds == 2.5
-        assert stats.min_item_duration_seconds == 2.5
-        assert stats.max_item_duration_seconds == 2.5
-        assert stats.p50_item_duration_seconds == 2.5
-        assert stats.items_per_second == 0.4
+        assert stats.total_duration_seconds == expected_total
+        assert stats.mean_item_duration_seconds == expected_mean
+        assert stats.min_item_duration_seconds == expected_min
+        assert stats.max_item_duration_seconds == expected_max
+        assert stats.p50_item_duration_seconds == expected_p50
+        assert stats.items_per_second == expected_items_per_second
 
     def test_to_dict(self):
         """Test serialization of timing stats."""

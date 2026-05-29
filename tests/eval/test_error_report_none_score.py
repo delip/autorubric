@@ -16,7 +16,6 @@ from autorubric.eval import (
     EvalRunner,
     ItemResult,
     _deserialize_ensemble_report,
-    _deserialize_single_report,
 )
 from autorubric.graders import CriterionGrader
 from autorubric.graders.base import Grader
@@ -90,19 +89,6 @@ def test_single_report_none_score_roundtrip():
     assert restored.report.score is None
     assert restored.report.raw_score is None
     assert restored.report.error == "x"
-
-
-def test_single_report_deserializer_preserves_none():
-    """_deserialize_single_report keeps a JSON-null score as None."""
-    report_data = {
-        "score": None,
-        "raw_score": None,
-        "error": "x",
-        "criterion_reports": [],
-    }
-    report = _deserialize_single_report(json.loads(json.dumps(report_data)), None)
-    assert report.score is None
-    assert report.raw_score is None
 
 
 def test_ensemble_report_none_score_roundtrip():

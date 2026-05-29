@@ -92,36 +92,39 @@ PARTIAL = CannotAssessConfig(strategy=CannotAssessStrategy.PARTIAL, partial_cred
 # ===========================================================================
 
 
-def test_binary_positive_met_full_credit():
-    """A single +weight MET criterion scores 1.0 (10/10)."""
-    reports = [binary_report(10.0, CriterionVerdict.MET)]
-    assert score_reports(reports, SKIP) == pytest.approx(1.0)
+@pytest.mark.parametrize(
+    "reports,expected",
+    [
+        # +weight MET -> 1.0 (10/10)
+        ([binary_report(10.0, CriterionVerdict.MET)], 1.0),
+        # +weight UNMET -> 0.0
+        ([binary_report(10.0, CriterionVerdict.UNMET)], 0.0),
+        # +weight MET plus -weight MET (penalty applies, clamps at 0):
+        # weighted_sum = 10 - 5 = 5; total_positive = 10 -> 0.5
+        (
+            [
+                binary_report(10.0, CriterionVerdict.MET),
+                binary_report(-5.0, CriterionVerdict.MET),
+            ],
+            0.5,
+        ),
+        # -weight UNMET contributes 0 (no penalty):
+        # weighted_sum = 10 + 0 = 10; total_positive = 10 -> 1.0
+        (
+            [
+                binary_report(10.0, CriterionVerdict.MET),
+                binary_report(-5.0, CriterionVerdict.UNMET),
+            ],
+            1.0,
+        ),
+    ],
+)
+def test_binary_genuine_verdict_baseline_arithmetic(reports, expected):
+    """Baseline binary genuine MET/UNMET arithmetic (no abstain) under SKIP.
 
-
-def test_binary_positive_unmet_zero():
-    """A single +weight UNMET criterion scores 0.0."""
-    reports = [binary_report(10.0, CriterionVerdict.UNMET)]
-    assert score_reports(reports, SKIP) == pytest.approx(0.0)
-
-
-def test_binary_negative_met_penalizes_to_floor():
-    """A +weight MET plus a -weight MET (penalty applies, clamps at 0)."""
-    reports = [
-        binary_report(10.0, CriterionVerdict.MET),
-        binary_report(-5.0, CriterionVerdict.MET),
-    ]
-    # weighted_sum = 10 - 5 = 5; total_positive = 10 -> 0.5
-    assert score_reports(reports, SKIP) == pytest.approx(0.5)
-
-
-def test_binary_negative_unmet_no_penalty():
-    """A -weight UNMET contributes 0 (no penalty)."""
-    reports = [
-        binary_report(10.0, CriterionVerdict.MET),
-        binary_report(-5.0, CriterionVerdict.UNMET),
-    ]
-    # weighted_sum = 10 + 0 = 10; total_positive = 10 -> 1.0
-    assert score_reports(reports, SKIP) == pytest.approx(1.0)
+    Pins the normalize numerator/denominator across the +/- weight x MET/UNMET cells.
+    """
+    assert score_reports(reports, SKIP) == pytest.approx(expected)
 
 
 # ===========================================================================
@@ -155,47 +158,34 @@ def test_binary_positive_cannot_assess_all_strategies(config, expected):
     assert score_reports(reports, config) == pytest.approx(expected)
 
 
-def test_binary_negative_cannot_assess_fail_contributes_full_weight():
-    """Negative CA under FAIL -> MET (assume the error is present), penalizing.
+@pytest.mark.parametrize(
+    "config,expected",
+    [
+        # FAIL: negative CA -> MET (assume the error is present), penalizing.
+        # Mirrors test_fail_strategy_negative_criterion_cannot_assess:
+        # MET(w=10) + CA(w=-5) under FAIL -> 10 - 5 = 5; total_positive = 10 -> 0.5.
+        (FAIL, 0.5),
+        # ZERO: negative CA contributes 0 (no penalty) but stays in denominator.
+        # weighted_sum = 10 + 0 = 10; total_positive = 10 -> 1.0
+        (ZERO, 1.0),
+        # PARTIAL only awards partial credit to +weight criteria; -weight CA -> 0.
+        # weighted_sum = 10 -> 1.0
+        (PARTIAL, 1.0),
+        # SKIP: negative CA excluded from numerator and denominator.
+        # weighted_sum = 10; total_positive = 10 -> 1.0
+        (SKIP, 1.0),
+    ],
+)
+def test_binary_negative_cannot_assess_all_strategies(config, expected):
+    """Mirror test_binary_positive_cannot_assess_all_strategies: -weight CA across strategies.
 
-    Mirrors test_fail_strategy_negative_criterion_cannot_assess:
-    MET(w=10) + CA(w=-5) under FAIL -> 10 - 5 = 5; total_positive = 10 -> 0.5.
+    Rubric: MET(w=10) + CANNOT_ASSESS(w=-5).
     """
     reports = [
         binary_report(10.0, CriterionVerdict.MET),
         binary_report(-5.0, CriterionVerdict.CANNOT_ASSESS),
     ]
-    assert score_reports(reports, FAIL) == pytest.approx(0.5)
-
-
-def test_binary_negative_cannot_assess_zero_no_penalty():
-    """Negative CA under ZERO contributes 0 (no penalty) but stays in denominator."""
-    reports = [
-        binary_report(10.0, CriterionVerdict.MET),
-        binary_report(-5.0, CriterionVerdict.CANNOT_ASSESS),
-    ]
-    # weighted_sum = 10 + 0 = 10; total_positive = 10 -> 1.0
-    assert score_reports(reports, ZERO) == pytest.approx(1.0)
-
-
-def test_binary_negative_cannot_assess_partial_no_credit():
-    """PARTIAL only awards partial credit to +weight criteria; -weight CA -> 0."""
-    reports = [
-        binary_report(10.0, CriterionVerdict.MET),
-        binary_report(-5.0, CriterionVerdict.CANNOT_ASSESS),
-    ]
-    # No partial credit for negative-weight CA; weighted_sum = 10 -> 1.0
-    assert score_reports(reports, PARTIAL) == pytest.approx(1.0)
-
-
-def test_binary_negative_cannot_assess_skip_excluded():
-    """Negative CA under SKIP is excluded from numerator and denominator."""
-    reports = [
-        binary_report(10.0, CriterionVerdict.MET),
-        binary_report(-5.0, CriterionVerdict.CANNOT_ASSESS),
-    ]
-    # CA excluded -> weighted_sum = 10; total_positive = 10 -> 1.0
-    assert score_reports(reports, SKIP) == pytest.approx(1.0)
+    assert score_reports(reports, config) == pytest.approx(expected)
 
 
 # ===========================================================================
@@ -252,24 +242,30 @@ def test_mc_positive_na_fail_shifted_scale_uses_worst_scored_option():
 # ===========================================================================
 
 
-def test_mc_positive_na_zero_contributes_nothing_in_denominator():
-    """+weight NA under ZERO contributes 0 but stays in the denominator."""
+@pytest.mark.parametrize(
+    "config,expected",
+    [
+        # ZERO: +weight NA contributes 0 but stays in the denominator.
+        # weighted_sum = 5; total_positive = 15 -> 5/15
+        (ZERO, 5.0 / 15.0),
+        # PARTIAL(0.5): +weight NA contributes partial_credit * w = 0.5 * 10 = 5.
+        # weighted_sum = 5 + 5 = 10; total_positive = 15 -> 10/15
+        (PARTIAL, 10.0 / 15.0),
+        # SKIP: +weight NA excluded from numerator and denominator.
+        # weighted_sum = 5; total_positive = 5 (NA's 10 excluded) -> 1.0
+        (SKIP, 1.0),
+    ],
+)
+def test_mc_positive_na_zero_partial_skip_strategies(config, expected):
+    """+weight multi-choice NA across ZERO / PARTIAL / SKIP.
+
+    Rubric: high-MC(w=5, value 1.0) + NA-MC(w=10).
+    """
     reports = [
         mc_report(5.0, STANDARD_OPTIONS, 2),  # high -> 1.0 * 5 = 5
-        mc_na_report(10.0, STANDARD_OPTIONS),  # NA -> 0 contribution
+        mc_na_report(10.0, STANDARD_OPTIONS),  # NA
     ]
-    # weighted_sum = 5; total_positive = 15 -> 5/15
-    assert score_reports(reports, ZERO) == pytest.approx(5.0 / 15.0)
-
-
-def test_mc_positive_na_partial_awards_partial_credit():
-    """+weight NA under PARTIAL(0.5) contributes partial_credit * w."""
-    reports = [
-        mc_report(5.0, STANDARD_OPTIONS, 2),  # high -> 5
-        mc_na_report(10.0, STANDARD_OPTIONS),  # NA -> 0.5 * 10 = 5
-    ]
-    # weighted_sum = 5 + 5 = 10; total_positive = 15 -> 10/15
-    assert score_reports(reports, PARTIAL) == pytest.approx(10.0 / 15.0)
+    assert score_reports(reports, config) == pytest.approx(expected)
 
 
 def test_mc_negative_na_partial_no_credit():
@@ -280,16 +276,6 @@ def test_mc_negative_na_partial_no_credit():
     ]
     # weighted_sum = 10; total_positive = 10 -> 1.0
     assert score_reports(reports, PARTIAL) == pytest.approx(1.0)
-
-
-def test_mc_positive_na_skip_excluded_from_both():
-    """+weight NA under SKIP excluded from numerator and denominator."""
-    reports = [
-        mc_report(5.0, STANDARD_OPTIONS, 2),  # high -> 5
-        mc_na_report(10.0, STANDARD_OPTIONS),  # NA excluded
-    ]
-    # weighted_sum = 5; total_positive = 5 (NA's 10 excluded) -> 1.0
-    assert score_reports(reports, SKIP) == pytest.approx(1.0)
 
 
 # ===========================================================================

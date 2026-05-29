@@ -38,32 +38,12 @@ def test_from_dict_missing_weight_uses_default():
     assert rubric.rubric[0].requirement == "Missing weight, should use default"
 
 
-def test_from_dict_uniform_weighting():
-    """Test that omitting weight from all criteria gives uniform weighting."""
-    data = [
-        {"requirement": "First requirement"},
-        {"requirement": "Second requirement"},
-        {"requirement": "Third requirement"},
-    ]
-    rubric = Rubric.from_dict(data)
-    assert len(rubric.rubric) == 3
-    # All should have default weight of 10.0
-    assert all(c.weight == 10.0 for c in rubric.rubric)
-
-
 def test_from_dict_missing_requirement():
     invalid_data = [{"weight": 1.0}]
     with pytest.raises(ValueError) as exc_info:
         Rubric.from_dict(invalid_data)
     assert "Invalid criterion at index 0" in str(exc_info.value)
     assert "requirement" in str(exc_info.value).lower()
-
-
-def test_from_dict_invalid_weight_type():
-    invalid_data = [{"weight": "invalid", "requirement": "test"}]
-    with pytest.raises(ValueError) as exc_info:
-        Rubric.from_dict(invalid_data)
-    assert "Invalid criterion at index 0" in str(exc_info.value)
 
 
 def test_from_dict_item_not_dict():

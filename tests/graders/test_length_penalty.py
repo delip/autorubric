@@ -67,22 +67,25 @@ def create_all_met_mock_client() -> MagicMock:
 
 
 class TestLengthPenaltyComputation:
-    def test_no_penalty_under_free_budget(self):
-        config = LengthPenalty(free_budget=100, max_cap=200, penalty_at_cap=50.0)
-        text = " ".join(["word"] * 50)
-        assert compute_length_penalty(text, config) == 0.0
-
-    def test_max_penalty_at_cap(self):
-        config = LengthPenalty(free_budget=100, max_cap=200, penalty_at_cap=50.0)
-        text = " ".join(["word"] * 250)
-        assert compute_length_penalty(text, config) == 50.0
-
-    def test_partial_penalty_between_budget_and_cap(self):
-        config = LengthPenalty(free_budget=100, max_cap=200, penalty_at_cap=50.0, exponent=1.0)
-        text = " ".join(["word"] * 150)
+    @pytest.mark.parametrize(
+        "n_words,exponent,expected,bounded",
+        [
+            # under-budget region: 50 words < free_budget=100 -> no penalty
+            (50, 2.0, 0.0, False),
+            # at/over-cap region: 250 words > max_cap=200 -> max penalty
+            (250, 2.0, 50.0, False),
+            # midpoint between budget and cap (exponent=1.0): linear -> 25.0,
+            # and strictly between 0.0 and the cap penalty
+            (150, 1.0, 25.0, True),
+        ],
+    )
+    def test_compute_length_penalty_regions(self, n_words, exponent, expected, bounded):
+        config = LengthPenalty(free_budget=100, max_cap=200, penalty_at_cap=50.0, exponent=exponent)
+        text = " ".join(["word"] * n_words)
         penalty = compute_length_penalty(text, config)
-        assert 0.0 < penalty < 50.0
-        assert penalty == pytest.approx(25.0)
+        if bounded:
+            assert 0.0 < penalty < 50.0
+        assert penalty == pytest.approx(expected)
 
     def test_custom_count_fn(self):
         config = LengthPenalty(
@@ -96,14 +99,16 @@ class TestLengthPenaltyComputation:
 
 
 class TestWordCount:
-    def test_word_count_basic(self):
-        assert word_count("hello world") == 2
-
-    def test_word_count_empty(self):
-        assert word_count("") == 0
-
-    def test_word_count_multiple_spaces(self):
-        assert word_count("hello   world") == 2
+    @pytest.mark.parametrize(
+        "text,expected",
+        [
+            ("hello world", 2),  # basic two words
+            ("", 0),  # empty-string boundary: ''.split() == [] -> 0
+            ("hello   world", 2),  # collapsing repeated whitespace
+        ],
+    )
+    def test_word_count(self, text, expected):
+        assert word_count(text) == expected
 
 
 @pytest.mark.asyncio

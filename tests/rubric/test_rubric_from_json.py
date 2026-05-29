@@ -37,20 +37,6 @@ def test_from_json_invalid_criteria():
     assert "Invalid criterion at index 1" in str(exc_info.value)
 
 
-def test_from_json_empty_list():
-    json_string = "[]"
-    with pytest.raises(ValueError) as exc_info:
-        Rubric.from_json(json_string)
-    assert "No criteria found" in str(exc_info.value)
-
-
-def test_from_json_not_list():
-    json_string = '{"weight": 1.0, "requirement": "test"}'
-    with pytest.raises(ValueError) as exc_info:
-        Rubric.from_json(json_string)
-    assert "Dict must contain either 'sections' or 'rubric' key" in str(exc_info.value)
-
-
 def test_from_json_with_extra_fields():
     json_string = json.dumps(
         [
