@@ -122,7 +122,7 @@ Note: `classify_grading_error` and `ErrorCategory` are in Public Exports.
 
 | Type | Purpose |
 | --- | --- |
-| `MetaCriterionJudgment` | Extends `CriterionJudgment` with `affected_criteria: list[int]` field for structured criterion references (internal — not exported from `meta.__init__`) |
+| `MetaCriterionJudgment` | Extends `CriterionJudgment` with `affected_criteria: list[int]` field for structured criterion references (internal — not exported from `meta.__init__`). `MultiChoiceMetaJudgment` is the multi-choice analog (extends `MultiChoiceJudgment`, same field; also internal/unexported) — wired via `multi_choice_response_format` |
 
 ### Meta-Rubric Functions (src/autorubric/meta/)
 
@@ -157,8 +157,8 @@ Note: `classify_grading_error` and `ErrorCategory` are in Public Exports.
 1. `Rubric.grade()` delegates to grader's `grade()` method
 2. `CriterionGrader` treats single LLM as "ensemble of 1". At the start of `judge()` the rubric is normalized **once** to an *effective rubric*: with `auto_na_option=True` (default) every multi-choice criterion is guaranteed an NA abstain option via `Criterion.with_guaranteed_na_option()` (T2-A — structural analog of binary CANNOT_ASSESS; see *Multi-Choice Criteria*). Normalization is pure (no RNG), same length/order (so `criterion_idx` and the shuffle RNG key stay aligned), never mutates the user's rubric. Effective options ride through `CriterionReport.options`, shared by prompt building, verdict mapping, scoring, and aggregation. `auto_na_option=False` ⇒ forced-choice (no injection); never strips an author NA option.
 3. Concurrent LLM calls per criterion per judge via `asyncio.gather()`
-4. Binary criteria use `binary_response_format` (default: `CriterionJudgment`); meta-rubric evals use `MetaCriterionJudgment`, which adds a structured `affected_criteria` field
-5. If the response includes `affected_criteria`, grader injects `[Affects: #1, #3]` into the reason string
+4. Binary criteria use `binary_response_format` (default: `CriterionJudgment`); multi-choice criteria use the symmetric `multi_choice_response_format` (default: `MultiChoiceJudgment`). Meta-rubric evals override both — `MetaCriterionJudgment` (binary) and `MultiChoiceMetaJudgment` (multi-choice) — each adding a structured `affected_criteria` field
+5. If the response includes a non-empty `affected_criteria`, grader injects `[Affects: #1, #3]` into the reason string. Applied symmetrically to binary and multi-choice success paths via the shared `_inject_affected_criteria()` helper (error paths never inject)
 6. Aggregates votes using strategy (majority/weighted/unanimous/any). For binary criteria `majority` is an **unweighted head-count** (> 50% of judges), distinct from `weighted` (summed judge weights). Multi-choice criteria aggregate via two **independent** knobs — `ordinal_aggregation` and `nominal_aggregation` — that binary `aggregation` never touches (values + axis in *Multi-Choice Criteria*).
 7. Returns `EnsembleEvaluationReport`
 

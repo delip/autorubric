@@ -98,6 +98,20 @@ def _aggregate_error(votes: Sequence[JudgeVote | MultiChoiceJudgeVote]) -> str |
     return _combine_errors([v.error for v in votes])
 
 
+def _inject_affected_criteria(reason: str, judgment: object) -> str:
+    """Append an [Affects: #i, #j] tag when the judgment carries non-empty affected_criteria.
+
+    Shared by the binary and multi-choice success paths so the structured-output
+    affected_criteria convention (used by meta-rubric evaluation) behaves identically
+    for both criterion types.
+    """
+    affected = getattr(judgment, "affected_criteria", None)
+    if affected:
+        tag = ", ".join(f"#{i}" for i in affected)
+        reason = f"{reason} [Affects: {tag}]"
+    return reason
+
+
 def _binary_worst_verdict(weight: float) -> CriterionVerdict:
     """The score-minimizing binary verdict for a criterion of the given weight.
 
@@ -241,6 +255,8 @@ class CriterionGrader(Grader):
         seed: int | None = None,
         # Structured output override for binary criteria
         binary_response_format: type[BaseModel] | None = None,
+        # Structured output override for multi-choice criteria
+        multi_choice_response_format: type[BaseModel] | None = None,
     ):
         """Initialize the criterion grader.
 
@@ -281,6 +297,12 @@ class CriterionGrader(Grader):
                 CriterionJudgment. If the model includes an ``affected_criteria`` field
                 (list[int]), matching indices are injected as an ``[Affects: ...]`` tag
                 into the reason string. Defaults to CriterionJudgment.
+            multi_choice_response_format: Pydantic model to use as the structured output
+                schema for multi-choice criterion judgments. Must be a subclass of (or
+                compatible with) MultiChoiceJudgment. If the model includes an
+                ``affected_criteria`` field (list[int]), matching indices are injected as
+                an ``[Affects: ...]`` tag into the reason string (same convention as
+                binary_response_format). Defaults to MultiChoiceJudgment.
 
         Raises:
             ValueError: If neither llm_config nor judges is provided, or both are provided.
@@ -319,6 +341,7 @@ class CriterionGrader(Grader):
             fsc = dataclasses.replace(fsc, seed=self._seed)
         self._few_shot_config = fsc
         self._binary_response_format = binary_response_format or CriterionJudgment
+        self._multi_choice_response_format = multi_choice_response_format or MultiChoiceJudgment
 
         # Build system prompts (separate for binary and multi-choice)
         if system_prompt is None:
@@ -644,11 +667,7 @@ class CriterionGrader(Grader):
 
             judgment = result.parsed
             reason = judgment.explanation
-
-            # Inject [Affects: ...] tag if the response model includes affected_criteria
-            if hasattr(judgment, "affected_criteria") and judgment.affected_criteria:
-                tag = ", ".join(f"#{i}" for i in judgment.affected_criteria)
-                reason = f"{reason} [Affects: {tag}]"
+            reason = _inject_affected_criteria(reason, judgment)
 
             report = CriterionReport(
                 requirement=criterion.requirement,
@@ -768,7 +787,7 @@ class CriterionGrader(Grader):
             result: GenerateResult = await client.generate(
                 system_prompt=self._multi_choice_system_prompt,
                 user_prompt=user_prompt,
-                response_format=MultiChoiceJudgment,
+                response_format=self._multi_choice_response_format,
                 return_result=True,
             )
 
@@ -795,11 +814,14 @@ class CriterionGrader(Grader):
                 na=selected_option.na,
             )
 
+            reason = judgment.explanation
+            reason = _inject_affected_criteria(reason, judgment)
+
             report = CriterionReport(
                 requirement=criterion.requirement,
                 verdict=None,  # Binary verdict is None for multi-choice
                 multi_choice_verdict=multi_choice_verdict,
-                reason=judgment.explanation,
+                reason=reason,
                 # Preserve the extended-thinking deliberation trace (T6-B).
                 reasoning=getattr(judgment, "reasoning", None),
                 weight=criterion.weight,

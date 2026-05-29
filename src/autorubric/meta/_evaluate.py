@@ -9,7 +9,7 @@ from pydantic import Field
 from autorubric.graders import CriterionGrader
 from autorubric.llm import LLMConfig
 from autorubric.rubric import Rubric
-from autorubric.types import CriterionJudgment, EnsembleEvaluationReport
+from autorubric.types import CriterionJudgment, EnsembleEvaluationReport, MultiChoiceJudgment
 
 from ._display import display_meta_rubric_result
 
@@ -30,6 +30,21 @@ class MetaCriterionJudgment(CriterionJudgment):
     """Extended judgment for meta-rubric evaluation with structured criterion references."""
 
     model_config = CriterionJudgment.model_config
+
+    affected_criteria: list[int] = Field(
+        default_factory=list,
+        description=(
+            "1-based indices of the rubric criteria this evaluation pertains to. "
+            "Use the index field from the criteria list. "
+            "Return an empty list for rubric-wide issues not specific to any criterion."
+        ),
+    )
+
+
+class MultiChoiceMetaJudgment(MultiChoiceJudgment):
+    """Multi-choice analog of MetaCriterionJudgment with structured criterion references."""
+
+    model_config = MultiChoiceJudgment.model_config
 
     affected_criteria: list[int] = Field(
         default_factory=list,
@@ -84,6 +99,7 @@ async def evaluate_rubric_standalone(
     grader = CriterionGrader(
         llm_config=llm_config,
         binary_response_format=MetaCriterionJudgment,
+        multi_choice_response_format=MultiChoiceMetaJudgment,
     )
 
     rubric_data = {
@@ -151,6 +167,7 @@ async def evaluate_rubric_in_context(
     grader = CriterionGrader(
         llm_config=llm_config,
         binary_response_format=MetaCriterionJudgment,
+        multi_choice_response_format=MultiChoiceMetaJudgment,
     )
 
     rubric_data = {
