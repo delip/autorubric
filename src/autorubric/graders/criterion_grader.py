@@ -627,6 +627,9 @@ class CriterionGrader(Grader):
                 requirement=criterion.requirement,
                 verdict=judgment.criterion_status,
                 reason=reason,
+                # Preserve the extended-thinking deliberation trace (T6-B). getattr
+                # guards custom binary_response_format models that lack the field.
+                reasoning=getattr(judgment, "reasoning", None),
                 weight=criterion.weight,
                 name=criterion.name,
                 options=criterion.options,
@@ -770,6 +773,8 @@ class CriterionGrader(Grader):
                 verdict=None,  # Binary verdict is None for multi-choice
                 multi_choice_verdict=multi_choice_verdict,
                 reason=judgment.explanation,
+                # Preserve the extended-thinking deliberation trace (T6-B).
+                reasoning=getattr(judgment, "reasoning", None),
                 weight=criterion.weight,
                 name=criterion.name,
                 options=criterion.options,
@@ -952,6 +957,7 @@ class CriterionGrader(Grader):
                                 na=mcv.na,
                                 shuffle_order=cr.report.shuffle_order,
                                 error=cr.report.error,
+                                reasoning=cr.report.reasoning,
                             )
                         )
 
@@ -990,6 +996,7 @@ class CriterionGrader(Grader):
                             reason=cr.report.reason,
                             weight=judge_result.weight,
                             error=cr.report.error,
+                            reasoning=cr.report.reasoning,
                         )
                     )
 

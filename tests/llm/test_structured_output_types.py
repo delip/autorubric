@@ -6,6 +6,7 @@ from pydantic import ValidationError
 from autorubric.types import (
     CriterionJudgment,
     CriterionVerdict,
+    MultiChoiceJudgment,
 )
 
 
@@ -65,3 +66,21 @@ class TestCriterionJudgment:
         )
         with pytest.raises(ValidationError):
             judgment.criterion_status = CriterionVerdict.UNMET
+
+
+class TestMultiChoiceJudgment:
+    """Tests for MultiChoiceJudgment structured output type (reasoning parity)."""
+
+    def test_reasoning_defaults_none(self):
+        """MultiChoiceJudgment.reasoning defaults to None (parity with CriterionJudgment)."""
+        judgment = MultiChoiceJudgment(selected_option=1, explanation="Chosen.")
+        assert judgment.reasoning is None
+
+    def test_with_reasoning(self):
+        """MultiChoiceJudgment can include the optional extended-thinking reasoning trace."""
+        judgment = MultiChoiceJudgment(
+            selected_option=2,
+            explanation="Option 2 best fits.",
+            reasoning="Compared all options; 2 dominates.",
+        )
+        assert judgment.reasoning == "Compared all options; 2 dominates."

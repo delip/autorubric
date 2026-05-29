@@ -227,6 +227,7 @@ def _serialize_ensemble_criterion_report(ecr: EnsembleCriterionReport) -> dict[s
                 "reason": v.reason,
                 "weight": v.weight,
                 "error": v.error,
+                "reasoning": v.reasoning,
             }
             for v in ecr.votes
         ]
@@ -244,6 +245,7 @@ def _serialize_ensemble_criterion_report(ecr: EnsembleCriterionReport) -> dict[s
                 "na": v.na,
                 "shuffle_order": v.shuffle_order,
                 "error": v.error,
+                "reasoning": v.reasoning,
             }
             for v in ecr.multi_choice_votes
         ]
@@ -289,6 +291,7 @@ def _deserialize_ensemble_report(
                 reason=v["reason"],
                 weight=v.get("weight", 1.0),
                 error=v.get("error"),
+                reasoning=v.get("reasoning"),
             )
             for v in ecr_data.get("votes", [])
         ]
@@ -311,6 +314,7 @@ def _deserialize_ensemble_report(
                 na=v.get("na", False),
                 shuffle_order=v.get("shuffle_order"),
                 error=v.get("error"),
+                reasoning=v.get("reasoning"),
             )
             for v in ecr_data.get("multi_choice_votes", [])
         ]

@@ -611,13 +611,17 @@ class MultiChoiceJudgeVote:
         selected_label: Label of selected option. READABLE for reports. ``None`` in the
             same no-option-selected abstain case as ``selected_index``.
         value: Score value of selected option.
-        reason: Judge's explanation for the selection.
+        reason: Judge's brief justification for the selection (the conclusion distilled
+            from ``reasoning`` when thinking is enabled).
         weight: Judge's voting weight (default 1.0).
         na: True if selected option is NA.
         shuffle_order: Permutation used when presenting options to the judge.
         error: Set (with a category prefix) when this vote's verdict was synthesized
             because the judge call failed. None for genuine votes. Mirrors
             ``JudgeVote.error`` for multi-choice criteria.
+        reasoning: The judge's verbose extended-thinking deliberation trace (populated
+            only when thinking is enabled; None otherwise). ``reason`` is the conclusion
+            distilled from it. Mirrors ``JudgeVote.reasoning`` for multi-choice criteria.
     """
 
     judge_id: str
@@ -629,6 +633,7 @@ class MultiChoiceJudgeVote:
     na: bool = False
     shuffle_order: list[int] | None = None
     error: str | None = None
+    reasoning: str | None = None
 
     @property
     def is_error(self) -> bool:
@@ -649,7 +654,10 @@ class CriterionReport(Criterion):
     Attributes:
         verdict: Binary verdict (MET/UNMET/CANNOT_ASSESS). None for multi-choice criteria.
         multi_choice_verdict: Multi-choice verdict with selected option. None for binary.
-        reason: Explanation for the verdict from the LLM judge.
+        reason: The judge's brief, final justification for the verdict. When thinking is
+            enabled this is the concise conclusion the judge *distilled from* its
+            ``reasoning`` deliberation trace below; when thinking is disabled ``reasoning``
+            is None and ``reason`` stands alone.
         shuffle_order: Permutation used when presenting multi-choice options to the LLM.
             Maps shuffled position → original index. None for binary criteria or when
             shuffle_options is disabled.
@@ -657,6 +665,10 @@ class CriterionReport(Criterion):
             rather than produced by a genuine judgment. The string is prefixed with the
             failure category (``"infrastructure: ..."``, ``"parse: ..."``, or
             ``"unknown: ..."``). None for genuine verdicts. See ``is_error``.
+        reasoning: The judge's verbose extended-thinking *deliberation trace* — the
+            chain of thought produced before settling on ``verdict``/``reason`` (the
+            provider's ``reasoning_content`` channel). Populated only when thinking is
+            enabled; None otherwise. ``reason`` is the conclusion distilled from this.
     """
 
     verdict: CriterionVerdict | None = None
@@ -664,6 +676,7 @@ class CriterionReport(Criterion):
     reason: str
     shuffle_order: list[int] | None = None
     error: str | None = None
+    reasoning: str | None = None
 
     @property
     def score_value(self) -> float:
@@ -764,6 +777,11 @@ class CriterionJudgment(BaseModel):
     - CriterionReport includes 'weight' and 'requirement' fields that come
       from the rubric, not from the LLM
     - The LLM only outputs the judgment (status + explanation)
+
+    ``explanation`` is the judge's brief, final justification. ``reasoning`` is the
+    verbose extended-thinking deliberation trace behind it (populated only when thinking
+    is enabled): when present, ``explanation`` is the concise conclusion the judge
+    distilled from ``reasoning``.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -798,8 +816,10 @@ class MultiChoiceJudgment(BaseModel):
 
     Attributes:
         selected_option: 1-indexed number of the selected option (1, 2, 3, etc.)
-        explanation: Brief explanation of why this option was selected.
-        reasoning: Extended thinking/reasoning trace (populated when thinking enabled).
+        explanation: Brief explanation of why this option was selected. When thinking is
+            enabled this is the concise conclusion distilled from ``reasoning``.
+        reasoning: Verbose extended-thinking deliberation trace (populated only when
+            thinking is enabled; None otherwise). ``explanation`` is distilled from it.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -842,10 +862,14 @@ class JudgeVote:
     Attributes:
         judge_id: Identifier for the judge (e.g., "gpt-4", "claude-sonnet").
         verdict: The judge's verdict (MET/UNMET).
-        reason: The judge's explanation for the verdict.
+        reason: The judge's brief justification for the verdict (the conclusion distilled
+            from ``reasoning`` when thinking is enabled).
         weight: Judge's voting weight (default 1.0).
         error: Set (with a category prefix) when this vote's verdict was synthesized
             because the judge call failed. None for genuine votes.
+        reasoning: The judge's verbose extended-thinking deliberation trace (populated
+            only when thinking is enabled; None otherwise). ``reason`` is the conclusion
+            distilled from it. Carried from this judge's ``CriterionReport.reasoning``.
     """
 
     judge_id: str
@@ -853,6 +877,7 @@ class JudgeVote:
     reason: str
     weight: float = 1.0
     error: str | None = None
+    reasoning: str | None = None
 
     @property
     def is_error(self) -> bool:

@@ -520,6 +520,133 @@ class TestItemResult:
         assert len(ecr_restored.multi_choice_votes) == 1
         assert ecr_restored.multi_choice_votes[0].judge_id == "j1"
 
+    def test_roundtrip_single_binary_reasoning(self):
+        """T6-B: the extended-thinking reasoning trace survives single-report roundtrip.
+
+        ``reason`` is the brief justification; ``reasoning`` is the verbose deliberation
+        trace (populated only when thinking is enabled). Both must round-trip.
+        """
+        item = DataItem(submission="Test", description="Test")
+        criterion_reports = [
+            CriterionReport(
+                weight=10.0,
+                requirement="Is accurate",
+                verdict=CriterionVerdict.MET,
+                reason="Looks good",
+                reasoning="Checked each claim against the source; all three check out.",
+            ),
+        ]
+        report = EvaluationReport(score=1.0, raw_score=10.0, report=criterion_reports)
+        result = ItemResult(item_idx=0, item=item, report=report, duration_seconds=1.0)
+
+        restored = ItemResult.from_dict(json.loads(json.dumps(result.to_dict())), item)
+
+        assert restored.report.report is not None
+        assert restored.report.report[0].reason == "Looks good"
+        assert (
+            restored.report.report[0].reasoning
+            == "Checked each claim against the source; all three check out."
+        )
+
+    def test_roundtrip_ensemble_binary_reasoning(self):
+        """T6-B: per-judge reasoning trace survives ensemble binary roundtrip."""
+        item = DataItem(submission="Test", description="Test")
+        criterion = Criterion(weight=10.0, requirement="Is accurate")
+        ecr = EnsembleCriterionReport(
+            criterion=criterion,
+            final_verdict=CriterionVerdict.MET,
+            final_reason="Both agree",
+            votes=[
+                JudgeVote(
+                    judge_id="j1",
+                    verdict=CriterionVerdict.MET,
+                    reason="Yes",
+                    weight=1.0,
+                    reasoning="j1 deliberation trace",
+                ),
+                JudgeVote(
+                    judge_id="j2",
+                    verdict=CriterionVerdict.MET,
+                    reason="Agree",
+                    weight=1.0,
+                ),
+            ],
+            agreement=1.0,
+        )
+        report = EnsembleEvaluationReport(
+            score=1.0, raw_score=10.0, report=[ecr], judge_scores={"j1": 1.0, "j2": 1.0}
+        )
+        result = ItemResult(item_idx=0, item=item, report=report, duration_seconds=1.0)
+
+        restored = ItemResult.from_dict(json.loads(json.dumps(result.to_dict())), item)
+
+        votes = {v.judge_id: v for v in restored.report.report[0].votes}
+        assert votes["j1"].reasoning == "j1 deliberation trace"
+        assert votes["j2"].reasoning is None
+
+    def test_roundtrip_ensemble_multi_choice_reasoning(self):
+        """T6-B: per-judge reasoning trace survives ensemble multi-choice roundtrip."""
+        item = DataItem(submission="Test", description="Test")
+        options = [
+            CriterionOption(label="Low", value=0.0),
+            CriterionOption(label="High", value=1.0),
+        ]
+        criterion = Criterion(weight=10.0, requirement="Quality?", options=options)
+        ecr = EnsembleCriterionReport(
+            criterion=criterion,
+            final_verdict=None,
+            final_reason="Aggregated",
+            final_multi_choice_verdict=AggregatedMultiChoiceVerdict(
+                selected_index=1, selected_label="High", value=1.0, aggregated_value=0.8
+            ),
+            multi_choice_votes=[
+                MultiChoiceJudgeVote(
+                    judge_id="j1",
+                    selected_index=1,
+                    selected_label="High",
+                    value=1.0,
+                    reason="Clearly high",
+                    reasoning="Weighed both options; High dominates.",
+                ),
+            ],
+        )
+        report = EnsembleEvaluationReport(
+            score=1.0, raw_score=10.0, report=[ecr], judge_scores={"j1": 1.0}
+        )
+        result = ItemResult(item_idx=0, item=item, report=report, duration_seconds=1.0)
+
+        restored = ItemResult.from_dict(json.loads(json.dumps(result.to_dict())), item)
+
+        mc_vote = restored.report.report[0].multi_choice_votes[0]
+        assert mc_vote.reasoning == "Weighed both options; High dominates."
+
+    def test_roundtrip_legacy_missing_reasoning_is_none(self):
+        """A legacy checkpoint without a reasoning key deserializes to None (not a crash)."""
+        item = DataItem(submission="Test", description="Test")
+        report_data = {
+            "score": 1.0,
+            "raw_score": 10.0,
+            "error": None,
+            "report_type": "ensemble",
+            "judge_scores": {"j1": 1.0},
+            "criterion_reports": [
+                {
+                    "criterion": {"weight": 10.0, "requirement": "Is accurate", "name": None},
+                    "final_verdict": "MET",
+                    "final_reason": "Agree",
+                    "votes": [
+                        # NOTE: no "reasoning" key (legacy format)
+                        {"judge_id": "j1", "verdict": "MET", "reason": "Yes", "weight": 1.0}
+                    ],
+                    "agreement": 1.0,
+                }
+            ],
+        }
+        data = {"item_idx": 0, "duration_seconds": 1.0, "error": None, "report": report_data}
+
+        restored = ItemResult.from_dict(data, item)
+        assert restored.report.report[0].votes[0].reasoning is None
+
     def test_backward_compat_no_criterion_reports(self):
         """Old format without criterion_reports loads with report=None."""
         data = {
