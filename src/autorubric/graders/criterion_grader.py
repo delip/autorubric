@@ -71,6 +71,12 @@ def _derive_shuffle_rng(
     return random.Random(derived)
 
 
+# Sentinel used in the item-key slot of ``_derive_shuffle_rng`` for few-shot example
+# selection. Few-shot examples are a fixed property of (criterion, judge), not of the
+# item being graded, so the per-call item content is intentionally not part of the key.
+FEW_SHOT_DOMAIN = "few_shot"
+
+
 def _combine_errors(errors: list[str | None]) -> str | None:
     """Combine per-judge error strings into an ensemble-level error.
 
@@ -287,11 +293,16 @@ class CriterionGrader(Grader):
         if llm_config is not None and judges is not None:
             raise ValueError("Cannot provide both llm_config and judges")
 
-        # Normalize to ensemble representation (single LLM = ensemble of 1)
+        # Normalize to ensemble representation (single LLM = ensemble of 1).
+        # The validation above guarantees exactly one of llm_config/judges is set, so by
+        # this point `judges` in the else branch is a non-None list[JudgeSpec]; the explicit
+        # attribute annotation lets the type checker see that without a suppression comment.
+        self._judges: list[JudgeSpec]
         if llm_config is not None:
             self._judges = [JudgeSpec(llm_config=llm_config, judge_id="default", weight=1.0)]
         else:
-            self._judges = judges  # type: ignore
+            assert judges is not None
+            self._judges = judges
 
         self._aggregation = aggregation
         self._ordinal_aggregation = ordinal_aggregation
@@ -329,8 +340,8 @@ class CriterionGrader(Grader):
 
         # Pre-compute few-shot examples if training data provided
         # Note: For multi-choice, examples are stored as (submission, selected_index, reason)
-        self._criterion_examples: dict[int, list[FewShotExample]] = {}
-        self._multi_choice_examples: dict[int, list[tuple[str, int, str | None]]] = {}
+        self._criterion_examples: dict[tuple[int, str], list[FewShotExample]] = {}
+        self._multi_choice_examples: dict[tuple[int, str], list[tuple[str, int, str | None]]] = {}
         if training_data is not None:
             self._prepare_examples()
 
@@ -355,30 +366,42 @@ class CriterionGrader(Grader):
 
     def _prepare_examples(self) -> None:
         """Pre-compute few-shot examples for each criterion."""
-        if self._training_data is None:
+        training_data = self._training_data
+        if training_data is None:
             return
 
-        n_criteria = self._training_data.num_criteria
-        rubric_criteria = self._training_data.rubric.rubric if self._training_data.rubric else []
+        n_criteria = training_data.num_criteria
+        rubric_criteria = training_data.rubric.rubric if training_data.rubric else []
 
         for criterion_idx in range(n_criteria):
             criterion = (
                 rubric_criteria[criterion_idx] if criterion_idx < len(rubric_criteria) else None
             )
-            if criterion is not None and criterion.is_multi_choice:
-                examples = self._select_multi_choice_examples(criterion_idx)
-                self._multi_choice_examples[criterion_idx] = examples
-            else:
-                examples = self._select_examples_for_criterion(criterion_idx)
-                self._criterion_examples[criterion_idx] = examples
+            # Select examples per judge so that ensemble judges see decorrelated few-shot
+            # subsets/orderings (T7-A), mirroring per-judge option shuffling.
+            for judge in self._judges:
+                if criterion is not None and criterion.is_multi_choice:
+                    examples = self._select_multi_choice_examples(criterion_idx, judge.judge_id)
+                    self._multi_choice_examples[(criterion_idx, judge.judge_id)] = examples
+                else:
+                    binary_examples = self._select_examples_for_criterion(
+                        criterion_idx, judge.judge_id
+                    )
+                    self._criterion_examples[(criterion_idx, judge.judge_id)] = binary_examples
 
-    def _select_examples_for_criterion(self, criterion_idx: int) -> list[FewShotExample]:
-        """Select stratified examples for a specific criterion."""
+    def _select_examples_for_criterion(
+        self, criterion_idx: int, judge_id: str
+    ) -> list[FewShotExample]:
+        """Select stratified examples for a specific criterion and judge."""
         if self._training_data is None:
             return []
 
         config = self._few_shot_config
-        rng = random.Random(config.seed)
+        seed = config.seed
+        # Guaranteed non-None when training_data is present (see __init__ few-shot seed
+        # coordination); _prepare_examples is the only caller and runs only in that case.
+        assert seed is not None
+        rng = _derive_shuffle_rng(seed, FEW_SHOT_DOMAIN, criterion_idx, judge_id)
 
         # Group items by verdict for this criterion
         verdict_groups: dict[CriterionVerdict, list] = {
@@ -496,9 +519,9 @@ class CriterionGrader(Grader):
             return None
 
     def _select_multi_choice_examples(
-        self, criterion_idx: int
+        self, criterion_idx: int, judge_id: str
     ) -> list[tuple[str, int, str | None]]:
-        """Select few-shot examples for a multi-choice criterion.
+        """Select few-shot examples for a multi-choice criterion and judge.
 
         Groups training items by their selected option index and balances
         across options when configured. Ground truth labels are converted
@@ -508,7 +531,11 @@ class CriterionGrader(Grader):
             return []
 
         config = self._few_shot_config
-        rng = random.Random(config.seed)
+        seed = config.seed
+        # Guaranteed non-None when training_data is present (see __init__ few-shot seed
+        # coordination); _prepare_examples is the only caller and runs only in that case.
+        assert seed is not None
+        rng = _derive_shuffle_rng(seed, FEW_SHOT_DOMAIN, criterion_idx, judge_id)
 
         # Group items by option index (converting label to index)
         option_groups: dict[int, list] = {}
@@ -592,7 +619,7 @@ class CriterionGrader(Grader):
         reference_submission: str | None = None,
     ) -> CriterionResult:
         """Judge a binary (MET/UNMET) criterion."""
-        examples = self._criterion_examples.get(criterion_idx, [])
+        examples = self._criterion_examples.get((criterion_idx, judge.judge_id), [])
 
         # Build prompt (with or without few-shot examples)
         if examples:
@@ -712,7 +739,7 @@ class CriterionGrader(Grader):
             shuffled_indices = list(range(len(criterion.options)))
             prompt_criterion = criterion
 
-        examples = self._multi_choice_examples.get(criterion_idx, [])
+        examples = self._multi_choice_examples.get((criterion_idx, judge.judge_id), [])
 
         # Build prompt (with or without few-shot examples)
         if examples:
