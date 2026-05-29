@@ -30,6 +30,11 @@ MAX_ITERATIONS = 10
 N_VAL = 98  # ~30% of 327 items
 
 
+def _fmt_rho(rho: float | None) -> str:
+    """Format an optional Spearman rho, rendering None (undefined) as N/A."""
+    return f"{rho:.3f}" if rho is not None else "N/A"
+
+
 class CriterionSpec(BaseModel):
     weight: int = Field(description="Importance weight (5-15 for positive, negative for errors)")
     requirement: str = Field(description="Clear, specific evaluation criterion")
@@ -77,8 +82,12 @@ async def measure_test_correlation(
     grader: CriterionGrader,
     task_prompt: str,
     label: str = "Grading test set",
-) -> tuple[float, float]:
-    """Grade the held-out test set and return (Spearman rho, cost)."""
+) -> tuple[float | None, float]:
+    """Grade the held-out test set and return (Spearman rho, cost).
+
+    The correlation is ``None`` when it is genuinely undefined (e.g. a constant
+    score array), propagated from ``validate_ground_truth``.
+    """
     from rich.progress import (
         BarColumn,
         MofNCompleteColumn,
@@ -164,7 +173,7 @@ async def main() -> None:
         label="[Baseline] Grading test set",
     )
     baseline_eval_cost += cost
-    print(f"[Baseline] Spearman rho on test set: {baseline_rho:.3f}")
+    print(f"[Baseline] Spearman rho on test set: {_fmt_rho(baseline_rho)}")
 
     print(f"\nRunning improvement loop (max {MAX_ITERATIONS} iterations) ...")
     baseline_config = ImprovementConfig(
@@ -189,7 +198,7 @@ async def main() -> None:
         label="[Baseline improved] Grading test set",
     )
     baseline_eval_cost += cost
-    print(f"[Baseline improved] Spearman rho on test set: {improved_baseline_rho:.3f}")
+    print(f"[Baseline improved] Spearman rho on test set: {_fmt_rho(improved_baseline_rho)}")
 
     # ================================================================
     # Track B — Original (human-authored rubric from dataset)
@@ -209,7 +218,7 @@ async def main() -> None:
         label="[Original] Grading test set",
     )
     original_eval_cost += cost
-    print(f"[Original] Spearman rho on test set: {original_rho:.3f}")
+    print(f"[Original] Spearman rho on test set: {_fmt_rho(original_rho)}")
 
     print(f"\nRunning improvement loop (max {MAX_ITERATIONS} iterations) ...")
     original_config = ImprovementConfig(
@@ -234,7 +243,7 @@ async def main() -> None:
         label="[Original improved] Grading test set",
     )
     original_eval_cost += cost
-    print(f"[Original improved] Spearman rho on test set: {improved_original_rho:.3f}")
+    print(f"[Original improved] Spearman rho on test set: {_fmt_rho(improved_original_rho)}")
 
     # ================================================================
     # Summary
@@ -249,14 +258,24 @@ async def main() -> None:
     print("SUMMARY")
     print("=" * 64)
     print("  Spearman rho (test set):")
-    print(f"    Baseline (zero-shot LLM):      {baseline_rho:.3f}")
-    print(f"    Baseline improved (iterative):  {improved_baseline_rho:.3f}")
-    print(f"    Original (human-authored):      {original_rho:.3f}")
-    print(f"    Original improved (iterative):  {improved_original_rho:.3f}")
-    baseline_delta = improved_baseline_rho - baseline_rho
-    original_delta = improved_original_rho - original_rho
-    print(f"  Delta (baseline -> improved baseline): {baseline_delta:+.3f}")
-    print(f"  Delta (original -> improved original): {original_delta:+.3f}")
+    print(f"    Baseline (zero-shot LLM):      {_fmt_rho(baseline_rho)}")
+    print(f"    Baseline improved (iterative):  {_fmt_rho(improved_baseline_rho)}")
+    print(f"    Original (human-authored):      {_fmt_rho(original_rho)}")
+    print(f"    Original improved (iterative):  {_fmt_rho(improved_original_rho)}")
+    baseline_delta = (
+        improved_baseline_rho - baseline_rho
+        if improved_baseline_rho is not None and baseline_rho is not None
+        else None
+    )
+    original_delta = (
+        improved_original_rho - original_rho
+        if improved_original_rho is not None and original_rho is not None
+        else None
+    )
+    baseline_delta_str = f"{baseline_delta:+.3f}" if baseline_delta is not None else "N/A"
+    original_delta_str = f"{original_delta:+.3f}" if original_delta is not None else "N/A"
+    print(f"  Delta (baseline -> improved baseline): {baseline_delta_str}")
+    print(f"  Delta (original -> improved original): {original_delta_str}")
 
     print("\n  Baseline track:")
     print(f"    Improvement iterations:  {len(baseline_result.iterations)}")

@@ -1593,3 +1593,124 @@ class TestForcedChoiceNoneAbstain:
         metrics = compute_metrics(eval_result, dataset, na_mode="as_unmet")
         assert metrics.na_stats is not None
         assert metrics.na_stats.na_count_pred == 1
+
+
+# =============================================================================
+# T8-C: top-level P/R/F1 are the BINARY MET-vs-rest metric → None for
+# multi-choice-only rubrics (no MET class). accuracy/kappa GENERALIZE.
+# =============================================================================
+
+
+class TestAggregatePrecisionRecallF1None:
+    """Multi-choice-only rubrics have no MET class, so the top-level
+    precision/recall/f1 (the binary MET-vs-rest metric) must be None, not 0.0.
+    accuracy (exact-match) and mean_kappa generalize and stay real numbers.
+    """
+
+    def test_multi_choice_only_pr_f1_none_accuracy_real(self, ordinal_dataset):
+        """Perfect ordinal-only predictions: P/R/F1 are None; accuracy/kappa real."""
+        item_results = [
+            ItemResult(
+                item_idx=0,
+                item=ordinal_dataset.items[0],
+                report=_make_ordinal_report(3),  # GT "4" = index 3
+                duration_seconds=0.1,
+            ),
+            ItemResult(
+                item_idx=1,
+                item=ordinal_dataset.items[1],
+                report=_make_ordinal_report(2),  # GT "3" = index 2
+                duration_seconds=0.1,
+            ),
+            ItemResult(
+                item_idx=2,
+                item=ordinal_dataset.items[2],
+                report=_make_ordinal_report(1),  # GT "2" = index 1
+                duration_seconds=0.1,
+            ),
+        ]
+        eval_result = _wrap_eval_result(item_results)
+
+        metrics = compute_metrics(eval_result, ordinal_dataset)
+
+        # No binary criteria => the MET-vs-rest precision/recall/f1 are undefined.
+        assert metrics.criterion_precision is None
+        assert metrics.criterion_recall is None
+        assert metrics.criterion_f1 is None
+
+        # accuracy is the hand-computed exact-match (perfect = 1.0), unchanged.
+        assert metrics.criterion_accuracy == pytest.approx(1.0)
+
+        # mean_kappa is the weighted kappa of the single ordinal criterion
+        # (perfect agreement = 1.0), unchanged.
+        assert metrics.mean_kappa == pytest.approx(1.0)
+        assert metrics.per_criterion[0].weighted_kappa == pytest.approx(1.0)
+
+    def test_to_file_emits_json_null_for_pr_f1(self, ordinal_dataset, tmp_path):
+        """to_file does not raise and serializes None P/R/F1 as JSON null."""
+        import json
+
+        item_results = [
+            ItemResult(
+                item_idx=i,
+                item=ordinal_dataset.items[i],
+                report=_make_ordinal_report(idx),
+                duration_seconds=0.1,
+            )
+            for i, idx in enumerate((3, 2, 1))
+        ]
+        eval_result = _wrap_eval_result(item_results)
+        metrics = compute_metrics(eval_result, ordinal_dataset)
+
+        out = tmp_path / "metrics.json"
+        metrics.to_file(out)  # must not raise
+        payload = json.loads(out.read_text(encoding="utf-8"))
+        assert payload["criterion_precision"] is None
+        assert payload["criterion_recall"] is None
+        assert payload["criterion_f1"] is None
+        assert payload["criterion_accuracy"] == pytest.approx(1.0)
+
+    def test_summary_renders_none_pr_f1_without_error(self, ordinal_dataset):
+        """summary() renders for a multi-choice-only rubric (None-safe accuracy/kappa)."""
+        item_results = [
+            ItemResult(
+                item_idx=i,
+                item=ordinal_dataset.items[i],
+                report=_make_ordinal_report(idx),
+                duration_seconds=0.1,
+            )
+            for i, idx in enumerate((3, 2, 1))
+        ]
+        eval_result = _wrap_eval_result(item_results)
+        metrics = compute_metrics(eval_result, ordinal_dataset)
+        summary = metrics.summary()  # must not raise
+        assert "Accuracy" in summary
+        assert "Mean Kappa" in summary
+
+    def test_mixed_rubric_pr_f1_are_floats(self, hybrid_dataset):
+        """Mixed binary+multi-choice rubric: the binary branch fires, so
+        precision/recall/f1 are floats (not None). Pins that we did not break
+        the binary path."""
+        item_results = [
+            ItemResult(
+                item_idx=0,
+                item=hybrid_dataset.items[0],
+                report=_make_hybrid_report(CriterionVerdict.MET, 3, 2),
+                duration_seconds=0.1,
+            ),
+            ItemResult(
+                item_idx=1,
+                item=hybrid_dataset.items[1],
+                report=_make_hybrid_report(CriterionVerdict.UNMET, 1, 0),
+                duration_seconds=0.1,
+            ),
+        ]
+        eval_result = _wrap_eval_result(item_results)
+
+        metrics = compute_metrics(eval_result, hybrid_dataset)
+
+        assert isinstance(metrics.criterion_precision, float)
+        assert isinstance(metrics.criterion_recall, float)
+        assert isinstance(metrics.criterion_f1, float)
+        assert isinstance(metrics.criterion_accuracy, float)
+        assert isinstance(metrics.mean_kappa, float)

@@ -28,9 +28,14 @@ grader = CriterionGrader(
 
 result = await rubric.grade(to_grade=response, grader=grader)
 
-# Ensemble-specific fields
-print(f"Score: {result.score:.3f}")
-print(f"Mean Agreement: {result.mean_agreement:.1%}")
+# Ensemble-specific fields. score / mean_agreement are `float | None`
+# (None on a failed grade or an empty rubric); guard before formatting.
+print(f"Score: {result.score:.3f}" if result.score is not None else "Score: n/a (grade failed)")
+print(
+    f"Mean Agreement: {result.mean_agreement:.1%}"
+    if result.mean_agreement is not None
+    else "Mean Agreement: n/a"
+)
 print(f"Judge Scores: {result.judge_scores}")
 
 # Per-criterion vote breakdown

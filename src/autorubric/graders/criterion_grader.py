@@ -912,10 +912,12 @@ class CriterionGrader(Grader):
         - Multi-choice: Uses MultiChoiceJudgeVote and _aggregate_multi_choice_votes()
         """
         if not judge_results:
+            # Empty/failed aggregation has no score: emit None, not a fabricated 0.0
+            # (which is a valid catastrophic score, indistinguishable from a real zero).
             return EnsembleEvaluationReport(
-                score=0.0,
-                raw_score=0.0,
-                llm_raw_score=0.0,
+                score=None,
+                raw_score=None,
+                llm_raw_score=None,
                 error="No judge results to aggregate",
             )
 
@@ -1049,7 +1051,7 @@ class CriterionGrader(Grader):
         mean_agreement = (
             sum(er.agreement for er in ensemble_reports) / len(ensemble_reports)
             if ensemble_reports
-            else 1.0
+            else None  # No criteria to agree on -> not measured (never fabricate 1.0)
         )
 
         # Count CANNOT_ASSESS (binary) and NA (multi-choice)

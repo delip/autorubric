@@ -326,9 +326,14 @@ async def compare_rubrics():
 
     print("\nSCORE COMPARISON")
     print("-" * 40)
-    print(f"  Flawed:   {flawed_result.score:.2f}")
-    print(f"  Improved: {improved_result.score:.2f}")
-    print(f"  Delta:    {improved_result.score - flawed_result.score:+.2f}")
+    # .score is `float | None` (None if the grade failed); guard before formatting / diffing.
+    flawed, improved = flawed_result.score, improved_result.score
+    print(f"  Flawed:   {flawed:.2f}" if flawed is not None else "  Flawed:   n/a")
+    print(f"  Improved: {improved:.2f}" if improved is not None else "  Improved: n/a")
+    if flawed is not None and improved is not None:
+        print(f"  Delta:    {improved - flawed:+.2f}")
+    else:
+        print("  Delta:    n/a")
 
 asyncio.run(compare_rubrics())
 ```
@@ -404,12 +409,13 @@ async def compare_variants():
         )
         results[name] = result
 
-    # Comparison table
+    # Comparison table. result.score is `float | None` (None if the grade failed).
     print(f"{'Variant':<20} {'Score':>8} {'Criteria':>10}")
     print("-" * 40)
     for name, result in results.items():
         n_criteria = len(variants[name].rubric)
-        print(f"{name:<20} {result.score:>8.2f} {n_criteria:>10}")
+        score_str = f"{result.score:>8.2f}" if result.score is not None else f"{'n/a':>8}"
+        print(f"{name:<20} {score_str} {n_criteria:>10}")
 
 asyncio.run(compare_variants())
 ```
@@ -435,12 +441,16 @@ async def validate_rubric(rubric_path: str, task_path: str, threshold: float = 0
         output_html_path="rubric_validation_report.html"
     )
 
-    print(f"Rubric quality score: {result.score:.2f}")
+    # result.score is `float | None` — None if the grade failed. Treat a missing
+    # score as a gate failure rather than letting the comparison raise TypeError.
+    score = result.score
+    print(f"Rubric quality score: {score:.2f}" if score is not None else "Rubric quality score: n/a (grade failed)")
     print(f"Threshold: {threshold:.2f}")
     print(f"Report: rubric_validation_report.html")
 
-    if result.score < threshold:
-        print(f"FAILED: Score {result.score:.2f} below threshold {threshold:.2f}")
+    if score is None or score < threshold:
+        shown = f"{score:.2f}" if score is not None else "n/a (grade failed)"
+        print(f"FAILED: Score {shown} below threshold {threshold:.2f}")
         sys.exit(1)
     else:
         print("PASSED: Rubric meets quality threshold")
@@ -640,13 +650,21 @@ async def main():
     print("=" * 60)
     print("SCORE COMPARISON")
     print("=" * 60)
+    # .score is `float | None` (None if the grade failed); render None as a right-aligned "n/a".
+    def cell(x):
+        return f"{x:>12.2f}" if x is not None else f"{'n/a':>12}"
+
     print(f"{'Rubric':<25} {'Standalone':>12} {'In-Context':>12}")
     print("-" * 50)
-    print(f"{'Flawed':<25} {flawed_standalone.score:>12.2f} {flawed_in_context.score:>12.2f}")
-    print(f"{'Improved':<25} {'N/A':>12} {improved_in_context.score:>12.2f}")
+    print(f"{'Flawed':<25} {cell(flawed_standalone.score)} {cell(flawed_in_context.score)}")
+    print(f"{'Improved':<25} {'N/A':>12} {cell(improved_in_context.score)}")
     print("-" * 50)
-    print(f"{'Improvement (In-Context)':<25} {'':<12} "
-          f"{improved_in_context.score - flawed_in_context.score:>+12.2f}")
+    # Only diff when both in-context scores are defined.
+    if improved_in_context.score is not None and flawed_in_context.score is not None:
+        delta_str = f"{improved_in_context.score - flawed_in_context.score:>+12.2f}"
+    else:
+        delta_str = f"{'n/a':>12}"
+    print(f"{'Improvement (In-Context)':<25} {'':<12} {delta_str}")
     print()
 
     # Generate HTML reports

@@ -163,9 +163,14 @@ result = asyncio.run(main())
 ### Step 5: Analyze Judge Agreement
 
 ```python
-# Overall score and agreement
-print(f"Final Score: {result.score:.2f}")
-print(f"Mean Agreement: {result.mean_agreement:.1%}")
+# Overall score and agreement. score / mean_agreement are `float | None`
+# (None on a failed grade); guard before formatting.
+print(f"Final Score: {result.score:.2f}" if result.score is not None else "Final Score: n/a")
+print(
+    f"Mean Agreement: {result.mean_agreement:.1%}"
+    if result.mean_agreement is not None
+    else "Mean Agreement: n/a"
+)
 
 # Per-judge scores
 print("\nPer-Judge Scores:")
@@ -456,8 +461,13 @@ async def main():
         print(f"\n{'=' * 70}")
         print(f"Application {i}: {app['description']}")
         print(f"{'=' * 70}")
-        print(f"Final Score: {result.score:.2f}")
-        print(f"Mean Agreement: {result.mean_agreement:.1%}")
+        # score / mean_agreement are `float | None` (None on a failed grade).
+        print(f"Final Score: {result.score:.2f}" if result.score is not None else "Final Score: n/a")
+        print(
+            f"Mean Agreement: {result.mean_agreement:.1%}"
+            if result.mean_agreement is not None
+            else "Mean Agreement: n/a"
+        )
 
         # Per-judge scores
         print("\nPer-Judge Scores:")

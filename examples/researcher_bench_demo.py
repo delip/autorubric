@@ -137,6 +137,7 @@ async def main() -> None:
     print(f"\n--- Per-Item Results ({eval_result.successful_items}/{n_items} succeeded) ---")
 
     scores: list[float] = []
+    score_descs: list[str] = []
     category_scores: dict[str, list[float]] = defaultdict(list)
 
     for ir in eval_result.item_results:
@@ -146,7 +147,11 @@ async def main() -> None:
             continue
 
         score = ir.report.score
+        if score is None:
+            print(f"  {desc:<55s}  Score: N/A (no score available)")
+            continue
         scores.append(score)
+        score_descs.append(desc)
 
         category = extract_category(desc)
         category_scores[category].append(score)
@@ -172,11 +177,8 @@ async def main() -> None:
     # -- Summary statistics --
     min_score = min(scores)
     max_score = max(scores)
-    min_idx = scores.index(min_score)
-    max_idx = scores.index(max_score)
-    successful = eval_result.filter_successful()
-    min_desc = successful[min_idx].item.description or f"Item {min_idx}"
-    max_desc = successful[max_idx].item.description or f"Item {max_idx}"
+    min_desc = score_descs[scores.index(min_score)]
+    max_desc = score_descs[scores.index(max_score)]
 
     print("\n--- Summary ---")
     print(f"  Mean Coverage Score:  {statistics.mean(scores):.3f}")

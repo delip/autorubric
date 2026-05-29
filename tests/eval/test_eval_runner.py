@@ -395,6 +395,87 @@ class TestItemResult:
         assert restored.report.report[0].votes[0].judge_id == "j1"
         assert restored.report.judge_scores == {"j1": 1.0, "j2": 1.0}
 
+    def test_roundtrip_ensemble_mean_agreement_none(self):
+        """Issue #6b: mean_agreement=None survives roundtrip (NOT coerced to 0.0).
+
+        Inter-judge agreement is None when there was nothing to measure; the
+        serialized form is JSON null and deserialization must preserve it.
+        """
+        item = DataItem(submission="Test", description="Test")
+        criterion = Criterion(weight=10.0, requirement="Is accurate")
+        ecr = EnsembleCriterionReport(
+            criterion=criterion,
+            final_verdict=CriterionVerdict.MET,
+            final_reason="Both agree",
+            votes=[
+                JudgeVote(judge_id="j1", verdict=CriterionVerdict.MET, reason="Yes", weight=1.0),
+            ],
+            agreement=1.0,
+        )
+        report = EnsembleEvaluationReport(
+            score=1.0,
+            raw_score=10.0,
+            report=[ecr],
+            judge_scores={"j1": 1.0},
+            mean_agreement=None,
+        )
+        result = ItemResult(item_idx=0, item=item, report=report, duration_seconds=1.0)
+
+        d = result.to_dict()
+        # JSON-safe (null), not a fabricated 0.0.
+        assert d["report"]["mean_agreement"] is None
+        assert json.loads(json.dumps(d))["report"]["mean_agreement"] is None
+
+        restored = ItemResult.from_dict(d, item)
+        assert isinstance(restored.report, EnsembleEvaluationReport)
+        assert restored.report.mean_agreement is None
+
+    def test_roundtrip_ensemble_legacy_missing_mean_agreement_is_none(self):
+        """Legacy checkpoint without a mean_agreement key deserializes to None.
+
+        The deserialize default changed from 0.0 to None, so a missing key (old
+        checkpoints) yields None rather than a fabricated 0.0.
+        """
+        item = DataItem(submission="Test", description="Test")
+        report_data = {
+            "score": 1.0,
+            "raw_score": 10.0,
+            "error": None,
+            "report_type": "ensemble",
+            "judge_scores": {"j1": 1.0},
+            "criterion_reports": [
+                {
+                    "criterion": {
+                        "weight": 10.0,
+                        "requirement": "Is accurate",
+                        "name": None,
+                    },
+                    "final_verdict": "MET",
+                    "final_reason": "Both agree",
+                    "votes": [
+                        {
+                            "judge_id": "j1",
+                            "verdict": "MET",
+                            "reason": "Yes",
+                            "weight": 1.0,
+                        }
+                    ],
+                    "agreement": 1.0,
+                }
+            ],
+            # NOTE: no "mean_agreement" key (legacy format)
+        }
+        data = {
+            "item_idx": 0,
+            "duration_seconds": 1.0,
+            "error": None,
+            "report": report_data,
+        }
+
+        restored = ItemResult.from_dict(data, item)
+        assert isinstance(restored.report, EnsembleEvaluationReport)
+        assert restored.report.mean_agreement is None
+
     def test_roundtrip_ensemble_multi_choice(self):
         """Ensemble multi-choice criterion reports survive roundtrip."""
         item = DataItem(submission="Test", description="Test")

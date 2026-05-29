@@ -192,14 +192,17 @@ async def main():
         for cname in criteria_names:
             if cname in per_criterion_map:
                 cm = per_criterion_map[cname]
-                accuracies.append(cm.accuracy)
-        avg_acc = sum(accuracies) / len(accuracies) if accuracies else 0.0
-        print(f"{dim_name:<15} {weight_label:<10} {len(criteria_names):>10} {avg_acc:>14.1%}")
+                if cm.accuracy is not None:
+                    accuracies.append(cm.accuracy)
+        avg_acc = sum(accuracies) / len(accuracies) if accuracies else None
+        avg_acc_str = f"{avg_acc:>14.1%}" if avg_acc is not None else f"{'N/A':>14}"
+        print(f"{dim_name:<15} {weight_label:<10} {len(criteria_names):>10} {avg_acc_str}")
 
     # Penalty criterion
     if PENALTY_CRITERION in per_criterion_map:
         cm = per_criterion_map[PENALTY_CRITERION]
-        print(f"{'Penalty':<15} {'---':<10} {'1':>10} {cm.accuracy:>14.1%}")
+        pen_acc_str = f"{cm.accuracy:>14.1%}" if cm.accuracy is not None else f"{'N/A':>14}"
+        print(f"{'Penalty':<15} {'---':<10} {'1':>10} {pen_acc_str}")
 
     # =========================================================================
     # Phase 3: Three-Condition Comparison
@@ -224,16 +227,21 @@ async def main():
     condition_means = {}
     for cond in ["without-skill", "poor-skill", "good-skill"]:
         results = condition_results[cond]
-        scores = [r.report.score for r in results]
-        mean_score = sum(scores) / len(scores) if scores else 0.0
+        scores = [r.report.score for r in results if r.report.score is not None]
+        mean_score = sum(scores) / len(scores) if scores else None
         condition_means[cond] = mean_score
 
-    baseline = condition_means.get("without-skill", 0.0)
+    baseline = condition_means.get("without-skill")
     for cond in ["without-skill", "poor-skill", "good-skill"]:
         mean_score = condition_means[cond]
-        delta = mean_score - baseline
-        delta_str = f"{delta:+.3f}" if cond != "without-skill" else "---"
-        print(f"{cond:<20} {len(condition_results[cond]):>5} {mean_score:>12.3f} {delta_str:>15}")
+        mean_str = f"{mean_score:>12.3f}" if mean_score is not None else f"{'N/A':>12}"
+        if cond == "without-skill":
+            delta_str = "---"
+        elif mean_score is not None and baseline is not None:
+            delta_str = f"{mean_score - baseline:+.3f}"
+        else:
+            delta_str = "N/A"
+        print(f"{cond:<20} {len(condition_results[cond]):>5} {mean_str} {delta_str:>15}")
 
     # Per-criterion pass rates by condition (from ground truth)
     print("\nPer-Criterion Ground Truth Pass Rates by Condition:")
@@ -263,8 +271,9 @@ async def main():
                 ir = eval_result.item_results[item_idx]
                 item = ir.item
                 pred = ir.report.score
+                pred_str = f"{pred:>10.3f}" if pred is not None else f"{'N/A':>10}"
                 expected = dataset.compute_weighted_score(item.ground_truth)
-                print(f"P{paper_idx + 1:<7} {cond:<20} {pred:>10.3f} {expected:>10.3f}")
+                print(f"P{paper_idx + 1:<7} {cond:<20} {pred_str} {expected:>10.3f}")
         if paper_idx < 2:
             print()
 

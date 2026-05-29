@@ -710,12 +710,17 @@ class EvaluationReport(BaseModel):
 
     Attributes:
         score: The final score (0-1 if normalized, raw weighted sum otherwise).
-        raw_score: The unnormalized weighted sum.
+            ``None`` only when grading FAILED (an error report); the normal grading
+            path always COMPUTES a real float. Consumers must skip ``None`` (most
+            already filter on ``error is not None``).
+        raw_score: The unnormalized weighted sum. ``None`` only on a failed/empty report.
         llm_raw_score: The original score returned by the LLM (same as raw_score).
         report: Per-criterion breakdown with verdicts and explanations.
         cannot_assess_count: Number of criteria with CANNOT_ASSESS verdict.
         error: Optional error message if grading failed (e.g., JSON parse error).
-            When set, score defaults to 0.0. Training pipelines should filter these out.
+            When set, score/raw_score are ``None`` (a failure has no score — a fabricated
+            0.0 is indistinguishable from a real catastrophic score). Training pipelines
+            should filter these out.
         token_usage: Aggregated token usage across all LLM calls made during grading.
             For CriterionGrader, this is the sum across all criterion evaluations.
         completion_cost: Total cost in USD for all LLM calls made during grading.
@@ -734,7 +739,7 @@ class EvaluationReport(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    score: float
+    score: float | None
     raw_score: float | None = None
     llm_raw_score: float | None = None
     report: list[CriterionReport] | None = None
@@ -939,12 +944,15 @@ class EnsembleEvaluationReport(BaseModel):
     Extends EvaluationReport with per-judge breakdown and agreement metrics.
 
     Attributes:
-        score: The final aggregated score (0-1 if normalized).
-        raw_score: The unnormalized weighted sum.
+        score: The final aggregated score (0-1 if normalized). ``None`` only when
+            grading FAILED (an error report, e.g. no judge results); the normal
+            grading path always COMPUTES a real float.
+        raw_score: The unnormalized weighted sum. ``None`` only on a failed/empty report.
         llm_raw_score: Same as raw_score (for compatibility with EvaluationReport).
         report: Per-criterion breakdown with ensemble voting details.
         judge_scores: Individual scores from each judge.
-        mean_agreement: Average agreement across all criteria.
+        mean_agreement: Average agreement across all criteria, or None when there
+            are no criteria to agree on (empty rubric) / agreement was not measured.
         cannot_assess_count: Number of criteria with CANNOT_ASSESS final verdict.
         token_usage: Total token usage across all judges.
         completion_cost: Total cost across all judges.
@@ -953,12 +961,12 @@ class EnsembleEvaluationReport(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    score: float
+    score: float | None
     raw_score: float | None = None
     llm_raw_score: float | None = None
     report: list[EnsembleCriterionReport] | None = None
     judge_scores: dict[str, float] = Field(default_factory=dict)
-    mean_agreement: float = 0.0
+    mean_agreement: float | None = None
     cannot_assess_count: int = 0
     token_usage: TokenUsage | None = None
     completion_cost: float | None = None

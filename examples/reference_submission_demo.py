@@ -91,7 +91,8 @@ convert CO2 into glucose. The overall equation is:
             reference_submission=ref,
         )
 
-        print(f"\nScore: {report.score:.2f}")
+        score_str = f"{report.score:.2f}" if report.score is not None else "N/A"
+        print(f"\nScore: {score_str}")
         for cr in report.report:
             print(f"  - {cr.name}: {cr.verdict.value} ({cr.reason})")
 

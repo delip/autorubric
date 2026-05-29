@@ -60,25 +60,34 @@ metrics = result.compute_metrics(
 )
 
 for judge_id, jm in metrics.per_judge.items():
-    print(f"{judge_id}: Accuracy={jm.criterion_accuracy:.1%}, RMSE={jm.score_rmse:.4f}")
+    # jm.criterion_accuracy is `float | None` (None when undefined); score_rmse is always a float.
+    acc = f"{jm.criterion_accuracy:.1%}" if jm.criterion_accuracy is not None else "n/a"
+    print(f"{judge_id}: Accuracy={acc}, RMSE={jm.score_rmse:.4f}")
 ```
 
 ## Metric Fields
 
+!!! note "`None` means genuinely undefined, never a fabricated `0.0`"
+
+    The numeric metric fields below are typed `float | None`. A field is `None`
+    when the metric is genuinely undefined for the data at hand — it is **never**
+    silently reported as a fake `0.0`. Always guard the format spec (e.g.
+    `f"{x:.2f}" if x is not None else "n/a"`) before printing these.
+
 | Field | Description |
 |-------|-------------|
-| `criterion_accuracy` | Overall accuracy across all criteria |
-| `criterion_precision` | Precision for MET class |
-| `criterion_recall` | Recall for MET class |
-| `criterion_f1` | F1 score for MET class |
-| `mean_kappa` | Mean Cohen's kappa across criteria |
-| `per_criterion` | Per-criterion metrics breakdown (polymorphic: `CriterionMetrics`, `OrdinalCriterionMetrics`, `NominalCriterionMetrics`) |
-| `score_rmse` | RMSE of cumulative scores |
-| `score_mae` | MAE of cumulative scores |
-| `score_spearman` | Spearman rank correlation |
-| `score_kendall` | Kendall tau correlation |
-| `score_pearson` | Pearson correlation |
-| `bias` | Systematic bias analysis (`BiasResult`) |
+| `criterion_accuracy` | Overall accuracy across all criteria. `float | None` — `None` when undefined (e.g. no paired predictions). |
+| `criterion_precision` | Precision for the binary MET class. `float | None` — `None` when not applicable, e.g. a **multi-choice-only** rubric (no binary MET class). |
+| `criterion_recall` | Recall for the binary MET class. `float | None` — `None` when not applicable (multi-choice-only rubric). |
+| `criterion_f1` | F1 for the binary MET class. `float | None` — `None` when not applicable (multi-choice-only rubric). |
+| `mean_kappa` | Mean Cohen's kappa across criteria. `float | None` — `None` when undefined (e.g. degenerate single-class). |
+| `per_criterion` | Per-criterion metrics breakdown (polymorphic: `CriterionMetrics`, `OrdinalCriterionMetrics`, `NominalCriterionMetrics`). Their per-criterion numeric fields (`accuracy`, `precision`, `recall`, `f1`, `kappa`, `weighted_kappa`, `adjacent_accuracy`, per-option metrics) are likewise `float | None` when undefined. |
+| `score_rmse` | RMSE of cumulative scores (always a `float`). |
+| `score_mae` | MAE of cumulative scores (always a `float`). |
+| `score_spearman` | Spearman rank correlation (`CorrelationResult`). Its `.coefficient` is `float | None` — `None` for a constant array or fewer than 3 samples. |
+| `score_kendall` | Kendall tau correlation (`CorrelationResult`). `.coefficient` is `float | None` (`None` for a constant array or < 3 samples). |
+| `score_pearson` | Pearson correlation (`CorrelationResult`). `.coefficient` is `float | None` (`None` for a constant array or < 3 samples). |
+| `bias` | Systematic bias analysis (`BiasResult`). Its `.mean_bias` / `.std_bias` are `float | None` — `mean_bias` is `None` at n=0 and `std_bias` is `None` for n < 2. |
 | `bootstrap` | Bootstrap confidence intervals (`BootstrapResults`, if enabled) |
 | `per_judge` | Per-judge metrics for ensemble (`dict[str, JudgeMetrics]`, if enabled) |
 | `n_items` | Number of items used in computation |

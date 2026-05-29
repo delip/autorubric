@@ -753,11 +753,15 @@ async def validate_ground_truth(
     on_item_complete: Callable[[], None] | None = None,
     _capture: list | None = None,
     _item_reports: list | None = None,
-) -> tuple[float, list[tuple[float, float]], float | None]:
+) -> tuple[float | None, list[tuple[float, float]], float | None]:
     """Grade validation items with the current rubric and compare against expected scores.
 
     Uses Spearman rank correlation when n >= 3, falls back to ``1 - MAE``
     when n < 3.
+
+    The correlation metric is ``None`` when it is genuinely undefined — a constant
+    rubric-score array (zero variance → Spearman NaN). ``None`` means "not measured" and
+    is handled gracefully by every consumer (it never counts as ``0.0``).
 
     Args:
         rubric: Current rubric to evaluate.
@@ -788,7 +792,15 @@ async def validate_ground_truth(
                 item.reference_submission or validation_data.reference_submission
             ),
         )
-        rubric_scores.append(result.score)
+        # A real validation submission always COMPUTES a float score; a None means the
+        # grade FAILED, and a correlation/MAE built on a fabricated fallback would be
+        # meaningless. Narrow it explicitly (and surface the failure) before use.
+        if result.score is None:
+            raise RuntimeError(
+                f"Ground-truth validation grading failed for item {i} (no score): {result.error}"
+            )
+        item_score = result.score
+        rubric_scores.append(item_score)
         total_cost += result.completion_cost or 0.0
 
         if _item_reports is not None:
@@ -799,9 +811,9 @@ async def validate_ground_truth(
                 {
                     "submission": item.submission[:200],
                     "description": item.description,
-                    "rubric_score": result.score,
+                    "rubric_score": item_score,
                     "expected_score": expected_scores[i],
-                    "gap": result.score - expected_scores[i],
+                    "gap": item_score - expected_scores[i],
                 }
             )
 
@@ -810,12 +822,15 @@ async def validate_ground_truth(
 
     per_item = list(zip(rubric_scores, expected_scores))
 
+    metric: float | None
     if len(rubric_scores) >= 3:
         corr, _ = spearmanr(rubric_scores, expected_scores)
-        # Handle NaN (constant arrays) as 0
-        if corr != corr:  # NaN check
-            corr = 0.0
-        metric = float(corr)
+        # A constant input array (zero variance) makes spearmanr return NaN: the
+        # correlation is genuinely undefined → None (never a fake 0.0, which would look
+        # like "no agreement" and could spuriously reject the revision). The consumers
+        # treat None as "not measured" (see ImprovementRunner / pareto_accept /
+        # _check_convergence / format_ground_truth_for_prompt).
+        metric = None if corr != corr else float(corr)  # corr != corr is the NaN check
     else:
         mae = sum(abs(r - e) for r, e in per_item) / len(per_item)
         metric = 1.0 - mae
@@ -892,7 +907,7 @@ def _format_error_criteria(
 
 
 def format_ground_truth_for_prompt(
-    correlation: float,
+    correlation: float | None,
     per_item: list[tuple[float, float]],
     *,
     item_reports: list[EnsembleEvaluationReport] | None = None,
@@ -901,7 +916,9 @@ def format_ground_truth_for_prompt(
     """Format ground-truth validation results as a self-contained prompt section.
 
     Args:
-        correlation: Spearman ρ or 1-MAE metric.
+        correlation: Spearman ρ or 1-MAE metric, or ``None`` when the correlation is
+            genuinely undefined (constant rubric-score array). ``None`` is rendered as
+            "n/a" in the header rather than a misleading 0.0.
         per_item: List of (rubric_score, expected_score) pairs.
         item_reports: Per-item grading reports from ``validate_ground_truth``.
             When provided, a diagnostics section is appended showing per-criterion
@@ -912,7 +929,8 @@ def format_ground_truth_for_prompt(
     Returns:
         Formatted section string with header, data, and instructions.
     """
-    lines: list[str] = [f"## Validation Against Ground Truth (Spearman ρ = {correlation:.2f})"]
+    corr_str = "n/a" if correlation is None else f"{correlation:.2f}"
+    lines: list[str] = [f"## Validation Against Ground Truth (Spearman ρ = {corr_str})"]
     for i, (rubric_score, expected_score) in enumerate(per_item, 1):
         gap = rubric_score - expected_score
         lines.append(
@@ -1017,7 +1035,7 @@ async def validate_agreement(
     *,
     on_sample_complete: Callable[[], None] | None = None,
     _capture: list | None = None,
-) -> tuple[float, dict[str, float], float | None]:
+) -> tuple[float | None, dict[str, float], float | None]:
     """Test inter-judge agreement by grading samples with an ensemble.
 
     Args:
@@ -1030,7 +1048,9 @@ async def validate_agreement(
             as serialized dicts for artifact persistence.
 
     Returns:
-        Tuple of (mean_agreement, per_criterion_agreement, total_cost).
+        Tuple of (mean_agreement, per_criterion_agreement, total_cost). The mean
+        is None when there was nothing to measure (no sample yielded a usable
+        ensemble report with a measured agreement) -- never a fabricated 0.0.
     """
     grader = CriterionGrader(judges=judges, aggregation="majority")
 
@@ -1041,7 +1061,10 @@ async def validate_agreement(
     for sample in samples:
         result = await rubric.grade(to_grade=sample, grader=grader, query=task_prompt)
         if isinstance(result, EnsembleEvaluationReport) and result.report:
-            all_agreements.append(result.mean_agreement)
+            # mean_agreement may be None (empty-rubric / not-measured); only an
+            # actually-measured value contributes to the mean (never coerce None).
+            if result.mean_agreement is not None:
+                all_agreements.append(result.mean_agreement)
             total_cost += result.completion_cost or 0.0
             for cr in result.report:
                 name = cr.criterion.name or cr.criterion.requirement[:30]
@@ -1066,7 +1089,7 @@ async def validate_agreement(
             on_sample_complete()
 
     if not all_agreements:
-        return 0.0, {}, total_cost if total_cost > 0 else None
+        return None, {}, total_cost if total_cost > 0 else None
 
     mean_agreement = sum(all_agreements) / len(all_agreements)
     per_criterion_agreement = {
@@ -1958,6 +1981,13 @@ class ImprovementRunner:
             )
 
             issues = extract_issues(quality_report)
+            # A meta-rubric quality eval normally COMPUTES a real float; a None score
+            # means the grading itself failed and the loop cannot proceed (a fabricated
+            # fallback would corrupt convergence/acceptance). Narrow it explicitly.
+            if quality_report.score is None:
+                raise RuntimeError(
+                    f"Meta-rubric quality evaluation failed (no score): {quality_report.error}"
+                )
             quality_score = quality_report.score
             iter_cost = quality_report.completion_cost or 0.0
             iter_usage = quality_report.token_usage

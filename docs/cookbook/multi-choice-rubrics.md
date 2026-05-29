@@ -211,8 +211,8 @@ async def main():
 
 result = asyncio.run(main())
 
-# Print results
-print(f"Overall Score: {result.score:.2f}\n")
+# Print results. result.score is `float | None` (None if the grade failed).
+print(f"Overall Score: {result.score:.2f}\n" if result.score is not None else "Overall Score: n/a\n")
 
 for criterion in result.report:
     name = criterion.name
@@ -501,7 +501,8 @@ async def main():
 
         print(f"\n{'─' * 70}")
         print(f"Review {i}: {review['description']}")
-        print(f"Score: {result.score:.2f}")
+        # result.score is `float | None` (None if the grade failed).
+        print(f"Score: {result.score:.2f}" if result.score is not None else "Score: n/a")
         print(f"{'─' * 70}")
 
         for cr in result.report:

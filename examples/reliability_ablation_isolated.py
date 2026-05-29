@@ -152,9 +152,13 @@ async def run_ablation() -> None:
             }
         )
 
+        acc_str = (
+            f"{metrics.criterion_accuracy:.1%}" if metrics.criterion_accuracy is not None else "N/A"
+        )
+        kappa_str = f"{metrics.mean_kappa:.3f}" if metrics.mean_kappa is not None else "N/A"
         print(
-            f"  accuracy={metrics.criterion_accuracy:.1%}  "
-            f"kappa={metrics.mean_kappa:.3f}  "
+            f"  accuracy={acc_str}  "
+            f"kappa={kappa_str}  "
             f"agreement={f'{mean_agreement:.1%}' if mean_agreement is not None else 'N/A':>6}  "
             f"cost=${cost:.2f}"
             if cost
@@ -169,11 +173,11 @@ async def run_ablation() -> None:
     )
     print("-" * 70)
     for r in results:
+        acc = f"{r['accuracy']:>7.1%}" if r["accuracy"] is not None else f"{'N/A':>7}"
+        kap = f"{r['kappa']:>6.3f}" if r["kappa"] is not None else f"{'N/A':>6}"
         agr = f"{r['agreement']:.1%}" if r["agreement"] is not None else "N/A"
         cst = f"${r['cost']:.2f}" if r["cost"] else "N/A"
-        print(
-            f"{r['config']:<16} | {r['accuracy']:>7.1%} | {r['kappa']:>6.3f} | {agr:>9} | {cst:>7}"
-        )
+        print(f"{r['config']:<16} | {acc} | {kap} | {agr:>9} | {cst:>7}")
     print("=" * 70)
 
     # Save JSON results

@@ -578,3 +578,70 @@ class TestCaKappa:
         assert "CANNOT_ASSESS Handling:" in text
         assert "CA in Ground Truth:" in text
         assert "CA Kappa:" in text
+
+
+class TestErroredReportExcludedFromScoreAggregation:
+    """Issue #7a: a report-level error (no item-level error) is EXCLUDED from the
+    score-level RMSE/correlation/bias arrays — not substituted with a fabricated 0.0."""
+
+    def _eval_with_one_errored_report(self, dataset, predictions):
+        """Build an EvalResult where item index 1's report carries error + score=None
+        WITHOUT an item-level error (so it passes the item_result.error is None gate
+        and reaches the score-aggregation logic)."""
+        base = create_mock_eval_result(dataset, predictions)
+        broken = base.item_results[1]
+        broken.report = EvaluationReport(
+            score=None,
+            raw_score=None,
+            report=broken.report.report,  # keep per-criterion verdicts intact
+            error="No judge results to aggregate",
+        )
+        # Crucially: NO item-level error, so it is not skipped at the item level.
+        assert broken.error is None
+        return base
+
+    def test_errored_report_excluded_from_score_rmse_and_bias(self):
+        dataset = create_mock_dataset()
+        predictions = [
+            [CriterionVerdict.MET, CriterionVerdict.MET],
+            [CriterionVerdict.MET, CriterionVerdict.UNMET],
+            [CriterionVerdict.UNMET, CriterionVerdict.MET],
+            [CriterionVerdict.UNMET, CriterionVerdict.UNMET],
+        ]
+
+        # Full eval but with item 1's report errored (score=None).
+        eval_with_error = self._eval_with_one_errored_report(dataset, predictions)
+
+        # Reference: a dataset+eval containing ONLY the 3 non-errored items.
+        good_dataset = create_mock_dataset()
+        # Drop item index 1 from both dataset and predictions.
+        del good_dataset.items[1]
+        good_preds = [predictions[0], predictions[2], predictions[3]]
+        good_eval = create_mock_eval_result(good_dataset, good_preds)
+
+        m_err = compute_metrics(eval_with_error, dataset)
+        m_good = compute_metrics(good_eval, good_dataset)
+
+        # Score-level metrics are computed over the SAME 3 good items in both, so they
+        # must match. If the errored item had been substituted with a fabricated 0.0,
+        # the RMSE / bias would differ.
+        assert m_err.score_rmse == pytest.approx(m_good.score_rmse)
+        assert m_err.bias.mean_bias == pytest.approx(m_good.bias.mean_bias)
+
+    def test_errored_item_still_counts_for_per_criterion(self):
+        """Per-criterion verdict handling is unchanged: the errored report's verdicts
+        still contribute (only the score-level arrays exclude it)."""
+        dataset = create_mock_dataset()
+        predictions = [
+            [CriterionVerdict.MET, CriterionVerdict.MET],
+            [CriterionVerdict.MET, CriterionVerdict.UNMET],
+            [CriterionVerdict.UNMET, CriterionVerdict.MET],
+            [CriterionVerdict.UNMET, CriterionVerdict.UNMET],
+        ]
+        eval_with_error = self._eval_with_one_errored_report(dataset, predictions)
+
+        m = compute_metrics(eval_with_error, dataset)
+        # All 4 items have ground truth, so n_items (items_with_ground_truth) is 4.
+        assert m.n_items == 4
+        # Per-criterion accuracy still sees the errored item's verdicts (perfect preds).
+        assert m.criterion_accuracy == 1.0

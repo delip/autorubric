@@ -42,6 +42,11 @@ load_dotenv()
 DATASET_PATH = Path(__file__).parent / "data" / "charm100.json"
 
 
+def fmt(value: float | None, spec: str, na: str = "N/A") -> str:
+    """Format an optional metric value, rendering None as N/A."""
+    return format(value, spec) if value is not None else na
+
+
 def format_confusion_matrix(matrix: list[list[int]], labels: list[str]) -> str:
     """Format a confusion matrix for display."""
     lines = []
@@ -174,22 +179,28 @@ async def main():
         if isinstance(cm, OrdinalCriterionMetrics):
             print(f"  Samples: {cm.n_samples}, Options: {cm.n_options}")
             print()
-            print(f"  Exact Accuracy:    {cm.exact_accuracy:.1%}")
-            print(f"  Adjacent Accuracy: {cm.adjacent_accuracy:.1%} (within ±1)")
+            print(f"  Exact Accuracy:    {fmt(cm.exact_accuracy, '.1%')}")
+            print(f"  Adjacent Accuracy: {fmt(cm.adjacent_accuracy, '.1%')} (within ±1)")
             print()
-            print(f"  Weighted Kappa:    {cm.weighted_kappa:.3f} ({cm.kappa_interpretation})")
+            print(
+                f"  Weighted Kappa:    {fmt(cm.weighted_kappa, '.3f')} ({cm.kappa_interpretation})"
+            )
             if cm.krippendorff_alpha is not None:
                 print(f"  Krippendorff α:    {cm.krippendorff_alpha:.3f}  (recommended)")
             if cm.fleiss_kappa is not None:
                 print(f"  Fleiss' Kappa:     {cm.fleiss_kappa:.3f}")
             print()
             print(
-                f"  Spearman rho:      {cm.spearman.coefficient:.3f} (p={cm.spearman.p_value:.4f})"
+                f"  Spearman rho:      {fmt(cm.spearman.coefficient, '.3f')} "
+                f"(p={fmt(cm.spearman.p_value, '.4f')})"
             )
-            print(f"  Kendall tau:       {cm.kendall.coefficient:.3f} (p={cm.kendall.p_value:.4f})")
+            print(
+                f"  Kendall tau:       {fmt(cm.kendall.coefficient, '.3f')} "
+                f"(p={fmt(cm.kendall.p_value, '.4f')})"
+            )
             print()
-            print(f"  RMSE:              {cm.rmse:.4f}")
-            print(f"  MAE:               {cm.mae:.4f}")
+            print(f"  RMSE:              {fmt(cm.rmse, '.4f')}")
+            print(f"  MAE:               {fmt(cm.mae, '.4f')}")
 
             # Per-option metrics
             print("\n  Per-Option Metrics:")
@@ -197,9 +208,10 @@ async def main():
             print(f"    {'-' * 30} {'-' * 8} {'-' * 8} {'-' * 8} {'-' * 8}")
             for opt in cm.per_option:
                 label = opt.label[:30]
-                print(
-                    f"    {label:<30} {opt.precision:>8.2f} {opt.recall:>8.2f} {opt.f1:>8.2f} {opt.support_true:>8}"
-                )
+                prec = fmt(opt.precision, ">8.2f", f"{'N/A':>8}")
+                rec = fmt(opt.recall, ">8.2f", f"{'N/A':>8}")
+                f1 = fmt(opt.f1, ">8.2f", f"{'N/A':>8}")
+                print(f"    {label:<30} {prec} {rec} {f1} {opt.support_true:>8}")
 
             # Confusion matrix
             print("\n  Confusion Matrix:")
@@ -210,8 +222,8 @@ async def main():
         elif isinstance(cm, NominalCriterionMetrics):
             print(f"  Samples: {cm.n_samples}, Options: {cm.n_options}")
             print()
-            print(f"  Exact Accuracy:    {cm.exact_accuracy:.1%}")
-            print(f"  Cohen's Kappa:     {cm.kappa:.3f} ({cm.kappa_interpretation})")
+            print(f"  Exact Accuracy:    {fmt(cm.exact_accuracy, '.1%')}")
+            print(f"  Cohen's Kappa:     {fmt(cm.kappa, '.3f')} ({cm.kappa_interpretation})")
             if cm.krippendorff_alpha is not None:
                 print(f"  Krippendorff α:    {cm.krippendorff_alpha:.3f}  (recommended)")
             if cm.fleiss_kappa is not None:
@@ -223,9 +235,10 @@ async def main():
             print(f"    {'-' * 30} {'-' * 8} {'-' * 8} {'-' * 8} {'-' * 8}")
             for opt in cm.per_option:
                 label = opt.label[:30]
-                print(
-                    f"    {label:<30} {opt.precision:>8.2f} {opt.recall:>8.2f} {opt.f1:>8.2f} {opt.support_true:>8}"
-                )
+                prec = fmt(opt.precision, ">8.2f", f"{'N/A':>8}")
+                rec = fmt(opt.recall, ">8.2f", f"{'N/A':>8}")
+                f1 = fmt(opt.f1, ">8.2f", f"{'N/A':>8}")
+                print(f"    {label:<30} {prec} {rec} {f1} {opt.support_true:>8}")
 
             # Confusion matrix
             print("\n  Confusion Matrix:")
@@ -237,11 +250,11 @@ async def main():
             # Binary criterion (BinaryCriterionMetrics)
             print(f"  Samples: {cm.n_samples}")
             print()
-            print(f"  Accuracy:          {cm.accuracy:.1%}")
-            print(f"  Precision:         {cm.precision:.2f}")
-            print(f"  Recall:            {cm.recall:.2f}")
-            print(f"  F1:                {cm.f1:.2f}")
-            print(f"  Cohen's Kappa:     {cm.kappa:.3f} ({cm.kappa_interpretation})")
+            print(f"  Accuracy:          {fmt(cm.accuracy, '.1%')}")
+            print(f"  Precision:         {fmt(cm.precision, '.2f')}")
+            print(f"  Recall:            {fmt(cm.recall, '.2f')}")
+            print(f"  F1:                {fmt(cm.f1, '.2f')}")
+            print(f"  Cohen's Kappa:     {fmt(cm.kappa, '.3f')} ({cm.kappa_interpretation})")
             if cm.krippendorff_alpha is not None:
                 print(f"  Krippendorff α:    {cm.krippendorff_alpha:.3f}  (recommended)")
             if cm.fleiss_kappa is not None:
@@ -259,12 +272,12 @@ async def main():
 
         # Compute true score
         true_score = dataset.compute_weighted_score(item.ground_truth)
-        score_error = abs(result.score - true_score)
+        score_error = abs(result.score - true_score) if result.score is not None else None
 
         print(f"\nItem {item_result.item_idx + 1}: {item.description}")
-        print(f"  Predicted Score: {result.score:.3f}")
+        print(f"  Predicted Score: {fmt(result.score, '.3f')}")
         print(f"  Actual Score:    {true_score:.3f}")
-        print(f"  Error:           {score_error:.3f}")
+        print(f"  Error:           {fmt(score_error, '.3f')}")
 
         if result.report:
             # Show per-criterion verdicts

@@ -22,9 +22,14 @@ from autorubric.meta import evaluate_rubric_standalone, evaluate_rubric_in_conte
 llm_config = LLMConfig(model="openai/gpt-4.1-mini", temperature=0.0)
 rubric = Rubric.from_file("my_rubric.json")
 
-# Standalone evaluation with terminal output
+# Standalone evaluation with terminal output. result.score is `float | None`
+# (None if the meta-rubric grade failed); guard before formatting.
 result = await evaluate_rubric_standalone(rubric, llm_config, display="stdout")
-print(f"Rubric quality score: {result.score:.2f}")
+print(
+    f"Rubric quality score: {result.score:.2f}"
+    if result.score is not None
+    else "Rubric quality score: n/a (grade failed)"
+)
 
 # In-context evaluation with HTML report
 result = await evaluate_rubric_in_context(

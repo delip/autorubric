@@ -46,7 +46,8 @@ async def main():
         query=prompt,
     )
 
-    print(f"\nScore: {result.score:.2f}\n")
+    score_str = f"{result.score:.2f}" if result.score is not None else "N/A"
+    print(f"\nScore: {score_str}\n")
 
     # Display per-criterion explanations
     for cr in result.report:

@@ -218,12 +218,16 @@ async def compare_thinking_modes():
         to_grade=security_report, grader=grader_thinking, query=query
     )
 
+    # result.score is `float | None` (None if the grade failed); render None as "n/a".
+    def fmt(x):
+        return f"{x:.2f}" if x is not None else "n/a"
+
     print("Without Thinking:")
-    print(f"  Score: {basic_result.score:.2f}")
+    print(f"  Score: {fmt(basic_result.score)}")
     print(f"  Cost: ${basic_result.completion_cost:.4f}")
 
     print("\nWith High Thinking:")
-    print(f"  Score: {thinking_result.score:.2f}")
+    print(f"  Score: {fmt(thinking_result.score)}")
     print(f"  Cost: ${thinking_result.completion_cost:.4f}")
 ```
 
@@ -497,9 +501,13 @@ async def main():
             query="Evaluate this security vulnerability report for technical accuracy."
         )
 
+        # .score is `float | None` (None if the grade failed); render None as "n/a".
+        def fmt(x):
+            return f"{x:.2f}" if x is not None else "n/a"
+
         print(f"\n{'GPT-4-mini (no thinking)':<30} | {'Claude Sonnet (high thinking)':<30}")
         print("-" * 62)
-        print(f"Score: {basic_result.score:.2f}{'':<22} | Score: {thinking_result.score:.2f}")
+        print(f"Score: {fmt(basic_result.score)}{'':<22} | Score: {fmt(thinking_result.score)}")
         print(f"Cost: ${basic_result.completion_cost or 0:.4f}{'':<20} | Cost: ${thinking_result.completion_cost or 0:.4f}")
 
         # Compare verdicts

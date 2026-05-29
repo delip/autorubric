@@ -1534,6 +1534,57 @@ class TestValidateAgreementCallback:
         assert agreement > 0
 
     @pytest.mark.asyncio
+    async def test_no_usable_sample_mean_agreement_is_none(self):
+        """Issue #6a: no usable ensemble report -> mean is None, not 0.0.
+
+        When no sample yields a usable ensemble report (empty/missing report),
+        there is nothing to measure, so validate_agreement returns None for the
+        mean (never a fabricated 0.0 "total disagreement").
+        """
+        rubric = Rubric([Criterion(name="x", weight=1.0, requirement="Test")])
+        samples = ["sample1", "sample2"]
+
+        # An ensemble report with a falsy .report is not a usable sample.
+        unusable = _make_ensemble_report([], score=0.0)
+        unusable.report = None
+
+        with patch.object(rubric, "grade", new_callable=AsyncMock, return_value=unusable):
+            agreement, per_crit, cost = await validate_agreement(
+                rubric,
+                samples,
+                [JudgeSpec(llm_config=LLMConfig(model="test"), judge_id="j1")],
+            )
+
+        assert agreement is None
+        assert per_crit == {}
+
+    @pytest.mark.asyncio
+    async def test_none_mean_agreement_samples_yield_none(self):
+        """Issue #6a/#6b: samples whose mean_agreement is None contribute nothing.
+
+        A usable ensemble report may now carry mean_agreement=None (empty-rubric
+        path). validate_agreement must guard against appending None into the mean
+        computation; if every usable sample is None, the overall mean is None.
+        """
+        rubric = Rubric([Criterion(name="x", weight=1.0, requirement="Test")])
+        samples = ["sample1"]
+
+        report = _make_ensemble_report(
+            [_make_ensemble_criterion_report("x", 1.0, CriterionVerdict.MET)],
+            score=1.0,
+        )
+        report.mean_agreement = None
+
+        with patch.object(rubric, "grade", new_callable=AsyncMock, return_value=report):
+            agreement, per_crit, _ = await validate_agreement(
+                rubric,
+                samples,
+                [JudgeSpec(llm_config=LLMConfig(model="test"), judge_id="j1")],
+            )
+
+        assert agreement is None
+
+    @pytest.mark.asyncio
     async def test_agreement_cost_accumulation(self):
         rubric = Rubric([Criterion(name="x", weight=1.0, requirement="Test")])
         samples = ["s1", "s2"]
@@ -2281,6 +2332,103 @@ class TestValidateGroundTruth:
 
         # Perfect match: MAE=0, so metric = 1 - 0 = 1.0
         assert metric == pytest.approx(1.0)
+
+    @pytest.mark.asyncio
+    async def test_constant_rubric_scores_metric_none(self):
+        """When n >= 3 but every graded rubric score is identical (constant array),
+        Spearman is genuinely undefined (NaN). The returned metric must be None — NOT a
+        fake 0.0 (which would falsely look like "no correlation" and could spuriously
+        reject the revision under the Pareto constraint)."""
+        rubric = Rubric(
+            [
+                Criterion(name="a", weight=10.0, requirement="First"),
+            ]
+        )
+        # Ground truth varies (so expected_scores vary), but the rubric grades every
+        # item identically → rubric_scores is a constant array.
+        dataset = RubricDataset(
+            prompt="task",
+            rubric=rubric,
+            items=[
+                DataItem(submission="s1", description="d1", ground_truth=[CriterionVerdict.MET]),
+                DataItem(submission="s2", description="d2", ground_truth=[CriterionVerdict.UNMET]),
+                DataItem(submission="s3", description="d3", ground_truth=[CriterionVerdict.MET]),
+            ],
+        )
+        expected_scores = compute_expected_scores(dataset)
+        # Sanity: expected scores genuinely vary, so the NaN comes from the constant
+        # rubric-score axis (not from both axes being constant).
+        assert len(set(expected_scores)) > 1
+
+        report_met = _make_ensemble_report(
+            [_make_ensemble_criterion_report("a", 10.0, CriterionVerdict.MET)],
+            score=1.0,
+        )
+
+        grader = CriterionGrader(llm_config=LLMConfig(model="test"))
+
+        with patch.object(
+            rubric,
+            "grade",
+            new_callable=AsyncMock,
+            side_effect=[report_met, report_met, report_met],
+        ):
+            metric, per_item, cost = await validate_ground_truth(
+                rubric,
+                dataset,
+                expected_scores,
+                grader,
+            )
+
+        # Constant rubric scores → Spearman undefined → None, never a fake 0.0.
+        assert metric is None
+        assert len(per_item) == 3
+
+
+# ============================================================================
+# Issue #2 — None agreement flows through the improvement-loop consumers
+#   gracefully (no crash, no spurious rejection). The agreement value returned
+#   by validate_ground_truth can now be None (undefined correlation).
+# ============================================================================
+
+
+class TestNoneAgreementConsumers:
+    def test_pareto_accept_none_current_agreement_does_not_reject(self):
+        """A None current agreement (undefined correlation) must NOT trigger a Pareto
+        regression rejection — None means 'not measured', so the revision is accepted."""
+        accepted, reason = _pareto_accept(None, 0.9, True, 0)
+        assert accepted is True
+        assert reason is None
+
+    def test_check_convergence_none_agreement_not_thresholds_met(self):
+        """A None agreement is 'not measured' → the agreement threshold is NOT satisfied
+        when validation_data is present, and the loop does not crash."""
+        config = ImprovementConfig(
+            eval_llm=LLMConfig(model="test-model"),
+            revision_llm=LLMConfig(model="test-model"),
+            max_iterations=10,
+            min_quality_score=0.95,
+            min_agreement=0.85,
+        )
+        # validation_data present → agreement must be measured & met for thresholds_met.
+        config.validation_data = RubricDataset(
+            prompt="p", rubric=Rubric([_make_criterion("c")]), name="v"
+        )
+        state = _ConvergenceState()
+        issues = [_make_issue("x")]
+        # High quality but None agreement → NOT thresholds_met (returns None to continue).
+        result = _check_convergence(0, issues, 0.99, None, config, state, 0.0)
+        assert result != "thresholds_met"
+
+    def test_format_ground_truth_for_prompt_none_correlation_renders_na(self):
+        """format_ground_truth_for_prompt must not crash on a None correlation (undefined
+        Spearman); it renders the coefficient as 'n/a' in the header."""
+        result = format_ground_truth_for_prompt(None, [(0.5, 0.5), (0.5, 0.6)])
+        assert isinstance(result, str)
+        assert result.startswith("## Validation Against Ground Truth")
+        assert "n/a" in result
+        # Per-item lines still render normally.
+        assert "Submission 1" in result
 
 
 # ============================================================================

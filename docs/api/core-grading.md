@@ -30,7 +30,8 @@ rubric = Rubric.from_file("rubric.yaml")
 grader = CriterionGrader(llm_config=LLMConfig(model="openai/gpt-4.1-mini"))
 result = await rubric.grade(to_grade="...", grader=grader)
 
-print(f"Score: {result.score:.2f}")
+# result.score is `float | None` (None if the grade failed); guard before formatting.
+print(f"Score: {result.score:.2f}" if result.score is not None else "Score: n/a (grade failed)")
 for cr in result.report:
     print(f"  [{cr.verdict}] {cr.criterion.requirement}")
     print(f"    Reason: {cr.reason}")

@@ -73,7 +73,9 @@ Structure the explanations into a readable feedback report:
 
 ```python
 def format_feedback(result):
-    lines = [f"Overall Score: {result.score:.0%}\n"]
+    # result.score is `float | None` (None if the grade failed); render None as "n/a".
+    score_line = f"Overall Score: {result.score:.0%}\n" if result.score is not None else "Overall Score: n/a\n"
+    lines = [score_line]
 
     met = [cr for cr in result.report if cr.verdict and cr.verdict.value == "MET" and cr.weight > 0]
     unmet = [cr for cr in result.report if cr.verdict and cr.verdict.value == "UNMET" and cr.weight > 0]
@@ -190,7 +192,9 @@ DATASET_PATH = Path(__file__).parent / "examples" / "data" / "essay_grading_data
 
 def format_feedback(result):
     """Format grading result as student-readable feedback."""
-    lines = [f"Overall Score: {result.score:.0%}\n"]
+    # result.score is `float | None` (None if the grade failed); render None as "n/a".
+    score_line = f"Overall Score: {result.score:.0%}\n" if result.score is not None else "Overall Score: n/a\n"
+    lines = [score_line]
 
     met = [cr for cr in result.report if cr.verdict and cr.verdict.value == "MET" and cr.weight > 0]
     unmet = [cr for cr in result.report if cr.verdict and cr.verdict.value == "UNMET" and cr.weight > 0]

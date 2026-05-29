@@ -339,10 +339,12 @@ async def main():
             manifest = json.load(f)
         print(f"\nCheckpoint master_seed: {manifest['grader_config'].get('master_seed')}")
 
-    # Print scores
+    # Print scores. report.score is `float | None` (None if that item's grade failed).
     print("\nScores:")
     for item_result in result.item_results:
-        print(f"  Item {item_result.item_idx}: {item_result.report.score:.2f}")
+        score = item_result.report.score
+        score_str = f"{score:.2f}" if score is not None else "n/a"
+        print(f"  Item {item_result.item_idx}: {score_str}")
 
 
 if __name__ == "__main__":

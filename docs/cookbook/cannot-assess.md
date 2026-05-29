@@ -183,7 +183,9 @@ async def compare_strategies():
             query=query
         )
 
-        print(f"{name:<15} {result.score:>8.2f} {result.cannot_assess_count:>10}")
+        # result.score is `float | None` (None if the grade failed).
+        score_str = f"{result.score:>8.2f}" if result.score is not None else f"{'n/a':>8}"
+        print(f"{name:<15} {score_str} {result.cannot_assess_count:>10}")
 
 asyncio.run(compare_strategies())
 ```
@@ -411,7 +413,9 @@ async def main():
 
             verdict_str = " ".join(verdicts)
 
-            print(f"{name:<12} {result.score:>8.2f} {result.cannot_assess_count:>5} | {verdict_str}")
+            # result.score is `float | None` (None if the grade failed).
+            score_str = f"{result.score:>8.2f}" if result.score is not None else f"{'n/a':>8}"
+            print(f"{name:<12} {score_str} {result.cannot_assess_count:>5} | {verdict_str}")
 
     # Detailed analysis of one response
     print("\n" + "=" * 80)

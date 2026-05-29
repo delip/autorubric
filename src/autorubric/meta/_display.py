@@ -123,9 +123,16 @@ def display_to_stdout(
     score_table.add_column("Label", style="bold")
     score_table.add_column("Value")
 
-    score_color = "green" if result.score >= 0.7 else "yellow" if result.score >= 0.5 else "red"
-    score_table.add_row("Score", Text(f"{result.score:.2f}", style=score_color))
-    score_table.add_row("Raw Score", f"{result.raw_score:.2f}")
+    # A grade-FAILURE has no score (score=None): render "n/a" with a neutral/red color.
+    if result.score is None:
+        score_color = "red"
+        score_text = "n/a"
+    else:
+        score_color = "green" if result.score >= 0.7 else "yellow" if result.score >= 0.5 else "red"
+        score_text = f"{result.score:.2f}"
+    score_table.add_row("Score", Text(score_text, style=score_color))
+    raw_score_text = "n/a" if result.raw_score is None else f"{result.raw_score:.2f}"
+    score_table.add_row("Raw Score", raw_score_text)
     if result.completion_cost:
         score_table.add_row("Cost", f"${result.completion_cost:.6f}")
 
@@ -218,13 +225,20 @@ def render_to_html(
     section_mapping = _load_section_mapping(meta_rubric_path)
     sections, issues_found = _group_criteria_by_section(result, section_mapping)
 
-    score_color = (
-        _color_to_css("green")
-        if result.score >= 0.7
-        else _color_to_css("yellow")
-        if result.score >= 0.5
-        else _color_to_css("red")
-    )
+    # A grade-FAILURE has no score (score=None): render "n/a" with a neutral/red color.
+    if result.score is None:
+        score_color = _color_to_css("red")
+        score_text = "n/a"
+    else:
+        score_color = (
+            _color_to_css("green")
+            if result.score >= 0.7
+            else _color_to_css("yellow")
+            if result.score >= 0.5
+            else _color_to_css("red")
+        )
+        score_text = f"{result.score:.2f}"
+    raw_score_text = "n/a" if result.raw_score is None else f"{result.raw_score:.2f}"
 
     html_parts = [
         """<!DOCTYPE html>
@@ -392,9 +406,9 @@ def render_to_html(
         <div class="panel-body">
             <div class="results-grid">
                 <span class="results-label">Score</span>
-                <span style="color: {score_color}; font-weight: 600;">{result.score:.2f}</span>
+                <span style="color: {score_color}; font-weight: 600;">{score_text}</span>
                 <span class="results-label">Raw Score</span>
-                <span>{result.raw_score:.2f}</span>
+                <span>{raw_score_text}</span>
                 {cost_html}
             </div>
         </div>

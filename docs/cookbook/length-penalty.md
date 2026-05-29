@@ -189,8 +189,12 @@ async def main():
     concise_words = len(concise_summary.split())
     verbose_words = len(verbose_summary.split())
 
-    print(f"Concise ({concise_words} words): Score = {concise_result.score:.2f}")
-    print(f"Verbose ({verbose_words} words): Score = {verbose_result.score:.2f}")
+    # result.score is `float | None` (None if the grade failed); render None as "n/a".
+    def fmt(x):
+        return f"{x:.2f}" if x is not None else "n/a"
+
+    print(f"Concise ({concise_words} words): Score = {fmt(concise_result.score)}")
+    print(f"Verbose ({verbose_words} words): Score = {fmt(verbose_result.score)}")
 
 asyncio.run(main())
 ```
@@ -478,11 +482,19 @@ async def main():
             query="Summarize Q3 business performance for executive review."
         )
 
-        delta = result_with_pen.score - result_no_pen.score
-        delta_str = f"{delta:+.2f}" if delta != 0 else "0.00"
+        # .score is `float | None` (None if the grade failed); only diff when both defined.
+        with_pen, no_pen = result_with_pen.score, result_no_pen.score
+        if with_pen is not None and no_pen is not None:
+            delta = with_pen - no_pen
+            delta_str = f"{delta:+.2f}" if delta != 0 else "0.00"
+        else:
+            delta_str = "n/a"
 
-        print(f"{summary['description']:<35} {word_count:>6} {result_no_pen.score:>8.2f} "
-              f"{result_with_pen.score:>9.2f} {delta_str:>7}")
+        def cell(x):
+            return f"{x:>8.2f}" if x is not None else f"{'n/a':>8}"
+
+        print(f"{summary['description']:<35} {word_count:>6} {cell(no_pen)} "
+              f"{cell(with_pen)} {delta_str:>7}")
 
     # Detailed breakdown for one example
     print("\n" + "=" * 75)
@@ -497,8 +509,9 @@ async def main():
     )
 
     print(f"Word count: {len(verbose['text'].split())}")
-    print(f"Final score: {result.score:.2f}")
-    print(f"Raw score: {result.raw_score:.2f}")
+    # score / raw_score are `float | None` (None if the grade failed); guard before formatting.
+    print(f"Final score: {result.score:.2f}" if result.score is not None else "Final score: n/a")
+    print(f"Raw score: {result.raw_score:.2f}" if result.raw_score is not None else "Raw score: n/a")
     print("\nPer-criterion verdicts:")
     for cr in result.report:
         verdict = cr.verdict.value

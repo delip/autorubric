@@ -105,13 +105,13 @@ async def main():
         item = item_result.item
 
         true_score = dataset.compute_weighted_score(item.ground_truth)
-        score_error = abs(result.score - true_score)
+        score_error = abs(result.score - true_score) if result.score is not None else None
+
+        pred_str = f"{result.score:.3f}" if result.score is not None else "N/A"
+        error_str = f"{score_error:.3f}" if score_error is not None else "N/A"
 
         print(f"\nItem {item_result.item_idx + 1}: {item.description}")
-        print(
-            f"  Scores: Predicted={result.score:.3f} | Actual={true_score:.3f} "
-            f"| Error={score_error:.3f}"
-        )
+        print(f"  Scores: Predicted={pred_str} | Actual={true_score:.3f} | Error={error_str}")
         if result.cannot_assess_count > 0:
             print(f"  Could not assess: {result.cannot_assess_count} criteria")
         print(f"  Duration: {item_result.duration_seconds:.2f}s")
@@ -134,8 +134,10 @@ async def main():
         item = item_result.item
         pred = item_result.report.score
         actual = dataset.compute_weighted_score(item.ground_truth)
-        error = abs(pred - actual)
-        print(f"{item_result.item_idx + 1:<10} {pred:>12.3f} {actual:>12.3f} {error:>12.3f}")
+        error = abs(pred - actual) if pred is not None else None
+        pred_cell = f"{pred:>12.3f}" if pred is not None else f"{'N/A':>12}"
+        error_cell = f"{error:>12.3f}" if error is not None else f"{'N/A':>12}"
+        print(f"{item_result.item_idx + 1:<10} {pred_cell} {actual:>12.3f} {error_cell}")
 
     # EvalRunner timing stats
     print("\n" + "-" * 80)

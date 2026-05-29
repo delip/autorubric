@@ -334,7 +334,7 @@ def _deserialize_ensemble_report(
         llm_raw_score=report_data.get("raw_score"),
         report=ensemble_reports,
         judge_scores=report_data.get("judge_scores", {}),
-        mean_agreement=report_data.get("mean_agreement", 0.0),
+        mean_agreement=report_data.get("mean_agreement"),
         token_usage=token_usage,
         completion_cost=report_data.get("completion_cost"),
         error=report_data.get("error"),
@@ -550,8 +550,17 @@ class EvalResult:
     experiment_dir: Path | None = None
 
     def get_scores(self) -> list[float]:
-        """Extract scores from all successful results."""
-        return [r.report.score for r in self.item_results if r.error is None]
+        """Extract scores from all successful results.
+
+        A grade-FAILURE has no score (``report.score is None``); such results are
+        skipped. This subsumes the item-level ``error`` filter and also drops a
+        report-level error that carried no item-level error.
+        """
+        return [
+            r.report.score
+            for r in self.item_results
+            if r.error is None and r.report.score is not None
+        ]
 
     def get_reports(self) -> list[EvaluationReport | EnsembleEvaluationReport]:
         """Extract reports from all successful results."""
@@ -1216,10 +1225,14 @@ class EvalRunner:
         )
 
     def _create_error_report(self, error_msg: str) -> EvaluationReport:
-        """Create an error report for failed items."""
+        """Create an error report for failed items.
+
+        A grade-FAILURE has no score: ``score``/``raw_score`` are ``None`` (never a
+        fabricated 0.0, which is indistinguishable from a real catastrophic score).
+        """
         return EvaluationReport(
-            score=0.0,
-            raw_score=0.0,
+            score=None,
+            raw_score=None,
             error=error_msg,
         )
 

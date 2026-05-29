@@ -445,12 +445,12 @@ async def run_batch_evaluation():
         print(f"  Min: {min(scores):.2f}")
         print(f"  Max: {max(scores):.2f}")
 
-    # Sample results
+    # Sample results. report.score is `float | None` (None if that item's grade failed).
     print(f"\nSample Results:")
     for item_result in result.item_results[:5]:
         score = item_result.report.score
         desc = item_result.item.description
-        print(f"  {desc}: {score:.2f}")
+        print(f"  {desc}: {score:.2f}" if score is not None else f"  {desc}: n/a")
 
     return result
 
