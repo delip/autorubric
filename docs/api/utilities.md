@@ -49,7 +49,7 @@ input1 = "plain text"
 input2 = {"thinking": "...", "output": "..."}
 input3 = "<thinking>...</thinking><output>...</output>"
 
-normalized = normalize_to_grade_input(input1)  # {'thinking': None, 'output': 'plain text'}
+normalized = normalize_to_grade_input(input1)  # {'thinking': '', 'output': 'plain text'}
 normalized = normalize_to_grade_input(input2)  # passes through
 normalized = normalize_to_grade_input(input3)  # parses markers
 ```
@@ -86,24 +86,26 @@ async def generate_labels():
 
 ```python
 from autorubric import (
+    CriterionVerdict,
     extract_verdicts_from_report,
     filter_cannot_assess,
     verdict_to_binary,
     verdict_to_string,
 )
 
-# Extract verdicts from evaluation report
-verdicts = extract_verdicts_from_report(result.report)
+# Extract verdicts from an evaluation report (pass the report object plus a
+# criterion count)
+pred_verdicts = extract_verdicts_from_report(result.report, num_criteria=len(rubric.rubric))
+true_verdicts = extract_verdicts_from_report(reference.report, num_criteria=len(rubric.rubric))
 
-# Filter out CANNOT_ASSESS
-filtered = filter_cannot_assess(verdicts)
+# Filter out CANNOT_ASSESS (drops pairs where either side abstains; returns a tuple)
+filtered_pred, filtered_true = filter_cannot_assess(pred_verdicts, true_verdicts)
 
-# Convert to binary (for metrics)
-binary = verdict_to_binary(CriterionVerdict.MET)  # 1
-binary = verdict_to_binary(CriterionVerdict.UNMET)  # 0
+# Convert to binary (for metrics) — takes a sequence, returns a list
+binary = verdict_to_binary([CriterionVerdict.MET, CriterionVerdict.UNMET])  # [1, 0]
 
-# Convert to string
-string = verdict_to_string(CriterionVerdict.MET)  # "MET"
+# Convert to string — takes a sequence, returns a list
+strings = verdict_to_string([CriterionVerdict.MET])  # ["MET"]
 ```
 
 ---

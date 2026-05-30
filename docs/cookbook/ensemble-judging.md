@@ -260,7 +260,7 @@ grader = CriterionGrader(
 
 With these weights:
 
-- GPT-4 MET + others UNMET → Total weight: 2 MET vs 2 UNMET → Tie (defaults to UNMET)
+- GPT-4 MET + others UNMET → Total weight: 2 MET vs 2 UNMET → Tie (resolves to UNMET for positive-weight criteria)
 - GPT-4 MET + one other MET → Total weight: 3 MET vs 1 UNMET → MET wins
 
 | GPT-4 Vote | GPT-4-Mini Vote | Gemini Flash Vote | Weight (MET vs UNMET) | Result |
@@ -271,10 +271,14 @@ With these weights:
 | UNMET      | MET             | MET                | 2 vs 2                | UNMET  |
 | UNMET      | UNMET           | UNMET              | 0 vs 4                | UNMET  |
 
-!!! warning "Tie-breaking defaults to UNMET"
-    When weighted votes are perfectly split, the aggregation defaults to UNMET.
-    This is a conservative choice that avoids false positives in quality
-    assurance. Adjust judge weights to reduce the likelihood of ties.
+!!! warning "Tie-breaking resolves to the score-minimizing (worst-case) verdict"
+    When weighted votes are perfectly split, the aggregation resolves to the
+    weight-sign-aware worst case (`_binary_worst_verdict` / `Criterion.worst_option_among`).
+    For positive- (and zero-) weight criteria this is UNMET — the conservative
+    choice that avoids false positives in quality assurance. For negative-weight
+    criteria such as `red_flags`, the worst (score-minimizing) outcome is instead
+    MET, since marking the penalty as MET subtracts the full weight. Adjust judge
+    weights to reduce the likelihood of ties.
 
 ## Key Takeaways
 

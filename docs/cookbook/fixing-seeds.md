@@ -124,8 +124,12 @@ async def main():
         report = item_result.report
         if report.report:
             for cr in report.report:
-                if cr.shuffle_order is not None:
-                    print(f"  {cr.name}: shuffle_order={cr.shuffle_order}")
+                # The aggregate report never sets shuffle_order; it is recorded on
+                # each per-judge vote. For a single judge, read vote 0.
+                if cr.multi_choice_votes:
+                    shuffle_order = cr.multi_choice_votes[0].shuffle_order
+                    if shuffle_order is not None:
+                        print(f"  {cr.criterion.name}: shuffle_order={shuffle_order}")
 
 asyncio.run(main())
 ```
@@ -133,11 +137,11 @@ asyncio.run(main())
 Output:
 
 ```
-  accuracy: shuffle_order=[2, 0, 3, 1]
-  conciseness: shuffle_order=[1, 2, 0]
+  accuracy: shuffle_order=[4, 2, 3, 1, 0]
+  conciseness: shuffle_order=[0, 1, 3, 2]
 ```
 
-The `shuffle_order` maps shuffled position to original index. Here, the LLM saw accuracy options in the order `[Accurate, Inaccurate, Highly accurate, Partially accurate]` instead of the original order.
+The `shuffle_order` maps shuffled position to original index. Note that with the default `auto_na_option=True`, the grader appends a canonical "Cannot assess / not applicable" option to every multi-choice criterion before shuffling—so accuracy's four declared options become five (and conciseness's three become four), growing each `shuffle_order` by one. Here, the LLM saw accuracy options in the order `[Cannot assess / not applicable, Accurate, Highly accurate, Partially accurate, Inaccurate]` instead of the original order. (With `auto_na_option=False` the lengths would be 4 and 3.)
 
 ### Step 5: Verify Reproducibility
 
@@ -162,7 +166,11 @@ async def verify_reproducibility():
     # Shuffle orders are identical
     for a, b in zip(result_a.item_results, result_b.item_results):
         for cr_a, cr_b in zip(a.report.report, b.report.report):
-            assert cr_a.shuffle_order == cr_b.shuffle_order
+            assert cr_a.criterion.name == cr_b.criterion.name
+            # shuffle_order lives on the per-judge votes (single judge here, vote 0).
+            order_a = cr_a.multi_choice_votes[0].shuffle_order
+            order_b = cr_b.multi_choice_votes[0].shuffle_order
+            assert order_a == order_b
     print("Shuffle orders match across runs.")
 
 asyncio.run(verify_reproducibility())
@@ -329,8 +337,11 @@ async def main():
         print(f"\nItem {item_result.item_idx}: {item_result.item.description}")
         if item_result.report.report:
             for cr in item_result.report.report:
-                if cr.shuffle_order is not None:
-                    print(f"  {cr.name}: {cr.shuffle_order}")
+                # shuffle_order is recorded per-judge, not on the aggregate report.
+                if cr.multi_choice_votes:
+                    shuffle_order = cr.multi_choice_votes[0].shuffle_order
+                    if shuffle_order is not None:
+                        print(f"  {cr.criterion.name}: {shuffle_order}")
 
     # Verify seed in checkpoint
     manifest_path = Path("experiments/seeded-review-eval/manifest.json")

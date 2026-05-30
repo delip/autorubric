@@ -69,6 +69,17 @@ The specific data can be found on page 47 of the annual report.
 # it cannot verify the WHO report claim without access to the document.
 ```
 
+!!! note "Genuine vs. error-induced abstains"
+    `CANNOT_ASSESS` is not only a genuine epistemic abstain. The grader also
+    *synthesizes* it from judge-call failures: failures are routed through
+    `classify_grading_error`, where `infrastructure`/`parse` errors map to
+    `CANNOT_ASSESS` (excluded from scoring under the default `SKIP`), while an
+    `unknown` error maps to the conservative worst case instead. `cannot_assess_count`
+    counts both genuine and error-induced abstains. To tell them apart, inspect each
+    report's `criterion.is_error` (or the category-prefixed `criterion.error` string):
+    `True` means the verdict was driven entirely by a judge-call failure rather than a
+    real judgment.
+
 ```mermaid
 flowchart LR
     J[Judge Evaluates Criterion] --> V{Verdict?}
@@ -135,6 +146,14 @@ grader_fail = CriterionGrader(
 | `ZERO` | Counts as UNMET | Lower (0 contribution) | Burden of proof on response |
 | `PARTIAL` | Partial weight credit | Middle ground | Balanced uncertainty handling |
 | `FAIL` | Worst case (UNMET for positive, MET for negative) | Lowest | Safety-critical applications |
+
+!!! note "These strategies also govern multi-choice NA"
+    The same `SKIP`/`ZERO`/`PARTIAL`/`FAIL` strategies are applied uniformly to
+    multi-choice NA options (not just binary `CANNOT_ASSESS`) by the shared
+    `scoring.score_reports` core. For multi-choice criteria, `FAIL` uses the
+    weight-sign-aware worst *scored* option (`Criterion.worst_scored_option()`)—the
+    lowest-value option for positive weights, the highest-value option for negative
+    weights. See [Multi-Choice Rubrics](multi-choice-rubrics.md) for NA options.
 
 !!! tip "Choosing a default strategy"
     SKIP is the safest default because it avoids penalizing submissions for criteria the judge genuinely cannot evaluate. The denominator shrinks, so assessed criteria still receive their full weight. However, ZERO or FAIL may be more appropriate when the inability to assess itself signals a problem -- for instance, if a response lacks citations and citation quality is a criterion, the missing evidence is the finding.
@@ -215,9 +234,10 @@ print(f"Could not assess: {result.cannot_assess_count}")
 
 # Identify which criteria caused issues
 for criterion in result.report:
-    if criterion.verdict == CriterionVerdict.CANNOT_ASSESS:
-        print(f"\nCANNOT_ASSESS: {criterion.name}")
-        print(f"  Reason: {criterion.reason}")
+    if criterion.final_verdict == CriterionVerdict.CANNOT_ASSESS:
+        kind = "error-induced" if criterion.is_error else "genuine"
+        print(f"\nCANNOT_ASSESS ({kind}): {criterion.criterion.name}")
+        print(f"  Reason: {criterion.final_reason}")
 ```
 
 !!! warning "High CANNOT_ASSESS Rates"
@@ -235,6 +255,7 @@ for criterion in result.report:
 - **ZERO** puts burden of proof on the response
 - **PARTIAL** offers a configurable middle ground
 - **FAIL** is conservative for safety-critical applications
+- **`CANNOT_ASSESS` can be error-synthesized**, not just a genuine abstain—use `criterion.is_error`/`criterion.error` to distinguish judge-call failures from real "insufficient evidence" verdicts (both are counted by `cannot_assess_count`)
 - **Monitor `cannot_assess_count`** to identify problematic criteria
 
 ## Going Further
@@ -403,7 +424,7 @@ async def main():
             # Summarize verdicts
             verdicts = []
             for cr in result.report:
-                v = cr.verdict.value
+                v = cr.final_verdict.value if cr.final_verdict is not None else None
                 if v == "MET":
                     verdicts.append("✓")
                 elif v == "UNMET":
@@ -436,11 +457,11 @@ async def main():
     )
 
     for cr in result.report:
-        status = cr.verdict.value
-        name = cr.name
+        status = cr.final_verdict.value if cr.final_verdict is not None else "N/A"
+        name = cr.criterion.name or "unnamed"
         print(f"\n[{status:^6}] {name}")
-        print(f"  Weight: {cr.weight:+.0f}")
-        print(f"  Reason: {cr.reason}")
+        print(f"  Weight: {cr.criterion.weight:+.0f}")
+        print(f"  Reason: {cr.final_reason}")
 
 
 if __name__ == "__main__":

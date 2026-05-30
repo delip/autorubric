@@ -104,7 +104,7 @@ rubric = Rubric.from_dict([
 # Save to JSON
 import json
 with open("configs/rubrics/paper_review.json", "w") as f:
-    json.dump([c.to_dict() for c in rubric.criteria], f, indent=2)
+    json.dump([c.model_dump(exclude_none=True) for c in rubric.rubric], f, indent=2)
 ```
 
 The JSON file:
@@ -659,7 +659,7 @@ async def run_experiment_from_config(config_path: str):
     # Load rubric
     rubric = load_sectioned_rubric(exp_config["rubric_file"])
     print(f"Rubric: {exp_config['rubric_file']}")
-    print(f"  Criteria: {len(rubric.criteria)}")
+    print(f"  Criteria: {len(rubric.rubric)}")
 
     # Create dataset
     dataset = create_sample_dataset()

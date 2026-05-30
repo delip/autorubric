@@ -33,8 +33,10 @@ result = await rubric.grade(to_grade="...", grader=grader)
 # result.score is `float | None` (None if the grade failed); guard before formatting.
 print(f"Score: {result.score:.2f}" if result.score is not None else "Score: n/a (grade failed)")
 for cr in result.report:
-    print(f"  [{cr.verdict}] {cr.criterion.requirement}")
-    print(f"    Reason: {cr.reason}")
+    # `final_verdict` is None on error/multi-choice criteria; guard before printing.
+    verdict = cr.final_verdict.value if cr.final_verdict is not None else "n/a"
+    print(f"  [{verdict}] {cr.criterion.requirement}")
+    print(f"    Reason: {cr.final_reason}")
 ```
 
 ## Score Calculation
@@ -150,7 +152,7 @@ TypedDict for responses with separate thinking and output sections.
 
 ## ScaleType
 
-Enum for criterion scale types (binary, ordinal, nominal).
+Literal type alias for multi-choice criterion scale types (ordinal, nominal).
 
 ::: autorubric.ScaleType
     options:

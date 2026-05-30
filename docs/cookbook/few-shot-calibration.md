@@ -212,7 +212,7 @@ for n in [1, 2, 3, 5]:
     kappa = f"{metrics.mean_kappa:.3f}" if metrics.mean_kappa is not None else "n/a"
     print(f"{n}-shot: Accuracy={acc}, "
           f"Kappa={kappa}, "
-          f"Cost=${result.total_completion_cost:.4f}")
+          f"Cost=${result.total_completion_cost or 0:.4f}")
 ```
 
 !!! note "Diminishing Returns"
@@ -492,7 +492,7 @@ async def main():
 
     print(f"\nCriterion Accuracy: {pct(baseline_metrics.criterion_accuracy)}")
     print(f"Cohen's Kappa: {num(baseline_metrics.mean_kappa)}")
-    print(f"Cost: ${baseline_result.total_completion_cost:.4f}")
+    print(f"Cost: ${baseline_result.total_completion_cost or 0:.4f}")
 
     print("\n" + "=" * 60)
     print("EVALUATING CALIBRATED (3-shot)")
@@ -507,7 +507,7 @@ async def main():
 
     print(f"\nCriterion Accuracy: {pct(calibrated_metrics.criterion_accuracy)}")
     print(f"Cohen's Kappa: {num(calibrated_metrics.mean_kappa)}")
-    print(f"Cost: ${calibrated_result.total_completion_cost:.4f}")
+    print(f"Cost: ${calibrated_result.total_completion_cost or 0:.4f}")
 
     # Compare costs
     print("\n" + "=" * 60)

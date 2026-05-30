@@ -26,6 +26,8 @@ A **Pareto constraint** rejects revisions that improve quality but decrease vali
 
 ```python
 import asyncio
+import json
+
 from autorubric import LLMConfig, Rubric
 from autorubric.dataset import RubricDataset
 from autorubric.meta import improve_rubric
@@ -49,10 +51,20 @@ async def main():
 
     print(f"Quality: {result.iterations[-1].quality_score:.0%}")
     print(f"Convergence: {result.convergence_reason}")
-    result.final_rubric.to_file("improved_rubric.json")
+
+    # Rubric has no to_file()/to_dict() serializer; dump its criteria directly.
+    criteria = [
+        {"weight": c.weight, "requirement": c.requirement, **({"name": c.name} if c.name else {})}
+        for c in result.final_rubric.rubric
+    ]
+    with open("improved_rubric.json", "w") as f:
+        json.dump(criteria, f, indent=2)
 
 asyncio.run(main())
 ```
+
+!!! note "Artifact persistence"
+    When `save_artifacts=True`, the loop already writes `rubric-iter-{NN}.json` artifacts for each iteration (see [Artifact Persistence](#artifact-persistence)), so explicit serialization is only needed when you want the final rubric saved to a specific path.
 
 ### Using `ImprovementRunner`
 

@@ -214,21 +214,24 @@ result = asyncio.run(main())
 # Print results. result.score is `float | None` (None if the grade failed).
 print(f"Overall Score: {result.score:.2f}\n" if result.score is not None else "Overall Score: n/a\n")
 
-for criterion in result.report:
-    name = criterion.name
+for cr in result.report:
+    name = cr.criterion.name
 
-    if criterion.verdict is not None:
+    if cr.final_verdict is not None:
         # Binary criterion
-        print(f"[{criterion.verdict.value}] {name}")
+        print(f"[{cr.final_verdict.value}] {name}")
     else:
         # Multi-choice criterion
-        mc = criterion.multi_choice_verdict
-        print(f"[{mc.selected_label}] {name}")
-        print(f"  Value: {mc.value:.2f}")
-        if mc.na:
-            print(f"  (Not applicable)")
+        mc = cr.final_multi_choice_verdict
+        # selected_label is str | None (None on a no-option-selected abstain).
+        label = mc.selected_label if mc is not None and mc.selected_label is not None else "N/A"
+        print(f"[{label}] {name}")
+        if mc is not None:
+            print(f"  Value: {mc.value:.2f}")
+            if mc.na:
+                print(f"  (Not applicable)")
 
-    print(f"  Reason: {criterion.reason}\n")
+    print(f"  Reason: {cr.final_reason}\n")
 ```
 
 Sample output:
@@ -506,16 +509,20 @@ async def main():
         print(f"{'─' * 70}")
 
         for cr in result.report:
-            if cr.verdict is not None:
+            if cr.final_verdict is not None:
                 # Binary
-                verdict_str = f"[{cr.verdict.value}]"
+                verdict_str = f"[{cr.final_verdict.value}]"
             else:
                 # Multi-choice
-                mc = cr.multi_choice_verdict
-                na_marker = " (N/A)" if mc.na else ""
-                verdict_str = f"[{mc.selected_label}]{na_marker}"
+                mc = cr.final_multi_choice_verdict
+                na_marker = " (N/A)" if mc is not None and mc.na else ""
+                # selected_label is str | None (None on a no-option-selected abstain).
+                label = (
+                    mc.selected_label if mc is not None and mc.selected_label is not None else "N/A"
+                )
+                verdict_str = f"[{label}]{na_marker}"
 
-            print(f"  {verdict_str} {cr.name}")
+            print(f"  {verdict_str} {cr.criterion.name}")
 
 
 if __name__ == "__main__":

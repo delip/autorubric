@@ -66,7 +66,7 @@ result = await evaluate(
 )
 
 print(f"Evaluated: {result.successful_items}/{result.total_items}")
-print(f"Cost: ${result.total_completion_cost:.4f}")
+print(f"Cost: ${result.total_completion_cost or 0:.4f}")
 ```
 
 ### Step 3: Compute Validation Metrics
@@ -166,7 +166,7 @@ def num(x):
     return f"{x:.3f}" if x is not None else "n/a"
 
 print(f"  Mean bias: {num(bias.mean_bias)}")
-print(f"  Bias direction: {bias.direction}")  # "permissive" or "strict"
+print(f"  Bias direction: {bias.direction}")  # "positive", "negative", or "none"
 print(f"  Statistically significant: {bias.is_significant}")
 print(f"  P-value: {bias.p_value:.4f}" if bias.p_value is not None else "  P-value: n/a")
 print(f"  Effect size: {num(bias.effect_size)}")
@@ -197,11 +197,15 @@ metrics = result.compute_metrics(
 # criterion_accuracy / mean_kappa are `float | None` (None when undefined).
 acc = metrics.criterion_accuracy
 kappa = metrics.mean_kappa
+# Bootstrap CIs are `tuple[float, float] | None` (None on no-samples / all-degenerate
+# resamples), so guard before subscripting.
+acc_ci = metrics.bootstrap.accuracy_ci
+kappa_ci = metrics.bootstrap.kappa_ci
 print(f"\nAccuracy: {acc:.1%}" if acc is not None else "\nAccuracy: n/a")
-print(f"  95% CI: [{metrics.bootstrap.accuracy_ci[0]:.1%}, {metrics.bootstrap.accuracy_ci[1]:.1%}]")
+print(f"  95% CI: [{acc_ci[0]:.1%}, {acc_ci[1]:.1%}]" if acc_ci is not None else "  95% CI: n/a")
 
 print(f"\nKappa: {kappa:.3f}" if kappa is not None else "\nKappa: n/a")
-print(f"  95% CI: [{metrics.bootstrap.kappa_ci[0]:.3f}, {metrics.bootstrap.kappa_ci[1]:.3f}]")
+print(f"  95% CI: [{kappa_ci[0]:.3f}, {kappa_ci[1]:.3f}]" if kappa_ci is not None else "  95% CI: n/a")
 ```
 
 !!! warning "Bootstrap Cost"
@@ -462,7 +466,7 @@ async def main():
 
         for j, cr in enumerate(item_result.report.report or []):
             total += 1
-            if cr.verdict == CriterionVerdict.MET:
+            if cr.final_verdict == CriterionVerdict.MET:
                 pred_met += 1
             if item.ground_truth[j] == CriterionVerdict.MET:
                 gt_met += 1

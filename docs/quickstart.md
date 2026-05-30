@@ -236,7 +236,10 @@ async def batch_eval():
     result = await evaluate(dataset, grader, show_progress=True)
 
     print(f"Evaluated {result.successful_items}/{result.total_items}")
-    print(f"Total cost: ${result.total_completion_cost:.4f}")
+    # total_completion_cost is `float | None` (None when no per-item cost is
+    # available, e.g. all-cached responses), so guard before formatting.
+    cost = result.total_completion_cost
+    print(f"Total cost: ${cost:.4f}" if cost is not None else "Total cost: n/a")
 ```
 
 ## Next Steps

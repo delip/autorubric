@@ -88,10 +88,12 @@ Evaluates intrinsic rubric quality across these sections:
 
 | Section | Focus |
 |---------|-------|
-| **Clarity & Precision** | Clear requirements, specific language, unidimensional criteria |
+| **Clarity & Precision** | Clear requirements, specific language, unidimensional criteria, behavioral language |
 | **Structure & Design** | Appropriate count, balanced weights, orthogonal criteria |
-| **LLM-Friendliness** | Independent verification, objective assessment |
-| **Anti-Patterns** | Double-barreled criteria, vague wording, circular definitions, excessive overlap |
+| **LLM-Friendliness** | Independent verification, objective assessment, well-defined options |
+| **Reliability Predictors** | Clear decision boundaries, deterministic assessability, consistent granularity |
+| **Anti-Patterns** | Double-barreled criteria, vague wording, circular definitions, excessive overlap, verbosity, hedging language, generic boilerplate |
+| **LLM-Judge Anti-Patterns** | Missing negative criteria, unfalsifiable criteria, ambiguous boundaries, verbosity-rewarding wording, poorly-anchored ordinals, counting dependence |
 
 ### In-Context Meta-Rubric
 

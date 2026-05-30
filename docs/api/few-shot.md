@@ -28,7 +28,7 @@ grader = CriterionGrader(
     training_data=train_data,
     few_shot_config=FewShotConfig(
         n_examples=3,
-        balance_verdicts=True,  # Include both MET and UNMET examples
+        balance_verdicts=True,  # Balance examples across label classes (verdicts for binary, option indices for multi-choice)
         include_reason=True,
         seed=42,
     ),

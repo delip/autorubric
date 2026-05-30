@@ -123,7 +123,7 @@ async def main():
     print(f"Issues: {len(result.iterations[0].issues)} -> "
           f"{len(result.iterations[result.best_iteration].issues)}")
     print(f"Converged: {result.convergence_reason}")
-    print(f"Cost: ${result.total_completion_cost:.4f}")
+    print(f"Cost: ${result.total_completion_cost or 0:.4f}")
 
 asyncio.run(main())
 ```
@@ -198,8 +198,9 @@ result = await improve_rubric(
 )
 
 for it in result.iterations:
+    corr = f"{it.agreement:.2f}" if it.agreement is not None else "N/A"
     print(f"Iter {it.iteration}: quality={it.quality_score:.0%}, "
-          f"correlation={it.agreement:.2f}")
+          f"correlation={corr}")
 ```
 
 #### Multi-Judge Validation

@@ -157,8 +157,8 @@ Throughput: 2.31 items/s
 
 ```python
 print(f"\nCost Summary:")
-print(f"  Total cost: ${result.total_completion_cost:.2f}")
-print(f"  Cost per item: ${result.total_completion_cost / result.successful_items:.4f}")
+print(f"  Total cost: ${result.total_completion_cost or 0:.2f}")
+print(f"  Cost per item: ${(result.total_completion_cost or 0) / result.successful_items:.4f}")
 
 # Token breakdown
 if result.total_token_usage:

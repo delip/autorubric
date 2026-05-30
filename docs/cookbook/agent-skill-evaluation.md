@@ -82,9 +82,9 @@ The criteria are organized by dimension:
 
 | Dimension | Weight | Criteria |
 |-----------|--------|----------|
-| Outcome (55%) | 55 | paper_summary, methodology_assessment, statistical_evaluation, strengths_and_weaknesses, clear_recommendation |
+| Outcome (65%) | 65 | paper_summary, methodology_assessment, statistical_evaluation, strengths_and_weaknesses, clear_recommendation |
 | Style (25%) | 25 | constructive_tone, structured_format, specific_references |
-| Efficiency (20%) | 20 | concise_review |
+| Efficiency (10%) | 10 | concise_review |
 | Penalty | -15 | factual_misrepresentation |
 
 **Criterion-to-skill mapping:**
@@ -312,9 +312,9 @@ for dim_name, criteria_names in dimensions.items():
         total_count = 0
         for r in results:
             for cr in r.report.report:
-                if cr.name in criteria_names:
+                if cr.criterion.name in criteria_names:
                     total_count += 1
-                    if cr.verdict.value == "MET":
+                    if cr.final_verdict is not None and cr.final_verdict.value == "MET":
                         met_count += 1
         accuracy = met_count / total_count if total_count > 0 else 0
         print(f"  {cond}: {accuracy:.0%}")
@@ -359,9 +359,9 @@ for cr_name in criterion_names:
         total = 0
         for r in conditions[cond]:
             for cr in r.report.report:
-                if cr.name == cr_name:
+                if cr.criterion.name == cr_name:
                     total += 1
-                    if cr.verdict.value == "MET":
+                    if cr.final_verdict is not None and cr.final_verdict.value == "MET":
                         met += 1
         rate = met / total if total > 0 else 0
         row += f" {rate:>9.0%}"
@@ -538,9 +538,9 @@ async def main():
             total_count = 0
             for r in results:
                 for cr in r.report.report:
-                    if cr.name in criteria_names:
+                    if cr.criterion.name in criteria_names:
                         total_count += 1
-                        if cr.verdict.value == "MET":
+                        if cr.final_verdict is not None and cr.final_verdict.value == "MET":
                             met_count += 1
             accuracy = met_count / total_count if total_count > 0 else 0
             print(f"  {cond}: {accuracy:.0%}")
@@ -555,12 +555,14 @@ async def main():
             met = sum(
                 1 for r in conditions[cond]
                 for cr in r.report.report
-                if cr.name == cr_name and cr.verdict.value == "MET"
+                if cr.criterion.name == cr_name
+                and cr.final_verdict is not None
+                and cr.final_verdict.value == "MET"
             )
             total = sum(
                 1 for r in conditions[cond]
                 for cr in r.report.report
-                if cr.name == cr_name
+                if cr.criterion.name == cr_name
             )
             rate = met / total if total > 0 else 0
             row += f" {rate:>9.0%}"

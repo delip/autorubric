@@ -28,7 +28,7 @@ flowchart LR
 
 ### Step 1: Grade and Access Explanations
 
-Every grading result contains a `report` — a list of `CriterionReport` objects, each with a `reason` field:
+Every grading result contains a `report` — a list of `EnsembleCriterionReport` objects, each with a `final_reason` field (`grade()` always returns an ensemble report, even for a single judge):
 
 ```python
 import asyncio
@@ -54,18 +54,20 @@ async def main():
     )
 
     for cr in result.report:
-        verdict = cr.verdict.value if cr.verdict else "N/A"
-        name = cr.name or "unnamed"
-        print(f"[{verdict}] {name}: {cr.reason}")
+        verdict = cr.final_verdict.value if cr.final_verdict else "N/A"
+        name = cr.criterion.name or "unnamed"
+        print(f"[{verdict}] {name}: {cr.final_reason}")
 
 asyncio.run(main())
 ```
 
 !!! tip "Single vs. Ensemble Explanations"
-    With a single judge, `reason` is the judge's direct explanation. With an ensemble,
+    `grade()` always returns an `EnsembleEvaluationReport` (a single LLM is treated as an
+    "ensemble of 1"), so you always read explanations via `cr.final_reason`. With a single
+    judge, `final_reason` is simply that one judge's explanation. With multiple judges,
     `final_reason` concatenates all judges' reasons with a pipe separator, and individual
-    verdicts are accessible through `cr.votes`. Choose ensemble when you need multiple
-    perspectives or higher reliability.
+    verdicts are accessible through `cr.votes`. Choose multiple judges when you need
+    multiple perspectives or higher reliability.
 
 ### Step 2: Format as Student Feedback
 
@@ -77,24 +79,24 @@ def format_feedback(result):
     score_line = f"Overall Score: {result.score:.0%}\n" if result.score is not None else "Overall Score: n/a\n"
     lines = [score_line]
 
-    met = [cr for cr in result.report if cr.verdict and cr.verdict.value == "MET" and cr.weight > 0]
-    unmet = [cr for cr in result.report if cr.verdict and cr.verdict.value == "UNMET" and cr.weight > 0]
-    errors = [cr for cr in result.report if cr.verdict and cr.verdict.value == "MET" and cr.weight < 0]
+    met = [cr for cr in result.report if cr.final_verdict and cr.final_verdict.value == "MET" and cr.criterion.weight > 0]
+    unmet = [cr for cr in result.report if cr.final_verdict and cr.final_verdict.value == "UNMET" and cr.criterion.weight > 0]
+    errors = [cr for cr in result.report if cr.final_verdict and cr.final_verdict.value == "MET" and cr.criterion.weight < 0]
 
     if met:
         lines.append("Strengths:")
         for cr in met:
-            lines.append(f"  + {cr.name}: {cr.reason}")
+            lines.append(f"  + {cr.criterion.name}: {cr.final_reason}")
 
     if unmet:
         lines.append("\nAreas for Improvement:")
         for cr in unmet:
-            lines.append(f"  - {cr.name}: {cr.reason}")
+            lines.append(f"  - {cr.criterion.name}: {cr.final_reason}")
 
     if errors:
         lines.append("\nErrors Found:")
         for cr in errors:
-            lines.append(f"  ! {cr.name}: {cr.reason}")
+            lines.append(f"  ! {cr.criterion.name}: {cr.final_reason}")
 
     return "\n".join(lines)
 ```
@@ -136,17 +138,17 @@ Extract specific explanations for downstream use:
 def get_unmet_feedback(result):
     """Extract reasons for criteria that were not met."""
     return {
-        cr.name: cr.reason
+        cr.criterion.name: cr.final_reason
         for cr in result.report
-        if cr.verdict and cr.verdict.value == "UNMET" and cr.weight > 0
+        if cr.final_verdict and cr.final_verdict.value == "UNMET" and cr.criterion.weight > 0
     }
 
 def get_error_explanations(result):
     """Extract explanations for detected errors (negative-weight criteria that were MET)."""
     return {
-        cr.name: cr.reason
+        cr.criterion.name: cr.final_reason
         for cr in result.report
-        if cr.verdict and cr.verdict.value == "MET" and cr.weight < 0
+        if cr.final_verdict and cr.final_verdict.value == "MET" and cr.criterion.weight < 0
     }
 ```
 
@@ -158,10 +160,15 @@ def get_error_explanations(result):
 
 ## Key Takeaways
 
-| Concept | Single Judge | Ensemble |
+`grade()` always returns an `EnsembleEvaluationReport`, so the right-hand column is what
+you use in practice (with one judge, the "ensemble" simply wraps that single judge). The
+left column documents the single-report `CriterionReport` type you encounter elsewhere
+(e.g., per-judge `EvaluationReport`s).
+
+| Concept | `CriterionReport` (single report) | `EnsembleCriterionReport` (from `grade()`) |
 |---------|-------------|----------|
-| Reason | `cr.reason` — judge's direct explanation | `cr.final_reason` — all judges' reasons joined with ` \| ` |
-| Individual votes | One verdict in `cr.votes` | Multiple verdicts in `cr.votes`, one per judge |
+| Reason | `cr.reason` — judge's direct explanation | `cr.final_reason` — all judges' reasons joined with ` \| ` (the single judge's reason when there is one) |
+| Individual votes | (no votes; it *is* the single report) | `cr.votes` — one `JudgeVote` per judge |
 | Verdict | `cr.verdict` — the judge's verdict | `cr.final_verdict` — aggregated verdict (e.g., majority vote) |
 | Criterion access | `cr.name`, `cr.weight` | `cr.criterion.name`, `cr.criterion.weight` |
 | Negative-weight MET | Reason explains the detected problem | Each judge's reason for detecting the problem |
@@ -196,24 +203,24 @@ def format_feedback(result):
     score_line = f"Overall Score: {result.score:.0%}\n" if result.score is not None else "Overall Score: n/a\n"
     lines = [score_line]
 
-    met = [cr for cr in result.report if cr.verdict and cr.verdict.value == "MET" and cr.weight > 0]
-    unmet = [cr for cr in result.report if cr.verdict and cr.verdict.value == "UNMET" and cr.weight > 0]
-    errors = [cr for cr in result.report if cr.verdict and cr.verdict.value == "MET" and cr.weight < 0]
+    met = [cr for cr in result.report if cr.final_verdict and cr.final_verdict.value == "MET" and cr.criterion.weight > 0]
+    unmet = [cr for cr in result.report if cr.final_verdict and cr.final_verdict.value == "UNMET" and cr.criterion.weight > 0]
+    errors = [cr for cr in result.report if cr.final_verdict and cr.final_verdict.value == "MET" and cr.criterion.weight < 0]
 
     if met:
         lines.append("Strengths:")
         for cr in met:
-            lines.append(f"  + {cr.name}: {cr.reason}")
+            lines.append(f"  + {cr.criterion.name}: {cr.final_reason}")
 
     if unmet:
         lines.append("\nAreas for Improvement:")
         for cr in unmet:
-            lines.append(f"  - {cr.name}: {cr.reason}")
+            lines.append(f"  - {cr.criterion.name}: {cr.final_reason}")
 
     if errors:
         lines.append("\nErrors Found:")
         for cr in errors:
-            lines.append(f"  ! {cr.name}: {cr.reason}")
+            lines.append(f"  ! {cr.criterion.name}: {cr.final_reason}")
 
     return "\n".join(lines)
 

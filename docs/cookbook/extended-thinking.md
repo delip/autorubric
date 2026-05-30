@@ -10,7 +10,7 @@ You're evaluating security vulnerability assessment reports. These require deep 
 
 - Enabling extended thinking with `ThinkingConfig`
 - Using thinking levels (LOW, MEDIUM, HIGH) vs explicit token budgets
-- Accessing reasoning traces in results via `GenerateResult.thinking`
+- Accessing reasoning traces: report-level `CriterionReport.reasoning` for grading results, `GenerateResult.thinking` for direct `LLMClient.generate` calls
 - Balancing reasoning depth against latency and cost
 
 ## The Solution
@@ -210,6 +210,8 @@ async def compare_thinking_modes():
         )
     )
 
+    query = "Evaluate this security vulnerability report."
+
     basic_result = await rubric.grade(
         to_grade=security_report, grader=grader_basic, query=query
     )
@@ -224,11 +226,11 @@ async def compare_thinking_modes():
 
     print("Without Thinking:")
     print(f"  Score: {fmt(basic_result.score)}")
-    print(f"  Cost: ${basic_result.completion_cost:.4f}")
+    print(f"  Cost: ${basic_result.completion_cost or 0:.4f}")
 
     print("\nWith High Thinking:")
     print(f"  Score: {fmt(thinking_result.score)}")
-    print(f"  Cost: ${thinking_result.completion_cost:.4f}")
+    print(f"  Cost: ${thinking_result.completion_cost or 0:.4f}")
 ```
 
 !!! warning "Cost Considerations"
@@ -513,10 +515,10 @@ async def main():
         # Compare verdicts
         print("\nVerdicts comparison:")
         for j, (basic_cr, think_cr) in enumerate(zip(basic_result.report, thinking_result.report)):
-            basic_v = basic_cr.verdict.value if basic_cr.verdict else "?"
-            think_v = think_cr.verdict.value if think_cr.verdict else "?"
+            basic_v = basic_cr.final_verdict.value if basic_cr.final_verdict else "?"
+            think_v = think_cr.final_verdict.value if think_cr.final_verdict else "?"
             match = "=" if basic_v == think_v else "≠"
-            print(f"  {basic_cr.name}: {basic_v} {match} {think_v}")
+            print(f"  {basic_cr.criterion.name}: {basic_v} {match} {think_v}")
 
 
 if __name__ == "__main__":

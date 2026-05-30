@@ -29,7 +29,7 @@ async def main():
 
     print(f"Evaluated {result.successful_items}/{result.total_items}")
     print(f"Throughput: {result.timing_stats.items_per_second:.2f} items/s")
-    print(f"Total cost: ${result.total_completion_cost:.4f}")
+    print(f"Total cost: ${result.total_completion_cost or 0:.4f}")
 ```
 
 ## Checkpointing and Resumption
