@@ -47,7 +47,7 @@ from autorubric.utils import aggregate_completion_cost, aggregate_token_usage
 
 if TYPE_CHECKING:
     from autorubric.graders.base import Grader
-    from autorubric.metrics import MetricsResult, NAMode
+    from autorubric.metrics import CannotAssessMode, MetricsResult, NAMode
 
 logger = logging.getLogger(__name__)
 
@@ -506,7 +506,7 @@ class EvalResult:
         bootstrap: bool = False,
         n_bootstrap: int = 1000,
         per_judge: bool = False,
-        cannot_assess: Literal["exclude", "as_unmet"] = "exclude",
+        cannot_assess: CannotAssessMode = "exclude",
         na_mode: NAMode = "exclude",
         confidence_level: float = 0.95,
         seed: int | None = None,
@@ -529,6 +529,7 @@ class EvalResult:
             cannot_assess: How to handle CANNOT_ASSESS verdicts:
                 - "exclude": Skip pairs where either is CANNOT_ASSESS (default)
                 - "as_unmet": Treat CANNOT_ASSESS as UNMET
+                - "as_category": Keep CANNOT_ASSESS as a distinct third class
             na_mode: How to handle NA options in multi-choice criteria.
                 Mirrors ``cannot_assess`` for binary:
 

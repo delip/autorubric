@@ -17,6 +17,7 @@ from sklearn.metrics import (
     cohen_kappa_score,
     confusion_matrix,
     f1_score,
+    matthews_corrcoef,
     mean_absolute_error,
     mean_squared_error,
     precision_score,
@@ -36,7 +37,9 @@ from ._types import (
     BootstrapResults,
     CannotAssessMode,
     CannotAssessStats,
+    ConfusionMatrix,
     CorrelationResult,
+    CoverageStats,
     CriterionMetrics,
     CriterionMetricsUnion,
     JudgeMetrics,
@@ -453,8 +456,10 @@ def _compute_ordinal_criterion_metrics(
             rmse=None,
             mae=None,
             per_option=[],
-            confusion_matrix=[[0] * n_options for _ in range(n_options)],
-            option_labels=option_labels,
+            confusion_matrix=ConfusionMatrix(
+                matrix=[[0] * n_options for _ in range(n_options)],
+                labels=option_labels,
+            ),
         )
 
     # Exact accuracy
@@ -510,8 +515,10 @@ def _compute_ordinal_criterion_metrics(
         rmse=rmse,
         mae=mae,
         per_option=per_option,
-        confusion_matrix=conf_matrix,
-        option_labels=option_labels,
+        confusion_matrix=ConfusionMatrix(matrix=conf_matrix, labels=option_labels),
+        # Had samples (this branch is past the n_samples==0 guard) but agreement could not be
+        # estimated → degenerate single-class data; distinct from the no-data case.
+        is_degenerate=weighted_kappa is None,
     )
 
 
@@ -556,8 +563,10 @@ def _compute_nominal_criterion_metrics(
             # 0 GT-paired samples, matching the binary empty branch (already None-guarded).
             fleiss_kappa=_compute_fleiss_kappa(fleiss_matrix),
             per_option=[],
-            confusion_matrix=[[0] * n_options for _ in range(n_options)],
-            option_labels=option_labels,
+            confusion_matrix=ConfusionMatrix(
+                matrix=[[0] * n_options for _ in range(n_options)],
+                labels=option_labels,
+            ),
         )
 
     # Exact accuracy
@@ -591,8 +600,10 @@ def _compute_nominal_criterion_metrics(
         krippendorff_alpha=krippendorff_alpha,
         fleiss_kappa=fleiss_kappa,
         per_option=per_option,
-        confusion_matrix=conf_matrix,
-        option_labels=option_labels,
+        confusion_matrix=ConfusionMatrix(matrix=conf_matrix, labels=option_labels),
+        # Had samples (past the n_samples==0 guard) but agreement could not be estimated →
+        # degenerate single-class data; distinct from the no-data case.
+        is_degenerate=kappa is None,
     )
 
 
@@ -711,7 +722,7 @@ def _compute_bootstrap_ci(
                 kappas = _per_criterion_kappas(
                     rs_pred, rs_true, criterion_types, effective_criteria, cannot_assess, na_mode
                 )
-                accuracy, _p, _r, _f1, mean_kappa = _criterion_level_scalars(
+                accuracy, _p, _r, _f1, mean_kappa, _phi, _mk = _criterion_level_scalars(
                     rs_pred, rs_true, criterion_types, cannot_assess, precomputed_kappas=kappas
                 )
                 # Append only defined values; a degenerate replicate contributes nothing (so an
@@ -767,6 +778,28 @@ def _kappa_or_none(y1, y2, *, weights: str | None = None) -> float | None:
     return None if math.isnan(k) else k
 
 
+def _mcc_or_none(met_true, met_pred) -> float | None:
+    """Matthews correlation coefficient (the phi coefficient), or None when undefined.
+
+    phi is the binary MET-vs-rest correlation between predictions and ground truth. It is
+    genuinely undefined — and therefore None, never a fabricated 0.0 — when the data
+    collapses onto a single class on either side: with no variation there is no correlation
+    to estimate. ``matthews_corrcoef`` silently returns 0.0 in that case (a real-looking but
+    meaningless value), so a ``len(set(...)) < 2`` guard on the pooled labels is MANDATORY
+    here before delegating. A NaN result is likewise mapped to None.
+    """
+    # Single-class on either side (or no data) → genuinely undefined. This guard is required:
+    # without it sklearn returns a misleading 0.0 for constant input.
+    if len(set(met_true)) < 2 or len(set(met_pred)) < 2:
+        return None
+    try:
+        phi = matthews_corrcoef(met_true, met_pred)
+    except Exception:
+        return None
+    phi = float(phi)
+    return None if math.isnan(phi) else phi
+
+
 def _mean_or_none(values: list[float | None]) -> float | None:
     """Mean of the non-None values, or None when none remain.
 
@@ -785,12 +818,16 @@ def _criterion_level_scalars(
     cannot_assess: CannotAssessMode,
     *,
     precomputed_kappas: list[float | None],
-) -> tuple[float | None, float | None, float | None, float | None, float | None]:
+) -> tuple[
+    float | None, float | None, float | None, float | None, float | None, float | None, float | None
+]:
     """Compute the aggregate criterion-level scalars from per-criterion pred/true lists.
 
     Single source of truth for the aggregate accuracy / precision / recall / f1 / mean
-    kappa, shared by the aggregate (``compute_metrics``) and per-judge
-    (``_compute_judge_metrics``) paths so the two cannot drift.
+    kappa / phi / pooled (micro) kappa, shared by the aggregate (``compute_metrics``) and
+    per-judge (``_compute_judge_metrics``) paths so the two cannot drift. Computing ``phi``
+    here from the same pooled binary MET flats is what makes a one-judge ensemble's phi
+    equal the aggregate phi by construction.
 
     precision/recall/f1 are the BINARY MET-vs-rest metric → ``None`` for a
     multi-choice-only rubric (no MET class). accuracy GENERALIZES (binary label accuracy
@@ -798,6 +835,11 @@ def _criterion_level_scalars(
     are no comparable pairs at all. ``mean_kappa`` is the mean of ``precomputed_kappas``
     (built by the caller, mirroring the per-criterion kappa construction), ``None`` when
     none were collected.
+
+    ``phi`` is the aggregate (micro) Matthews correlation coefficient over the pooled binary
+    MET-vs-rest flats; ``micro_kappa`` is the pooled binary Cohen's kappa over the same
+    flats' label representations. Both are ``None`` for a multi-choice-only rubric (no binary
+    flats) and ``None`` on degenerate single-class pooled data — never a fabricated 0.0.
 
     Args:
         per_criterion_pred: criteria x items predictions (binary ``CriterionVerdict``,
@@ -809,7 +851,7 @@ def _criterion_level_scalars(
             recomputed here.
 
     Returns:
-        ``(accuracy, precision, recall, f1, mean_kappa)``.
+        ``(accuracy, precision, recall, f1, mean_kappa, phi, micro_kappa)``.
     """
     n_criteria = len(criterion_types)
 
@@ -838,14 +880,21 @@ def _criterion_level_scalars(
     precision: float | None
     recall: float | None
     f1: float | None
+    phi: float | None
+    micro_kappa: float | None
 
     if label_pred_flat:
         accuracy = float(accuracy_score(label_true_flat, label_pred_flat))
         precision = float(precision_score(met_true_flat, met_pred_flat, zero_division=0))
         recall = float(recall_score(met_true_flat, met_pred_flat, zero_division=0))
         f1 = float(f1_score(met_true_flat, met_pred_flat, zero_division=0))
+        # Micro phi over the pooled binary MET flats (None on single-class — never a fake 0.0).
+        phi = _mcc_or_none(met_true_flat, met_pred_flat)
+        # Micro pooled Cohen's kappa over the pooled binary label representations.
+        micro_kappa = _kappa_or_none(label_true_flat, label_pred_flat)
     else:
-        # No binary criteria → accuracy is multi-choice exact-match; P/R/F1 not applicable.
+        # No binary criteria → accuracy is multi-choice exact-match; P/R/F1/phi/micro-kappa
+        # are the binary MET-vs-rest / pooled-binary metrics → not applicable (None).
         all_correct = 0
         all_total = 0
         for c_idx in range(n_criteria):
@@ -860,9 +909,11 @@ def _criterion_level_scalars(
         precision = None
         recall = None
         f1 = None
+        phi = None
+        micro_kappa = None
 
     mean_kappa = _mean_or_none(list(precomputed_kappas))
-    return accuracy, precision, recall, f1, mean_kappa
+    return accuracy, precision, recall, f1, mean_kappa, phi, micro_kappa
 
 
 def _per_criterion_kappas(
@@ -923,6 +974,99 @@ def _per_criterion_kappas(
             weights = "quadratic" if c_type == "ordinal" else None
             kappas.append(_kappa_or_none(true_filtered, pred_filtered, weights=weights))
     return kappas
+
+
+# Fixed binary confusion-matrix class order: positive (MET), negative (UNMET), then the
+# abstain class (CANNOT_ASSESS) last, so the per-judge matrix is a 3x3 superset of the 2x2
+# MET/UNMET layout and ``ConfusionMatrix`` binary cells line up at indices 0/1.
+_BINARY_JUDGE_CM_LABELS = ["MET", "UNMET", "CANNOT_ASSESS"]
+_BINARY_JUDGE_CM_INDEX = {
+    CriterionVerdict.MET: 0,
+    CriterionVerdict.UNMET: 1,
+    CriterionVerdict.CANNOT_ASSESS: 2,
+}
+
+
+def _build_binary_2x2_confusion_matrix(met_true: list[int], met_pred: list[int]) -> ConfusionMatrix:
+    """Build a 2x2 MET/UNMET confusion matrix from MET-vs-rest 0/1 flats.
+
+    Rows are ground truth, columns are predictions, labels ``["MET", "UNMET"]`` (positive=MET
+    at index 0). ``matrix[0][0]`` is true MET / pred MET (tp); ``matrix[1][1]`` is true UNMET
+    / pred UNMET (tn). The derived rates (``.fpr``/``.fnr``/``.precision``/``.recall``) come
+    from this matrix and honour undefined→None at a zero denominator.
+    """
+    tp = fn = fp = tn = 0
+    for t, p in zip(met_true, met_pred):
+        if t == 1 and p == 1:
+            tp += 1
+        elif t == 1 and p == 0:
+            fn += 1
+        elif t == 0 and p == 1:
+            fp += 1
+        else:
+            tn += 1
+    return ConfusionMatrix(matrix=[[tp, fn], [fp, tn]], labels=["MET", "UNMET"])
+
+
+def _build_binary_judge_confusion_matrix(
+    per_criterion_pred: list[list[CriterionVerdict | int]],
+    per_criterion_true: list[list[CriterionVerdict | int]],
+    criterion_types: list[str],
+) -> ConfusionMatrix | None:
+    """Pool a judge's RAW binary verdicts across all binary criteria into a 3x3 matrix.
+
+    Rows are ground truth, columns are predictions, in the fixed order
+    ``["MET", "UNMET", "CANNOT_ASSESS"]`` (abstain class last). The inputs carry the raw
+    pre-``cannot_assess``-filter verdicts (errored/type-mismatched cells already dropped by
+    the caller), so a CANNOT_ASSESS abstention is preserved as its own class rather than
+    being hidden by filtering. The aggregate of per-judge matrices equals their elementwise
+    sum because every judge uses the same fixed class order.
+
+    Returns ``None`` when the judge contributed no binary verdict pairs (no data → no matrix,
+    never a fabricated all-zero matrix).
+    """
+    matrix = [[0, 0, 0], [0, 0, 0], [0, 0, 0]]
+    seen = False
+    for c_idx, c_type in enumerate(criterion_types):
+        if c_type != "binary":
+            continue
+        for p, t in zip(per_criterion_pred[c_idx], per_criterion_true[c_idx]):
+            if not isinstance(p, CriterionVerdict) or not isinstance(t, CriterionVerdict):
+                continue
+            matrix[_BINARY_JUDGE_CM_INDEX[t]][_BINARY_JUDGE_CM_INDEX[p]] += 1
+            seen = True
+    if not seen:
+        return None
+    return ConfusionMatrix(matrix=matrix, labels=list(_BINARY_JUDGE_CM_LABELS))
+
+
+def _build_coverage_stats(
+    *,
+    n_total: int,
+    n_covered: int,
+    judge_abstain: int,
+    gt_abstain: int,
+    n_errored: int,
+) -> CoverageStats:
+    """Build a ``CoverageStats`` with every rate honouring undefined→None.
+
+    Each rate is ``None`` when its denominator (``n_total``, the raw pre-exclusion paired
+    count) is zero, never a fabricated 0.0; counts stay ``int``. ``union_exclusion_rate`` is
+    the complement of ``coverage`` (the fraction excluded for any reason).
+    """
+    if n_total <= 0:
+        return CoverageStats(n_total=n_total if n_total > 0 else 0, n_covered=n_covered)
+    coverage = n_covered / n_total
+    return CoverageStats(
+        n_total=n_total,
+        n_covered=n_covered,
+        coverage=coverage,
+        judge_abstain_rate=judge_abstain / n_total,
+        gt_abstain_rate=gt_abstain / n_total,
+        union_exclusion_rate=1 - coverage,
+        n_errored=n_errored,
+        error_rate=n_errored / n_total,
+    )
 
 
 def _compute_judge_metrics(
@@ -993,15 +1137,28 @@ def _compute_judge_metrics(
         pj_pred, pj_true, criterion_types, effective_criteria, cannot_assess, na_mode
     )
 
-    criterion_accuracy, criterion_precision, criterion_recall, criterion_f1, mean_kappa = (
-        _criterion_level_scalars(
-            pj_pred,
-            pj_true,
-            criterion_types,
-            cannot_assess,
-            precomputed_kappas=pj_kappas,
-        )
+    (
+        criterion_accuracy,
+        criterion_precision,
+        criterion_recall,
+        criterion_f1,
+        mean_kappa,
+        phi,
+        _micro_kappa,
+    ) = _criterion_level_scalars(
+        pj_pred,
+        pj_true,
+        criterion_types,
+        cannot_assess,
+        precomputed_kappas=pj_kappas,
     )
+
+    # Per-judge confusion matrix: binary MET/UNMET with the abstain CANNOT_ASSESS class
+    # last (3x3), pooled across ALL binary criteria from the RAW pre-filter judge codes.
+    # pj_pred/pj_true already carry the raw verdicts (CANNOT_ASSESS included; only errored
+    # and type-mismatched cells were dropped above), so this captures abstentions that the
+    # cannot_assess filtering would otherwise hide. None when the judge had no binary data.
+    judge_confusion_matrix = _build_binary_judge_confusion_matrix(pj_pred, pj_true, criterion_types)
 
     # Score-level metrics (unchanged)
     score_rmse = float(np.sqrt(mean_squared_error(true_scores, judge_scores)))
@@ -1025,6 +1182,8 @@ def _compute_judge_metrics(
         criterion_recall=criterion_recall if criterion_recall is None else float(criterion_recall),
         criterion_f1=criterion_f1 if criterion_f1 is None else float(criterion_f1),
         mean_kappa=mean_kappa if mean_kappa is None else float(mean_kappa),
+        phi=phi if phi is None else float(phi),
+        confusion_matrix=judge_confusion_matrix,
         score_rmse=score_rmse,
         score_mae=score_mae,
         score_spearman=score_spearman,
@@ -1188,6 +1347,10 @@ def compute_metrics(
     alpha_cells: dict[int, list[dict[str, float]]] = {c: [] for c in range(n_criteria)}
 
     items_with_ground_truth = 0
+    # Count GT-bearing items lost to a grading error (skipped below). These have ground truth
+    # (the no-ground-truth case is handled separately) but no usable verdicts, so they reduce
+    # coverage. Feeds the CoverageStats error_rate and a warning.
+    n_errored_items = 0
 
     # NA tracking for multi-choice
     total_na_true = 0
@@ -1205,6 +1368,9 @@ def compute_metrics(
             continue
 
         if item_result.error is not None:
+            # GT-bearing item lost to a grading error: counted toward the raw coverage
+            # denominator (it had ground truth) but contributes no usable verdicts.
+            n_errored_items += 1
             continue
 
         items_with_ground_truth += 1
@@ -1511,6 +1677,16 @@ def compute_metrics(
 
             criterion_kappas.append(c_kappa)
 
+            # 2x2 confusion matrix on the MET-vs-rest dichotomy (rows=true, cols=pred,
+            # labels ["MET","UNMET"]). Built from the same met flats so FPR/FNR derived from
+            # ``.fpr``/``.fnr`` honour undefined→None at a zero denominator.
+            c_cm = _build_binary_2x2_confusion_matrix(met_true, met_pred)
+            # phi (MCC) on the MET-vs-rest dichotomy: None on single-class — never a fake 0.0.
+            c_phi = _mcc_or_none(met_true, met_pred)
+            # Degenerate iff there were samples but agreement (kappa) could not be estimated
+            # because the data collapsed onto a single class — distinct from the no-data case.
+            c_degenerate = c_kappa is None
+
             per_criterion.append(
                 CriterionMetrics(
                     name=name,
@@ -1528,6 +1704,11 @@ def compute_metrics(
                     fleiss_kappa=fleiss_kappa,
                     support_true=sum(met_true),
                     support_pred=sum(met_pred),
+                    confusion_matrix=c_cm,
+                    fpr=c_cm.fpr,
+                    fnr=c_cm.fnr,
+                    phi=c_phi,
+                    is_degenerate=c_degenerate,
                 )
             )
 
@@ -1603,6 +1784,8 @@ def compute_metrics(
         criterion_recall,
         criterion_f1,
         mean_kappa,
+        criterion_phi,
+        micro_kappa,
     ) = _criterion_level_scalars(
         per_criterion_pred,  # type: ignore[arg-type]
         per_criterion_true,
@@ -1611,6 +1794,86 @@ def compute_metrics(
         precomputed_kappas=criterion_kappas,
     )
 
+    # Macro accuracy: unweighted mean of the per-criterion accuracies (binary ``accuracy`` /
+    # multi-choice ``exact_accuracy``), the macro complement to the pooled (micro)
+    # ``criterion_accuracy`` above. None when no criterion contributed an accuracy.
+    per_criterion_accuracies: list[float | None] = []
+    for cm in per_criterion:
+        if cm.criterion_type == "binary":
+            per_criterion_accuracies.append(cm.accuracy)
+        else:
+            per_criterion_accuracies.append(cm.exact_accuracy)
+    macro_accuracy = _mean_or_none(per_criterion_accuracies)
+
+    # Macro mean of the per-criterion Krippendorff's alpha (inter-judge agreement). None when
+    # no criterion contributed an alpha (e.g. single-judge runs).
+    mean_krippendorff_alpha = _mean_or_none([cm.krippendorff_alpha for cm in per_criterion])
+
+    # Coverage / error diagnostics — only meaningful under the ``exclude`` handling modes,
+    # where abstentions (CANNOT_ASSESS / NA) and grading errors drop a paired observation
+    # from the agreement denominator. Under ``as_unmet`` / ``as_category`` nothing is
+    # union-excluded, so coverage would be trivially 1.0 and we leave these ``None``. The raw
+    # denominator counts every GT-bearing item (including those lost to a grading error), so
+    # error_rate and the abstain rates share one consistent denominator.
+    coverage_stats: CoverageStats | None = None
+    coverage_mode = cannot_assess == "exclude" and na_mode == "exclude"
+    if coverage_mode:
+        n_total_raw = items_with_ground_truth + n_errored_items
+        agg_judge_abstain = 0
+        agg_gt_abstain = 0
+        for c_idx in range(n_criteria):
+            c_type = criterion_types[c_idx]
+            raw_pred = per_criterion_pred[c_idx]
+            raw_true = per_criterion_true[c_idx]
+            if c_type == "binary":
+                CA = CriterionVerdict.CANNOT_ASSESS
+                judge_abstain = sum(1 for v in raw_pred if v == CA)
+                gt_abstain = sum(1 for v in raw_true if v == CA)
+            else:
+                na_idx_set = {
+                    i for i, opt in enumerate(effective_criteria[c_idx].options) if opt.na
+                }
+                judge_abstain = sum(1 for v in raw_pred if isinstance(v, int) and v in na_idx_set)
+                gt_abstain = sum(1 for v in raw_true if isinstance(v, int) and v in na_idx_set)
+            agg_judge_abstain += judge_abstain
+            agg_gt_abstain += gt_abstain
+            cstats = _build_coverage_stats(
+                n_total=n_total_raw,
+                n_covered=per_criterion[c_idx].n_samples,
+                judge_abstain=judge_abstain,
+                gt_abstain=gt_abstain,
+                n_errored=n_errored_items,
+            )
+            per_criterion[c_idx] = per_criterion[c_idx].model_copy(
+                update={"coverage_stats": cstats}
+            )
+
+        # Aggregate rollup: coverage pools the per-criterion *pairs* (raw pair count summed
+        # over criteria; covered = sum of per-criterion covered counts), so the coverage /
+        # abstain fractions reflect the full paired sample. ``n_errored``, by contrast, is an
+        # *item* count (an errored item has no usable verdicts at all) — reported as the raw
+        # item count for an intuitive read, matching the per-criterion value; its ``error_rate``
+        # is the fraction of raw ground-truth-bearing items lost to a grading error.
+        agg_total = n_total_raw * n_criteria
+        agg_covered = sum(cm.n_samples for cm in per_criterion)
+        agg_coverage = agg_covered / agg_total if agg_total else None
+        coverage_stats = CoverageStats(
+            n_total=agg_total,
+            n_covered=agg_covered,
+            coverage=agg_coverage,
+            judge_abstain_rate=(agg_judge_abstain / agg_total if agg_total else None),
+            gt_abstain_rate=(agg_gt_abstain / agg_total if agg_total else None),
+            union_exclusion_rate=(1 - agg_coverage if agg_coverage is not None else None),
+            n_errored=n_errored_items,
+            error_rate=(n_errored_items / n_total_raw if n_total_raw else None),
+        )
+
+    if n_errored_items > 0:
+        result_warnings.append(
+            f"{n_errored_items} item(s) with ground truth were excluded from metrics because "
+            "grading errored; their verdicts and scores do not contribute."
+        )
+
     # Score-level metrics
     score_rmse = float(np.sqrt(mean_squared_error(all_true_scores, all_pred_scores)))
     score_mae = float(mean_absolute_error(all_true_scores, all_pred_scores))
@@ -1618,6 +1881,25 @@ def compute_metrics(
     score_spearman = _compute_correlation(all_pred_scores, all_true_scores, "spearman")
     score_kendall = _compute_correlation(all_pred_scores, all_true_scores, "kendall")
     score_pearson = _compute_correlation(all_pred_scores, all_true_scores, "pearson")
+
+    # Score-collapse warning: if the per-item ground-truth scores take at most two distinct
+    # values, the score-level rank correlations are uninformative (a rank correlation on a
+    # near-constant variable conveys almost nothing), so flag it rather than letting a reader
+    # over-interpret the Spearman/Kendall numbers.
+    if len(set(all_true_scores)) <= 2:
+        result_warnings.append(
+            "Ground-truth scores take <=2 distinct values; score-level correlations "
+            "(Spearman/Kendall/Pearson) are uninformative on a collapsed score range."
+        )
+
+    # Degeneracy warning: name the criteria that had samples but whose agreement coefficient
+    # collapsed to None (single-class data). Distinct from no-data criteria.
+    degenerate_names = [cm.name for cm in per_criterion if cm.is_degenerate]
+    if degenerate_names:
+        result_warnings.append(
+            "Degenerate (single-class) data prevented an agreement estimate for "
+            f"criteria: {', '.join(degenerate_names)}."
+        )
 
     # Bias analysis
     bias = systematic_bias(all_pred_scores, all_true_scores)
@@ -1800,5 +2082,16 @@ def compute_metrics(
         n_nominal_criteria=n_nominal,
         na_stats=na_stats,
         cannot_assess_stats=cannot_assess_stats,
+        # Handling-mode provenance (recorded on the result so downstream readers know how
+        # abstentions were treated when these numbers were produced).
+        cannot_assess_mode=cannot_assess,
+        na_mode=na_mode,
+        # Additional aggregate scalars (every one honours undefined→None — never a fake 0.0).
+        n_samples=sum(cm.n_samples for cm in per_criterion),
+        mean_krippendorff_alpha=mean_krippendorff_alpha,
+        criterion_phi=criterion_phi if criterion_phi is None else float(criterion_phi),
+        macro_accuracy=macro_accuracy if macro_accuracy is None else float(macro_accuracy),
+        micro_kappa=micro_kappa if micro_kappa is None else float(micro_kappa),
+        coverage_stats=coverage_stats,
         warnings=result_warnings,
     )

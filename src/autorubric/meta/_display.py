@@ -497,6 +497,21 @@ def _escape_html(text: str) -> str:
     )
 
 
+def _fmt_pct(value: float | None) -> str:
+    """Format a fraction as a percent, rendering an undefined (None) value as n/a."""
+    return "n/a" if value is None else f"{value:.0%}"
+
+
+def _fmt_num(value: float | None) -> str:
+    """Format a scalar to 2 decimals, rendering an undefined (None) value as n/a."""
+    return "n/a" if value is None else f"{value:.2f}"
+
+
+def _fmt_int(value: int | None) -> str:
+    """Format an integer count, rendering a missing (None) value as n/a."""
+    return "n/a" if value is None else str(value)
+
+
 def display_meta_rubric_result(
     result: EnsembleEvaluationReport,
     meta_rubric_path: Path,
@@ -698,9 +713,15 @@ def render_improvement_report_html(
         # Metrics bar
         cost_str = f"${it.completion_cost:.4f}" if it.completion_cost else "N/A"
         if it.held_out_diagnostics is not None:
+            ho = it.held_out_diagnostics
+            # Neutral handling-mode label only — no statistical conflation note here
+            # (those live solely in MetricsResult.summary()).
             parts.append(
                 f'<div class="metrics-bar">'
                 f"<span><strong>Accuracy:</strong> {it.quality_score:.1%}</span>"
+                f"<span><strong>Coverage:</strong> {_fmt_pct(ho.mean_coverage)}</span>"
+                f"<span><strong>CA-rate:</strong> {_fmt_pct(ho.mean_ca_rate)}</span>"
+                f"<span><strong>Handling:</strong> CANNOT_ASSESS={ho.cannot_assess}</span>"
                 f"<span><strong>Cost:</strong> {cost_str}</span>"
                 f"</div>\n"
             )
@@ -713,10 +734,18 @@ def render_improvement_report_html(
                 f"</div>\n"
             )
 
-        # Held-out per-criterion accuracy table
+        # Held-out per-criterion table. "Raw % Agreement" is the judge-vs-ground-
+        # truth accuracy; alongside it we surface kappa, coverage, CA-rate, precision,
+        # the FP/FN rates, and the per-criterion 2x2 (TP/FP/TN/FN). No conflation note
+        # here — single-source discipline keeps it in MetricsResult.summary().
         if it.held_out_diagnostics is not None:
-            parts.append("<h4>Per-Criterion Accuracy</h4>\n<table>\n<thead><tr>")
-            parts.append("<th>Criterion</th><th>Accuracy</th><th>FP Rate</th><th>FN Rate</th>")
+            parts.append("<h4>Per-Criterion Diagnostics</h4>\n<table>\n<thead><tr>")
+            parts.append(
+                "<th>Criterion</th><th>Raw % Agreement</th><th>Kappa</th>"
+                "<th>Coverage</th><th>CA-rate</th><th>Precision</th>"
+                "<th>FP Rate</th><th>FN Rate</th>"
+                "<th>TP</th><th>FP</th><th>TN</th><th>FN</th>"
+            )
             parts.append("</tr></thead>\n<tbody>\n")
             for cr in sorted(
                 it.held_out_diagnostics.per_criterion,
@@ -727,12 +756,26 @@ def render_improvement_report_html(
                     if cr.accuracy >= 0.9
                     else ("var(--yellow)" if cr.accuracy >= 0.7 else "var(--red)")
                 )
+                cm = cr.confusion_matrix
+                precision = cm.precision if cm is not None else None
+                tp = cm.tp if cm is not None else None
+                fp = cm.fp if cm is not None else None
+                tn = cm.tn if cm is not None else None
+                fn = cm.fn if cm is not None else None
                 parts.append(
                     f"<tr><td class='crit-name'>"
                     f"{_escape_html(cr.criterion_name)}</td>"
                     f"<td style='color: {acc_color};'>{cr.accuracy:.0%}</td>"
+                    f"<td>{_fmt_num(cr.kappa)}</td>"
+                    f"<td>{_fmt_pct(cr.coverage)}</td>"
+                    f"<td>{_fmt_pct(cr.ca_rate)}</td>"
+                    f"<td>{_fmt_pct(precision)}</td>"
                     f"<td>{cr.false_positive_rate:.0%}</td>"
-                    f"<td>{cr.false_negative_rate:.0%}</td></tr>\n"
+                    f"<td>{cr.false_negative_rate:.0%}</td>"
+                    f"<td>{_fmt_int(tp)}</td>"
+                    f"<td>{_fmt_int(fp)}</td>"
+                    f"<td>{_fmt_int(tn)}</td>"
+                    f"<td>{_fmt_int(fn)}</td></tr>\n"
                 )
             parts.append("</tbody>\n</table>\n")
 

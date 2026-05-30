@@ -247,6 +247,146 @@ class ClassificationReport(BaseModel):
     n_samples: int
 
 
+class ConfusionMatrix(BaseModel):
+    """A labelled confusion matrix shared across binary, ordinal, nominal, per-judge, and
+    held-out diagnostics.
+
+    Rows are ground truth, columns are predictions. ``matrix[i][j]`` counts cases whose true
+    label is ``labels[i]`` and predicted label is ``labels[j]``. One uniform type carries the
+    counts and their axis labels together, so every reader (summary, dataframe, HTML, Rich)
+    consumes the same shape.
+
+    Label conventions:
+
+    - binary: ``["MET", "UNMET"]``
+    - per-judge binary (with an abstain class): ``["MET", "UNMET", "CANNOT_ASSESS"]``
+    - multi-choice: the option labels, with ``"NA"`` appended last when an NA/abstain class
+      is present.
+
+    The binary-only derived cells (``tp``/``fp``/``fn``/``tn`` and the rates built from them)
+    are defined exactly when the matrix is 2×2 with ``labels[0] == "MET"`` — i.e. a positive
+    (MET) / negative (UNMET) layout. They raise ``ValueError`` otherwise, because there is no
+    single positive class on a 3×3 (or larger) matrix.
+
+    Every rate honours the undefined→None convention: a rate is ``None`` when its denominator
+    is zero, never a fabricated ``0.0``. Counts stay ``int``.
+
+    Attributes:
+        matrix: Square 2D list of counts (rows=true, cols=pred).
+        labels: Class labels, one per row/column, in matrix order.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    matrix: list[list[int]]
+    labels: list[str]
+
+    @property
+    def n_classes(self) -> int:
+        """Number of classes (matrix dimension)."""
+        return len(self.labels)
+
+    @property
+    def total(self) -> int:
+        """Total number of observations in the matrix."""
+        return sum(sum(row) for row in self.matrix)
+
+    def _require_binary(self) -> None:
+        """Raise ``ValueError`` unless this is a 2×2 MET/UNMET (positive/negative) matrix."""
+        if len(self.labels) != 2 or self.labels[0] != "MET":
+            raise ValueError(
+                "tp/fp/fn/tn and the rates derived from them are only defined for a binary "
+                "2x2 confusion matrix with labels[0] == 'MET' (positive=MET, negative=UNMET); "
+                f"got labels={self.labels!r}."
+            )
+
+    @property
+    def tp(self) -> int:
+        """True positives: true MET predicted MET (binary only)."""
+        self._require_binary()
+        return self.matrix[0][0]
+
+    @property
+    def fn(self) -> int:
+        """False negatives: true MET predicted UNMET (binary only)."""
+        self._require_binary()
+        return self.matrix[0][1]
+
+    @property
+    def fp(self) -> int:
+        """False positives: true UNMET predicted MET (binary only)."""
+        self._require_binary()
+        return self.matrix[1][0]
+
+    @property
+    def tn(self) -> int:
+        """True negatives: true UNMET predicted UNMET (binary only)."""
+        self._require_binary()
+        return self.matrix[1][1]
+
+    @property
+    def fpr(self) -> float | None:
+        """False-positive rate ``fp / (fp + tn)`` (binary only). None when no true negatives."""
+        denom = self.fp + self.tn
+        return self.fp / denom if denom else None
+
+    @property
+    def fnr(self) -> float | None:
+        """False-negative rate ``fn / (fn + tp)`` (binary only). None when no true positives."""
+        denom = self.fn + self.tp
+        return self.fn / denom if denom else None
+
+    @property
+    def precision(self) -> float | None:
+        """Precision ``tp / (tp + fp)`` for MET (binary only). None when nothing predicted MET."""
+        denom = self.tp + self.fp
+        return self.tp / denom if denom else None
+
+    @property
+    def recall(self) -> float | None:
+        """Recall ``tp / (tp + fn)`` for MET (binary only). None when no true MET."""
+        denom = self.tp + self.fn
+        return self.tp / denom if denom else None
+
+
+class CoverageStats(BaseModel):
+    """How much of the raw paired sample survived abstention/error exclusion.
+
+    Built only under the ``exclude`` handling mode, where abstentions (CANNOT_ASSESS / NA) and
+    grading errors drop a paired observation from the agreement denominator. Under ``as_unmet``
+    or ``as_category`` no observation is dropped, so coverage would be trivially ``1.0`` and
+    these stats are not produced (left ``None`` by callers).
+
+    ``n_total`` is the raw pre-exclusion denominator; ``n_covered`` is what remained after the
+    union of all exclusion reasons (it equals the per-criterion ``n_samples``). Every rate
+    honours undefined→None (``None`` when its denominator is zero); counts stay ``int``.
+
+    Attributes:
+        n_total: Raw pre-exclusion paired count (the denominator before any drops).
+        n_covered: Paired count remaining after union-exclusion (== per-criterion ``n_samples``).
+        coverage: ``n_covered / n_total``. None when ``n_total == 0``.
+        judge_abstain_rate: Fraction of the raw pairs where the judge/prediction abstained.
+            None when ``n_total == 0``.
+        gt_abstain_rate: Fraction of the raw pairs where the ground truth abstained. None when
+            ``n_total == 0``.
+        union_exclusion_rate: Fraction excluded for any reason (``1 - coverage``). None when
+            ``n_total == 0``.
+        n_errored: Count of paired observations dropped because grading errored.
+        error_rate: ``n_errored / n_total``. None when ``n_total == 0``.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    n_total: int
+    n_covered: int
+    coverage: float | None = None
+    judge_abstain_rate: float | None = None
+    gt_abstain_rate: float | None = None
+    union_exclusion_rate: float | None = None
+    n_errored: int = 0
+    error_rate: float | None = None
+
+
 # Type alias for criterion type classification
 CriterionType = Literal["binary", "ordinal", "nominal"]
 """Classification of criterion type for metrics computation.
@@ -284,6 +424,20 @@ class CriterionMetrics(BaseModel):
             None unless ensemble with >=2 judges and >=2 complete-case items.
         support_true: Count of MET in ground truth.
         support_pred: Count of MET in predictions.
+        confusion_matrix: 2×2 labelled confusion matrix (``["MET", "UNMET"]``, rows=true,
+            cols=pred). ``None`` when there are no samples.
+        fpr: False-positive rate (true UNMET predicted MET). ``None`` when undefined (no true
+            negatives) / no samples.
+        fnr: False-negative rate (true MET predicted UNMET). ``None`` when undefined (no true
+            positives) / no samples.
+        phi: Matthews correlation coefficient (the φ coefficient) on the {MET, UNMET}
+            dichotomy. ``None`` on constant / single-class data, where it is genuinely
+            undefined (never a fabricated ``0.0``).
+        is_degenerate: True iff this criterion had samples (``n_samples > 0``) but ``kappa``
+            is still ``None`` — agreement could not be estimated because the data collapsed
+            onto a single class. Distinct from the no-data case (``n_samples == 0``).
+        coverage_stats: How much of the raw paired sample survived abstention/error
+            exclusion. Only populated under the ``exclude`` handling mode; ``None`` otherwise.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -302,6 +456,12 @@ class CriterionMetrics(BaseModel):
     fleiss_kappa: float | None = None
     support_true: int
     support_pred: int
+    confusion_matrix: ConfusionMatrix | None = None
+    fpr: float | None = None
+    fnr: float | None = None
+    phi: float | None = None
+    is_degenerate: bool = False
+    coverage_stats: CoverageStats | None = None
 
 
 # Alias for backwards compatibility
@@ -451,8 +611,14 @@ class OrdinalCriterionMetrics(BaseModel):
         rmse: RMSE on option values (0-1 scale). None when undefined / no samples.
         mae: MAE on option values (0-1 scale). None when undefined / no samples.
         per_option: Per-option precision/recall/F1 breakdown.
-        confusion_matrix: N×N confusion matrix (rows=true, cols=pred).
-        option_labels: Labels for confusion matrix axes.
+        confusion_matrix: N×N labelled confusion matrix (rows=true, cols=pred); its
+            ``.labels`` carry the option labels (the former ``option_labels``).
+        is_degenerate: True iff this criterion had samples (``n_samples > 0``) but
+            ``weighted_kappa`` is still ``None`` — agreement could not be estimated because
+            the data collapsed onto a single class. Distinct from the no-data case
+            (``n_samples == 0``), where every metric is ``None`` simply for lack of samples.
+        coverage_stats: How much of the raw paired sample survived abstention/error
+            exclusion. Only populated under the ``exclude`` handling mode; ``None`` otherwise.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -473,8 +639,9 @@ class OrdinalCriterionMetrics(BaseModel):
     rmse: float | None
     mae: float | None
     per_option: list[OptionMetrics]
-    confusion_matrix: list[list[int]]
-    option_labels: list[str]
+    confusion_matrix: ConfusionMatrix
+    is_degenerate: bool = False
+    coverage_stats: CoverageStats | None = None
 
 
 class NominalCriterionMetrics(BaseModel):
@@ -502,8 +669,13 @@ class NominalCriterionMetrics(BaseModel):
             complete-case. Prefer ``krippendorff_alpha`` as the general statistic. None
             unless ensemble with >=2 judges and >=2 complete-case items.
         per_option: Per-option precision/recall/F1 breakdown.
-        confusion_matrix: N×N confusion matrix (rows=true, cols=pred).
-        option_labels: Labels for confusion matrix axes.
+        confusion_matrix: N×N labelled confusion matrix (rows=true, cols=pred); its
+            ``.labels`` carry the option labels (the former ``option_labels``).
+        is_degenerate: True iff this criterion had samples (``n_samples > 0``) but ``kappa``
+            is still ``None`` — agreement could not be estimated because the data collapsed
+            onto a single class. Distinct from the no-data case (``n_samples == 0``).
+        coverage_stats: How much of the raw paired sample survived abstention/error
+            exclusion. Only populated under the ``exclude`` handling mode; ``None`` otherwise.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -519,8 +691,9 @@ class NominalCriterionMetrics(BaseModel):
     krippendorff_alpha: float | None = None
     fleiss_kappa: float | None = None
     per_option: list[OptionMetrics]
-    confusion_matrix: list[list[int]]
-    option_labels: list[str]
+    confusion_matrix: ConfusionMatrix
+    is_degenerate: bool = False
+    coverage_stats: CoverageStats | None = None
 
 
 # Union type for polymorphic per-criterion metrics
@@ -554,37 +727,6 @@ class ScoreCorrelationResult(BaseModel):
     rmse: float
     mae: float
     n_samples: int
-
-
-class AgreementSummary(BaseModel):
-    """Summary of agreement between predictions and ground truth.
-
-    This is the main result type for Level 2 agreement computation,
-    aggregating per-criterion and score-level metrics.
-
-    Attributes:
-        overall_accuracy: Overall criterion-level accuracy.
-        mean_kappa: Mean Cohen's kappa across criteria.
-        per_criterion: Per-criterion metrics breakdown.
-        score_rmse: RMSE of cumulative scores.
-        score_mae: MAE of cumulative scores.
-        score_correlation: Score correlation results.
-        n_items: Number of items evaluated.
-        n_criteria: Number of criteria.
-        cannot_assess_mode: How CANNOT_ASSESS was handled.
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    overall_accuracy: float
-    mean_kappa: float
-    per_criterion: list[CriterionMetrics]
-    score_rmse: float
-    score_mae: float
-    score_correlation: ScoreCorrelationResult
-    n_items: int
-    n_criteria: int
-    cannot_assess_mode: CannotAssessMode = "exclude"
 
 
 class DistributionResult(BaseModel):
@@ -775,6 +917,12 @@ class JudgeMetrics(BaseModel):
         criterion_f1: Overall F1 for the binary MET class. ``None`` when not applicable
             (see ``criterion_precision``).
         mean_kappa: Mean Cohen's kappa across criteria. ``None`` when undefined.
+        phi: Matthews correlation coefficient (φ) for this judge on the binary {MET, UNMET}
+            dichotomy, pooled across criteria. ``None`` when undefined (constant / single
+            class / no binary data).
+        confusion_matrix: This judge's confusion matrix, aggregated across criteria from the
+            raw pre-filter codes (binary MET/UNMET with an abstain ``CANNOT_ASSESS`` class
+            last → 3×3). ``None`` when there is no data.
         score_rmse: RMSE of cumulative scores.
         score_mae: MAE of cumulative scores.
         score_spearman: Spearman correlation result.
@@ -791,6 +939,8 @@ class JudgeMetrics(BaseModel):
     criterion_recall: float | None
     criterion_f1: float | None
     mean_kappa: float | None
+    phi: float | None = None
+    confusion_matrix: ConfusionMatrix | None = None
     score_rmse: float
     score_mae: float
     score_spearman: CorrelationResult
@@ -841,6 +991,22 @@ class MetricsResult(BaseModel):
         cannot_assess_stats: Statistics for CANNOT_ASSESS handling in binary criteria —
             the binary parallel to ``na_stats`` (a distinct kind of abstention; see
             CannotAssessStats).
+        cannot_assess_mode: How binary CANNOT_ASSESS verdicts were handled when these metrics
+            were computed (``exclude`` / ``as_unmet`` / ``as_category``).
+        na_mode: How multi-choice NA options were handled when these metrics were computed
+            (the multi-choice analog of ``cannot_assess_mode``).
+        n_samples: Total number of paired observations contributing to the aggregate metrics.
+            ``None`` when not recorded (legacy checkpoints).
+        mean_krippendorff_alpha: Macro mean of the per-criterion Krippendorff's alpha. ``None``
+            when no criterion contributed an alpha.
+        criterion_phi: Aggregate (micro) Matthews correlation coefficient (φ) over the pooled
+            binary {MET, UNMET} flats. ``None`` for multi-choice-only rubrics or when undefined.
+        macro_accuracy: Unweighted mean of the per-criterion accuracies. ``None`` when no
+            criterion contributed an accuracy.
+        micro_kappa: Aggregate (micro) Cohen's kappa pooled across criteria. ``None`` when
+            undefined.
+        coverage_stats: Aggregate rollup of how much of the raw paired sample survived
+            abstention/error exclusion. Only populated under the ``exclude`` handling mode.
         warnings: Any warnings generated during computation.
     """
 
@@ -880,10 +1046,33 @@ class MetricsResult(BaseModel):
     n_nominal_criteria: int = 0
     na_stats: NAStats | None = None
     cannot_assess_stats: CannotAssessStats | None = None
+
+    # Handling-mode provenance (frozen onto the result; defaults keep legacy checkpoints
+    # loadable). These record HOW abstentions were treated when the metrics were computed.
+    cannot_assess_mode: CannotAssessMode = "exclude"
+    na_mode: NAMode = "exclude"
+
+    # Additional aggregate scalars (additive; default None so legacy checkpoints load).
+    # Every one honours undefined→None — never a fabricated 0.0.
+    n_samples: int | None = None
+    mean_krippendorff_alpha: float | None = None
+    criterion_phi: float | None = None
+    macro_accuracy: float | None = None
+    micro_kappa: float | None = None
+    coverage_stats: CoverageStats | None = None
+
     warnings: list[str] = []
 
-    def summary(self) -> str:
-        """Return formatted text summary of metrics."""
+    def summary(self, *, verbose: bool = False) -> str:
+        """Return formatted text summary of metrics.
+
+        Args:
+            verbose: When ``True``, the per-judge table swaps in the secondary numeric
+                columns (RMSE, Spearman) it omits by default and prints each judge's
+                confusion matrix. The default (``False``) per-judge line leads with the
+                chance-corrected accuracy + mean kappa (and Matthews phi), the metrics most
+                directly comparable across judges.
+        """
         lines = []
         lines.append("=" * 60)
         lines.append("METRICS SUMMARY")
@@ -902,23 +1091,57 @@ class MetricsResult(BaseModel):
             criteria_info += f" ({', '.join(type_parts)})"
         lines.append(criteria_info)
 
+        # Handling modes: every accuracy/kappa/F1 below depends on how abstentions were
+        # treated, so the estimand is named explicitly. A number reported without its
+        # handling mode is ambiguous among the three estimands.
+        lines.append(f"Handling modes: CANNOT_ASSESS={self.cannot_assess_mode}, NA={self.na_mode}")
+
         if self.warnings:
             lines.append(f"\nWarnings ({len(self.warnings)}):")
             for w in self.warnings:
                 lines.append(f"  - {w}")
 
+        # Criterion-level scalars span two aggregation levels. Pooled-over-decisions
+        # metrics are micro; the unweighted mean over criteria is macro. They estimate
+        # different quantities (a high-support criterion dominates micro, every criterion
+        # counts equally for macro), so each carries its level explicitly.
         lines.append("")
         lines.append("Criterion-Level Metrics:")
-        lines.append(f"  Accuracy:   {_fmt_opt(self.criterion_accuracy, '.1%')}")
+        lines.append(f"  Accuracy (micro):       {_fmt_opt(self.criterion_accuracy, '.1%')}")
+        lines.append(f"  Accuracy (macro):       {_fmt_opt(self.macro_accuracy, '.1%')}")
         if self.n_binary_criteria > 0:
             # Guaranteed non-None here, but render via _fmt_opt so ty is satisfied.
-            lines.append(f"  Precision:  {_fmt_opt(self.criterion_precision, '.2f')}")
-            lines.append(f"  Recall:     {_fmt_opt(self.criterion_recall, '.2f')}")
-            lines.append(f"  F1:         {_fmt_opt(self.criterion_f1, '.2f')}")
-        lines.append(f"  Mean Kappa: {_fmt_opt(self.mean_kappa, '.3f')}")
+            lines.append(f"  Precision (micro):      {_fmt_opt(self.criterion_precision, '.2f')}")
+            lines.append(f"  Recall (micro):         {_fmt_opt(self.criterion_recall, '.2f')}")
+            lines.append(f"  F1 (micro):             {_fmt_opt(self.criterion_f1, '.2f')}")
+        lines.append(f"  Mean Kappa (macro):     {_fmt_opt(self.mean_kappa, '.3f')}")
+        lines.append(f"  Kappa (micro):          {_fmt_opt(self.micro_kappa, '.3f')}")
+        if self.n_binary_criteria > 0:
+            lines.append(f"  Phi (micro):            {_fmt_opt(self.criterion_phi, '.3f')}")
+            # Single-source conflation note: on binary data phi coincides with the
+            # Pearson/Spearman/Kendall/MCC family, and the kappa minus phi gap measures the
+            # judge's positive-rate drift from the human's (not a second, corroborating
+            # statistic). This note lives only here (and in to_dataframe()/docstrings).
+            lines.append(
+                "    (phi = Pearson = Spearman = Kendall = MCC on binary data; the "
+                "Kappa - Phi gap is the judge's positive-rate drift, not extra evidence)"
+            )
+        lines.append(f"  Mean Kripp-α (macro):   {_fmt_opt(self.mean_krippendorff_alpha, '.3f')}")
+
+        # Aggregate coverage continuation: under exclude mode an abstention/error drops a
+        # paired observation, so the covered-subset metrics above are reported alongside
+        # their coverage (a selective accuracy without its coverage is incomplete).
+        if self.coverage_stats is not None:
+            cs = self.coverage_stats
+            lines.append(f"  Coverage:               {_fmt_opt(cs.coverage, '.1%')}")
+            lines.append(
+                f"    judge-abstain={_fmt_opt(cs.judge_abstain_rate, '.1%')}, "
+                f"gt-abstain={_fmt_opt(cs.gt_abstain_rate, '.1%')}, "
+                f"errored={cs.n_errored}"
+            )
 
         lines.append("")
-        lines.append("Score-Level Metrics:")
+        lines.append("Score-Level Metrics (continuous per-item weighted score):")
         lines.append(f"  RMSE:     {self.score_rmse:.4f}")
         lines.append(f"  MAE:      {self.score_mae:.4f}")
         lines.append(
@@ -996,66 +1219,114 @@ class MetricsResult(BaseModel):
             lines.append("")
             lines.append("Per-Judge Metrics:")
             for judge_id, jm in sorted(self.per_judge.items()):
+                # Default line leads with the chance-corrected accuracy + mean kappa (and
+                # phi), the metrics most comparable across judges. RMSE/Spearman are demoted
+                # to the verbose view.
                 lines.append(
-                    f"  {judge_id}: RMSE={jm.score_rmse:.4f}, "
-                    f"Spearman={_fmt_opt(jm.score_spearman.coefficient, '.4f')}"
+                    f"  {judge_id}: Acc={_fmt_opt(jm.criterion_accuracy, '.1%')}, "
+                    f"Mean Kappa={_fmt_opt(jm.mean_kappa, '.3f')}, "
+                    f"Phi={_fmt_opt(jm.phi, '.3f')}"
                 )
+                if verbose:
+                    lines.append(
+                        f"      RMSE={jm.score_rmse:.4f}, "
+                        f"Spearman={_fmt_opt(jm.score_spearman.coefficient, '.4f')}, "
+                        f"MAE={jm.score_mae:.4f}"
+                    )
+                    if jm.confusion_matrix is not None:
+                        lines.append(
+                            "      Confusion (" + ", ".join(jm.confusion_matrix.labels) + "):"
+                        )
+                        for label, mrow in zip(
+                            jm.confusion_matrix.labels, jm.confusion_matrix.matrix
+                        ):
+                            lines.append(f"        {label:<14} {mrow}")
 
         lines.append("")
         lines.append("Per-Criterion Breakdown:")
 
-        # Inter-judge agreement (Krippendorff's alpha + Fleiss' kappa) is only populated for
-        # ensembles with >=2 judges; append those columns to a group's table only when at
-        # least one criterion in the group carries them. Krippendorff's alpha is the
-        # recommended statistic, so it leads.
-        def _has_agreement(criteria: list) -> bool:
-            return any(
-                cm.krippendorff_alpha is not None or cm.fleiss_kappa is not None for cm in criteria
-            )
+        # Inter-judge agreement is only populated for ensembles with >=2 judges. Render is
+        # type-aware: on binary/nominal data Krippendorff's nominal alpha and Fleiss' kappa
+        # coincide up to a finite-sample correction (1 - kappa_F)/(N*R) — they are one
+        # statistic, not corroborating evidence — so alpha is reported as the single primary
+        # column and the bare Fleiss column is dropped. On ordinal data alpha is
+        # distance-aware while Fleiss stays nominal (different geometry), so both are kept.
+        def _has_alpha(criteria: list) -> bool:
+            return any(cm.krippendorff_alpha is not None for cm in criteria)
 
-        def _agreement_header() -> str:
+        def _has_fleiss(criteria: list) -> bool:
+            return any(cm.fleiss_kappa is not None for cm in criteria)
+
+        def _alpha_header() -> str:
+            return f" {'Kripp-α':>9}"
+
+        def _alpha_cell(cm) -> str:
+            return f" {_fmt_opt(cm.krippendorff_alpha, '>9.3f', 9)}"
+
+        def _alpha_fleiss_header() -> str:
             return f" {'Kripp-α':>9} {'Fleiss':>8}"
 
-        def _agreement_cells(cm) -> str:
+        def _alpha_fleiss_cells(cm) -> str:
             return (
                 f" {_fmt_opt(cm.krippendorff_alpha, '>9.3f', 9)}"
                 f" {_fmt_opt(cm.fleiss_kappa, '>8.3f', 8)}"
             )
+
+        # Marks a criterion that had samples but whose agreement coefficient collapsed to
+        # None (single-class) — distinct from a no-data criterion (n_samples == 0).
+        def _degen_suffix(cm) -> str:
+            return "  [degenerate: agreement undefined, single class]" if cm.is_degenerate else ""
 
         # Separate display by criterion type
         binary_criteria = [cm for cm in self.per_criterion if cm.criterion_type == "binary"]
         ordinal_criteria = [cm for cm in self.per_criterion if cm.criterion_type == "ordinal"]
         nominal_criteria = [cm for cm in self.per_criterion if cm.criterion_type == "nominal"]
 
+        alpha_note_needed = False
+
         if binary_criteria:
             if ordinal_criteria or nominal_criteria:
                 lines.append("\nBinary Criteria:")
-            show_agreement = _has_agreement(binary_criteria)
-            header = f"{'Criterion':<20} {'Acc':>8} {'Prec':>8} {'Rec':>8} {'F1':>8} {'Kappa':>8}"
-            if show_agreement:
-                header += _agreement_header()
+            # Binary/nominal: alpha primary, bare Fleiss dropped.
+            show_alpha = _has_alpha(binary_criteria)
+            alpha_note_needed = alpha_note_needed or show_alpha
+            header = (
+                f"{'Criterion':<20} {'Acc':>8} {'Prec':>8} {'Rec':>8} {'F1':>8} "
+                f"{'Kappa':>8} {'Phi':>8} {'FP':>5} {'FN':>5} {'FPR':>7} {'FNR':>7}"
+            )
+            if show_alpha:
+                header += _alpha_header()
             lines.append(header)
             lines.append("-" * len(header))
             for cm in binary_criteria:
+                fp = cm.confusion_matrix.fp if cm.confusion_matrix is not None else None
+                fn = cm.confusion_matrix.fn if cm.confusion_matrix is not None else None
                 row = (
                     f"{cm.name:<20} {_fmt_opt(cm.accuracy, '>8.1%', 8)} "
                     f"{_fmt_opt(cm.precision, '>8.2f', 8)} "
                     f"{_fmt_opt(cm.recall, '>8.2f', 8)} {_fmt_opt(cm.f1, '>8.2f', 8)} "
-                    f"{_fmt_opt(cm.kappa, '>8.3f', 8)}"
+                    f"{_fmt_opt(cm.kappa, '>8.3f', 8)} {_fmt_opt(cm.phi, '>8.3f', 8)} "
+                    f"{(str(fp) if fp is not None else 'n/a'):>5} "
+                    f"{(str(fn) if fn is not None else 'n/a'):>5} "
+                    f"{_fmt_opt(cm.fpr, '>7.2f', 7)} {_fmt_opt(cm.fnr, '>7.2f', 7)}"
                 )
-                if show_agreement:
-                    row += _agreement_cells(cm)
+                if show_alpha:
+                    row += _alpha_cell(cm)
+                row += _degen_suffix(cm)
                 lines.append(row)
 
         if ordinal_criteria:
             lines.append("\nOrdinal Criteria:")
-            show_agreement = _has_agreement(ordinal_criteria)
+            # Ordinal: keep both alpha (distance-aware) and Fleiss (nominal) — different
+            # geometry, see the note below.
+            show_alpha = _has_alpha(ordinal_criteria)
+            show_fleiss = _has_fleiss(ordinal_criteria)
             header = (
                 f"{'Criterion':<20} {'Exact':>8} {'Adj':>8} "
                 f"{'WKappa':>8} {'Spearman':>10} {'RMSE':>8}"
             )
-            if show_agreement:
-                header += _agreement_header()
+            if show_alpha or show_fleiss:
+                header += _alpha_fleiss_header()
             lines.append(header)
             lines.append("-" * len(header))
             for cm in ordinal_criteria:
@@ -1066,16 +1337,26 @@ class MetricsResult(BaseModel):
                     f"{_fmt_opt(cm.spearman.coefficient, '>10.4f', 10)} "
                     f"{_fmt_opt(cm.rmse, '>8.4f', 8)}"
                 )
-                if show_agreement:
-                    row += _agreement_cells(cm)
+                if show_alpha or show_fleiss:
+                    row += _alpha_fleiss_cells(cm)
+                row += _degen_suffix(cm)
                 lines.append(row)
+            if show_fleiss:
+                # Distinguishing note (NOT a conflation note): ordinal alpha and nominal
+                # Fleiss measure different geometries and are both intentionally retained.
+                lines.append(
+                    "  Note: ordinal Kripp-α is distance-aware while Fleiss is nominal — they "
+                    "measure different geometry, not the same statistic."
+                )
 
         if nominal_criteria:
             lines.append("\nNominal Criteria:")
-            show_agreement = _has_agreement(nominal_criteria)
+            # Binary/nominal: alpha primary, bare Fleiss dropped.
+            show_alpha = _has_alpha(nominal_criteria)
+            alpha_note_needed = alpha_note_needed or show_alpha
             header = f"{'Criterion':<20} {'Accuracy':>10} {'Kappa':>8} {'Interpretation':<20}"
-            if show_agreement:
-                header += _agreement_header()
+            if show_alpha:
+                header += _alpha_header()
             lines.append(header)
             lines.append("-" * len(header))
             for cm in nominal_criteria:
@@ -1083,37 +1364,88 @@ class MetricsResult(BaseModel):
                     f"{cm.name:<20} {_fmt_opt(cm.exact_accuracy, '>10.1%', 10)} "
                     f"{_fmt_opt(cm.kappa, '>8.3f', 8)} {cm.kappa_interpretation:<20}"
                 )
-                if show_agreement:
-                    row += _agreement_cells(cm)
+                if show_alpha:
+                    row += _alpha_cell(cm)
+                row += _degen_suffix(cm)
                 lines.append(row)
+
+        if alpha_note_needed:
+            # Single-source conflation note for binary/nominal: alpha and Fleiss coincide up
+            # to a finite-sample correction, so only the primary (alpha) is reported and
+            # Fleiss is omitted. This note lives only here (and in to_dataframe()/docstrings).
+            lines.append(
+                "  Note: on binary/nominal data Krippendorff's nominal α equals Fleiss' κ up "
+                "to a finite-sample correction (1 - κ_F)/(N·R) — one statistic, not "
+                "corroborating evidence; α is reported as primary (bare Fleiss omitted)."
+            )
 
         return "\n".join(lines)
 
     def to_dataframe(self) -> "pd.DataFrame":
         """Export metrics to pandas DataFrame.
 
-        Returns a flat DataFrame with a 'level' column indicating:
-        - 'aggregate': Overall metrics
-        - 'criterion': Per-criterion metrics (binary)
-        - 'criterion_ordinal': Per-criterion metrics (ordinal)
-        - 'criterion_nominal': Per-criterion metrics (nominal)
-        - 'judge': Per-judge metrics (if available)
+        Returns a flat DataFrame with a 'level' column indicating 'aggregate' / 'criterion'
+        / 'judge'. The criterion-level scalars carry their **aggregation level** in the
+        column name: ``accuracy_micro`` / ``precision_micro`` / ``recall_micro`` /
+        ``f1_micro`` / ``kappa_micro`` / ``phi_micro`` are pooled over decisions, while
+        ``accuracy_macro`` and ``mean_kappa_macro`` are unweighted means over criteria (the
+        former bare ``accuracy`` / ``precision`` / ``recall`` / ``f1`` / ``kappa`` columns
+        are gone — they mixed levels). The handling modes (``cannot_assess_mode`` /
+        ``na_mode``) and ``n_samples`` round-trip on the aggregate row, alongside coverage
+        columns (``coverage`` / ``judge_abstain_rate`` / ``gt_abstain_rate`` /
+        ``union_exclusion_rate`` / ``n_errored`` / ``error_rate``; ``None`` outside exclude
+        mode). On binary/nominal data Krippendorff's α equals Fleiss' κ up to a
+        finite-sample correction, so α is the single primary inter-judge column and the bare
+        ``fleiss_kappa`` value is emitted only for ordinal criteria (different geometry).
         """
         import pandas as pd
 
         rows = []
 
-        # Aggregate row
+        def _coverage_cols(cs: "CoverageStats | None") -> dict:
+            """Coverage columns, all None when coverage was not computed (non-exclude mode)."""
+            if cs is None:
+                return {
+                    "coverage": None,
+                    "judge_abstain_rate": None,
+                    "gt_abstain_rate": None,
+                    "union_exclusion_rate": None,
+                    "n_errored": None,
+                    "error_rate": None,
+                }
+            return {
+                "coverage": cs.coverage,
+                "judge_abstain_rate": cs.judge_abstain_rate,
+                "gt_abstain_rate": cs.gt_abstain_rate,
+                "union_exclusion_rate": cs.union_exclusion_rate,
+                "n_errored": cs.n_errored,
+                "error_rate": cs.error_rate,
+            }
+
+        # Aggregate row. The criterion-level scalars are labelled by aggregation level:
+        # accuracy_micro / precision_micro / recall_micro / f1_micro / kappa_micro / phi_micro
+        # are pooled over all decisions; accuracy_macro / mean_kappa_macro are unweighted
+        # means over criteria. The bare accuracy/precision/recall/f1/kappa columns are gone
+        # (they hid the level). On binary/nominal data Krippendorff's α is the single primary
+        # inter-judge statistic (Fleiss coincides up to a finite-sample correction), so the
+        # aggregate-level mean is mean_krippendorff_alpha and bare Fleiss is omitted there.
         rows.append(
             {
                 "level": "aggregate",
                 "name": "overall",
                 "criterion_type": "all",
-                "accuracy": self.criterion_accuracy,
-                "precision": self.criterion_precision,
-                "recall": self.criterion_recall,
-                "f1": self.criterion_f1,
-                "kappa": self.mean_kappa,
+                "accuracy_micro": self.criterion_accuracy,
+                "accuracy_macro": self.macro_accuracy,
+                "precision_micro": self.criterion_precision,
+                "recall_micro": self.criterion_recall,
+                "f1_micro": self.criterion_f1,
+                "mean_kappa_macro": self.mean_kappa,
+                "kappa_micro": self.micro_kappa,
+                "phi_micro": self.criterion_phi,
+                "mean_krippendorff_alpha": self.mean_krippendorff_alpha,
+                "cannot_assess_mode": self.cannot_assess_mode,
+                "na_mode": self.na_mode,
+                "n_samples": self.n_samples,
                 "rmse": self.score_rmse,
                 "mae": self.score_mae,
                 "spearman": self.score_spearman.coefficient,
@@ -1122,12 +1454,20 @@ class MetricsResult(BaseModel):
                 "bias": self.bias.mean_bias,
                 "adjacent_accuracy": None,
                 "weighted_kappa": None,
+                "phi": None,
+                "fpr": None,
+                "fnr": None,
+                "is_degenerate": None,
                 "krippendorff_alpha": None,
                 "fleiss_kappa": None,
+                **_coverage_cols(self.coverage_stats),
             }
         )
 
-        # Per-criterion rows (handle different types)
+        # Per-criterion rows (handle different types). Each criterion's pooled accuracy /
+        # kappa land in the *_micro columns (a single criterion has no macro/micro split);
+        # the macro columns stay None at this level. Binary/nominal drop the bare Fleiss
+        # value (α primary); ordinal keeps both (different geometry).
         for cm in self.per_criterion:
             if cm.criterion_type == "binary":
                 rows.append(
@@ -1135,11 +1475,18 @@ class MetricsResult(BaseModel):
                         "level": "criterion",
                         "name": cm.name,
                         "criterion_type": "binary",
-                        "accuracy": cm.accuracy,
-                        "precision": cm.precision,
-                        "recall": cm.recall,
-                        "f1": cm.f1,
-                        "kappa": cm.kappa,
+                        "accuracy_micro": cm.accuracy,
+                        "accuracy_macro": None,
+                        "precision_micro": cm.precision,
+                        "recall_micro": cm.recall,
+                        "f1_micro": cm.f1,
+                        "mean_kappa_macro": None,
+                        "kappa_micro": cm.kappa,
+                        "phi_micro": None,
+                        "mean_krippendorff_alpha": None,
+                        "cannot_assess_mode": None,
+                        "na_mode": None,
+                        "n_samples": cm.n_samples,
                         "rmse": None,
                         "mae": None,
                         "spearman": None,
@@ -1148,8 +1495,14 @@ class MetricsResult(BaseModel):
                         "bias": None,
                         "adjacent_accuracy": None,
                         "weighted_kappa": None,
+                        "phi": cm.phi,
+                        "fpr": cm.fpr,
+                        "fnr": cm.fnr,
+                        "is_degenerate": cm.is_degenerate,
                         "krippendorff_alpha": cm.krippendorff_alpha,
-                        "fleiss_kappa": cm.fleiss_kappa,
+                        # Binary: bare Fleiss dropped (α primary).
+                        "fleiss_kappa": None,
+                        **_coverage_cols(cm.coverage_stats),
                     }
                 )
             elif cm.criterion_type == "ordinal":
@@ -1158,11 +1511,18 @@ class MetricsResult(BaseModel):
                         "level": "criterion",
                         "name": cm.name,
                         "criterion_type": "ordinal",
-                        "accuracy": cm.exact_accuracy,
-                        "precision": None,
-                        "recall": None,
-                        "f1": None,
-                        "kappa": cm.weighted_kappa,
+                        "accuracy_micro": cm.exact_accuracy,
+                        "accuracy_macro": None,
+                        "precision_micro": None,
+                        "recall_micro": None,
+                        "f1_micro": None,
+                        "mean_kappa_macro": None,
+                        "kappa_micro": cm.weighted_kappa,
+                        "phi_micro": None,
+                        "mean_krippendorff_alpha": None,
+                        "cannot_assess_mode": None,
+                        "na_mode": None,
+                        "n_samples": cm.n_samples,
                         "rmse": cm.rmse,
                         "mae": cm.mae,
                         "spearman": cm.spearman.coefficient,
@@ -1171,8 +1531,14 @@ class MetricsResult(BaseModel):
                         "bias": None,
                         "adjacent_accuracy": cm.adjacent_accuracy,
                         "weighted_kappa": cm.weighted_kappa,
+                        "phi": None,
+                        "fpr": None,
+                        "fnr": None,
+                        "is_degenerate": cm.is_degenerate,
                         "krippendorff_alpha": cm.krippendorff_alpha,
+                        # Ordinal: keep Fleiss (different geometry from α).
                         "fleiss_kappa": cm.fleiss_kappa,
+                        **_coverage_cols(cm.coverage_stats),
                     }
                 )
             else:  # nominal
@@ -1181,11 +1547,18 @@ class MetricsResult(BaseModel):
                         "level": "criterion",
                         "name": cm.name,
                         "criterion_type": "nominal",
-                        "accuracy": cm.exact_accuracy,
-                        "precision": None,
-                        "recall": None,
-                        "f1": None,
-                        "kappa": cm.kappa,
+                        "accuracy_micro": cm.exact_accuracy,
+                        "accuracy_macro": None,
+                        "precision_micro": None,
+                        "recall_micro": None,
+                        "f1_micro": None,
+                        "mean_kappa_macro": None,
+                        "kappa_micro": cm.kappa,
+                        "phi_micro": None,
+                        "mean_krippendorff_alpha": None,
+                        "cannot_assess_mode": None,
+                        "na_mode": None,
+                        "n_samples": cm.n_samples,
                         "rmse": None,
                         "mae": None,
                         "spearman": None,
@@ -1194,8 +1567,14 @@ class MetricsResult(BaseModel):
                         "bias": None,
                         "adjacent_accuracy": None,
                         "weighted_kappa": None,
+                        "phi": None,
+                        "fpr": None,
+                        "fnr": None,
+                        "is_degenerate": cm.is_degenerate,
                         "krippendorff_alpha": cm.krippendorff_alpha,
-                        "fleiss_kappa": cm.fleiss_kappa,
+                        # Nominal: bare Fleiss dropped (α primary).
+                        "fleiss_kappa": None,
+                        **_coverage_cols(cm.coverage_stats),
                     }
                 )
 
@@ -1207,11 +1586,18 @@ class MetricsResult(BaseModel):
                         "level": "judge",
                         "name": judge_id,
                         "criterion_type": "all",
-                        "accuracy": jm.criterion_accuracy,
-                        "precision": jm.criterion_precision,
-                        "recall": jm.criterion_recall,
-                        "f1": jm.criterion_f1,
-                        "kappa": jm.mean_kappa,
+                        "accuracy_micro": jm.criterion_accuracy,
+                        "accuracy_macro": None,
+                        "precision_micro": jm.criterion_precision,
+                        "recall_micro": jm.criterion_recall,
+                        "f1_micro": jm.criterion_f1,
+                        "mean_kappa_macro": jm.mean_kappa,
+                        "kappa_micro": None,
+                        "phi_micro": None,
+                        "mean_krippendorff_alpha": None,
+                        "cannot_assess_mode": None,
+                        "na_mode": None,
+                        "n_samples": None,
                         "rmse": jm.score_rmse,
                         "mae": jm.score_mae,
                         "spearman": jm.score_spearman.coefficient,
@@ -1220,8 +1606,13 @@ class MetricsResult(BaseModel):
                         "bias": jm.bias.mean_bias,
                         "adjacent_accuracy": None,
                         "weighted_kappa": None,
+                        "phi": jm.phi,
+                        "fpr": None,
+                        "fnr": None,
+                        "is_degenerate": None,
                         "krippendorff_alpha": None,
                         "fleiss_kappa": None,
+                        **_coverage_cols(None),
                     }
                 )
 

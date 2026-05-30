@@ -6,7 +6,17 @@ Agreement and correlation metrics for validating LLM judges against ground truth
 
 When your dataset includes ground truth labels, `compute_metrics()` measures how well your LLM judge agrees with human annotations. Metrics include accuracy, precision, recall, F1, Cohen's kappa, correlations, and systematic bias analysis.
 
-For ensemble (multi-judge) evaluations, each per-criterion metrics object also reports **inter-judge agreement** (judges vs. each other, independent of ground truth). The recommended statistic is **Krippendorff's alpha** (`krippendorff_alpha`) — it handles unequal/missing raters and is level-aware (nominal vs. ordinal). **Fleiss' kappa** (`fleiss_kappa`) is also reported as the classic fixed-rater nominal measure, computed complete-case. Both are populated only with an ensemble of ≥2 judges and ≥2 items, and are `None` otherwise.
+For ensemble (multi-judge) evaluations, each per-criterion metrics object also reports **inter-judge agreement** (judges vs. each other, independent of ground truth). The recommended statistic is **Krippendorff's alpha** (`krippendorff_alpha`) — it handles unequal/missing raters and is level-aware (nominal vs. ordinal). **Fleiss' kappa** (`fleiss_kappa`) is also computed as the classic fixed-rater nominal measure, complete-case. Both are populated only with an ensemble of ≥2 judges and ≥2 items, and are `None` otherwise.
+
+!!! note "One inter-judge statistic on binary/nominal data"
+
+    On binary and nominal data Krippendorff's nominal α and Fleiss' κ coincide up to a
+    finite-sample correction `(1 − κ_F)/(N·R)` — they are one statistic, not corroborating
+    evidence. `summary()` therefore reports **α as the single primary** inter-judge column
+    for binary/nominal criteria and drops the bare Fleiss column (a note explains the
+    omission); `to_dataframe()` leaves the binary/nominal `fleiss_kappa` value `None`. On
+    **ordinal** data α is distance-aware while Fleiss is nominal (different geometry), so
+    both are kept with a distinguishing note.
 
 !!! tip "Research Background"
 
@@ -26,10 +36,18 @@ result = await evaluate(dataset, grader, show_progress=True)
 # Compute metrics
 metrics = result.compute_metrics(dataset)
 
-# Formatted summary
+# Formatted summary. The header names the handling modes
+# (CANNOT_ASSESS / NA estimands), the criterion-level scalars carry their
+# aggregation level (micro vs macro), and binary criteria show φ + FP/FN/FPR/FNR.
 print(metrics.summary())
 
-# Export options
+# verbose=True additionally prints the per-judge RMSE/Spearman columns and each
+# judge's confusion matrix (the default per-judge line leads with accuracy + kappa + φ).
+print(metrics.summary(verbose=True))
+
+# Export options. to_dataframe() uses level-labelled aggregate keys
+# (accuracy_micro / accuracy_macro / mean_kappa_macro / kappa_micro / phi_micro / ...)
+# and round-trips the handling modes + coverage columns.
 df = metrics.to_dataframe()
 metrics.to_file("metrics.json")
 ```
@@ -80,7 +98,14 @@ for judge_id, jm in metrics.per_judge.items():
 | `criterion_precision` | Precision for the binary MET class. `float | None` — `None` when not applicable, e.g. a **multi-choice-only** rubric (no binary MET class). |
 | `criterion_recall` | Recall for the binary MET class. `float | None` — `None` when not applicable (multi-choice-only rubric). |
 | `criterion_f1` | F1 for the binary MET class. `float | None` — `None` when not applicable (multi-choice-only rubric). |
-| `mean_kappa` | Mean Cohen's kappa across criteria. `float | None` — `None` when undefined (e.g. degenerate single-class). |
+| `mean_kappa` | Mean Cohen's kappa across criteria (**macro** — unweighted mean over criteria). `float | None` — `None` when undefined (e.g. degenerate single-class). |
+| `macro_accuracy` | Unweighted mean of the per-criterion accuracies (**macro**). `float | None`. |
+| `micro_kappa` | Cohen's kappa pooled across criteria (**micro**, distinct from the macro `mean_kappa`). `float | None`. |
+| `criterion_phi` | Matthews correlation coefficient (φ) pooled over the binary MET-vs-rest flats (**micro**). `float | None` — `None` for a multi-choice-only rubric or on single-class data. φ = Pearson = Spearman = Kendall = MCC on binary data; the κ − φ gap is the judge's positive-rate drift. |
+| `mean_krippendorff_alpha` | Macro mean of the per-criterion Krippendorff's α (inter-judge). `float | None`. |
+| `cannot_assess_mode` / `na_mode` | How CANNOT_ASSESS / NA were handled when the metrics were computed (`exclude` / `as_unmet` / `as_category`). Frozen on the result and round-tripped by `to_file` so a serialized number is never ambiguous among the estimands. |
+| `n_samples` | Total paired observations contributing to the aggregate metrics. `int | None`. |
+| `coverage_stats` | Under the `exclude` mode, how much of the raw paired sample survived abstention/error exclusion (`coverage`, judge/gt abstain rates, errored count). `CoverageStats | None`. |
 | `per_criterion` | Per-criterion metrics breakdown (polymorphic: `CriterionMetrics`, `OrdinalCriterionMetrics`, `NominalCriterionMetrics`). Their per-criterion numeric fields (`accuracy`, `precision`, `recall`, `f1`, `kappa`, `weighted_kappa`, `adjacent_accuracy`, per-option metrics) are likewise `float | None` when undefined. |
 | `score_rmse` | RMSE of cumulative scores (always a `float`). |
 | `score_mae` | MAE of cumulative scores (always a `float`). |

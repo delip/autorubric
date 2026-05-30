@@ -780,8 +780,61 @@ class TestComputeNominalCriterionMetrics:
         true = [0, 1, 2]
         metrics = _compute_nominal_criterion_metrics(pred, true, nominal_criterion, 0)
 
-        assert len(metrics.confusion_matrix) == 3
-        assert metrics.confusion_matrix[0][0] == 1  # True 0, Pred 0
+        assert len(metrics.confusion_matrix.matrix) == 3
+        assert metrics.confusion_matrix.matrix[0][0] == 1  # True 0, Pred 0
+
+
+class TestMultiChoiceConfusionMatrixType:
+    """Multi-choice confusion_matrix is the unified ConfusionMatrix type.
+
+    The former ``confusion_matrix: list[list[int]]`` + ``option_labels: list[str]`` pair
+    is replaced by a single ``confusion_matrix: ConfusionMatrix`` whose ``.matrix`` holds
+    the old N×N counts and whose ``.labels`` holds the old option labels. The separate
+    ``option_labels`` attribute is removed.
+    """
+
+    def test_ordinal_confusion_matrix_is_confusion_matrix_type(self, ordinal_criterion):
+        from autorubric.metrics import ConfusionMatrix
+
+        pred = [0, 1, 2, 3]
+        true = [0, 1, 2, 3]
+        metrics = _compute_ordinal_criterion_metrics(pred, true, ordinal_criterion, 0)
+        assert isinstance(metrics.confusion_matrix, ConfusionMatrix)
+        # .matrix == the old NxN list-of-lists.
+        assert metrics.confusion_matrix.matrix == [
+            [1, 0, 0, 0],
+            [0, 1, 0, 0],
+            [0, 0, 1, 0],
+            [0, 0, 0, 1],
+        ]
+        # .labels == the old option_labels.
+        assert metrics.confusion_matrix.labels == [opt.label for opt in ordinal_criterion.options]
+
+    def test_nominal_confusion_matrix_is_confusion_matrix_type(self, nominal_criterion):
+        from autorubric.metrics import ConfusionMatrix
+
+        pred = [0, 1, 2]
+        true = [0, 1, 2]
+        metrics = _compute_nominal_criterion_metrics(pred, true, nominal_criterion, 0)
+        assert isinstance(metrics.confusion_matrix, ConfusionMatrix)
+        assert metrics.confusion_matrix.matrix == [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+        assert metrics.confusion_matrix.labels == [opt.label for opt in nominal_criterion.options]
+
+    def test_option_labels_attribute_removed_ordinal(self, ordinal_criterion):
+        metrics = _compute_ordinal_criterion_metrics([0], [0], ordinal_criterion, 0)
+        assert not hasattr(metrics, "option_labels")
+
+    def test_option_labels_attribute_removed_nominal(self, nominal_criterion):
+        metrics = _compute_nominal_criterion_metrics([0], [0], nominal_criterion, 0)
+        assert not hasattr(metrics, "option_labels")
+
+    def test_empty_data_confusion_matrix_is_confusion_matrix_type(self, nominal_criterion):
+        from autorubric.metrics import ConfusionMatrix
+
+        metrics = _compute_nominal_criterion_metrics([], [], nominal_criterion, 0)
+        assert isinstance(metrics.confusion_matrix, ConfusionMatrix)
+        assert metrics.confusion_matrix.matrix == [[0, 0, 0], [0, 0, 0], [0, 0, 0]]
+        assert metrics.confusion_matrix.labels == [opt.label for opt in nominal_criterion.options]
 
 
 # =============================================================================

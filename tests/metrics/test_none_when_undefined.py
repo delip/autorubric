@@ -266,7 +266,7 @@ def test_ordinal_empty_data_metrics_none_counts_zero():
     assert m.n_samples == 0
     assert m.per_option == []
     # Confusion matrix cells stay 0 (real counts).
-    assert m.confusion_matrix == [[0, 0, 0], [0, 0, 0], [0, 0, 0]]
+    assert m.confusion_matrix.matrix == [[0, 0, 0], [0, 0, 0], [0, 0, 0]]
 
 
 def test_nominal_empty_data_metrics_none_counts_zero():
@@ -277,7 +277,7 @@ def test_nominal_empty_data_metrics_none_counts_zero():
     assert m.kappa_interpretation == "undefined"
     assert m.n_samples == 0
     assert m.per_option == []
-    assert m.confusion_matrix == [[0, 0, 0], [0, 0, 0], [0, 0, 0]]
+    assert m.confusion_matrix.matrix == [[0, 0, 0], [0, 0, 0], [0, 0, 0]]
 
 
 def test_ordinal_empty_data_fleiss_kappa_from_matrix():
