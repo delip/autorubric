@@ -252,7 +252,7 @@ class TestFilterNaMultiChoice:
         assert na_fp == 1
         assert na_fn == 0
 
-    # ---- T1-C: the full mirror of cannot_assess ---------------------------
+    # ---- the full mirror of cannot_assess ---------------------------
 
     def test_as_worst_literal_is_rejected(self, nominal_criterion_with_na):
         """The old 'as_worst' literal is gone (hard break).
@@ -612,7 +612,7 @@ class TestCriterionNaOptionIndex:
 
 
 class TestCriterionWithGuaranteedNAOption:
-    """Tests for ``Criterion.with_guaranteed_na_option`` — the auto-inject helper (T2-A).
+    """Tests for ``Criterion.with_guaranteed_na_option`` — the auto-inject helper.
 
     Appends a single canonical NA option when the criterion lacks one (so the judge
     always has an abstain channel, the analog of binary CANNOT_ASSESS); returns self
@@ -1174,7 +1174,7 @@ class TestBackwardsCompatibility:
 
 
 # =============================================================================
-# NA Kappa tests (T1-E): NAStats.na_kappa = Cohen's kappa on {NA, not-NA}
+# NA Kappa tests: NAStats.na_kappa = Cohen's kappa on {NA, not-NA}
 # =============================================================================
 
 
@@ -1235,7 +1235,7 @@ def _wrap_eval_result(item_results: list[ItemResult]) -> EvalResult:
 
 
 class TestNaKappa:
-    """Cohen's kappa on the dichotomized {NA, not-NA} decision (T1-E)."""
+    """Cohen's kappa on the dichotomized {NA, not-NA} decision."""
 
     @pytest.mark.parametrize(
         "labels,preds,expected_kappa,expected_interpretation,expected_counts",
@@ -1379,7 +1379,7 @@ class TestNaKappa:
         assert metrics.na_stats is None
 
     def test_multi_choice_only_rubric_leaves_ca_stats_none(self, nominal_criterion_with_na):
-        """Dual of the binary-only -> na_stats None guard (T2-C): a multi-choice-only
+        """Dual of the binary-only -> na_stats None guard: a multi-choice-only
         rubric has no binary criteria, so cannot_assess_stats is None."""
         labels = ["N/A", "Very specific", "Very specific"]
         preds = [3, 2, 2]
@@ -1432,7 +1432,7 @@ def _make_effective_report(selected_index: int, effective_criterion: Criterion) 
 
 
 class TestMetricsAutoInjectedNA:
-    """compute_metrics must interpret predicted auto-injected NA indices (T2-A).
+    """compute_metrics must interpret predicted auto-injected NA indices.
 
     The grader appends the NA option at index ``N = len(author.options)`` (out of range
     for the author rubric used by the metrics layer). Metrics must reconstruct the same
@@ -1508,7 +1508,7 @@ def _make_forced_choice_report(
 ) -> EvaluationReport:
     """Single-criterion report for a forced-choice (no-NA) criterion.
 
-    ``selected_index=None`` models the grader's genuine error-abstain (T2-B): na=True
+    ``selected_index=None`` models the grader's genuine error-abstain: na=True
     with no option selected (selected_index/label=None), value 0.0.
     """
     if selected_index is None:
@@ -1542,7 +1542,7 @@ def _make_forced_choice_report(
 
 
 class TestForcedChoiceNoneAbstain:
-    """compute_metrics must treat a forced-choice None error-abstain as NA (T2-B).
+    """compute_metrics must treat a forced-choice None error-abstain as NA.
 
     A forced-choice criterion has no NA option, so an infrastructure/parse error yields a
     verdict with selected_index=None (na=True). Metrics must recognize that as an abstain
@@ -1612,7 +1612,7 @@ class TestForcedChoiceNoneAbstain:
 
 
 # =============================================================================
-# T8-C: top-level P/R/F1 are the BINARY MET-vs-rest metric → None for
+# top-level P/R/F1 are the BINARY MET-vs-rest metric → None for
 # multi-choice-only rubrics (no MET class). accuracy/kappa GENERALIZE.
 # =============================================================================
 
@@ -1733,7 +1733,7 @@ class TestAggregatePrecisionRecallF1None:
 
 
 # =============================================================================
-# T8-A — Bootstrap CIs for multi-choice / mixed rubrics
+# Bootstrap CIs for multi-choice / mixed rubrics
 # =============================================================================
 
 
@@ -1821,7 +1821,7 @@ def _ordinal_eval(gt_labels, pred_indices, scores) -> EvalResult:
 
 
 class TestBootstrapMultiChoice:
-    """T8-A: bootstrap CIs now cover multi-choice (ordinal/nominal) and mixed rubrics.
+    """Bootstrap CIs now cover multi-choice (ordinal/nominal) and mixed rubrics.
 
     Each CI must be the CI of the SAME aggregate statistic compute_metrics reports
     (accuracy_ci<-criterion_accuracy, kappa_ci<-mean_kappa, rmse_ci<-score_rmse), so the

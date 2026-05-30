@@ -732,7 +732,7 @@ def test_krippendorff_alpha_error_vote_becomes_missing_cell():
 
 
 # =============================================================================
-# Rendering: summary() and to_dataframe() surface agreement stats (T1-D)
+# Rendering: summary() and to_dataframe() surface agreement stats
 # =============================================================================
 
 
@@ -850,7 +850,7 @@ def test_to_dataframe_agreement_none_for_single_judge():
 
 
 # =============================================================================
-# T8-B: per-judge metrics mirror the aggregate's type handling
+# Per-judge metrics mirror the aggregate's type handling
 # (multi-choice criteria contribute real accuracy/kappa; P/R/F1 is the binary
 # MET-vs-rest metric → None for multi-choice-only).
 # =============================================================================

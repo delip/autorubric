@@ -4,12 +4,12 @@ Pins the semantics of ``CriterionGrader._aggregate_votes`` for each
 ``AggregationStrategy``:
 
 - ``majority`` is an **unweighted head-count** (> 50% of judges), distinct from
-  ``weighted`` (sum of judge weights). This is the T1-A fix: previously the two
+  ``weighted`` (sum of judge weights). This is the fix: previously the two
   branches were byte-identical.
 - ``weighted`` decides by summed judge weights.
 - ``unanimous`` / ``any`` behave as documented.
 - CANNOT_ASSESS votes are excluded from the count.
-- Ties resolve to the weight-sign worst case (T3-B): UNMET for weight >= 0, MET for
+- Ties resolve to the weight-sign worst case: UNMET for weight >= 0, MET for
   weight < 0 (the binary analog of ``Criterion.worst_scored_option``).
 """
 
@@ -91,7 +91,7 @@ def test_all_cannot_assess_returns_cannot_assess() -> None:
     assert verdict == CANNOT_ASSESS
 
 
-# T3-B: ties resolve to the score-minimizing verdict by weight sign (worst case),
+# Ties resolve to the score-minimizing verdict by weight sign (worst case),
 # matching Criterion.worst_scored_option / the unknown-error path. Positive weight →
 # UNMET (earns 0); negative (penalty) weight → MET (subtracts the full penalty).
 #

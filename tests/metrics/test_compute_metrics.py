@@ -216,7 +216,7 @@ class TestComputeMetricsOptions:
             )
             assert metrics.bootstrap is not None
             assert metrics.bootstrap.n_bootstrap == 100
-            # T8-A: CIs now come from an item-level resample (was binary pair-flattening),
+            # CIs now come from an item-level resample (was binary pair-flattening),
             # so the exact endpoints differ from before; the bracket invariant still holds,
             # and accuracy_ci<-criterion_accuracy, kappa_ci<-mean_kappa.
             assert metrics.bootstrap.accuracy_ci[0] <= metrics.criterion_accuracy
@@ -364,7 +364,7 @@ def create_single_criterion_dataset(ground_truths: list[list[CriterionVerdict]])
 
 
 def test_negative_kappa_interpretation_uses_canonical_label():
-    """P3-2: per-criterion kappa<0 uses the single canonical KappaResult mapping
+    """Per-criterion kappa<0 uses the single canonical KappaResult mapping
     ('poor (worse than chance)'), not the old _compute._interpret_kappa '"poor"'."""
     MET, UNMET = CriterionVerdict.MET, CriterionVerdict.UNMET
     # Perfectly anti-correlated pred vs ground truth → Cohen's kappa = -1.0.
@@ -375,7 +375,7 @@ def test_negative_kappa_interpretation_uses_canonical_label():
     metrics = compute_metrics(eval_result, dataset)
     cm = metrics.per_criterion[0]
     assert cm.kappa is not None and cm.kappa < 0
-    # Fails today ("poor"); after P3-2 the per-criterion path uses the canonical label.
+    # Fails today ("poor"); after the fix the per-criterion path uses the canonical label.
     assert cm.kappa_interpretation == "poor (worse than chance)"
 
 
@@ -469,7 +469,7 @@ class TestComputeMetricsCannotAssess:
 
 
 class TestCaKappa:
-    """CANNOT_ASSESS stats (T2-C): the binary parallel of multi-choice NAStats.
+    """CANNOT_ASSESS stats: the binary parallel of multi-choice NAStats.
 
     Cohen's kappa on the dichotomized {CANNOT_ASSESS, not-CANNOT_ASSESS} decision plus
     counts/FP/FN, mirroring TestNaKappa. CANNOT_ASSESS is a distinct kind of abstention

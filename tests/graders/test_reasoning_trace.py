@@ -1,4 +1,4 @@
-"""Tests for preserving the extended-thinking ``reasoning`` trace (T6-B).
+"""Tests for preserving the extended-thinking ``reasoning`` trace.
 
 The judge LLM can emit a verbose extended-thinking *deliberation trace* (the
 provider's ``reasoning_content`` channel), which ``LLMClient.generate`` injects into

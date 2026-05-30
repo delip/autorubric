@@ -564,7 +564,7 @@ class TestMultiChoiceAggregation:
         assert max_result.selected_index == 1
 
     # -------------------------------------------------------------------------
-    # T3-B: deterministic, weight-sign-aware tie-breaking
+    # Deterministic, weight-sign-aware tie-breaking
     #
     # mode / weighted_mode count/weight ties and mean/median snap equidistant ties all
     # resolve to the score-minimizing option by weight sign (lowest value for weight >= 0,
@@ -810,7 +810,7 @@ class TestMultiChoiceAggregation:
         assert unanimous_result.selected_index != mode_result.selected_index
 
     def test_all_na_prefers_genuine_na_index_over_none(self, nominal_criterion_with_na):
-        """All-NA aggregation: prefer a vote that abstained into a real NA option (T2-B).
+        """All-NA aggregation: prefer a vote that abstained into a real NA option.
 
         When NA votes mix a clean None-abstain (error, no option) with a genuine NA-option
         abstain, the aggregate surfaces the real NA index, not None.

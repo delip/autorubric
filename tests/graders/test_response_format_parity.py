@@ -1,4 +1,4 @@
-"""Parity tests for binary vs. multi-choice custom response formats (T7-B).
+"""Parity tests for binary vs. multi-choice custom response formats.
 
 Binary criteria support a custom ``binary_response_format`` and inject an
 ``[Affects: #i, #j]`` tag when the parsed judgment carries non-empty

@@ -527,7 +527,7 @@ class TestItemResult:
         assert ecr_restored.multi_choice_votes[0].judge_id == "j1"
 
     def test_roundtrip_single_binary_reasoning(self):
-        """T6-B: the extended-thinking reasoning trace survives single-report roundtrip.
+        """The extended-thinking reasoning trace survives single-report roundtrip.
 
         ``reason`` is the brief justification; ``reasoning`` is the verbose deliberation
         trace (populated only when thinking is enabled). Both must round-trip.
@@ -555,7 +555,7 @@ class TestItemResult:
         )
 
     def test_roundtrip_ensemble_binary_reasoning(self):
-        """T6-B: per-judge reasoning trace survives ensemble binary roundtrip."""
+        """Per-judge reasoning trace survives ensemble binary roundtrip."""
         item = DataItem(submission="Test", description="Test")
         criterion = Criterion(weight=10.0, requirement="Is accurate")
         ecr = EnsembleCriterionReport(
@@ -591,7 +591,7 @@ class TestItemResult:
         assert votes["j2"].reasoning is None
 
     def test_roundtrip_ensemble_multi_choice_reasoning(self):
-        """T6-B: per-judge reasoning trace survives ensemble multi-choice roundtrip."""
+        """Per-judge reasoning trace survives ensemble multi-choice roundtrip."""
         item = DataItem(submission="Test", description="Test")
         options = [
             CriterionOption(label="Low", value=0.0),
@@ -668,7 +668,7 @@ class TestItemResult:
         assert result.report.score == 0.5
 
     def test_roundtrip_ensemble_mixed_binary_and_multi_choice(self):
-        """T6-D: a report mixing a binary and a multi-choice criterion round-trips."""
+        """A report mixing a binary and a multi-choice criterion round-trips."""
         item = DataItem(submission="Test", description="Test")
         binary_crit = Criterion(weight=10.0, requirement="Is accurate")
         options = [
@@ -744,7 +744,7 @@ class TestItemResult:
         assert rcr.votes[0].is_error
 
     def test_roundtrip_ensemble_multi_choice_vote_error_and_none_abstain(self):
-        """T2-B: an errored no-option abstain (selected_index=None) round-trips on a vote."""
+        """An errored no-option abstain (selected_index=None) round-trips on a vote."""
         item = DataItem(submission="Test", description="Test")
         options = [
             CriterionOption(label="Low", value=0.0),
@@ -827,7 +827,7 @@ class TestItemResult:
 
 
 # -----------------------------------------------------------------------------
-# T6-D: ensemble report/vote types are frozen pydantic models with native
+# Ensemble report/vote types are frozen pydantic models with native
 # model_dump/model_validate (symmetric with the single-report CriterionReport).
 # -----------------------------------------------------------------------------
 
@@ -849,7 +849,7 @@ class TestEnsembleTypePydanticRoundtrip:
         assert restored.is_error
 
     def test_multi_choice_judge_vote_pydantic_roundtrip_none_abstain(self):
-        """T2-B: a no-option abstain (selected_index/label None) round-trips."""
+        """A no-option abstain (selected_index/label None) round-trips."""
         mcv = MultiChoiceJudgeVote(
             judge_id="j1",
             selected_index=None,

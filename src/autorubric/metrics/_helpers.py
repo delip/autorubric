@@ -282,7 +282,7 @@ def extract_all_verdicts_from_report(
     if report.report is None:
         # No report available — binary gets the conservative UNMET default; multi-choice gets
         # None (extraction failed), NOT a fabricated option 0. A real option index would bypass
-        # the consumer's None→NA normalization and be miscounted as a genuine vote (T2-B / the
+        # the consumer's None→NA normalization and be miscounted as a genuine vote (the
         # "never fabricate a value" principle); None is routed to NA downstream.
         result: list[CriterionVerdict | int | None] = []
         for criterion in criteria:
@@ -388,7 +388,7 @@ def filter_na_multi_choice(
         raise ValueError(
             f"Unknown na_mode value {mode!r}. "
             "Valid modes are 'exclude', 'as_unmet', 'as_category'. "
-            "('as_worst' was renamed to 'as_category' in T1-C and is no "
+            "('as_worst' was renamed to 'as_category' and is no "
             "longer accepted.)"
         )
 

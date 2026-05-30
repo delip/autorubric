@@ -2554,7 +2554,7 @@ class TestFormatErrorCriteria:
             ]
         )
         # Simulate a multi-choice criterion (no binary final_verdict). The report is a
-        # frozen pydantic model (T6-D), so swap in a copy rather than mutating in place;
+        # frozen pydantic model, so swap in a copy rather than mutating in place;
         # the enclosing list on the non-frozen EnsembleEvaluationReport stays mutable.
         report.report[0] = report.report[0].model_copy(update={"final_verdict": None})
         assert _format_error_criteria(report, over_scored=True) == []

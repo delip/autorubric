@@ -1,4 +1,4 @@
-"""Cross-path agreement for the unified scoring core (audit T4-A + T1-B).
+"""Cross-path agreement for the unified scoring core (audit).
 
 After step (b) of the scoring-unification refactor, three scorers route through the
 single ``autorubric.scoring.score_reports`` core:
@@ -11,7 +11,7 @@ These tests prove the grader and ``Rubric.compute_score`` produce *identical* sc
 across every ``CannotAssessStrategy`` x {binary, multi-choice} x {+/- weight}, for the
 same underlying verdicts -- the explicit cross-check the audit requires. They also pin
 the ``Rubric.compute_score`` SKIP-denominator regression (the dual-denominator bug the
-unified core fixes) and the T1-B weight-sign-aware multi-choice FAIL penalization.
+unified core fixes) and the weight-sign-aware multi-choice FAIL penalization.
 """
 
 from typing import Any
@@ -178,7 +178,7 @@ async def test_grader_matches_compute_score_all_strategies(strategy):
     """The live grader and Rubric.compute_score agree for the SAME verdicts under
     every CannotAssessStrategy, across +/- binary CA and +/- multi-choice NA.
 
-    This is the audit's explicit cross-path requirement (T4-A): both paths route
+    This is the audit's explicit cross-path requirement: both paths route
     through score_reports, so they must produce identical normalized and raw scores.
     """
     rubric = _mixed_rubric()
@@ -206,7 +206,7 @@ async def test_grader_matches_compute_score_all_strategies(strategy):
 
 
 # ===========================================================================
-# T1-B: weight-sign-aware multi-choice FAIL penalization (FAIL < ZERO)
+# Weight-sign-aware multi-choice FAIL penalization (FAIL < ZERO)
 # ===========================================================================
 
 
@@ -215,7 +215,7 @@ def test_negative_multi_choice_na_fail_strictly_worse_than_zero():
 
     Under ZERO the NA contributes 0 (no penalty). Under FAIL, worst_scored_option()
     selects the highest-value scored option for a negative weight, so it subtracts a
-    real penalty -- the T1-B weight-sign-aware fix. FAIL must therefore be < ZERO.
+    real penalty -- the weight-sign-aware fix. FAIL must therefore be < ZERO.
     """
     rubric = Rubric(
         [
@@ -247,7 +247,7 @@ def test_negative_multi_choice_na_fail_strictly_worse_than_zero():
 
 @pytest.mark.asyncio
 async def test_grader_negative_multi_choice_na_fail_strictly_worse_than_zero():
-    """Same FAIL < ZERO inequality, proved through the live grader path (T1-B)."""
+    """Same FAIL < ZERO inequality, proved through the live grader path."""
     rubric = Rubric(
         [
             Criterion(name="pos", weight=10.0, requirement=REQ_POS_BIN_MET),

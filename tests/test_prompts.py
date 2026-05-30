@@ -1,4 +1,4 @@
-"""Tests for prompt construction (multi-choice NA / abstain rendering, T2-A)."""
+"""Tests for prompt construction (multi-choice NA / abstain rendering)."""
 
 from autorubric.prompts import (
     MULTI_CHOICE_SYSTEM_PROMPT,
@@ -86,19 +86,19 @@ def _empty_submission_section() -> str:
 
 
 def test_empty_submission_instruction_drops_ordinal_only_contradiction():
-    """T7-C: the empty/refusal instruction no longer hard-codes ordinal-only / anti-NA guidance.
+    """The empty/refusal instruction no longer hard-codes ordinal-only / anti-NA guidance.
 
     The old text said "Select the lowest-quality option on the scale — not NA", which is
-    meaningless for nominal scales and contradicts T2-A's guaranteed NA channel.
+    meaningless for nominal scales and contradicts the guaranteed NA channel.
     """
-    # The anti-NA contradiction is gone (T2-A guarantees an NA channel).
+    # The anti-NA contradiction is gone (the NA channel is guaranteed).
     assert "not NA" not in MULTI_CHOICE_SYSTEM_PROMPT
     # The ordinal-only "lowest-quality option on the scale" phrasing is gone.
     assert "lowest-quality option on the scale" not in MULTI_CHOICE_SYSTEM_PROMPT
 
 
 def test_empty_submission_instruction_is_scale_aware():
-    """T7-C: empty/refusal guidance covers BOTH an ordinal (failure option) and a
+    """Empty/refusal guidance covers BOTH an ordinal (failure option) and a
     nominal (NA) branch, driven by whether any option describes an empty submission."""
     section = _empty_submission_section()
     # Still has a dedicated empty/refusal block.
@@ -115,7 +115,7 @@ def test_empty_submission_instruction_is_scale_aware():
 
 
 def test_nominal_empty_submission_example_maps_to_na():
-    """T7-C: a worked nominal empty-submission example demonstrates empty -> NA,
+    """A worked nominal empty-submission example demonstrates empty -> NA,
     alongside the preserved ordinal empty -> lowest-option example."""
     # Two worked empty-submission examples now exist (ordinal lowest-option + nominal NA).
     assert MULTI_CHOICE_SYSTEM_PROMPT.count('Submission: ""') >= 2
@@ -124,7 +124,7 @@ def test_nominal_empty_submission_example_maps_to_na():
 
 
 def test_ordinal_empty_submission_example_preserved():
-    """T7-C: the existing ordinal empty -> lowest-quality-option example is retained
+    """The existing ordinal empty -> lowest-quality-option example is retained
     (empty answers on quality scales are still scored, not excluded)."""
     assert "represents the lowest level of clarity" in MULTI_CHOICE_SYSTEM_PROMPT
 
@@ -137,14 +137,14 @@ def _contradictory_section() -> str:
 
 
 def test_contradictory_submission_ordinal_branch_preserved():
-    """T7-C follow-up: the ordered-scale conservative default ('weaker' reading) is kept."""
+    """The ordered-scale conservative default ('weaker' reading) is kept."""
     section = _contradictory_section()
     assert "weaker" in section
     assert "conservative default" in section
 
 
 def test_contradictory_submission_instruction_is_scale_aware():
-    """T7-C follow-up: genuine-ambiguity guidance covers an unordered/nominal branch that
+    """Genuine-ambiguity guidance covers an unordered/nominal branch that
     falls back to NA, since 'weaker interpretation' is undefined for unordered categories."""
     section = _contradictory_section()
     # Nominal branch: abstain via the NA / "cannot assess" option.
@@ -155,5 +155,5 @@ def test_contradictory_submission_instruction_is_scale_aware():
 
 
 def test_nominal_contradictory_submission_example_maps_to_na():
-    """T7-C follow-up: a worked nominal contradictory example demonstrates ambiguous -> NA."""
+    """A worked nominal contradictory example demonstrates ambiguous -> NA."""
     assert "no single category applies" in MULTI_CHOICE_SYSTEM_PROMPT

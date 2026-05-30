@@ -512,7 +512,7 @@ async def test_ensemble_multi_choice_vote_carries_error():
 async def test_ensemble_multi_choice_all_judges_fail_error_flagged():
     """Every judge fails (infra) on a multi-choice criterion -> ensemble flagged.
 
-    Behavior-lock (T5-B): the ensemble-level error must combine BOTH judges' failures
+    Behavior-lock: the ensemble-level error must combine BOTH judges' failures
     (joined by `` | ``), the ensemble report must be flagged via ``is_error``, and every
     per-judge ``MultiChoiceJudgeVote`` must itself be flagged via ``is_error``. This
     pins the all-judges-fail multi-choice behavior so the single-source ``_aggregate_error``
@@ -566,7 +566,7 @@ async def test_ensemble_multi_choice_all_judges_fail_error_flagged():
     assert "a down" in cr.error
     assert "b down" in cr.error
 
-    # Every per-judge vote is itself flagged (T5-A is_error parity).
+    # Every per-judge vote is itself flagged (is_error parity).
     assert cr.multi_choice_votes
     assert len(cr.multi_choice_votes) == 2
     assert all(v.is_error for v in cr.multi_choice_votes)
@@ -579,7 +579,7 @@ async def test_ensemble_forced_choice_all_fail_clean_abstain():
 
     With no NA option to abstain into, each per-judge error-abstain has selected_index=None
     (na=True), and the aggregate must be a GENUINE abstain: na=True with selected_index/label
-    None — never na=True pointing at a real scored option (T2-B). Excluded under SKIP -> 0.0.
+    None — never na=True pointing at a real scored option. Excluded under SKIP -> 0.0.
     """
     rubric = Rubric(
         [
@@ -681,7 +681,7 @@ async def test_error_survives_serialization_round_trip(mock_llm_config):
 
 @pytest.mark.asyncio
 async def test_none_abstain_survives_serialization_round_trip():
-    """A genuine None-abstain (T2-B) round-trips: selected_index/label stay None on the
+    """A genuine None-abstain round-trips: selected_index/label stay None on the
     aggregated verdict and on each multi-choice vote."""
     rubric = Rubric(
         [
@@ -761,7 +761,7 @@ def _multi_choice_vote(error: str | None) -> MultiChoiceJudgeVote:
 
 
 class TestVoteIsErrorProperty:
-    """``is_error`` parity on the per-vote dataclasses (T5-A).
+    """``is_error`` parity on the per-vote dataclasses.
 
     ``CriterionReport`` / ``EnsembleCriterionReport`` advise using ``is_error`` instead
     of inspecting ``reason``; the per-vote types must expose the same property so the

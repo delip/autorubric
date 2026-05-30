@@ -1154,7 +1154,7 @@ def compute_metrics(
     # Per-criterion data storage
     # For binary: list[CriterionVerdict]
     # For multi-choice: list[int] (option indices). A predicted index may transiently be
-    # None for a genuine multi-choice error-abstain (T2-B); it is normalized to the
+    # None for a genuine multi-choice error-abstain; it is normalized to the
     # effective NA index right after the effective criteria are built, so consumers below
     # only ever see CriterionVerdict | int.
     per_criterion_pred: list[list[CriterionVerdict | int | None]] = [[] for _ in range(n_criteria)]
@@ -1168,8 +1168,8 @@ def compute_metrics(
     judge_scores: dict[str, list[float]] = {}
     judge_verdicts: dict[str, list[list[CriterionVerdict]]] = {}
     # Per-judge multi-choice predictions (items x criteria); binary cells are a None
-    # placeholder. A multi-choice cell may transiently be None (genuine error-abstain,
-    # T2-B); it is normalized to the effective NA index after the effective criteria are
+    # placeholder. A multi-choice cell may transiently be None (genuine error-abstain);
+    # it is normalized to the effective NA index after the effective criteria are
     # built, mirroring the aggregate per_criterion_pred normalization.
     judge_mc_preds: dict[str, list[list[int | None]]] = {}
     judge_errors: dict[str, list[list[str | None]]] = {}
@@ -1226,7 +1226,7 @@ def compute_metrics(
 
             # Handle None predictions (failed extraction). Binary None -> UNMET (the
             # conservative default). A multi-choice None is a GENUINE error-abstain (no NA
-            # option, forced-choice; T2-B): leave it as None here and normalize it to the
+            # option, forced-choice): leave it as None here and normalize it to the
             # effective criterion's NA index after the effective criteria are built below,
             # so it is recognized as NA instead of being silently counted as option 0.
             if pred_val is None and criterion_types[c_idx] == "binary":
@@ -1293,7 +1293,7 @@ def compute_metrics(
             # EnsembleCriterionReport.votes / .multi_choice_votes. A binary criterion
             # yields a verdict and a None multi-choice placeholder; a multi-choice
             # criterion yields a placeholder UNMET verdict and the vote's selected_index
-            # (raw int|None — None is a genuine T2-B abstain, normalized later). The error
+            # (raw int|None — None is a genuine abstain, normalized later). The error
             # is captured per criterion from whichever vote type matched, so errored MC
             # votes are skipped with the same parity as binary.
             if hasattr(report, "report") and report.report:
@@ -1371,8 +1371,8 @@ def compute_metrics(
         raise ValueError("No valid items with a computed score found")
 
     # Reconstruct the effective criterion for any multi-choice criterion whose graded
-    # reports used an auto-injected NA option (T2-A) OR produced a genuine None error-abstain
-    # (T2-B). The grader appends an auto-injected NA at index N = len(author.options) — out of
+    # reports used an auto-injected NA option OR produced a genuine None error-abstain.
+    # The grader appends an auto-injected NA at index N = len(author.options) — out of
     # range for the author rubric used above — and emits selected_index=None when it had to
     # abstain with no NA option. We normalize only when an out-of-range OR a None prediction
     # is actually observed, so forced-choice runs without abstains are unaffected and never
@@ -1402,7 +1402,7 @@ def compute_metrics(
         if observed:
             effective_criteria[c_idx] = author_c.with_guaranteed_na_option()
 
-    # Normalize any remaining None multi-choice predictions (genuine error-abstains, T2-B) to
+    # Normalize any remaining None multi-choice predictions (genuine error-abstains) to
     # the effective criterion's NA index, so every downstream consumer sees only ints and the
     # abstain is recognized as NA (FP/FN, na_kappa, filtering) under every na_mode. The
     # reconstruction above guarantees a NA option exists for any criterion that had a None.
@@ -1416,7 +1416,7 @@ def compute_metrics(
 
     # Mirror the aggregate None→NA normalization for each judge's multi-choice predictions,
     # using the SAME effective_criteria. A judge's None multi-choice cell is either a binary
-    # placeholder (no NA option to point at) or a genuine T2-B abstain on a multi-choice
+    # placeholder (no NA option to point at) or a genuine abstain on a multi-choice
     # criterion; only multi-choice cells with a resolvable NA index are normalized, so binary
     # placeholders stay None and are ignored by the per-judge multi-choice path.
     for jid in judge_mc_preds:
@@ -1533,7 +1533,7 @@ def compute_metrics(
 
         elif c_type == "ordinal":
             # Ordinal multi-choice criterion metrics. Use the effective criterion so a
-            # predicted auto-injected NA index is recognized (T2-A).
+            # predicted auto-injected NA index is recognized.
             eff_criterion = effective_criteria[c_idx]
             pred_indices = [v for v in pred_data if isinstance(v, int)]
             true_indices = [v for v in true_data if isinstance(v, int)]
@@ -1563,7 +1563,7 @@ def compute_metrics(
 
         else:  # nominal
             # Nominal multi-choice criterion metrics. Use the effective criterion so a
-            # predicted auto-injected NA index is recognized (T2-A).
+            # predicted auto-injected NA index is recognized.
             eff_criterion = effective_criteria[c_idx]
             pred_indices = [v for v in pred_data if isinstance(v, int)]
             true_indices = [v for v in true_data if isinstance(v, int)]

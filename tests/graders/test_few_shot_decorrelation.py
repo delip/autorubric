@@ -1,4 +1,4 @@
-"""Tests for per-judge / per-criterion decorrelation of few-shot example selection (T7-A).
+"""Tests for per-judge / per-criterion decorrelation of few-shot example selection.
 
 Option *shuffling* already de-correlates per ``(seed, item, criterion, judge)`` via
 ``_derive_shuffle_rng``. Few-shot example *selection*, however, historically used a flat
@@ -6,7 +6,7 @@ Option *shuffling* already de-correlates per ``(seed, item, criterion, judge)`` 
 saw the *same* few-shot examples in the *same* order (undercutting the ensemble-independence
 assumption behind the inter-judge agreement metrics) and ordering correlated across criteria.
 
-T7-A keys the selection RNG on ``(few_shot_seed, criterion_idx, judge_id)`` (reusing the
+Selection keys the RNG on ``(few_shot_seed, criterion_idx, judge_id)`` (reusing the
 same ``_derive_shuffle_rng`` helper, with a constant ``FEW_SHOT_DOMAIN`` in the item-key
 slot — few-shot examples are a fixed property of criterion+judge, not item-specific). The
 example dicts are now keyed by ``(criterion_idx, judge_id)`` tuples. Selection stays fully

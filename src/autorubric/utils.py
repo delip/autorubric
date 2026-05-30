@@ -303,7 +303,7 @@ def _extract_ground_truth_from_report(
                 ground_truth.append(mc_v.selected_label)
             elif mc_v is not None and mc_v.na:
                 # A genuine abstain that selected no option (selected_label is None — an
-                # error-abstain with no NA option, T2-B) is not a usable ground-truth label.
+                # error-abstain with no NA option) is not a usable ground-truth label.
                 raise ValueError(
                     f"Criterion {i} ({criterion.name or 'unnamed'}) abstained with no option "
                     f"selected (likely a judge-call failure); filter error reports before "

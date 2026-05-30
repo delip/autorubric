@@ -127,7 +127,7 @@ def _top_tied_keys(scores: Mapping[int, float]) -> list[int]:
     """Option indices tied for the maximum score (vote count or summed judge weight).
 
     Used to surface mode/weighted_mode tie candidates for resolution via
-    ``Criterion.worst_option_among`` (T3-B). A clear winner yields a single-element list.
+    ``Criterion.worst_option_among``. A clear winner yields a single-element list.
     """
     top = max(scores.values())
     return [i for i, s in scores.items() if s == top]
@@ -401,7 +401,7 @@ class CriterionGrader(Grader):
                 rubric_criteria[criterion_idx] if criterion_idx < len(rubric_criteria) else None
             )
             # Select examples per judge so that ensemble judges see decorrelated few-shot
-            # subsets/orderings (T7-A), mirroring per-judge option shuffling.
+            # subsets/orderings, mirroring per-judge option shuffling.
             for judge in self._judges:
                 if criterion is not None and criterion.is_multi_choice:
                     examples = self._select_multi_choice_examples(criterion_idx, judge.judge_id)
@@ -673,7 +673,7 @@ class CriterionGrader(Grader):
                 requirement=criterion.requirement,
                 verdict=judgment.criterion_status,
                 reason=reason,
-                # Preserve the extended-thinking deliberation trace (T6-B). getattr
+                # Preserve the extended-thinking deliberation trace. getattr
                 # guards custom binary_response_format models that lack the field.
                 reasoning=getattr(judgment, "reasoning", None),
                 weight=criterion.weight,
@@ -822,7 +822,7 @@ class CriterionGrader(Grader):
                 verdict=None,  # Binary verdict is None for multi-choice
                 multi_choice_verdict=multi_choice_verdict,
                 reason=reason,
-                # Preserve the extended-thinking deliberation trace (T6-B).
+                # Preserve the extended-thinking deliberation trace.
                 reasoning=getattr(judgment, "reasoning", None),
                 weight=criterion.weight,
                 name=criterion.name,
@@ -848,7 +848,7 @@ class CriterionGrader(Grader):
                 # is reserved for infrastructure/parse failures. Ties resolve to the
                 # first such option in declaration order (deterministic). The shared
                 # helper is also used by the metrics layer's na_mode="as_unmet" remap
-                # (T1-C) so the two layers cannot drift.
+                # so the two layers cannot drift.
                 worst_idx, worst_option = criterion.worst_scored_option()
                 multi_choice_verdict = MultiChoiceVerdict(
                     selected_index=worst_idx,
@@ -859,10 +859,10 @@ class CriterionGrader(Grader):
             else:
                 # Infrastructure/parse: abstain (excluded under SKIP). Prefer a genuine
                 # NA option — guaranteed when auto_na_option is on — so the abstain verdict
-                # points at a real na=True option (resolves the T2-B contradiction for the
+                # points at a real na=True option (resolves the contradiction for the
                 # default case). With no NA option (forced-choice + no author NA) emit a
                 # GENUINE abstain that selects no option (selected_index/label=None), rather
-                # than forcing na=True onto a scored option (the old T2-B contradiction). It
+                # than forcing na=True onto a scored option (the old contradiction). It
                 # stays na=True → excluded under SKIP, so infra/parse never penalizes.
                 na_idx = criterion.na_option_index
                 if na_idx is not None:
@@ -926,7 +926,7 @@ class CriterionGrader(Grader):
         """Return the criterion as actually evaluated.
 
         When ``auto_na_option`` is enabled, multi-choice criteria are guaranteed an
-        NA/"cannot assess" option (the abstain channel, T2-A) via
+        NA/"cannot assess" option (the abstain channel) via
         :meth:`Criterion.with_guaranteed_na_option`. Binary criteria and the
         ``auto_na_option=False`` case are returned unchanged. Pure function of the
         criterion, so prompt building, verdict mapping, scoring, ensemble aggregation,
@@ -1146,7 +1146,7 @@ class CriterionGrader(Grader):
 
         ``weight`` is the criterion weight (not a judge weight); it is used only to break
         ties in ``majority``/``weighted`` via :func:`_binary_worst_verdict` — UNMET for
-        weight ≥ 0, MET for weight < 0 (T3-B, consistent with ``worst_scored_option``).
+        weight ≥ 0, MET for weight < 0 (consistent with ``worst_scored_option``).
         """
         if not votes:
             return CriterionVerdict.CANNOT_ASSESS, "No votes"
@@ -1184,7 +1184,7 @@ class CriterionGrader(Grader):
     @staticmethod
     def _decide_binary(met: float, unmet: float, weight: float) -> CriterionVerdict:
         """MET if ``met`` strictly wins, UNMET if ``unmet`` strictly wins, else the
-        weight-sign worst case (T3-B). ``met``/``unmet`` are head-counts or summed
+        weight-sign worst case. ``met``/``unmet`` are head-counts or summed
         weights depending on the strategy."""
         if met > unmet:
             return CriterionVerdict.MET
@@ -1259,7 +1259,7 @@ class CriterionGrader(Grader):
             # All votes are NA. Prefer a vote that abstained into a GENUINE NA option
             # (selected_index is not None) so the aggregate keeps a real NA index where one
             # exists (the default auto_na_option case); fall back to a clean None-abstain
-            # only when every NA vote is itself a no-NA-option error-abstain (T2-B).
+            # only when every NA vote is itself a no-NA-option error-abstain.
             na_vote = next((v for v in votes if v.selected_index is not None), votes[0])
             reasons = [f"{v.judge_id}: {v.reason}" for v in votes]
             return (
@@ -1352,7 +1352,7 @@ class CriterionGrader(Grader):
         elif strategy in ("min", "max"):
             # Conservative / permissive analogs of binary unanimous / any: the lowest-
             # (min) or highest- (max) value option any judge selected. Value ties resolve
-            # to the lowest option index (deterministic; T3-B tie rules out of scope).
+            # to the lowest option index (deterministic; tie rules out of scope).
             scored = [(v.value, idx) for v in votes if (idx := v.selected_index) is not None]
             if strategy == "min":
                 _, chosen_idx = min(scored, key=lambda t: (t[0], t[1]))
@@ -1434,8 +1434,8 @@ class CriterionGrader(Grader):
                 most_common_idx = indices[0]
             else:
                 # Judges disagree -> abstain via the NA option if one exists (na=True flows
-                # through the SKIP scoring path). Never set na=True against a real option
-                # (T2-B). With no NA option, fall back to mode and warn.
+                # through the SKIP scoring path). Never set na=True against a real option.
+                # With no NA option, fall back to mode and warn.
                 na_idx = criterion.na_option_index
                 if na_idx is not None:
                     most_common_idx = na_idx

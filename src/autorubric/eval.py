@@ -209,7 +209,7 @@ def _serialize_eval_config(config: EvalConfig) -> dict[str, Any]:
 def _serialize_ensemble_criterion_report(ecr: EnsembleCriterionReport) -> dict[str, Any]:
     """Serialize an EnsembleCriterionReport to a JSON-safe dict.
 
-    Thin pydantic delegation (T6-D): the report and its votes are frozen pydantic models,
+    Thin pydantic delegation: the report and its votes are frozen pydantic models,
     so ``model_dump`` covers every field automatically — symmetric with the single-report
     path (``CriterionReport.model_dump``). Shared by checkpoint persistence and the
     meta-rubric improvement-loop artifacts.
@@ -241,7 +241,7 @@ def _deserialize_ensemble_report(
 ) -> EnsembleEvaluationReport:
     """Reconstruct EnsembleEvaluationReport with full criterion reports.
 
-    The per-criterion reports are frozen pydantic models (T6-D), so ``model_validate``
+    The per-criterion reports are frozen pydantic models, so ``model_validate``
     covers every field automatically — including legacy checkpoints, where missing keys
     fall back to field defaults (``votes``/``multi_choice_votes`` -> [],
     ``reasoning``/``error``/``shuffle_order`` -> None, ``weight`` -> 1.0, ``na`` -> False,

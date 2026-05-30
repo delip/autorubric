@@ -1,7 +1,7 @@
-"""Tests for the auto-injected multi-choice abstain channel (T2-A).
+"""Tests for the auto-injected multi-choice abstain channel.
 
 A multi-choice criterion that lacks an NA option has, historically, no way to
-express "cannot assess" — the judge is forced to pick a scored option. T2-A gives
+express "cannot assess" — the judge is forced to pick a scored option. Auto-injection gives
 multi-choice criteria a first-class abstain channel analogous to binary
 CANNOT_ASSESS by auto-injecting a canonical NA option (``CriterionGrader``'s
 ``auto_na_option=True`` default), with an opt-out for forced-choice classification.
@@ -220,7 +220,7 @@ async def test_author_na_not_duplicated_when_auto_on(mock_llm_config):
 
 @pytest.mark.asyncio
 async def test_infra_failure_points_at_genuine_injected_na(mock_llm_config):
-    """T2-B default-case fix: an infra error abstains via the genuine (injected) NA option.
+    """Default-case fix: an infra error abstains via the genuine (injected) NA option.
 
     Previously, with no NA option, the grader set na=True against a real scored option
     (index 0) — an internally contradictory verdict. With auto-injection the abstain
@@ -276,7 +276,7 @@ async def test_injected_na_excluded_under_skip_like_binary(mock_llm_config):
 
 @pytest.mark.asyncio
 async def test_forced_choice_infra_error_is_genuine_abstain(mock_llm_config):
-    """T2-B residual fix: forced-choice (auto_na_option=False) criterion with no NA option.
+    """Residual fix: forced-choice (auto_na_option=False) criterion with no NA option.
 
     On an infrastructure/parse error there is no NA option to abstain into. The verdict
     must be a GENUINE abstain — na=True with selected_index/selected_label = None — never

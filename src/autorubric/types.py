@@ -430,7 +430,7 @@ class Criterion(BaseModel):
         """Return a multi-choice criterion guaranteed to expose an NA/abstain option.
 
         Gives the judge a first-class "cannot assess" channel analogous to binary
-        ``CriterionVerdict.CANNOT_ASSESS`` (T2-A). If the criterion already has an
+        ``CriterionVerdict.CANNOT_ASSESS``. If the criterion already has an
         NA option (author intent), returns ``self`` unchanged. Otherwise returns a
         copy with a single :data:`CANONICAL_NA_OPTION` **appended at the end**
         (highest index) so existing option indices ``0..N-1`` stay stable for
@@ -546,7 +546,7 @@ class MultiChoiceVerdict(BaseModel):
             ``None`` for a genuine abstain synthesized on an infrastructure/parse failure
             when the criterion has no NA option (forced-choice, ``auto_na_option=False``):
             the verdict is ``na=True`` but no real option was selected, so it never
-            contradicts itself by pointing ``na=True`` at a scored option (T2-B).
+            contradicts itself by pointing ``na=True`` at a scored option.
         selected_label: Label text of the selected option. READABLE for reports.
             ``None`` in the same no-option-selected abstain case as ``selected_index``.
         value: Score contribution of the selected option (0.0-1.0).

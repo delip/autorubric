@@ -281,7 +281,7 @@ def test_nominal_empty_data_metrics_none_counts_zero():
 
 
 def test_ordinal_empty_data_fleiss_kappa_from_matrix():
-    """P3-3: with 0 GT-paired samples, fleiss_kappa is still computed from the (GT-independent)
+    """With 0 GT-paired samples, fleiss_kappa is still computed from the (GT-independent)
     inter-judge fleiss_matrix — matching binary, not hardcoded None."""
     crit = _ordinal_criterion()
     m = _compute_ordinal_criterion_metrics([], [], crit, 0, fleiss_matrix=[[2, 0, 0], [0, 2, 0]])
@@ -290,7 +290,7 @@ def test_ordinal_empty_data_fleiss_kappa_from_matrix():
 
 
 def test_nominal_empty_data_fleiss_kappa_from_matrix():
-    """P3-3 (nominal analog)."""
+    """Nominal analog."""
     crit = _nominal_criterion()
     m = _compute_nominal_criterion_metrics([], [], crit, 0, fleiss_matrix=[[2, 0, 0], [0, 2, 0]])
     assert m.n_samples == 0
@@ -523,7 +523,7 @@ def test_bootstrap_ci_single_class_kappa_none_summary_ok():
 
 
 # =============================================================================
-# Multi-choice extraction failure → None (not a fabricated option 0) — P3-4
+# Multi-choice extraction failure → None (not a fabricated option 0)
 # =============================================================================
 
 
@@ -550,7 +550,7 @@ def test_extract_no_report_multichoice_returns_none_not_zero():
         score=None, raw_score=None, report=None, error="No judge results to aggregate"
     )
     result = extract_all_verdicts_from_report(report, [binary, multichoice])
-    # Fails today: [CriterionVerdict.UNMET, 0]. After P3-4: [CriterionVerdict.UNMET, None].
+    # Fails today: [CriterionVerdict.UNMET, 0]. After the fix: [CriterionVerdict.UNMET, None].
     assert result == [CriterionVerdict.UNMET, None]
 
 
