@@ -61,7 +61,12 @@ def nominal_criterion() -> Criterion:
 
 @pytest.fixture
 def nominal_criterion_with_na() -> Criterion:
-    """Create a nominal criterion with an NA option."""
+    """Create an ordinal criterion with an NA option.
+
+    NOTE: This fixture is misnamed for historical reasons — ``scale_type`` is
+    ``"ordinal"``. Existing tests rely on the name. For genuinely nominal NA
+    fixtures, see :func:`true_nominal_criterion_with_na` below.
+    """
     return Criterion(
         name="specificity",
         weight=6.0,
@@ -71,6 +76,45 @@ def nominal_criterion_with_na() -> Criterion:
             {"label": "Vague", "value": 0.0},
             {"label": "Somewhat specific", "value": 0.5},
             {"label": "Very specific", "value": 1.0},
+            {"label": "N/A", "value": 0.0, "na": True},
+        ],
+    )
+
+
+@pytest.fixture
+def true_nominal_criterion_with_na() -> Criterion:
+    """Genuinely nominal criterion with an NA option (for ``as_category`` tests)."""
+    return Criterion(
+        name="category",
+        weight=4.0,
+        requirement="Which category?",
+        scale_type="nominal",
+        options=[
+            {"label": "Alpha", "value": 1.0},
+            {"label": "Beta", "value": 0.0},
+            {"label": "Gamma", "value": 0.5},
+            {"label": "N/A", "value": 0.0, "na": True},
+        ],
+    )
+
+
+@pytest.fixture
+def negative_weight_criterion_with_na() -> Criterion:
+    """Ordinal criterion with NEGATIVE weight and an NA option.
+
+    For negative weight, the score-minimizing scored option is the HIGHEST
+    value (a high value on a negative-weight criterion subtracts more from
+    the score). Used to pin weight-sign aware ``as_unmet`` remapping.
+    """
+    return Criterion(
+        name="severity_penalty",
+        weight=-8.0,
+        requirement="How severe is the safety violation?",
+        scale_type="ordinal",
+        options=[
+            {"label": "None", "value": 0.0},
+            {"label": "Minor", "value": 0.5},
+            {"label": "Severe", "value": 1.0},
             {"label": "N/A", "value": 0.0, "na": True},
         ],
     )
@@ -100,17 +144,18 @@ def hybrid_rubric(binary_criterion, ordinal_criterion, nominal_criterion) -> Rub
 class TestClassifyCriterion:
     """Tests for classify_criterion helper."""
 
-    def test_binary_criterion(self, binary_criterion):
-        """Binary criteria are classified as 'binary'."""
-        assert classify_criterion(binary_criterion) == "binary"
-
-    def test_ordinal_criterion(self, ordinal_criterion):
-        """Ordinal criteria are classified as 'ordinal'."""
-        assert classify_criterion(ordinal_criterion) == "ordinal"
-
-    def test_nominal_criterion(self, nominal_criterion):
-        """Nominal criteria are classified as 'nominal'."""
-        assert classify_criterion(nominal_criterion) == "nominal"
+    @pytest.mark.parametrize(
+        "criterion_fixture,expected",
+        [
+            ("binary_criterion", "binary"),
+            ("ordinal_criterion", "ordinal"),
+            ("nominal_criterion", "nominal"),
+        ],
+    )
+    def test_scale_type_classification(self, criterion_fixture, expected, request):
+        """scale_type maps to its type via the PUBLIC classify_criterion symbol."""
+        criterion = request.getfixturevalue(criterion_fixture)
+        assert classify_criterion(criterion) == expected
 
 
 class TestClassifyCriteria:
@@ -190,19 +235,6 @@ class TestResolveGroundTruth:
 class TestFilterNaMultiChoice:
     """Tests for filter_na_multi_choice helper."""
 
-    def test_no_na_options(self, ordinal_criterion):
-        """No NA options returns data unchanged."""
-        pred = [0, 1, 2, 3]
-        true = [1, 2, 3, 0]
-        filtered_pred, filtered_true, na_agree, na_fp, na_fn = filter_na_multi_choice(
-            pred, true, ordinal_criterion
-        )
-        assert filtered_pred == pred
-        assert filtered_true == true
-        assert na_agree == 0
-        assert na_fp == 0
-        assert na_fn == 0
-
     def test_exclude_na(self, nominal_criterion_with_na):
         """Exclude mode removes NA pairs."""
         pred = [0, 3, 2, 3]  # 3 is NA index
@@ -219,6 +251,437 @@ class TestFilterNaMultiChoice:
         assert na_agree == 1
         assert na_fp == 1
         assert na_fn == 0
+
+    # ---- the full mirror of cannot_assess ---------------------------
+
+    def test_as_worst_literal_is_rejected(self, nominal_criterion_with_na):
+        """The old 'as_worst' literal is gone (hard break).
+
+        Anyone passing it should get a clean ValueError pointing at the new
+        modes; we do not silently accept the misnomer.
+        """
+        with pytest.raises(ValueError, match="as_worst|na_mode|mode"):
+            filter_na_multi_choice(
+                [0, 1, 2],
+                [0, 1, 2],
+                nominal_criterion_with_na,
+                mode="as_worst",  # type: ignore[arg-type]
+            )
+
+    def test_as_category_keeps_na_as_column_nominal(self, true_nominal_criterion_with_na):
+        """Nominal + as_category: NA pairs pass through unchanged (NA is its own column)."""
+        # NA option is index 3.
+        pred = [0, 3, 1, 3, 2]
+        true = [0, 3, 2, 1, 2]
+        filtered_pred, filtered_true, na_agree, na_fp, na_fn = filter_na_multi_choice(
+            pred, true, true_nominal_criterion_with_na, mode="as_category"
+        )
+        # All pairs survive, including NA-on-NA, NA-on-non-NA, non-NA-on-NA.
+        assert filtered_pred == pred
+        assert filtered_true == true
+        # FP/FN diagnostics still populate (mode-independent).
+        assert na_agree == 1  # second pair (3, 3)
+        assert na_fp == 1  # fourth pair (3, 1)
+        assert na_fn == 0
+
+    def test_as_category_raises_on_ordinal_with_na(self, nominal_criterion_with_na):
+        """Ordinal + as_category + criterion has NA option → ValueError.
+
+        NA has no ordinal position; quadratic-weighted Cohen's kappa would
+        assign NA a geometrically meaningless distance based on its index.
+        """
+        # nominal_criterion_with_na is actually ordinal (see fixture docstring)
+        # and has an NA option.
+        with pytest.raises(ValueError, match="ordinal.*NA|as_category.*ordinal"):
+            filter_na_multi_choice(
+                [0, 3, 2],
+                [1, 3, 2],
+                nominal_criterion_with_na,
+                mode="as_category",
+            )
+
+    def test_as_category_allowed_on_ordinal_without_na(self, ordinal_criterion):
+        """Ordinal + as_category + criterion has NO NA option → no-op pass-through.
+
+        The ordinal-NA combination is what's incoherent; an ordinal criterion
+        without an NA option has no NA cells, so the guard does not fire.
+        """
+        pred = [0, 1, 2, 3]
+        true = [1, 2, 3, 0]
+        filtered_pred, filtered_true, na_agree, na_fp, na_fn = filter_na_multi_choice(
+            pred, true, ordinal_criterion, mode="as_category"
+        )
+        assert filtered_pred == pred
+        assert filtered_true == true
+        assert na_agree == 0
+        assert na_fp == 0
+        assert na_fn == 0
+
+    @pytest.mark.parametrize(
+        "criterion_fixture,pred,true,expected_pred,expected_true,expected_counts",
+        [
+            # Positive weight: NA → lowest-value scored option (index 0).
+            # Options: [Vague(0.0), Somewhat(0.5), Very(1.0), N/A(na=True)]. Weight +6.
+            # Worst scored = Vague at index 0. FP/FN counts populate from unremapped pairs:
+            # (3,3) agree at idx 0, (3,0) FP at idx 2, (2,3) FN at idx 3.
+            (
+                "nominal_criterion_with_na",
+                [3, 1, 3, 2],  # NA at positions 0, 2
+                [3, 1, 0, 3],  # NA at positions 0, 3
+                [0, 1, 0, 2],
+                [0, 1, 0, 0],
+                (1, 1, 1),
+            ),
+            # NEGATIVE weight: NA → HIGHEST-value scored option (worst case flips).
+            # Options: [None(0.0), Minor(0.5), Severe(1.0), N/A(na=True)]. Weight -8.
+            # Worst scored = Severe at index 2 (a high value subtracts more from the score).
+            (
+                "negative_weight_criterion_with_na",
+                [3, 0, 3],
+                [1, 3, 0],
+                [2, 0, 2],
+                [1, 2, 0],
+                None,
+            ),
+        ],
+    )
+    def test_as_unmet_remaps_na_weight_sign_aware(
+        self,
+        criterion_fixture,
+        pred,
+        true,
+        expected_pred,
+        expected_true,
+        expected_counts,
+        request,
+    ):
+        """as_unmet remaps NA → the score-minimizing scored option, weight-sign aware.
+
+        Positive weight → lowest-value scored option; negative weight → highest-value
+        (a high value on a negative-weight criterion subtracts more from the score).
+        """
+        criterion = request.getfixturevalue(criterion_fixture)
+        filtered_pred, filtered_true, na_agree, na_fp, na_fn = filter_na_multi_choice(
+            pred, true, criterion, mode="as_unmet"
+        )
+        assert filtered_pred == expected_pred
+        assert filtered_true == expected_true
+        # No pairs dropped under as_unmet.
+        assert len(filtered_pred) == len(pred)
+        if expected_counts is not None:
+            assert (na_agree, na_fp, na_fn) == expected_counts
+
+    def test_as_unmet_matches_grader_worst_case(
+        self, nominal_criterion_with_na, negative_weight_criterion_with_na
+    ):
+        """The metrics ``as_unmet`` remap and the grader unknown-error worst case
+        resolve to the same option for the same criterion.
+
+        Pins the cross-layer reuse contract: both paths share
+        ``Criterion.worst_scored_option()``.
+        """
+        for criterion in (nominal_criterion_with_na, negative_weight_criterion_with_na):
+            method_idx, _method_opt = criterion.worst_scored_option()
+            na_idx = next(i for i, opt in enumerate(criterion.options) if opt.na)
+            filtered_pred, _filtered_true, _agree, _fp, _fn = filter_na_multi_choice(
+                [na_idx],
+                [na_idx],
+                criterion,
+                mode="as_unmet",
+            )
+            assert filtered_pred == [method_idx]
+
+    def test_fp_fn_counts_under_all_modes(self, true_nominal_criterion_with_na):
+        """na_fp and na_fn invariants: identical across modes; only dropping differs."""
+        # NA option index = 3.
+        pred = [0, 3, 1, 3]  # NA at positions 1, 3
+        true = [0, 3, 3, 1]  # NA at positions 1, 2
+        # (0,0) both non-NA. (3,3) both NA → agreement. (1,3) true NA → FN. (3,1) pred NA → FP.
+        expected_agree, expected_fp, expected_fn = 1, 1, 1
+
+        for mode in ("exclude", "as_unmet", "as_category"):
+            _fp, _ft, na_agree, na_fp, na_fn = filter_na_multi_choice(
+                pred, true, true_nominal_criterion_with_na, mode=mode
+            )
+            assert (na_agree, na_fp, na_fn) == (expected_agree, expected_fp, expected_fn), (
+                f"NA counts drifted under mode={mode!r}"
+            )
+
+    def test_no_na_option_is_passthrough_all_modes(self, ordinal_criterion):
+        """No NA option in criterion → all three modes pass through unchanged."""
+        pred = [0, 1, 2, 3]
+        true = [1, 2, 3, 0]
+        for mode in ("exclude", "as_unmet", "as_category"):
+            filtered_pred, filtered_true, na_agree, na_fp, na_fn = filter_na_multi_choice(
+                pred, true, ordinal_criterion, mode=mode
+            )
+            assert filtered_pred == pred, mode
+            assert filtered_true == true, mode
+            assert (na_agree, na_fp, na_fn) == (0, 0, 0), mode
+
+
+class TestCriterionWorstScoredOption:
+    """Tests for the shared ``Criterion.worst_scored_option`` helper.
+
+    This is the extracted worst-case selection used by both the grader's
+    ``unknown``-error path (``criterion_grader.py``) and the metrics layer's
+    ``na_mode="as_unmet"`` remap. The two paths cannot drift because they
+    share this method.
+    """
+
+    @pytest.mark.parametrize(
+        "criterion_fixture,expected_idx,expected_value",
+        [
+            # Positive weight → lowest-value scored option (Vague, idx 0, value 0.0).
+            ("nominal_criterion_with_na", 0, 0.0),
+            # Negative weight → highest-value scored option (Severe, idx 2, value 1.0).
+            ("negative_weight_criterion_with_na", 2, 1.0),
+        ],
+    )
+    def test_picks_score_minimizing_scored_option(
+        self, criterion_fixture, expected_idx, expected_value, request
+    ):
+        """Returns the (index, CriterionOption) tuple for the score-minimizing scored option.
+
+        Positive weight → lowest value; negative weight → highest value (worst case flips).
+        Pins the returned OPTION object (value + non-NA), not just the index.
+        """
+        criterion = request.getfixturevalue(criterion_fixture)
+        idx, opt = criterion.worst_scored_option()
+        assert idx == expected_idx
+        assert opt.value == expected_value
+        assert opt.na is False
+
+    def test_skips_na_options(self):
+        """NA options are excluded from the search even if they have the lowest value."""
+        criterion = Criterion(
+            name="t",
+            weight=10.0,
+            requirement="R",
+            scale_type="nominal",
+            options=[
+                {"label": "A", "value": 0.5},
+                {"label": "B", "value": 0.7},
+                # NA has the lowest value but must be skipped.
+                {"label": "N/A", "value": 0.0, "na": True},
+            ],
+        )
+        idx, opt = criterion.worst_scored_option()
+        assert idx == 0
+        assert opt.value == 0.5
+
+    def test_ties_pick_first(self):
+        """Ties at the worst value resolve to the first declared option."""
+        criterion = Criterion(
+            name="t",
+            weight=10.0,
+            requirement="R",
+            scale_type="nominal",
+            options=[
+                {"label": "A", "value": 0.3},
+                {"label": "B", "value": 0.3},
+                {"label": "C", "value": 1.0},
+            ],
+        )
+        idx, opt = criterion.worst_scored_option()
+        assert idx == 0
+        assert opt.label == "A"
+
+    def test_binary_criterion_raises(self, binary_criterion):
+        """Calling on a binary criterion is a programmer error."""
+        with pytest.raises(ValueError, match="Binary criterion"):
+            binary_criterion.worst_scored_option()
+
+
+class TestCriterionWorstOptionAmong:
+    """Tests for ``Criterion.worst_option_among`` — the score-minimizing option among a
+    candidate subset, weight-sign aware with a deterministic lowest-index tie-break.
+
+    This is the canonical tie-break shared by ensemble vote aggregation
+    (mode/weighted_mode/snap, ``criterion_grader.py``) and ``worst_scored_option`` itself,
+    so scoring, the unknown-error path, and aggregation cannot drift.
+    """
+
+    @pytest.mark.parametrize(
+        "criterion_factory,candidate_lists,expected",
+        [
+            # Positive weight → the lowest-value candidate (not the global lowest).
+            # ordinal_criterion values: [0.0, 0.33, 0.67, 1.0]. Among {1, 2, 3} the worst is 1.
+            (lambda r: r.getfixturevalue("ordinal_criterion"), [[3, 2, 1]], 1),
+            # Negative weight → the highest-value candidate (worst case flips).
+            # values: None=0.0(0), Minor=0.5(1), Severe=1.0(2). Among {0, 1, 2} the worst is 2.
+            (
+                lambda r: r.getfixturevalue("negative_weight_criterion_with_na"),
+                [[0, 1, 2]],
+                2,
+            ),
+            # Positive weight, value tie → lowest index, regardless of candidate order.
+            (
+                lambda r: Criterion(
+                    name="t",
+                    weight=10.0,
+                    requirement="R",
+                    scale_type="nominal",
+                    options=[
+                        {"label": "A", "value": 0.0},  # idx 0  ─┐ tie at the worst value
+                        {"label": "B", "value": 0.5},  # idx 1   │
+                        {"label": "C", "value": 0.0},  # idx 2  ─┘
+                    ],
+                ),
+                [[2, 0], [0, 2]],
+                0,
+            ),
+            # Negative weight, value tie at the highest value → lowest index.
+            (
+                lambda r: Criterion(
+                    name="t",
+                    weight=-3.0,
+                    requirement="R",
+                    scale_type="nominal",
+                    options=[
+                        {"label": "A", "value": 1.0},  # idx 0  ─┐ tie at the worst (highest) value
+                        {"label": "B", "value": 0.5},  # idx 1   │
+                        {"label": "C", "value": 1.0},  # idx 2  ─┘
+                    ],
+                ),
+                [[2, 0], [0, 2]],
+                0,
+            ),
+        ],
+    )
+    def test_picks_score_minimizing_candidate_order_independent(
+        self, criterion_factory, candidate_lists, expected, request
+    ):
+        """Score-minimizing candidate, weight-sign aware, with order-independent lowest-index
+        tie-break (both candidate orderings resolve to the same index)."""
+        criterion = criterion_factory(request)
+        for candidates in candidate_lists:
+            assert criterion.worst_option_among(candidates) == expected
+
+    def test_single_candidate_returned_as_is(self, ordinal_criterion):
+        assert ordinal_criterion.worst_option_among([2]) == 2
+
+    def test_empty_candidates_raises(self, ordinal_criterion):
+        with pytest.raises(ValueError):
+            ordinal_criterion.worst_option_among([])
+
+    def test_binary_criterion_raises(self, binary_criterion):
+        with pytest.raises(ValueError, match="Binary criterion"):
+            binary_criterion.worst_option_among([0])
+
+    def test_worst_scored_option_delegates_consistently(
+        self, ordinal_criterion, negative_weight_criterion_with_na
+    ):
+        """``worst_scored_option`` equals ``worst_option_among`` over all non-NA indices."""
+        for criterion in (ordinal_criterion, negative_weight_criterion_with_na):
+            non_na = [i for i, o in enumerate(criterion.options) if not o.na]
+            idx, _ = criterion.worst_scored_option()
+            assert idx == criterion.worst_option_among(non_na)
+
+
+class TestCriterionNaOptionIndex:
+    """Tests for the ``Criterion.na_option_index`` property (first NA index, else None)."""
+
+    def test_returns_first_na_index(self, nominal_criterion_with_na):
+        """Returns the index of the (first) NA option."""
+        assert nominal_criterion_with_na.na_option_index == 3
+
+    def test_none_when_no_na_option(self, ordinal_criterion):
+        """Multi-choice criterion without an NA option → None."""
+        assert ordinal_criterion.na_option_index is None
+
+    def test_none_for_binary(self, binary_criterion):
+        """Binary criterion (no options) → None (safe, no raise)."""
+        assert binary_criterion.na_option_index is None
+
+    def test_returns_first_when_multiple_na(self):
+        """With multiple NA options, returns the lowest index."""
+        criterion = Criterion(
+            name="t",
+            weight=10.0,
+            requirement="R",
+            scale_type="nominal",
+            options=[
+                {"label": "A", "value": 0.5},
+                {"label": "B", "value": 1.0},
+                {"label": "N/A one", "value": 0.0, "na": True},
+                {"label": "N/A two", "value": 0.0, "na": True},
+            ],
+        )
+        assert criterion.na_option_index == 2
+
+
+class TestCriterionWithGuaranteedNAOption:
+    """Tests for ``Criterion.with_guaranteed_na_option`` — the auto-inject helper.
+
+    Appends a single canonical NA option when the criterion lacks one (so the judge
+    always has an abstain channel, the analog of binary CANNOT_ASSESS); returns self
+    unchanged when an author NA option already exists.
+    """
+
+    def test_appends_canonical_na_when_absent(self, ordinal_criterion):
+        """No NA option → a canonical NA option is appended at the END."""
+        from autorubric.types import CANONICAL_NA_OPTION
+
+        result = ordinal_criterion.with_guaranteed_na_option()
+
+        # One more option, appended at the highest index.
+        assert len(result.options) == len(ordinal_criterion.options) + 1
+        injected = result.options[-1]
+        assert injected.na is True
+        assert injected.value == 0.0
+        assert injected == CANONICAL_NA_OPTION
+
+    def test_preserves_original_indices(self, ordinal_criterion):
+        """Indices 0..N-1 (labels and values) are unchanged by the append."""
+        result = ordinal_criterion.with_guaranteed_na_option()
+        for i, opt in enumerate(ordinal_criterion.options):
+            assert result.options[i].label == opt.label
+            assert result.options[i].value == opt.value
+            assert result.options[i].na == opt.na
+
+    def test_does_not_mutate_original(self, ordinal_criterion):
+        """The author criterion (frozen) is never mutated."""
+        original_len = len(ordinal_criterion.options)
+        ordinal_criterion.with_guaranteed_na_option()
+        assert len(ordinal_criterion.options) == original_len
+        assert ordinal_criterion.na_option_index is None
+
+    def test_idempotent_when_author_na_present(self, nominal_criterion_with_na):
+        """Author already supplied an NA option → returns self unchanged (no 2nd NA)."""
+        result = nominal_criterion_with_na.with_guaranteed_na_option()
+        assert result is nominal_criterion_with_na
+        na_count = sum(1 for o in result.options if o.na)
+        assert na_count == 1
+
+    def test_idempotent_when_author_na_not_last(self):
+        """Author NA in a non-final position is respected — no canonical NA appended."""
+        criterion = Criterion(
+            name="t",
+            weight=10.0,
+            requirement="R",
+            scale_type="nominal",
+            options=[
+                {"label": "N/A", "value": 0.0, "na": True},  # NA first
+                {"label": "A", "value": 0.5},
+                {"label": "B", "value": 1.0},
+            ],
+        )
+        result = criterion.with_guaranteed_na_option()
+        assert result is criterion
+        assert sum(1 for o in result.options if o.na) == 1
+
+    def test_binary_raises(self, binary_criterion):
+        """Calling on a binary criterion is a programmer error."""
+        with pytest.raises(ValueError, match="Binary criterion"):
+            binary_criterion.with_guaranteed_na_option()
+
+    def test_result_passes_validator(self, ordinal_criterion):
+        """Appending an NA option keeps ≥2 non-NA options (validator still passes)."""
+        result = ordinal_criterion.with_guaranteed_na_option()
+        non_na = [o for o in result.options if not o.na]
+        assert len(non_na) == len(ordinal_criterion.options)  # non-NA count unchanged
+        assert len(non_na) >= 2
 
 
 # =============================================================================
@@ -371,13 +834,17 @@ def hybrid_dataset(hybrid_rubric) -> RubricDataset:
     return dataset
 
 
-def _make_ordinal_report(selected_index: int) -> EvaluationReport:
-    """Create a mock EvaluationReport for ordinal criterion."""
+def _make_ordinal_report(selected_index: int, score: float = 0.5) -> EvaluationReport:
+    """Create a mock EvaluationReport for ordinal criterion.
+
+    ``score`` is configurable so bootstrap tests can vary per-item scores (a constant
+    score makes ``rmse_ci`` a degenerate point).
+    """
     from autorubric.types import CriterionReport
 
     return EvaluationReport(
-        score=0.5,
-        raw_score=5.0,
+        score=score,
+        raw_score=score * 10.0,
         report=[
             CriterionReport(
                 weight=10.0,
@@ -399,13 +866,14 @@ def _make_hybrid_report(
     binary_verdict: CriterionVerdict,
     ordinal_index: int,
     nominal_index: int,
+    score: float = 0.5,
 ) -> EvaluationReport:
-    """Create a mock EvaluationReport for hybrid rubric."""
+    """Create a mock EvaluationReport for hybrid rubric (``score`` configurable)."""
     from autorubric.types import CriterionReport
 
     return EvaluationReport(
-        score=0.5,
-        raw_score=10.0,
+        score=score,
+        raw_score=score * 25.0,
         report=[
             # Binary criterion
             CriterionReport(
@@ -703,3 +1171,844 @@ class TestBackwardsCompatibility:
         # All per_criterion should be binary
         for cm in metrics.per_criterion:
             assert cm.criterion_type == "binary"
+
+
+# =============================================================================
+# NA Kappa tests: NAStats.na_kappa = Cohen's kappa on {NA, not-NA}
+# =============================================================================
+
+
+def _make_na_dataset(nominal_criterion_with_na, ground_truth_labels: list[str]) -> RubricDataset:
+    """Build a dataset of N items using the supplied criterion and per-item GT label."""
+    rubric = Rubric([nominal_criterion_with_na])
+    dataset = RubricDataset(prompt="Test", rubric=rubric)
+    for i, label in enumerate(ground_truth_labels):
+        dataset.add_item(
+            submission=f"S{i}",
+            description=f"D{i}",
+            ground_truth=[label],
+        )
+    return dataset
+
+
+def _make_na_report(selected_index: int, criterion: Criterion) -> EvaluationReport:
+    """Build a single-criterion EvaluationReport whose pick is ``selected_index``."""
+    option = criterion.options[selected_index]
+    return EvaluationReport(
+        score=float(option.value),
+        raw_score=float(option.value) * criterion.weight,
+        report=[
+            CriterionReport(
+                weight=criterion.weight,
+                requirement=criterion.requirement,
+                name=criterion.name,
+                verdict=(CriterionVerdict.MET if option.value >= 0.5 else CriterionVerdict.UNMET),
+                reason="Test",
+                multi_choice_verdict=MultiChoiceVerdict(
+                    selected_index=selected_index,
+                    selected_label=option.label,
+                    value=float(option.value),
+                ),
+            ),
+        ],
+    )
+
+
+def _wrap_eval_result(item_results: list[ItemResult]) -> EvalResult:
+    """Wrap ItemResults into an EvalResult with the metadata compute_metrics expects."""
+    from datetime import datetime
+
+    return EvalResult(
+        item_results=item_results,
+        total_items=len(item_results),
+        successful_items=len(item_results),
+        failed_items=0,
+        total_token_usage=None,
+        total_completion_cost=None,
+        timing_stats=None,
+        started_at=datetime.now(),
+        completed_at=datetime.now(),
+        errors=[],
+        experiment_name=None,
+        experiment_dir=None,
+    )
+
+
+class TestNaKappa:
+    """Cohen's kappa on the dichotomized {NA, not-NA} decision."""
+
+    @pytest.mark.parametrize(
+        "labels,preds,expected_kappa,expected_interpretation,expected_counts",
+        [
+            # 4 items, perfect NA-vs-not-NA agreement => kappa=1.0, 'almost perfect'.
+            # items 1,2: both pred and GT pick N/A (index 3).
+            # items 3,4: both pred and GT pick "Very specific" (index 2).
+            # A=2, fp=0, fn=0, N=2. P_o=1.0, P_e=0.5, kappa=1.0.
+            (
+                ["N/A", "N/A", "Very specific", "Very specific"],
+                [3, 3, 2, 2],
+                1.0,
+                "almost perfect",
+                None,
+            ),
+            # 6 items, 2x2 mix gives na_kappa = 1/3, with na_count_*/na_false_* populated.
+            # Layout (pred, true); index 3 is NA, index 2 is "Very specific" (not-NA):
+            #     (NA, NA), (NA, NA)                  -> A=2
+            #     (NA, not-NA)                        -> fp=1
+            #     (not-NA, NA)                        -> fn=1
+            #     (not-NA, not-NA), (not-NA, not-NA)  -> N=2
+            # P_o=(2+2)/6=4/6; pred_NA=A+fp=3, true_NA=A+fn=3; P_e=(3/6)^2*2=0.5;
+            # kappa=(4/6 - 0.5)/(1 - 0.5) = (1/6)/(1/2) = 1/3.
+            (
+                ["N/A", "N/A", "Very specific", "N/A", "Very specific", "Very specific"],
+                [3, 3, 3, 2, 2, 2],
+                1 / 3,
+                None,
+                # (na_count_true, na_count_pred, na_false_positive, na_false_negative)
+                (3, 3, 1, 1),
+            ),
+        ],
+    )
+    def test_na_kappa_and_counts(
+        self,
+        nominal_criterion_with_na,
+        labels,
+        preds,
+        expected_kappa,
+        expected_interpretation,
+        expected_counts,
+    ):
+        """na_kappa is Cohen's kappa on the dichotomized {NA, not-NA} decision, with the
+        na_count_*/na_false_* diagnostics populated on the same na_stats object."""
+        dataset = _make_na_dataset(nominal_criterion_with_na, labels)
+        item_results = [
+            ItemResult(
+                item_idx=i,
+                item=dataset.items[i],
+                report=_make_na_report(preds[i], nominal_criterion_with_na),
+                duration_seconds=0.1,
+            )
+            for i in range(len(labels))
+        ]
+        eval_result = _wrap_eval_result(item_results)
+
+        metrics = compute_metrics(eval_result, dataset)
+
+        assert metrics.na_stats is not None
+        assert metrics.na_stats.na_kappa == pytest.approx(expected_kappa, abs=1e-9)
+        if expected_interpretation is not None:
+            assert metrics.na_stats.na_kappa_interpretation == expected_interpretation
+        if expected_counts is not None:
+            count_true, count_pred, fp, fn = expected_counts
+            assert metrics.na_stats.na_count_true == count_true
+            assert metrics.na_stats.na_count_pred == count_pred
+            assert metrics.na_stats.na_false_positive == fp
+            assert metrics.na_stats.na_false_negative == fn
+
+    def test_na_kappa_no_na_observed_is_none(self, nominal_criterion_with_na):
+        """3 items, no NA in either pred or GT => kappa is undefined (single class) => None."""
+        labels = ["Very specific", "Very specific", "Very specific"]
+        preds = [2, 2, 2]
+        dataset = _make_na_dataset(nominal_criterion_with_na, labels)
+        item_results = [
+            ItemResult(
+                item_idx=i,
+                item=dataset.items[i],
+                report=_make_na_report(preds[i], nominal_criterion_with_na),
+                duration_seconds=0.1,
+            )
+            for i in range(len(labels))
+        ]
+        eval_result = _wrap_eval_result(item_results)
+
+        metrics = compute_metrics(eval_result, dataset)
+
+        assert metrics.na_stats is not None
+        assert metrics.na_stats.na_kappa is None
+        assert metrics.na_stats.na_kappa_interpretation is None
+
+    def test_na_kappa_binary_only_rubric_leaves_na_stats_none(self):
+        """Regression guard: binary-only rubrics produce na_stats=None."""
+        rubric = Rubric([Criterion(name="C1", weight=10.0, requirement="R1")])
+        dataset = RubricDataset(prompt="Test", rubric=rubric)
+        dataset.add_item(submission="A", description="D1", ground_truth=[CriterionVerdict.MET])
+        dataset.add_item(submission="B", description="D2", ground_truth=[CriterionVerdict.UNMET])
+
+        item_results = [
+            ItemResult(
+                item_idx=0,
+                item=dataset.items[0],
+                report=EvaluationReport(
+                    score=1.0,
+                    raw_score=10.0,
+                    report=[
+                        CriterionReport(
+                            weight=10.0,
+                            requirement="R1",
+                            name="C1",
+                            verdict=CriterionVerdict.MET,
+                            reason="Test",
+                        ),
+                    ],
+                ),
+                duration_seconds=0.1,
+            ),
+            ItemResult(
+                item_idx=1,
+                item=dataset.items[1],
+                report=EvaluationReport(
+                    score=0.0,
+                    raw_score=0.0,
+                    report=[
+                        CriterionReport(
+                            weight=10.0,
+                            requirement="R1",
+                            name="C1",
+                            verdict=CriterionVerdict.UNMET,
+                            reason="Test",
+                        ),
+                    ],
+                ),
+                duration_seconds=0.1,
+            ),
+        ]
+        eval_result = _wrap_eval_result(item_results)
+
+        metrics = compute_metrics(eval_result, dataset)
+
+        assert metrics.na_stats is None
+
+    def test_multi_choice_only_rubric_leaves_ca_stats_none(self, nominal_criterion_with_na):
+        """Dual of the binary-only -> na_stats None guard: a multi-choice-only
+        rubric has no binary criteria, so cannot_assess_stats is None."""
+        labels = ["N/A", "Very specific", "Very specific"]
+        preds = [3, 2, 2]
+        dataset = _make_na_dataset(nominal_criterion_with_na, labels)
+        item_results = [
+            ItemResult(
+                item_idx=i,
+                item=dataset.items[i],
+                report=_make_na_report(preds[i], nominal_criterion_with_na),
+                duration_seconds=0.1,
+            )
+            for i in range(len(labels))
+        ]
+        eval_result = _wrap_eval_result(item_results)
+
+        metrics = compute_metrics(eval_result, dataset)
+
+        assert metrics.cannot_assess_stats is None
+
+
+def _make_effective_report(selected_index: int, effective_criterion: Criterion) -> EvaluationReport:
+    """A single-criterion report whose criterion carries the EFFECTIVE options.
+
+    Models what the grader produces with ``auto_na_option`` on: the report's criterion
+    has the injected NA appended at the end, and the verdict may point at it (an index
+    out of range for the author rubric).
+    """
+    option = effective_criterion.options[selected_index]
+    return EvaluationReport(
+        score=0.0 if option.na else float(option.value),
+        raw_score=0.0,
+        report=[
+            CriterionReport(
+                weight=effective_criterion.weight,
+                requirement=effective_criterion.requirement,
+                name=effective_criterion.name,
+                options=effective_criterion.options,
+                scale_type=effective_criterion.scale_type,
+                verdict=None,
+                reason="Test",
+                multi_choice_verdict=MultiChoiceVerdict(
+                    selected_index=selected_index,
+                    selected_label=option.label,
+                    value=float(option.value),
+                    na=option.na,
+                ),
+            ),
+        ],
+    )
+
+
+class TestMetricsAutoInjectedNA:
+    """compute_metrics must interpret predicted auto-injected NA indices.
+
+    The grader appends the NA option at index ``N = len(author.options)`` (out of range
+    for the author rubric used by the metrics layer). Metrics must reconstruct the same
+    effective criterion so the prediction is recognized as NA rather than crashing.
+    """
+
+    def test_handles_predicted_injected_na(self, ordinal_criterion):
+        """A predicted index == N (injected NA) is recognized as NA, not a crash."""
+        effective = ordinal_criterion.with_guaranteed_na_option()
+        na_index = len(ordinal_criterion.options)  # injected NA appended at the end
+
+        dataset = RubricDataset(prompt="Test", rubric=Rubric([ordinal_criterion]))
+        # Two abstain (predicted NA); three scored pairs (with variation, so kappa is
+        # well-defined and no degenerate-confusion warning is emitted).
+        gt_labels = [
+            "Very satisfied",
+            "Dissatisfied",
+            "Satisfied",
+            "Very satisfied",
+            "Very dissatisfied",
+        ]
+        preds = [na_index, na_index, 2, 3, 0]
+        for i, label in enumerate(gt_labels):
+            dataset.add_item(submission=f"S{i}", description=f"D{i}", ground_truth=[label])
+
+        item_results = [
+            ItemResult(
+                item_idx=i,
+                item=dataset.items[i],
+                report=_make_effective_report(preds[i], effective),
+                duration_seconds=0.1,
+            )
+            for i in range(len(gt_labels))
+        ]
+        eval_result = _wrap_eval_result(item_results)
+
+        metrics = compute_metrics(eval_result, dataset)  # must not raise
+
+        assert metrics.na_stats is not None
+        # Two predictions abstained (NA); ground truth never NA.
+        assert metrics.na_stats.na_count_pred == 2
+        assert metrics.na_stats.na_count_true == 0
+        assert metrics.na_stats.na_false_positive == 2
+
+    def test_as_category_refused_for_autoinjected_ordinal(self, ordinal_criterion):
+        """na_mode='as_category' is refused once an ordinal criterion gains an NA option."""
+        effective = ordinal_criterion.with_guaranteed_na_option()
+        na_index = len(ordinal_criterion.options)
+
+        dataset = RubricDataset(prompt="Test", rubric=Rubric([ordinal_criterion]))
+        gt_labels = ["Very satisfied", "Dissatisfied"]
+        preds = [na_index, 2]
+        for i, label in enumerate(gt_labels):
+            dataset.add_item(submission=f"S{i}", description=f"D{i}", ground_truth=[label])
+
+        item_results = [
+            ItemResult(
+                item_idx=i,
+                item=dataset.items[i],
+                report=_make_effective_report(preds[i], effective),
+                duration_seconds=0.1,
+            )
+            for i in range(len(gt_labels))
+        ]
+        eval_result = _wrap_eval_result(item_results)
+
+        with pytest.raises(ValueError, match="ordinal|as_category"):
+            compute_metrics(eval_result, dataset, na_mode="as_category")
+
+
+def _make_forced_choice_report(
+    selected_index: int | None, criterion: Criterion
+) -> EvaluationReport:
+    """Single-criterion report for a forced-choice (no-NA) criterion.
+
+    ``selected_index=None`` models the grader's genuine error-abstain: na=True
+    with no option selected (selected_index/label=None), value 0.0.
+    """
+    if selected_index is None:
+        mcv = MultiChoiceVerdict(selected_index=None, selected_label=None, value=0.0, na=True)
+        score = 0.0
+    else:
+        option = criterion.options[selected_index]
+        mcv = MultiChoiceVerdict(
+            selected_index=selected_index,
+            selected_label=option.label,
+            value=float(option.value),
+            na=False,
+        )
+        score = float(option.value)
+    return EvaluationReport(
+        score=score,
+        raw_score=score * criterion.weight,
+        report=[
+            CriterionReport(
+                weight=criterion.weight,
+                requirement=criterion.requirement,
+                name=criterion.name,
+                options=criterion.options,
+                scale_type=criterion.scale_type,
+                verdict=None,
+                reason="Test",
+                multi_choice_verdict=mcv,
+            ),
+        ],
+    )
+
+
+class TestForcedChoiceNoneAbstain:
+    """compute_metrics must treat a forced-choice None error-abstain as NA.
+
+    A forced-choice criterion has no NA option, so an infrastructure/parse error yields a
+    verdict with selected_index=None (na=True). Metrics must recognize that as an abstain
+    (reconstructing an effective NA option), NOT silently count it as option 0.
+    """
+
+    def test_none_abstain_recognized_as_na_not_option_zero(self, nominal_criterion):
+        """nominal_criterion = [Too brief(0), Too verbose(1), Just right(2)], no NA.
+
+        Three scored pairs are perfectly correct; one item is a None error-abstain whose
+        ground truth is 'Just right' (index 2). If the abstain were miscounted as option 0,
+        it would be a wrong pair AND na_count_pred would be 0. With the fix it is NA:
+        excluded under the default na_mode, and counted in na_count_pred / na_false_positive.
+        """
+        dataset = RubricDataset(prompt="Test", rubric=Rubric([nominal_criterion]))
+        gt_labels = ["Too brief", "Too verbose", "Just right", "Just right"]
+        preds: list[int | None] = [0, 1, 2, None]
+        for i, label in enumerate(gt_labels):
+            dataset.add_item(submission=f"S{i}", description=f"D{i}", ground_truth=[label])
+
+        item_results = [
+            ItemResult(
+                item_idx=i,
+                item=dataset.items[i],
+                report=_make_forced_choice_report(preds[i], nominal_criterion),
+                duration_seconds=0.1,
+            )
+            for i in range(len(gt_labels))
+        ]
+        eval_result = _wrap_eval_result(item_results)
+
+        metrics = compute_metrics(eval_result, dataset)  # must not raise
+
+        assert metrics.na_stats is not None
+        # The abstain is recognized as a predicted NA (not as option 0).
+        assert metrics.na_stats.na_count_pred == 1
+        assert metrics.na_stats.na_count_true == 0
+        assert metrics.na_stats.na_false_positive == 1
+        # The three scored pairs are perfect; the abstain is excluded (n_samples == 3).
+        assert metrics.per_criterion[0].n_samples == 3
+        assert metrics.per_criterion[0].exact_accuracy == pytest.approx(1.0)
+
+    def test_none_abstain_as_unmet_remaps_to_worst(self, nominal_criterion):
+        """Under na_mode='as_unmet' the None-abstain remaps to the worst scored option
+        (here value-0 options) rather than being excluded — and never crashes on None."""
+        dataset = RubricDataset(prompt="Test", rubric=Rubric([nominal_criterion]))
+        gt_labels = ["Just right", "Just right"]
+        preds: list[int | None] = [2, None]
+        for i, label in enumerate(gt_labels):
+            dataset.add_item(submission=f"S{i}", description=f"D{i}", ground_truth=[label])
+
+        item_results = [
+            ItemResult(
+                item_idx=i,
+                item=dataset.items[i],
+                report=_make_forced_choice_report(preds[i], nominal_criterion),
+                duration_seconds=0.1,
+            )
+            for i in range(len(gt_labels))
+        ]
+        eval_result = _wrap_eval_result(item_results)
+
+        # Must not raise; the abstain is handled, not a None crashing kappa.
+        metrics = compute_metrics(eval_result, dataset, na_mode="as_unmet")
+        assert metrics.na_stats is not None
+        assert metrics.na_stats.na_count_pred == 1
+
+
+# =============================================================================
+# top-level P/R/F1 are the BINARY MET-vs-rest metric → None for
+# multi-choice-only rubrics (no MET class). accuracy/kappa GENERALIZE.
+# =============================================================================
+
+
+class TestAggregatePrecisionRecallF1None:
+    """Multi-choice-only rubrics have no MET class, so the top-level
+    precision/recall/f1 (the binary MET-vs-rest metric) must be None, not 0.0.
+    accuracy (exact-match) and mean_kappa generalize and stay real numbers.
+    """
+
+    def test_multi_choice_only_pr_f1_none_accuracy_real(self, ordinal_dataset):
+        """Perfect ordinal-only predictions: P/R/F1 are None; accuracy/kappa real."""
+        item_results = [
+            ItemResult(
+                item_idx=0,
+                item=ordinal_dataset.items[0],
+                report=_make_ordinal_report(3),  # GT "4" = index 3
+                duration_seconds=0.1,
+            ),
+            ItemResult(
+                item_idx=1,
+                item=ordinal_dataset.items[1],
+                report=_make_ordinal_report(2),  # GT "3" = index 2
+                duration_seconds=0.1,
+            ),
+            ItemResult(
+                item_idx=2,
+                item=ordinal_dataset.items[2],
+                report=_make_ordinal_report(1),  # GT "2" = index 1
+                duration_seconds=0.1,
+            ),
+        ]
+        eval_result = _wrap_eval_result(item_results)
+
+        metrics = compute_metrics(eval_result, ordinal_dataset)
+
+        # No binary criteria => the MET-vs-rest precision/recall/f1 are undefined.
+        assert metrics.criterion_precision is None
+        assert metrics.criterion_recall is None
+        assert metrics.criterion_f1 is None
+
+        # accuracy is the hand-computed exact-match (perfect = 1.0), unchanged.
+        assert metrics.criterion_accuracy == pytest.approx(1.0)
+
+        # mean_kappa is the weighted kappa of the single ordinal criterion
+        # (perfect agreement = 1.0), unchanged.
+        assert metrics.mean_kappa == pytest.approx(1.0)
+        assert metrics.per_criterion[0].weighted_kappa == pytest.approx(1.0)
+
+    def test_to_file_emits_json_null_for_pr_f1(self, ordinal_dataset, tmp_path):
+        """to_file does not raise and serializes None P/R/F1 as JSON null."""
+        import json
+
+        item_results = [
+            ItemResult(
+                item_idx=i,
+                item=ordinal_dataset.items[i],
+                report=_make_ordinal_report(idx),
+                duration_seconds=0.1,
+            )
+            for i, idx in enumerate((3, 2, 1))
+        ]
+        eval_result = _wrap_eval_result(item_results)
+        metrics = compute_metrics(eval_result, ordinal_dataset)
+
+        out = tmp_path / "metrics.json"
+        metrics.to_file(out)  # must not raise
+        payload = json.loads(out.read_text(encoding="utf-8"))
+        assert payload["criterion_precision"] is None
+        assert payload["criterion_recall"] is None
+        assert payload["criterion_f1"] is None
+        assert payload["criterion_accuracy"] == pytest.approx(1.0)
+
+    def test_summary_renders_none_pr_f1_without_error(self, ordinal_dataset):
+        """summary() renders for a multi-choice-only rubric (None-safe accuracy/kappa)."""
+        item_results = [
+            ItemResult(
+                item_idx=i,
+                item=ordinal_dataset.items[i],
+                report=_make_ordinal_report(idx),
+                duration_seconds=0.1,
+            )
+            for i, idx in enumerate((3, 2, 1))
+        ]
+        eval_result = _wrap_eval_result(item_results)
+        metrics = compute_metrics(eval_result, ordinal_dataset)
+        summary = metrics.summary()  # must not raise
+        assert "Accuracy" in summary
+        assert "Mean Kappa" in summary
+
+    def test_mixed_rubric_pr_f1_are_floats(self, hybrid_dataset):
+        """Mixed binary+multi-choice rubric: the binary branch fires, so
+        precision/recall/f1 are floats (not None). Pins that we did not break
+        the binary path."""
+        item_results = [
+            ItemResult(
+                item_idx=0,
+                item=hybrid_dataset.items[0],
+                report=_make_hybrid_report(CriterionVerdict.MET, 3, 2),
+                duration_seconds=0.1,
+            ),
+            ItemResult(
+                item_idx=1,
+                item=hybrid_dataset.items[1],
+                report=_make_hybrid_report(CriterionVerdict.UNMET, 1, 0),
+                duration_seconds=0.1,
+            ),
+        ]
+        eval_result = _wrap_eval_result(item_results)
+
+        metrics = compute_metrics(eval_result, hybrid_dataset)
+
+        assert isinstance(metrics.criterion_precision, float)
+        assert isinstance(metrics.criterion_recall, float)
+        assert isinstance(metrics.criterion_f1, float)
+        assert isinstance(metrics.criterion_accuracy, float)
+        assert isinstance(metrics.mean_kappa, float)
+
+
+# =============================================================================
+# Bootstrap CIs for multi-choice / mixed rubrics
+# =============================================================================
+
+
+def _ordinal_ds(gt_labels: list[str]) -> RubricDataset:
+    """Single ordinal-criterion dataset (4-point satisfaction scale) with the given GT."""
+    rubric = Rubric(
+        [
+            Criterion(
+                name="satisfaction",
+                weight=10.0,
+                requirement="Satisfaction level",
+                scale_type="ordinal",
+                options=[
+                    {"label": "1", "value": 0.0},
+                    {"label": "2", "value": 0.33},
+                    {"label": "3", "value": 0.67},
+                    {"label": "4", "value": 1.0},
+                ],
+            )
+        ]
+    )
+    ds = RubricDataset(prompt="Test", rubric=rubric)
+    for i, gt in enumerate(gt_labels):
+        ds.add_item(submission=f"s{i}", description="d", ground_truth=[gt])
+    return ds
+
+
+def _nominal_ds(gt_labels: list[str]) -> RubricDataset:
+    """Single nominal-criterion dataset (3 unordered categories) with the given GT."""
+    rubric = Rubric(
+        [
+            Criterion(
+                name="length",
+                weight=5.0,
+                requirement="Is the response length appropriate?",
+                scale_type="nominal",
+                options=[
+                    {"label": "Too brief", "value": 0.0},
+                    {"label": "Too verbose", "value": 0.0},
+                    {"label": "Just right", "value": 1.0},
+                ],
+            )
+        ]
+    )
+    ds = RubricDataset(prompt="Test", rubric=rubric)
+    for i, gt in enumerate(gt_labels):
+        ds.add_item(submission=f"s{i}", description="d", ground_truth=[gt])
+    return ds
+
+
+def _make_nominal_report(selected_index: int, score: float = 0.5) -> EvaluationReport:
+    """Mock report for the single nominal 'length' criterion (3 options)."""
+    return EvaluationReport(
+        score=score,
+        raw_score=score * 5.0,
+        report=[
+            CriterionReport(
+                weight=5.0,
+                requirement="Is the response length appropriate?",
+                name="length",
+                verdict=CriterionVerdict.MET if selected_index == 2 else CriterionVerdict.UNMET,
+                reason="Test",
+                multi_choice_verdict=MultiChoiceVerdict(
+                    selected_index=selected_index,
+                    selected_label=str(selected_index),
+                    value=1.0 if selected_index == 2 else 0.0,
+                ),
+            ),
+        ],
+    )
+
+
+def _ordinal_eval(gt_labels, pred_indices, scores) -> EvalResult:
+    ds = _ordinal_ds(gt_labels)
+    item_results = [
+        ItemResult(
+            item_idx=i,
+            item=ds.items[i],
+            report=_make_ordinal_report(pred_indices[i], score=scores[i]),
+            duration_seconds=0.1,
+        )
+        for i in range(len(gt_labels))
+    ]
+    return _wrap_eval_result(item_results)
+
+
+class TestBootstrapMultiChoice:
+    """Bootstrap CIs now cover multi-choice (ordinal/nominal) and mixed rubrics.
+
+    Each CI must be the CI of the SAME aggregate statistic compute_metrics reports
+    (accuracy_ci<-criterion_accuracy, kappa_ci<-mean_kappa, rmse_ci<-score_rmse), so the
+    point estimate is bracketed. Pure multi-choice previously returned bootstrap=None.
+    """
+
+    def test_pure_ordinal_all_cis_present_and_bracket(self):
+        gt = ["1", "2", "3", "4", "1", "2", "3", "4"]
+        preds = [0, 1, 2, 3, 0, 1, 2, 2]  # one (adjacent) error -> not perfect, not single-class
+        scores = [0.10, 0.35, 0.65, 0.95, 0.15, 0.40, 0.70, 0.60]
+        ds = _ordinal_ds(gt)
+        eval_result = _ordinal_eval(gt, preds, scores)
+        m = compute_metrics(eval_result, ds, bootstrap=True, n_bootstrap=500, seed=42)
+
+        assert m.bootstrap is not None  # FAILS today: pure multi-choice -> bootstrap None
+        b = m.bootstrap
+        assert b.accuracy_ci is not None
+        assert b.accuracy_ci[0] <= m.criterion_accuracy <= b.accuracy_ci[1]
+        assert b.kappa_ci is not None
+        assert b.kappa_ci[0] <= m.mean_kappa <= b.kappa_ci[1]
+        # The bootstrapped kappa is the QUADRATIC-weighted ordinal kappa (mean over 1 criterion).
+        assert m.mean_kappa == pytest.approx(m.per_criterion[0].weighted_kappa)
+        assert b.rmse_ci is not None
+        assert b.rmse_ci[0] <= m.score_rmse <= b.rmse_ci[1]
+
+    def test_pure_nominal_unweighted_kappa_ci(self):
+        gt = [
+            "Too brief",
+            "Too verbose",
+            "Just right",
+            "Too brief",
+            "Too verbose",
+            "Just right",
+            "Just right",
+            "Too brief",
+        ]
+        # indices: 0,1,2,0,1,2,2,0 ; one error at item 6 (pred 1 vs true 2)
+        preds = [0, 1, 2, 0, 1, 2, 1, 0]
+        scores = [0.2, 0.1, 0.9, 0.25, 0.15, 0.85, 0.5, 0.3]
+        ds = _nominal_ds(gt)
+        item_results = [
+            ItemResult(
+                item_idx=i,
+                item=ds.items[i],
+                report=_make_nominal_report(preds[i], score=scores[i]),
+                duration_seconds=0.1,
+            )
+            for i in range(len(gt))
+        ]
+        m = compute_metrics(
+            _wrap_eval_result(item_results), ds, bootstrap=True, n_bootstrap=500, seed=42
+        )
+
+        assert m.bootstrap is not None
+        b = m.bootstrap
+        assert b.accuracy_ci is not None
+        assert b.accuracy_ci[0] <= m.criterion_accuracy <= b.accuracy_ci[1]
+        assert b.kappa_ci is not None
+        assert b.kappa_ci[0] <= m.mean_kappa <= b.kappa_ci[1]
+        # Nominal -> UNWEIGHTED kappa (mean over the single criterion).
+        assert m.mean_kappa == pytest.approx(m.per_criterion[0].kappa)
+        assert b.rmse_ci is not None
+
+    def test_hybrid_all_cis_present_and_bracket(self, hybrid_dataset_big):
+        ds, eval_result = hybrid_dataset_big
+        m = compute_metrics(eval_result, ds, bootstrap=True, n_bootstrap=500, seed=42)
+
+        assert m.bootstrap is not None
+        b = m.bootstrap
+        assert b.accuracy_ci is not None
+        assert b.accuracy_ci[0] <= m.criterion_accuracy <= b.accuracy_ci[1]
+        assert b.kappa_ci is not None
+        assert b.kappa_ci[0] <= m.mean_kappa <= b.kappa_ci[1]
+        assert b.rmse_ci is not None
+        assert b.rmse_ci[0] <= m.score_rmse <= b.rmse_ci[1]
+
+    def test_multichoice_single_class_kappa_ci_none_accuracy_present(self):
+        # All GT and predictions are the same option -> single class every resample.
+        gt = ["3", "3", "3", "3", "3", "3"]
+        preds = [2, 2, 2, 2, 2, 2]  # "3" == index 2; all correct -> accuracy 1.0
+        scores = [0.6, 0.7, 0.65, 0.55, 0.6, 0.68]  # vary so rmse is non-degenerate
+        ds = _ordinal_ds(gt)
+        eval_result = _ordinal_eval(gt, preds, scores)
+        m = compute_metrics(eval_result, ds, bootstrap=True, n_bootstrap=200, seed=7)
+
+        assert m.bootstrap is not None
+        assert m.bootstrap.accuracy_ci is not None  # accuracy is defined (all correct)
+        assert m.bootstrap.kappa_ci is None  # single-class every resample -> kappa undefined
+        assert m.bootstrap.rmse_ci is not None  # scores vary -> rmse defined
+        assert isinstance(m.summary(), str)  # None-guarded rendering does not crash
+
+    def test_one_criterion_none_others_survive_kappa_ci_present(self, hybrid_one_class_binary):
+        # Binary criterion is single-class (kappa None); ordinal+nominal survive ->
+        # per-replicate mean_kappa is the mean of the surviving criteria (not None).
+        ds, eval_result = hybrid_one_class_binary
+        m = compute_metrics(eval_result, ds, bootstrap=True, n_bootstrap=400, seed=42)
+
+        assert m.bootstrap is not None
+        assert m.bootstrap.kappa_ci is not None
+        assert m.bootstrap.kappa_ci[0] <= m.mean_kappa <= m.bootstrap.kappa_ci[1]
+
+    def test_determinism_same_seed_identical_diff_seed_differs(self):
+        gt = ["1", "2", "3", "4", "1", "2", "3", "4"]
+        preds = [0, 1, 2, 3, 0, 1, 2, 2]
+        scores = [0.10, 0.35, 0.65, 0.95, 0.15, 0.40, 0.70, 0.60]
+        ds = _ordinal_ds(gt)
+        m1 = compute_metrics(
+            _ordinal_eval(gt, preds, scores), ds, bootstrap=True, n_bootstrap=200, seed=123
+        )
+        m2 = compute_metrics(
+            _ordinal_eval(gt, preds, scores), ds, bootstrap=True, n_bootstrap=200, seed=123
+        )
+        m3 = compute_metrics(
+            _ordinal_eval(gt, preds, scores), ds, bootstrap=True, n_bootstrap=200, seed=999
+        )
+        assert m1.bootstrap is not None
+        assert m1.bootstrap == m2.bootstrap  # same seed -> bit-identical (frozen model eq)
+        assert m1.bootstrap != m3.bootstrap  # different seed -> different CIs
+
+
+@pytest.fixture
+def hybrid_dataset_big(hybrid_rubric):
+    """Mixed binary+ordinal+nominal dataset with enough spread for stable bootstrap CIs."""
+    ds = RubricDataset(prompt="Test", rubric=hybrid_rubric)
+    rows = [
+        (CriterionVerdict.MET, "Very satisfied", "Just right"),
+        (CriterionVerdict.UNMET, "Dissatisfied", "Too brief"),
+        (CriterionVerdict.MET, "Satisfied", "Just right"),
+        (CriterionVerdict.UNMET, "Very dissatisfied", "Too verbose"),
+        (CriterionVerdict.MET, "Satisfied", "Too brief"),
+        (CriterionVerdict.UNMET, "Dissatisfied", "Just right"),
+    ]
+    for i, (bv, ol, nl) in enumerate(rows):
+        ds.add_item(submission=f"s{i}", description="d", ground_truth=[bv, ol, nl])
+    # Predictions: a few errors across each criterion type. (binary, ordinal_idx, nominal_idx)
+    preds = [
+        (CriterionVerdict.MET, 3, 2),
+        (CriterionVerdict.UNMET, 1, 0),
+        (CriterionVerdict.MET, 2, 2),
+        (CriterionVerdict.MET, 0, 1),  # binary error
+        (CriterionVerdict.MET, 1, 0),  # ordinal adjacent error
+        (CriterionVerdict.UNMET, 1, 2),
+    ]
+    scores = [0.9, 0.2, 0.7, 0.35, 0.6, 0.45]
+    item_results = [
+        ItemResult(
+            item_idx=i,
+            item=ds.items[i],
+            report=_make_hybrid_report(*preds[i], score=scores[i]),
+            duration_seconds=0.1,
+        )
+        for i in range(len(rows))
+    ]
+    return ds, _wrap_eval_result(item_results)
+
+
+@pytest.fixture
+def hybrid_one_class_binary(hybrid_rubric):
+    """Mixed dataset where the binary criterion is single-class (all MET) so its kappa is
+    None, while ordinal+nominal carry real spread."""
+    ds = RubricDataset(prompt="Test", rubric=hybrid_rubric)
+    rows = [
+        (CriterionVerdict.MET, "Very satisfied", "Just right"),
+        (CriterionVerdict.MET, "Dissatisfied", "Too brief"),
+        (CriterionVerdict.MET, "Satisfied", "Just right"),
+        (CriterionVerdict.MET, "Very dissatisfied", "Too verbose"),
+        (CriterionVerdict.MET, "Satisfied", "Too brief"),
+        (CriterionVerdict.MET, "Dissatisfied", "Just right"),
+    ]
+    for i, (bv, ol, nl) in enumerate(rows):
+        ds.add_item(submission=f"s{i}", description="d", ground_truth=[bv, ol, nl])
+    preds = [
+        (CriterionVerdict.MET, 3, 2),
+        (CriterionVerdict.MET, 1, 0),
+        (CriterionVerdict.MET, 2, 1),  # nominal error
+        (CriterionVerdict.MET, 0, 1),
+        (CriterionVerdict.MET, 2, 0),
+        (CriterionVerdict.MET, 1, 2),
+    ]
+    scores = [0.9, 0.4, 0.6, 0.3, 0.7, 0.5]
+    item_results = [
+        ItemResult(
+            item_idx=i,
+            item=ds.items[i],
+            report=_make_hybrid_report(*preds[i], score=scores[i]),
+            duration_seconds=0.1,
+        )
+        for i in range(len(rows))
+    ]
+    return ds, _wrap_eval_result(item_results)

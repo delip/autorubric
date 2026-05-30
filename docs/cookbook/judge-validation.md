@@ -76,15 +76,24 @@ Use `compute_metrics()` to compare predictions against ground truth:
 ```python
 metrics = result.compute_metrics(dataset)
 
+# Metric fields are `float | None` — None when genuinely undefined (e.g. precision/
+# recall/F1 for a rubric with no binary MET class, or kappa on a degenerate class).
+# Guard the format spec so the snippet never crashes on None.
+def pct(x):
+    return f"{x:.1%}" if x is not None else "n/a"
+
+def num(x):
+    return f"{x:.3f}" if x is not None else "n/a"
+
 # Overall metrics
 print("=" * 50)
 print("OVERALL VALIDATION METRICS")
 print("=" * 50)
-print(f"Criterion Accuracy:  {metrics.criterion_accuracy:.1%}")
-print(f"Cohen's Kappa:       {metrics.mean_kappa:.3f}")
-print(f"Precision (MET):     {metrics.criterion_precision:.1%}")
-print(f"Recall (MET):        {metrics.criterion_recall:.1%}")
-print(f"F1 Score:            {metrics.criterion_f1:.3f}")
+print(f"Criterion Accuracy:  {pct(metrics.criterion_accuracy)}")
+print(f"Cohen's Kappa:       {num(metrics.mean_kappa)}")
+print(f"Precision (MET):     {pct(metrics.criterion_precision)}")
+print(f"Recall (MET):        {pct(metrics.criterion_recall)}")
+print(f"F1 Score:            {num(metrics.criterion_f1)}")
 ```
 
 ### Interpreting the Metrics
@@ -116,9 +125,13 @@ print("-" * 50)
 print(f"{'Criterion':<25} {'Acc':>8} {'Kappa':>8} {'F1':>8}")
 print("-" * 50)
 
+# Per-criterion metrics are `float | None`; render None as a right-aligned "n/a".
+def cell(x, width, fmt):
+    return f"{x:>{width}.{fmt}}" if x is not None else f"{'n/a':>{width}}"
+
 for cr_metrics in metrics.per_criterion:
-    print(f"{cr_metrics.name:<25} {cr_metrics.accuracy:>7.1%} {cr_metrics.kappa:>8.3f} "
-          f"{cr_metrics.f1:>8.3f}")
+    print(f"{cr_metrics.name:<25} {cell(cr_metrics.accuracy, 7, '1%')} "
+          f"{cell(cr_metrics.kappa, 8, '3f')} {cell(cr_metrics.f1, 8, '3f')}")
 ```
 
 Sample output:
@@ -147,11 +160,16 @@ Check if the judge systematically over- or under-predicts MET:
 bias = metrics.bias
 
 print(f"\nSystematic Bias Analysis:")
-print(f"  Mean bias: {bias.mean_bias:.3f}")
+# BiasResult numeric fields are `float | None` — None when undefined (mean_bias at
+# n=0; p_value / effect_size when there is too little data). Guard before formatting.
+def num(x):
+    return f"{x:.3f}" if x is not None else "n/a"
+
+print(f"  Mean bias: {num(bias.mean_bias)}")
 print(f"  Bias direction: {bias.direction}")  # "permissive" or "strict"
 print(f"  Statistically significant: {bias.is_significant}")
-print(f"  P-value: {bias.p_value:.4f}")
-print(f"  Effect size: {bias.effect_size:.3f}")
+print(f"  P-value: {bias.p_value:.4f}" if bias.p_value is not None else "  P-value: n/a")
+print(f"  Effect size: {num(bias.effect_size)}")
 ```
 
 - **Permissive bias**: Judge marks MET more often than humans
@@ -176,10 +194,13 @@ metrics = result.compute_metrics(
     seed=42
 )
 
-print(f"\nAccuracy: {metrics.criterion_accuracy:.1%}")
+# criterion_accuracy / mean_kappa are `float | None` (None when undefined).
+acc = metrics.criterion_accuracy
+kappa = metrics.mean_kappa
+print(f"\nAccuracy: {acc:.1%}" if acc is not None else "\nAccuracy: n/a")
 print(f"  95% CI: [{metrics.bootstrap.accuracy_ci[0]:.1%}, {metrics.bootstrap.accuracy_ci[1]:.1%}]")
 
-print(f"\nKappa: {metrics.mean_kappa:.3f}")
+print(f"\nKappa: {kappa:.3f}" if kappa is not None else "\nKappa: n/a")
 print(f"  95% CI: [{metrics.bootstrap.kappa_ci[0]:.3f}, {metrics.bootstrap.kappa_ci[1]:.3f}]")
 ```
 
@@ -193,8 +214,12 @@ Check how well predicted scores correlate with ground truth scores:
 
 ```python
 print(f"\nScore Correlation:")
-print(f"  Pearson:  {metrics.score_pearson.coefficient:.3f}")
-print(f"  Spearman: {metrics.score_spearman.coefficient:.3f}")
+# CorrelationResult.coefficient is `float | None` (None for a constant array or < 3 samples).
+def corr(c):
+    return f"{c:.3f}" if c is not None else "n/a"
+
+print(f"  Pearson:  {corr(metrics.score_pearson.coefficient)}")
+print(f"  Spearman: {corr(metrics.score_spearman.coefficient)}")
 print(f"  RMSE:     {metrics.score_rmse:.3f}")
 ```
 
@@ -380,12 +405,22 @@ async def main():
 
     metrics = result.compute_metrics(dataset)
 
+    # Metric fields are `float | None`; None when genuinely undefined (never a fake 0.0).
+    def pct(x):
+        return f"{x:.1%}" if x is not None else "n/a"
+
+    def num(x):
+        return f"{x:.3f}" if x is not None else "n/a"
+
+    def cell(x, width, fmt):
+        return f"{x:>{width}.{fmt}}" if x is not None else f"{'n/a':>{width}}"
+
     print(f"\nOverall Metrics:")
-    print(f"  Criterion Accuracy:  {metrics.criterion_accuracy:.1%}")
-    print(f"  Cohen's Kappa:       {metrics.mean_kappa:.3f}")
-    print(f"  Precision (MET):     {metrics.criterion_precision:.1%}")
-    print(f"  Recall (MET):        {metrics.criterion_recall:.1%}")
-    print(f"  F1 Score:            {metrics.criterion_f1:.3f}")
+    print(f"  Criterion Accuracy:  {pct(metrics.criterion_accuracy)}")
+    print(f"  Cohen's Kappa:       {num(metrics.mean_kappa)}")
+    print(f"  Precision (MET):     {pct(metrics.criterion_precision)}")
+    print(f"  Recall (MET):        {pct(metrics.criterion_recall)}")
+    print(f"  F1 Score:            {num(metrics.criterion_f1)}")
 
     # Per-criterion breakdown
     print("\n" + "-" * 60)
@@ -395,15 +430,17 @@ async def main():
     print("-" * 60)
 
     for cr_metrics in metrics.per_criterion:
-        print(f"{cr_metrics.name:<20} {cr_metrics.accuracy:>7.1%} {cr_metrics.kappa:>8.3f} "
-              f"{cr_metrics.precision:>7.1%} {cr_metrics.recall:>7.1%}")
+        print(f"{cr_metrics.name:<20} {cell(cr_metrics.accuracy, 7, '1%')} "
+              f"{cell(cr_metrics.kappa, 8, '3f')} {cell(cr_metrics.precision, 7, '1%')} "
+              f"{cell(cr_metrics.recall, 7, '1%')}")
 
     # Score correlation
     print("\n" + "-" * 60)
     print("SCORE CORRELATION")
     print("-" * 60)
-    print(f"  Pearson r:   {metrics.score_pearson.coefficient:.3f}")
-    print(f"  Spearman ρ:  {metrics.score_spearman.coefficient:.3f}")
+    # CorrelationResult.coefficient is None for a constant array or < 3 samples.
+    print(f"  Pearson r:   {num(metrics.score_pearson.coefficient)}")
+    print(f"  Spearman ρ:  {num(metrics.score_spearman.coefficient)}")
     print(f"  RMSE:        {metrics.score_rmse:.3f}")
 
     # Bias analysis

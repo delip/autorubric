@@ -42,6 +42,11 @@ litellm.suppress_debug_info = True
 DATASET_PATH = Path(__file__).parent / "data" / "essay_grading_dataset.json"
 
 
+def _cell(value: float | None, value_spec: str, width: int) -> str:
+    """Format an optional metric into a fixed-width cell, rendering None as N/A."""
+    return format(value, value_spec) if value is not None else f"{'N/A':>{width}}"
+
+
 async def main():
     # Load the dataset from JSON file
     dataset = RubricDataset.from_file(DATASET_PATH)
@@ -136,14 +141,17 @@ async def main():
         report = item_result.report
 
         true_score = dataset.compute_weighted_score(item.ground_truth)
-        score_error = abs(report.score - true_score)
+        score_error = abs(report.score - true_score) if report.score is not None else None
+
+        ensemble_str = f"{report.score:.3f}" if report.score is not None else "N/A"
+        error_str = f"{score_error:.3f}" if score_error is not None else "N/A"
+        agreement_str = (
+            f"{report.mean_agreement:.1%}" if report.mean_agreement is not None else "N/A"
+        )
 
         print(f"\nItem {item_result.item_idx + 1}: {item.description}")
-        print(
-            f"  Scores: Ensemble={report.score:.3f} | Actual={true_score:.3f} "
-            f"| Error={score_error:.3f}"
-        )
-        print(f"  Agreement: {report.mean_agreement:.1%}")
+        print(f"  Scores: Ensemble={ensemble_str} | Actual={true_score:.3f} | Error={error_str}")
+        print(f"  Agreement: {agreement_str}")
 
         # Show per-judge scores
         print("  Judge Scores: ", end="")
@@ -164,16 +172,18 @@ async def main():
 
         for judge_id, jm in sorted(metrics.per_judge.items()):
             print(
-                f"{judge_id:<15} {jm.criterion_accuracy:>10.1%} {jm.mean_kappa:>10.3f} "
-                f"{jm.score_rmse:>10.4f} {jm.score_spearman.coefficient:>10.4f} "
-                f"{jm.bias.mean_bias:>+10.4f}"
+                f"{judge_id:<15} {_cell(jm.criterion_accuracy, '>10.1%', 10)} "
+                f"{_cell(jm.mean_kappa, '>10.3f', 10)} "
+                f"{jm.score_rmse:>10.4f} {_cell(jm.score_spearman.coefficient, '>10.4f', 10)} "
+                f"{_cell(jm.bias.mean_bias, '>+10.4f', 10)}"
             )
 
         print("-" * 70)
         print(
-            f"{'ENSEMBLE':<15} {metrics.criterion_accuracy:>10.1%} {metrics.mean_kappa:>10.3f} "
-            f"{metrics.score_rmse:>10.4f} {metrics.score_spearman.coefficient:>10.4f} "
-            f"{metrics.bias.mean_bias:>+10.4f}"
+            f"{'ENSEMBLE':<15} {_cell(metrics.criterion_accuracy, '>10.1%', 10)} "
+            f"{_cell(metrics.mean_kappa, '>10.3f', 10)} "
+            f"{metrics.score_rmse:>10.4f} {_cell(metrics.score_spearman.coefficient, '>10.4f', 10)} "
+            f"{_cell(metrics.bias.mean_bias, '>+10.4f', 10)}"
         )
 
     # Cost & Timing Summary

@@ -73,12 +73,13 @@ def earth_movers_distance(
     d2 = _to_array(dist2).astype(float)
 
     if len(d1) == 0 or len(d2) == 0:
+        # No data to transport ⇒ every distance/diff statistic is genuinely undefined.
         return EMDResult(
-            emd=0.0,
-            mean_diff=0.0,
-            std_diff=0.0,
+            emd=None,
+            mean_diff=None,
+            std_diff=None,
             bias_direction="none",
-            bias_magnitude=0.0,
+            bias_magnitude=None,
             interpretation="insufficient data",
         )
 
@@ -124,7 +125,7 @@ def wasserstein_distance(
     dist2: ArrayLike,
     *,
     normalize: bool = True,
-) -> float:
+) -> float | None:
     """Compute Wasserstein distance (alias for EMD).
 
     This is a convenience function that returns just the distance value.
@@ -135,7 +136,8 @@ def wasserstein_distance(
         normalize: If True, normalize both distributions to [0, 1].
 
     Returns:
-        Wasserstein distance value.
+        Wasserstein distance value, or ``None`` when either distribution is empty (the
+        distance is genuinely undefined with no data to transport).
     """
     result = earth_movers_distance(dist1, dist2, normalize=normalize)
     return result.emd
@@ -217,16 +219,45 @@ def systematic_bias(
     y_true = _to_array(y_true).astype(float)
 
     n = len(y_pred)
-    if n < 2:
+    if n == 0:
+        # Nothing to compare ⇒ mean_bias is genuinely undefined (not 0.0).
         return BiasResult(
-            mean_bias=0.0,
-            std_bias=0.0,
+            mean_bias=None,
+            std_bias=None,
             is_significant=False,
             p_value=None,
             direction="none",
             effect_size=None,
             ci=None,
-            n_samples=n,
+            n_samples=0,
+        )
+
+    if n == 1:
+        # mean_bias IS computable from a single pair (the one difference); the
+        # dispersion-dependent statistics (std_bias, Cohen's d, CI, p-value) are not.
+        if paired:
+            _validate_same_length(y_pred, y_true)
+            single = float(y_pred[0] - y_true[0])
+        else:
+            single = float(np.mean(y_pred) - np.mean(y_true))
+
+        single_direction: Literal["positive", "negative", "none"]
+        if single > 0.001:
+            single_direction = "positive"
+        elif single < -0.001:
+            single_direction = "negative"
+        else:
+            single_direction = "none"
+
+        return BiasResult(
+            mean_bias=single,
+            std_bias=None,
+            is_significant=False,
+            p_value=None,
+            direction=single_direction,
+            effect_size=None,
+            ci=None,
+            n_samples=1,
         )
 
     if paired:
@@ -238,8 +269,8 @@ def systematic_bias(
         # Paired t-test
         t_stat, p_value = stats.ttest_rel(y_pred, y_true)
 
-        # Cohen's d for paired samples
-        effect_size = mean_bias / std_bias if std_bias > 0 else 0.0
+        # Cohen's d for paired samples (undefined when std_bias == 0).
+        effect_size = mean_bias / std_bias if std_bias > 0 else None
     else:
         mean_bias = float(np.mean(y_pred) - np.mean(y_true))
 
@@ -252,8 +283,8 @@ def systematic_bias(
         # Independent t-test
         t_stat, p_value = stats.ttest_ind(y_pred, y_true)
 
-        # Cohen's d
-        effect_size = mean_bias / std_bias if std_bias > 0 else 0.0
+        # Cohen's d (undefined when pooled std == 0).
+        effect_size = mean_bias / std_bias if std_bias > 0 else None
 
     # Determine direction
     if mean_bias > 0.001:
@@ -263,19 +294,25 @@ def systematic_bias(
     else:
         direction = "none"
 
-    # Confidence interval for mean bias
-    if paired:
-        se = std_bias / np.sqrt(n)
+    # Confidence interval for mean bias. The t critical value is undefined when the
+    # degrees of freedom drop below 1 (e.g. n=2 unpaired → df=0 → stats.t.ppf returns
+    # NaN); the interval is then genuinely undefined → ci=None, never a NaN-valued CI.
+    df = (n - 1) if paired else (n - 2)
+    if df < 1:
+        ci = None
     else:
-        se = std_bias * np.sqrt(1 / len(y_pred) + 1 / len(y_true))
+        if paired:
+            se = std_bias / np.sqrt(n)
+        else:
+            se = std_bias * np.sqrt(1 / len(y_pred) + 1 / len(y_true))
 
-    t_crit = stats.t.ppf(1 - (1 - confidence) / 2, n - 1 if paired else n - 2)
-    ci = ConfidenceInterval(
-        lower=float(mean_bias - t_crit * se),
-        upper=float(mean_bias + t_crit * se),
-        confidence=confidence,
-        method="t",
-    )
+        t_crit = stats.t.ppf(1 - (1 - confidence) / 2, df)
+        ci = ConfidenceInterval(
+            lower=float(mean_bias - t_crit * se),
+            upper=float(mean_bias + t_crit * se),
+            confidence=confidence,
+            method="t",
+        )
 
     return BiasResult(
         mean_bias=mean_bias,
@@ -283,7 +320,7 @@ def systematic_bias(
         is_significant=p_value < 0.05,
         p_value=float(p_value),
         direction=direction,
-        effect_size=float(effect_size),
+        effect_size=float(effect_size) if effect_size is not None else None,
         ci=ci,
         n_samples=n,
     )
@@ -319,26 +356,30 @@ def score_distribution(
 
     n = len(scores)
     if n == 0:
+        # No data ⇒ every descriptive statistic is genuinely undefined (not 0.0).
         return DistributionResult(
             n=0,
-            mean=0.0,
-            std=0.0,
-            variance=0.0,
-            min=0.0,
-            max=0.0,
-            median=0.0,
-            q25=0.0,
-            q75=0.0,
-            iqr=0.0,
-            skewness=0.0,
-            kurtosis=0.0,
+            mean=None,
+            std=None,
+            variance=None,
+            min=None,
+            max=None,
+            median=None,
+            q25=None,
+            q75=None,
+            iqr=None,
+            skewness=None,
+            kurtosis=None,
             histogram=None,
         )
 
-    # Basic statistics
+    # Basic statistics. A single point still has a defined mean/min/max/median/quartiles
+    # (and iqr = q75 - q25 = 0.0, the true IQR of one point). Dispersion- and
+    # shape-dependent stats need more points and are None below their thresholds:
+    #   std/variance need >=2, skewness needs >=3, kurtosis needs >=4.
     mean = float(np.mean(scores))
-    std = float(np.std(scores, ddof=1)) if n > 1 else 0.0
-    variance = float(np.var(scores, ddof=1)) if n > 1 else 0.0
+    std = float(np.std(scores, ddof=1)) if n > 1 else None
+    variance = float(np.var(scores, ddof=1)) if n > 1 else None
     min_val = float(np.min(scores))
     max_val = float(np.max(scores))
     median = float(np.median(scores))
@@ -347,8 +388,8 @@ def score_distribution(
     iqr = q75 - q25
 
     # Skewness and kurtosis
-    skewness = float(stats.skew(scores)) if n > 2 else 0.0
-    kurtosis = float(stats.kurtosis(scores)) if n > 3 else 0.0
+    skewness = float(stats.skew(scores)) if n > 2 else None
+    kurtosis = float(stats.kurtosis(scores)) if n > 3 else None
 
     # Histogram
     histogram = None

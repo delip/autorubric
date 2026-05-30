@@ -32,7 +32,12 @@ from autorubric.dataset import DataItem
 from autorubric.eval import ItemResult
 from autorubric.graders import CriterionGrader, JudgeSpec
 from autorubric.llm import GenerateResult, LLMConfig
-from autorubric.types import CriterionJudgment, MultiChoiceJudgment
+from autorubric.types import (
+    CriterionJudgment,
+    JudgeVote,
+    MultiChoiceJudgeVote,
+    MultiChoiceJudgment,
+)
 
 
 @pytest.fixture
@@ -75,46 +80,52 @@ def _client_raising(exc: BaseException) -> MagicMock:
 # =============================================================================
 
 
+def _json_decode_error() -> ValueError:
+    """A real ``json.JSONDecodeError`` (subclasses ``ValueError``)."""
+    try:
+        json.loads("{")
+    except ValueError as e:
+        return e
+    raise AssertionError("json.loads('{') should have raised")
+
+
+def _validation_error() -> ValidationError:
+    """A real pydantic ``ValidationError``."""
+
+    class _M(BaseModel):
+        x: int
+
+    try:
+        _M.model_validate({"x": "not-an-int"})
+    except ValidationError as e:
+        return e
+    raise AssertionError("expected a ValidationError")
+
+
 class TestClassifyGradingError:
     """Unit tests for the error taxonomy."""
 
-    def test_litellm_timeout_is_infrastructure(self):
-        exc = litellm.Timeout("timed out", model="m", llm_provider="p")
-        assert classify_grading_error(exc) == "infrastructure"
-
-    def test_litellm_rate_limit_is_infrastructure(self):
-        exc = litellm.RateLimitError("rate limited", model="m", llm_provider="p")
-        assert classify_grading_error(exc) == "infrastructure"
-
-    def test_json_decode_error_is_parse(self):
-        try:
-            json.loads("{")
-        except ValueError as e:  # json.JSONDecodeError subclasses ValueError
-            assert classify_grading_error(e) == "parse"
-        else:
-            pytest.fail("json.loads('{') should have raised")
-
-    def test_pydantic_validation_error_is_parse(self):
-        class _M(BaseModel):
-            x: int
-
-        try:
-            _M.model_validate({"x": "not-an-int"})
-        except ValidationError as e:
-            assert classify_grading_error(e) == "parse"
-        else:
-            pytest.fail("expected a ValidationError")
-
-    def test_value_error_is_parse(self):
-        assert classify_grading_error(ValueError("bad value")) == "parse"
-
-    def test_runtime_error_is_unknown(self):
-        assert classify_grading_error(RuntimeError("boom")) == "unknown"
-
-    def test_return_type_is_error_category_literal(self):
-        # Sanity: the documented literal values are exactly what we return.
-        result: ErrorCategory = classify_grading_error(RuntimeError("boom"))
-        assert result in ("infrastructure", "parse", "unknown")
+    @pytest.mark.parametrize(
+        "exc, expected",
+        [
+            (litellm.Timeout("timed out", model="m", llm_provider="p"), "infrastructure"),
+            (litellm.RateLimitError("rate limited", model="m", llm_provider="p"), "infrastructure"),
+            (_json_decode_error(), "parse"),  # json.JSONDecodeError subclasses ValueError
+            (_validation_error(), "parse"),
+            (ValueError("bad value"), "parse"),
+            (RuntimeError("boom"), "unknown"),
+        ],
+        ids=[
+            "litellm_timeout",
+            "litellm_rate_limit",
+            "json_decode_error",
+            "pydantic_validation_error",
+            "value_error",
+            "runtime_error",
+        ],
+    )
+    def test_taxonomy(self, exc: BaseException, expected: ErrorCategory):
+        assert classify_grading_error(exc) == expected
 
 
 # =============================================================================
@@ -375,6 +386,76 @@ async def test_multi_choice_infrastructure_failure_is_na(mock_llm_config):
 
 
 @pytest.mark.asyncio
+async def test_multi_choice_unknown_with_na_option_does_not_select_na(mock_llm_config):
+    """Unknown error must NOT auto-select an NA option (NA is reserved for infra/parse).
+
+    Positive weight -> worst case is the lowest-value scored (non-NA) option.
+    """
+    rubric = Rubric(
+        [
+            Criterion(
+                name="quality",
+                requirement="How good is it?",
+                weight=5.0,
+                scale_type="ordinal",
+                options=[
+                    CriterionOption(label="NA", value=0.0, na=True),
+                    CriterionOption(label="Bad", value=0.0),
+                    CriterionOption(label="Great", value=1.0),
+                ],
+            ),
+        ]
+    )
+    with patch(
+        "autorubric.graders.criterion_grader.LLMClient",
+        return_value=_client_raising(RuntimeError("boom")),
+    ):
+        grader = CriterionGrader(llm_config=mock_llm_config, shuffle_options=False)
+        report = await rubric.grade("submission", grader=grader)
+
+    assert report.report is not None
+    cr = report.report[0]
+    assert cr.final_multi_choice_verdict is not None
+    assert cr.final_multi_choice_verdict.na is False
+    assert cr.final_multi_choice_verdict.selected_index == 1
+    assert report.score == 0.0
+
+
+@pytest.mark.asyncio
+async def test_multi_choice_unknown_positive_weight_picks_lowest_value(mock_llm_config):
+    """Unknown error, positive weight -> worst case is the lowest-value option."""
+    rubric = Rubric(
+        [
+            Criterion(
+                name="quality",
+                requirement="How good is it?",
+                weight=5.0,
+                scale_type="ordinal",
+                options=[
+                    CriterionOption(label="Bad", value=0.0),
+                    CriterionOption(label="Ok", value=0.5),
+                    CriterionOption(label="Great", value=1.0),
+                ],
+            ),
+        ]
+    )
+    with patch(
+        "autorubric.graders.criterion_grader.LLMClient",
+        return_value=_client_raising(RuntimeError("boom")),
+    ):
+        grader = CriterionGrader(llm_config=mock_llm_config, shuffle_options=False)
+        report = await rubric.grade("submission", grader=grader)
+
+    assert report.report is not None
+    cr = report.report[0]
+    assert cr.final_multi_choice_verdict is not None
+    assert cr.final_multi_choice_verdict.selected_index == 0
+    assert cr.final_multi_choice_verdict.value == 0.0
+    assert cr.final_multi_choice_verdict.na is False
+    assert report.score == 0.0
+
+
+@pytest.mark.asyncio
 async def test_ensemble_multi_choice_vote_carries_error():
     """In a mixed multi-choice ensemble, the failed judge's vote records its error.
 
@@ -427,6 +508,130 @@ async def test_ensemble_multi_choice_vote_carries_error():
     assert by_id["judge_b"].error is None
 
 
+@pytest.mark.asyncio
+async def test_ensemble_multi_choice_all_judges_fail_error_flagged():
+    """Every judge fails (infra) on a multi-choice criterion -> ensemble flagged.
+
+    Behavior-lock: the ensemble-level error must combine BOTH judges' failures
+    (joined by `` | ``), the ensemble report must be flagged via ``is_error``, and every
+    per-judge ``MultiChoiceJudgeVote`` must itself be flagged via ``is_error``. This
+    pins the all-judges-fail multi-choice behavior so the single-source ``_aggregate_error``
+    refactor is provably behavior-preserving.
+    """
+    rubric = Rubric(
+        [
+            Criterion(
+                name="quality",
+                requirement="How good is it?",
+                weight=5.0,
+                scale_type="ordinal",
+                options=[
+                    CriterionOption(label="Bad", value=0.0),
+                    CriterionOption(label="Ok", value=0.5),
+                    CriterionOption(label="Great", value=1.0),
+                ],
+            ),
+        ]
+    )
+
+    client_a = _client_raising(litellm.Timeout("a down", model="m", llm_provider="p"))
+    client_b = _client_raising(litellm.RateLimitError("b down", model="m", llm_provider="p"))
+
+    def fake_client(config: LLMConfig) -> MagicMock:
+        return client_a if config.model == "judge-a-model" else client_b
+
+    with patch(
+        "autorubric.graders.criterion_grader.LLMClient",
+        side_effect=fake_client,
+    ):
+        grader = CriterionGrader(
+            judges=[
+                JudgeSpec(LLMConfig(model="judge-a-model"), "judge_a"),
+                JudgeSpec(LLMConfig(model="judge-b-model"), "judge_b"),
+            ],
+            aggregation="majority",
+            shuffle_options=False,
+        )
+        report = await rubric.grade("submission", grader=grader)
+
+    assert report.report is not None
+    cr = report.report[0]
+
+    # Ensemble flagged as error (every judge failed).
+    assert cr.is_error
+    assert cr.error is not None
+    # Combined message references BOTH judges' failures, joined by " | ".
+    assert " | " in cr.error
+    assert cr.error.count("infrastructure:") == 2
+    assert "a down" in cr.error
+    assert "b down" in cr.error
+
+    # Every per-judge vote is itself flagged (is_error parity).
+    assert cr.multi_choice_votes
+    assert len(cr.multi_choice_votes) == 2
+    assert all(v.is_error for v in cr.multi_choice_votes)
+    assert all(v.error is not None for v in cr.multi_choice_votes)
+
+
+@pytest.mark.asyncio
+async def test_ensemble_forced_choice_all_fail_clean_abstain():
+    """Forced-choice (auto_na_option=False), no NA option, every judge fails (infra).
+
+    With no NA option to abstain into, each per-judge error-abstain has selected_index=None
+    (na=True), and the aggregate must be a GENUINE abstain: na=True with selected_index/label
+    None — never na=True pointing at a real scored option. Excluded under SKIP -> 0.0.
+    """
+    rubric = Rubric(
+        [
+            Criterion(
+                name="quality",
+                requirement="How good is it?",
+                weight=5.0,
+                scale_type="ordinal",
+                options=[
+                    CriterionOption(label="Bad", value=0.0),
+                    CriterionOption(label="Ok", value=0.5),
+                    CriterionOption(label="Great", value=1.0),
+                ],
+            ),
+        ]
+    )
+
+    client_a = _client_raising(litellm.Timeout("a down", model="m", llm_provider="p"))
+    client_b = _client_raising(litellm.RateLimitError("b down", model="m", llm_provider="p"))
+
+    def fake_client(config: LLMConfig) -> MagicMock:
+        return client_a if config.model == "judge-a-model" else client_b
+
+    with patch(
+        "autorubric.graders.criterion_grader.LLMClient",
+        side_effect=fake_client,
+    ):
+        grader = CriterionGrader(
+            judges=[
+                JudgeSpec(LLMConfig(model="judge-a-model"), "judge_a"),
+                JudgeSpec(LLMConfig(model="judge-b-model"), "judge_b"),
+            ],
+            aggregation="majority",
+            shuffle_options=False,
+            auto_na_option=False,
+        )
+        report = await rubric.grade("submission", grader=grader)
+
+    assert report.report is not None
+    cr = report.report[0]
+    mcv = cr.final_multi_choice_verdict
+    assert mcv is not None
+    assert mcv.na is True
+    assert mcv.selected_index is None
+    assert mcv.selected_label is None
+    assert cr.is_error
+    # Every per-judge vote is a clean None-abstain.
+    assert cr.multi_choice_votes
+    assert all(v.na and v.selected_index is None for v in cr.multi_choice_votes)
+    assert report.score == 0.0
+
+
 # =============================================================================
 # Serialization round-trip
 # =============================================================================
@@ -472,3 +677,107 @@ async def test_error_survives_serialization_round_trip(mock_llm_config):
     assert len(restored_cr.votes) == 2
     assert all(v.error is not None for v in restored_cr.votes)
     assert all(v.error.startswith("infrastructure:") for v in restored_cr.votes)
+
+
+@pytest.mark.asyncio
+async def test_none_abstain_survives_serialization_round_trip():
+    """A genuine None-abstain round-trips: selected_index/label stay None on the
+    aggregated verdict and on each multi-choice vote."""
+    rubric = Rubric(
+        [
+            Criterion(
+                name="quality",
+                requirement="How good is it?",
+                weight=5.0,
+                scale_type="ordinal",
+                options=[
+                    CriterionOption(label="Bad", value=0.0),
+                    CriterionOption(label="Ok", value=0.5),
+                    CriterionOption(label="Great", value=1.0),
+                ],
+            ),
+        ]
+    )
+
+    client_a = _client_raising(litellm.Timeout("a down", model="m", llm_provider="p"))
+    client_b = _client_raising(litellm.RateLimitError("b down", model="m", llm_provider="p"))
+
+    def fake_client(config: LLMConfig) -> MagicMock:
+        return client_a if config.model == "judge-a-model" else client_b
+
+    with patch(
+        "autorubric.graders.criterion_grader.LLMClient",
+        side_effect=fake_client,
+    ):
+        grader = CriterionGrader(
+            judges=[
+                JudgeSpec(LLMConfig(model="judge-a-model"), "judge_a"),
+                JudgeSpec(LLMConfig(model="judge-b-model"), "judge_b"),
+            ],
+            aggregation="majority",
+            shuffle_options=False,
+            auto_na_option=False,
+        )
+        report = await rubric.grade("submission", grader=grader)
+
+    item = DataItem(submission="submission", description="test item")
+    item_result = ItemResult(item_idx=0, item=item, report=report, duration_seconds=0.1)
+    payload = json.loads(json.dumps(item_result.to_dict()))
+    restored = ItemResult.from_dict(payload, item)
+
+    assert restored.report.report is not None
+    restored_cr = restored.report.report[0]
+    assert restored_cr.final_multi_choice_verdict is not None
+    assert restored_cr.final_multi_choice_verdict.na is True
+    assert restored_cr.final_multi_choice_verdict.selected_index is None
+    assert restored_cr.final_multi_choice_verdict.selected_label is None
+    assert restored_cr.multi_choice_votes
+    assert all(v.selected_index is None for v in restored_cr.multi_choice_votes)
+
+
+# =============================================================================
+# JudgeVote / MultiChoiceJudgeVote is_error property parity
+# =============================================================================
+
+
+def _binary_vote(error: str | None) -> JudgeVote:
+    return JudgeVote(
+        judge_id="j",
+        verdict=CriterionVerdict.UNMET,
+        reason="r",
+        error=error,
+    )
+
+
+def _multi_choice_vote(error: str | None) -> MultiChoiceJudgeVote:
+    return MultiChoiceJudgeVote(
+        judge_id="j",
+        selected_index=0,
+        selected_label="L",
+        value=0.0,
+        reason="r",
+        error=error,
+    )
+
+
+class TestVoteIsErrorProperty:
+    """``is_error`` parity on the per-vote dataclasses.
+
+    ``CriterionReport`` / ``EnsembleCriterionReport`` advise using ``is_error`` instead
+    of inspecting ``reason``; the per-vote types must expose the same property so the
+    advised pattern is possible at vote level. ``is_error`` is the pure getter
+    ``error is not None``, identical across both vote types.
+    """
+
+    @pytest.mark.parametrize(
+        "vote_factory",
+        [_binary_vote, _multi_choice_vote],
+        ids=["binary_vote", "multi_choice_vote"],
+    )
+    @pytest.mark.parametrize(
+        "error, expected",
+        [("infrastructure: x", True), (None, False)],
+        ids=["error_set", "error_none"],
+    )
+    def test_is_error(self, vote_factory, error: str | None, expected: bool):
+        assert vote_factory(error).is_error is expected

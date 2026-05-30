@@ -211,8 +211,8 @@ async def main():
 
 result = asyncio.run(main())
 
-# Print results
-print(f"Overall Score: {result.score:.2f}\n")
+# Print results. result.score is `float | None` (None if the grade failed).
+print(f"Overall Score: {result.score:.2f}\n" if result.score is not None else "Overall Score: n/a\n")
 
 for criterion in result.report:
     name = criterion.name
@@ -270,20 +270,36 @@ grader = CriterionGrader(
 - `median`: Median value, snap to nearest
 - `weighted_mean`: Weighted by judge weights
 - `mode`: Most common selection
+- `min`: Lowest-value option any judge selected (conservative; ordinal analog of binary `unanimous`)
+- `max`: Highest-value option any judge selected (permissive; ordinal analog of binary `any`)
 
 **Nominal aggregation strategies:**
 
 - `mode`: Most common selection (majority)
 - `weighted_mode`: Weighted by judge weights
-- `unanimous`: All must agree (else fallback to mode)
+- `unanimous`: All must select the same option; on disagreement, abstain via the NA option (verdict `na=True`) — or fall back to `mode` and warn if the criterion has no NA option
 
 | Property | Ordinal | Nominal |
 |---|---|---|
 | Option ordering | Matters - options have inherent rank | Does not matter - categories are unordered |
 | Agreement metric | Weighted kappa (penalizes distant disagreements more) | Unweighted kappa (all disagreements equal) |
-| Ensemble aggregation | Mean, median, or mode of option values | Mode or weighted mode of selections |
+| Ensemble aggregation | Mean, median, mode, min, or max of option values | Mode or weighted mode of selections; `unanimous` abstains on disagreement |
 | When to use | Quality ratings, Likert scales, satisfaction levels | Sentiment type, content category, tone classification |
 | Example | "Very Poor / Poor / Average / Good / Excellent" | "Positive / Neutral / Negative / Mixed" |
+
+#### Consensus posture across criterion types
+
+The three aggregation knobs (`aggregation` for binary, `ordinal_aggregation`,
+`nominal_aggregation`) are **independent** — setting binary `aggregation` does not change
+how multi-choice criteria aggregate. Conceptually they share a *central / conservative /
+permissive* axis (binary `unanimous` ≡ taking the **min** over the {0,1} option values, and
+binary `any` ≡ the **max**):
+
+| Concept      | Binary (`aggregation`)        | Ordinal (`ordinal_aggregation`)           | Nominal (`nominal_aggregation`)              |
+|--------------|-------------------------------|-------------------------------------------|----------------------------------------------|
+| Central      | `majority`, `weighted`        | `mean`, `median`, `weighted_mean`, `mode` | `mode`, `weighted_mode`                      |
+| Conservative | `unanimous` (≡ min over {0,1})| `min` (lowest selected option)            | `unanimous` (abstain via NA on disagreement) |
+| Permissive   | `any` (≡ max over {0,1})      | `max` (highest selected option)           | — (unordered ⇒ no permissive analog)         |
 
 ## Key Takeaways
 
@@ -485,7 +501,8 @@ async def main():
 
         print(f"\n{'─' * 70}")
         print(f"Review {i}: {review['description']}")
-        print(f"Score: {result.score:.2f}")
+        # result.score is `float | None` (None if the grade failed).
+        print(f"Score: {result.score:.2f}" if result.score is not None else "Score: n/a")
         print(f"{'─' * 70}")
 
         for cr in result.report:

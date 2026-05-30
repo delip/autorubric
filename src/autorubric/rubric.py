@@ -10,11 +10,15 @@ import yaml
 from pydantic import ValidationError
 
 from autorubric.graders import Grader
+from autorubric.scoring import score_reports
 from autorubric.types import (
+    CannotAssessConfig,
     CannotAssessStrategy,
     Criterion,
+    CriterionReport,
     CriterionVerdict,
     EvaluationReport,
+    MultiChoiceVerdict,
     ToGradeInput,
 )
 
@@ -233,29 +237,6 @@ class Rubric:
                 f"got {type(source).__name__}"
             )
 
-    @staticmethod
-    def _apply_cannot_assess_strategy(
-        strategy: CannotAssessStrategy,
-        weight: float,
-        partial_credit: float,
-    ) -> tuple[float, float, bool]:
-        """Apply CANNOT_ASSESS/NA strategy for a single criterion.
-
-        Returns:
-            (score_contribution, skip_positive_weight_adjustment, should_skip_criterion)
-        """
-        if strategy == CannotAssessStrategy.SKIP:
-            return 0.0, max(0.0, weight), True
-        elif strategy == CannotAssessStrategy.FAIL:
-            # Worst case: 0 for positive weight, MET (subtract) for negative
-            score = weight if weight < 0 else 0.0
-            return score, 0.0, False
-        elif strategy == CannotAssessStrategy.PARTIAL:
-            score = partial_credit * weight if weight > 0 else 0.0
-            return score, 0.0, False
-        else:  # ZERO
-            return 0.0, 0.0, False
-
     def compute_score(
         self,
         verdicts: list[CriterionVerdict | str],
@@ -268,6 +249,11 @@ class Rubric:
         Single source of truth for scoring from verdict lists (e.g. ground truth
         labels). Handles binary (MET/UNMET/CANNOT_ASSESS) and multi-choice
         (option label strings) criteria.
+
+        Parses and validates each verdict into a ``CriterionReport`` and delegates
+        to the shared ``score_reports`` core, so this path agrees exactly with the
+        live grader and ``RubricDataset.compute_weighted_score`` across every
+        ``CannotAssessStrategy`` x {binary, multi-choice} x {+/- weight}.
 
         Args:
             verdicts: One value per criterion. Binary criteria accept
@@ -284,14 +270,8 @@ class Rubric:
         if len(verdicts) != len(self.rubric):
             raise ValueError(f"Expected {len(self.rubric)} verdicts, got {len(verdicts)}")
 
-        weighted_sum = 0.0
-        total_positive_weight = 0.0
-        total_negative_weight = 0.0
-        skip_positive_weight = 0.0
-
+        reports: list[CriterionReport] = []
         for criterion, verdict in zip(self.rubric, verdicts):
-            weight = criterion.weight
-
             if criterion.is_multi_choice:
                 if not isinstance(verdict, str):
                     raise ValueError(
@@ -300,22 +280,24 @@ class Rubric:
                     )
                 idx = criterion.find_option_by_label(verdict)
                 opt = criterion.options[idx]  # type: ignore[index]
-                if opt.na:
-                    score, skip_adj, should_skip = self._apply_cannot_assess_strategy(
-                        cannot_assess_strategy, weight, partial_credit
+                reports.append(
+                    CriterionReport(
+                        requirement=criterion.requirement,
+                        name=criterion.name,
+                        weight=criterion.weight,
+                        options=criterion.options,
+                        scale_type=criterion.scale_type,
+                        aggregation=criterion.aggregation,
+                        multi_choice_verdict=MultiChoiceVerdict(
+                            selected_index=idx,
+                            selected_label=opt.label,
+                            value=opt.value,
+                            na=opt.na,
+                        ),
+                        reason="",
                     )
-                    weighted_sum += score
-                    skip_positive_weight += skip_adj
-                    if should_skip:
-                        continue
-                else:
-                    weighted_sum += opt.value * weight
-                if weight > 0:
-                    total_positive_weight += weight
-                else:
-                    total_negative_weight += abs(weight)
+                )
             else:
-                # Binary criterion
                 if isinstance(verdict, str):
                     try:
                         verdict = CriterionVerdict(verdict)
@@ -324,34 +306,18 @@ class Rubric:
                             f"Invalid binary verdict '{verdict}'. "
                             f"Must be 'MET', 'UNMET', or 'CANNOT_ASSESS'."
                         ) from None
-
-                if verdict == CriterionVerdict.CANNOT_ASSESS:
-                    score, skip_adj, should_skip = self._apply_cannot_assess_strategy(
-                        cannot_assess_strategy, weight, partial_credit
+                reports.append(
+                    CriterionReport(
+                        requirement=criterion.requirement,
+                        name=criterion.name,
+                        weight=criterion.weight,
+                        verdict=verdict,
+                        reason="",
                     )
-                    weighted_sum += score
-                    skip_positive_weight += skip_adj
-                    if should_skip:
-                        continue
-                elif verdict == CriterionVerdict.MET:
-                    weighted_sum += weight
+                )
 
-                if weight > 0:
-                    total_positive_weight += weight
-                else:
-                    total_negative_weight += abs(weight)
-
-        if not normalize:
-            return weighted_sum
-
-        # Adjust denominator for SKIP strategy
-        effective_positive = total_positive_weight - skip_positive_weight
-        if effective_positive > 0:
-            return max(0.0, min(1.0, weighted_sum / effective_positive))
-        elif total_negative_weight > 0:
-            return max(0.0, min(1.0, 1.0 + weighted_sum / total_negative_weight))
-        else:
-            return 0.0
+        config = CannotAssessConfig(strategy=cannot_assess_strategy, partial_credit=partial_credit)
+        return score_reports(reports, config, normalize)
 
     @classmethod
     def from_dict(cls, data: list[dict[str, Any]] | dict[str, Any]) -> Rubric:

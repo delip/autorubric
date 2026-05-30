@@ -152,13 +152,21 @@ async def compare_graders():
     baseline_metrics = baseline_result.compute_metrics(test_data)
     calibrated_metrics = calibrated_result.compute_metrics(test_data)
 
+    # criterion_accuracy / mean_kappa are `float | None` (None when undefined, e.g. a
+    # multi-choice-only rubric has no binary MET class); guard the format spec.
+    def pct(x):
+        return f"{x:.1%}" if x is not None else "n/a"
+
+    def num(x):
+        return f"{x:.3f}" if x is not None else "n/a"
+
     print("\n=== BASELINE (no few-shot) ===")
-    print(f"Criterion Accuracy: {baseline_metrics.criterion_accuracy:.1%}")
-    print(f"Cohen's Kappa: {baseline_metrics.mean_kappa:.3f}")
+    print(f"Criterion Accuracy: {pct(baseline_metrics.criterion_accuracy)}")
+    print(f"Cohen's Kappa: {num(baseline_metrics.mean_kappa)}")
 
     print("\n=== CALIBRATED (3-shot) ===")
-    print(f"Criterion Accuracy: {calibrated_metrics.criterion_accuracy:.1%}")
-    print(f"Cohen's Kappa: {calibrated_metrics.mean_kappa:.3f}")
+    print(f"Criterion Accuracy: {pct(calibrated_metrics.criterion_accuracy)}")
+    print(f"Cohen's Kappa: {num(calibrated_metrics.mean_kappa)}")
 
 asyncio.run(compare_graders())
 ```
@@ -199,8 +207,11 @@ for n in [1, 2, 3, 5]:
     result = await evaluate(test_data, grader, show_progress=False)
     metrics = result.compute_metrics(test_data)
 
-    print(f"{n}-shot: Accuracy={metrics.criterion_accuracy:.1%}, "
-          f"Kappa={metrics.mean_kappa:.3f}, "
+    # criterion_accuracy / mean_kappa are `float | None`; render None as "n/a".
+    acc = f"{metrics.criterion_accuracy:.1%}" if metrics.criterion_accuracy is not None else "n/a"
+    kappa = f"{metrics.mean_kappa:.3f}" if metrics.mean_kappa is not None else "n/a"
+    print(f"{n}-shot: Accuracy={acc}, "
+          f"Kappa={kappa}, "
           f"Cost=${result.total_completion_cost:.4f}")
 ```
 
@@ -472,8 +483,15 @@ async def main():
     )
     baseline_metrics = baseline_result.compute_metrics(test_data)
 
-    print(f"\nCriterion Accuracy: {baseline_metrics.criterion_accuracy:.1%}")
-    print(f"Cohen's Kappa: {baseline_metrics.mean_kappa:.3f}")
+    # criterion_accuracy / mean_kappa are `float | None`; guard before formatting.
+    def pct(x):
+        return f"{x:.1%}" if x is not None else "n/a"
+
+    def num(x):
+        return f"{x:.3f}" if x is not None else "n/a"
+
+    print(f"\nCriterion Accuracy: {pct(baseline_metrics.criterion_accuracy)}")
+    print(f"Cohen's Kappa: {num(baseline_metrics.mean_kappa)}")
     print(f"Cost: ${baseline_result.total_completion_cost:.4f}")
 
     print("\n" + "=" * 60)
@@ -487,8 +505,8 @@ async def main():
     )
     calibrated_metrics = calibrated_result.compute_metrics(test_data)
 
-    print(f"\nCriterion Accuracy: {calibrated_metrics.criterion_accuracy:.1%}")
-    print(f"Cohen's Kappa: {calibrated_metrics.mean_kappa:.3f}")
+    print(f"\nCriterion Accuracy: {pct(calibrated_metrics.criterion_accuracy)}")
+    print(f"Cohen's Kappa: {num(calibrated_metrics.mean_kappa)}")
     print(f"Cost: ${calibrated_result.total_completion_cost:.4f}")
 
     # Compare costs
@@ -496,10 +514,15 @@ async def main():
     print("SUMMARY")
     print("=" * 60)
 
-    improvement = calibrated_metrics.criterion_accuracy - baseline_metrics.criterion_accuracy
+    # criterion_accuracy is `float | None`; only diff when both sides are defined.
+    cal_acc = calibrated_metrics.criterion_accuracy
+    base_acc = baseline_metrics.criterion_accuracy
+    if cal_acc is not None and base_acc is not None:
+        improvement = cal_acc - base_acc
+        print(f"Accuracy improvement: +{improvement:.1%}")
+    else:
+        print("Accuracy improvement: n/a (accuracy undefined for one or both runs)")
     cost_increase = (calibrated_result.total_completion_cost or 0) - (baseline_result.total_completion_cost or 0)
-
-    print(f"Accuracy improvement: +{improvement:.1%}")
     print(f"Cost increase: ${cost_increase:.4f}")
 
 

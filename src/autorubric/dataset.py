@@ -271,54 +271,11 @@ class RubricDataset:
         effective_rubric = rubric if rubric is not None else self.rubric
         if effective_rubric is None:
             raise ValueError("Cannot compute score: no rubric provided and no global rubric set")
-
-        score = 0.0
-        total_positive = 0.0
-
-        for i, verdict in enumerate(verdicts):
-            criterion = effective_rubric.rubric[i]
-            weight = criterion.weight
-
-            if criterion.is_multi_choice:
-                # Multi-choice: resolve label to value
-                if isinstance(verdict, str):
-                    idx = criterion.find_option_by_label(verdict)
-                    opt = criterion.options[idx]  # type: ignore
-                    if opt.na:
-                        # NA options don't contribute
-                        continue
-                    score += opt.value * weight
-                    if weight > 0:
-                        total_positive += weight
-                else:
-                    raise ValueError(
-                        f"Criterion {i} is multi-choice but got CriterionVerdict; "
-                        f"expected option label string"
-                    )
-            else:
-                # Binary: MET=1.0, UNMET=0.0, CANNOT_ASSESS skipped
-                if isinstance(verdict, str):
-                    # Try to parse as CriterionVerdict
-                    try:
-                        verdict = CriterionVerdict(verdict)
-                    except ValueError:
-                        raise ValueError(
-                            f"Criterion {i} is binary but got invalid verdict '{verdict}'. "
-                            f"Must be 'MET', 'UNMET', or 'CANNOT_ASSESS'."
-                        ) from None
-
-                if verdict == CriterionVerdict.CANNOT_ASSESS:
-                    continue  # Skip
-                if verdict == CriterionVerdict.MET:
-                    score += weight
-                if weight > 0:
-                    total_positive += weight
-
-        if normalize:
-            if total_positive > 0:
-                return max(0.0, min(1.0, score / total_positive))
-            return 0.0
-        return score
+        # Delegate to the rubric's unified scorer. The default
+        # cannot_assess_strategy=SKIP matches this method's historical behavior
+        # (CANNOT_ASSESS / NA excluded from numerator and denominator), and routes
+        # through the shared score_reports core so all scoring paths agree.
+        return effective_rubric.compute_score(verdicts, normalize=normalize)
 
     def add_item(
         self,

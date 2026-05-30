@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from autorubric.types import Criterion
+from autorubric.types import Criterion, CriterionOption
 
 if TYPE_CHECKING:
     from autorubric.types import FewShotExample
@@ -289,27 +289,35 @@ evidence.
 - When borderline between two adjacent options, select the one whose description more \
 precisely matches the specific evidence in the submission.
 
-NA / NOT APPLICABLE OPTIONS:
-Some options may be marked as "N/A" or "Not Applicable".
-
-When to select NA:
+NA / "CANNOT ASSESS" OPTION:
+One option is marked "(cannot assess / not applicable)" — this is your abstain channel, \
+analogous to a "cannot assess" verdict. Select it ONLY when:
 - The submission references missing attachments or external content you cannot access
 - The question genuinely cannot be answered for this particular submission
 - The submission is too garbled or corrupted to evaluate against the question
 
-When NOT to select NA:
+Do NOT select the NA option when:
 - You can make a reasonable inference from context (commit to the best match)
 - The submission simply doesn't match any option well (select the closest match instead)
 - You're uncertain but have some evidence (select the best match, don't retreat to NA)
 
 SPECIAL CASES:
 
-Empty or refusal submissions: Select the lowest-quality option on the scale — not NA. The \
-submission failed to respond, which is a meaningful evaluation outcome.
+Empty or refusal submissions: An empty or refusal submission is a meaningful evaluation \
+outcome, not an automatic abstain. Decide by whether any option actually describes it:
+- If an option describes absence, failure, or the lowest quality level (common on ordinal / \
+quality scales), select that option so the submission is scored on its merits — do not abstain.
+- If no option meaningfully describes an empty submission (common on nominal / categorical \
+scales, where each option names a category the content would have to exhibit), select the NA / \
+"cannot assess" option. If no NA option is offered, select the closest option.
+Unlike a weak match on a non-empty submission, here there is simply no content to evaluate.
 
 Contradictory submissions: If the submission states both X and not-X, evaluate based on the \
-predominant or final position. If genuinely ambiguous, select the option reflecting the weaker \
-interpretation (conservative default).
+predominant or final position. If genuinely ambiguous with no predominant position: on an \
+ordered / quality scale, select the option reflecting the weaker (lower-quality) reading \
+(conservative default); on unordered / categorical options, where no reading is "weaker" and \
+the question genuinely cannot be answered, select the NA / "cannot assess" option (or, if no NA \
+option is offered, the option the text best supports).
 
 Borderline between two options: Cite the specific evidence that distinguishes the two options \
 and explain why it tips toward your selection.
@@ -358,12 +366,47 @@ Options: 1. Very clear  2. Mostly clear  3. Somewhat unclear  4. Very unclear
 Submission: ""
 {"selected_option": 4, "explanation": "The submission is empty — no explanation was provided, which represents the lowest level of clarity."}
 
+Question: "Which narrative point of view does the passage use?"
+Options: 1. First person  2. Second person  3. Third person  4. N/A
+Submission: ""
+{"selected_option": 4, "explanation": "The submission is empty — there is no passage to analyze, and point of view is a categorical question with no lowest-quality level, so no applicable category exists. NA is correct."}
+
+Question: "Which single genre best describes the piece?"
+Options: 1. Mystery  2. Romance  3. Science fiction  4. N/A
+Submission: "The story is equal parts a detective investigation and a developing love affair, weaving the two plots together with neither taking precedence."
+{"selected_option": 4, "explanation": "The piece commits equally to mystery and romance with no predominant genre; 'single genre' is an unordered categorical question with no weaker reading, so no single category applies and NA is correct."}
+
 Question: "Which programming paradigm does the code primarily follow?"
 Options: 1. Object-oriented  2. Functional  3. Procedural  4. Declarative
 Submission: "The code defines a series of pure functions that transform data through map, filter, and reduce operations, with no mutable state or class definitions."
 {"selected_option": 2, "explanation": "Pure functions, map/filter/reduce operations, and no mutable state are defining characteristics of functional programming."}
 
 Return only raw JSON starting with {, no back-ticks, no 'json' prefix."""
+
+
+def _label_signals_na(label: str) -> bool:
+    """Whether an option label already reads as a 'not applicable' marker.
+
+    Used to avoid double-marking author labels like ``"N/A - No claims made"`` or the
+    canonical ``"Cannot assess / not applicable"`` injected option.
+    """
+    low = label.lower()
+    return any(tok in low for tok in ("n/a", "not applicable", "cannot assess"))
+
+
+def _render_options(options: list[CriterionOption]) -> str:
+    """Render a numbered (1-indexed) option list, marking NA / abstain options.
+
+    NA options are tagged ``(cannot assess / not applicable)`` so the judge can
+    recognize the abstain channel — unless the label already signals NA.
+    """
+    lines = []
+    for i, opt in enumerate(options, 1):
+        if opt.na and not _label_signals_na(opt.label):
+            lines.append(f"{i}. {opt.label} (cannot assess / not applicable)")
+        else:
+            lines.append(f"{i}. {opt.label}")
+    return "\n".join(lines)
 
 
 def build_multi_choice_user_prompt(
@@ -397,10 +440,7 @@ def build_multi_choice_user_prompt(
     )
 
     # Format options as numbered list (1-indexed for human readability)
-    options_lines = []
-    for i, opt in enumerate(criterion.options, 1):
-        options_lines.append(f"{i}. {opt.label}")
-    options_text = "\n".join(options_lines)
+    options_text = _render_options(criterion.options)
 
     return f"""<question>
 {criterion.requirement}
@@ -450,10 +490,7 @@ def build_multi_choice_few_shot_user_prompt(
     )
 
     # Format options as numbered list
-    options_lines = []
-    for i, opt in enumerate(criterion.options, 1):
-        options_lines.append(f"{i}. {opt.label}")
-    options_text = "\n".join(options_lines)
+    options_text = _render_options(criterion.options)
 
     # Format examples
     examples_text = _format_multi_choice_examples(criterion, examples, include_reason)

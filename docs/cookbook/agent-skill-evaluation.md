@@ -235,8 +235,11 @@ for item_result in eval_result.item_results:
             break
 
 for cond, results in conditions.items():
-    mean_score = sum(r.report.score for r in results) / len(results)
-    print(f"{cond}: {mean_score:.2f}")
+    # report.score is `float | None` (None if an item's grade failed); average only
+    # the defined scores so a failed grade can't crash the mean.
+    valid = [r.report.score for r in results if r.report.score is not None]
+    mean_score = sum(valid) / len(valid) if valid else None
+    print(f"{cond}: {mean_score:.2f}" if mean_score is not None else f"{cond}: n/a")
 ```
 
 Expected output:
@@ -252,12 +255,17 @@ Compute skill efficacy deltas to quantify impact:
 ```python
 scores = {}
 for cond, results in conditions.items():
-    scores[cond] = sum(r.report.score for r in results) / len(results)
+    # report.score is `float | None`; average only the defined scores.
+    valid = [r.report.score for r in results if r.report.score is not None]
+    scores[cond] = sum(valid) / len(valid) if valid else None
+
+def delta(a, b):
+    return f"+{a - b:.2f}" if a is not None and b is not None else "n/a"
 
 print(f"\nSkill Efficacy Deltas:")
-print(f"  Poor skill vs none:  +{scores['poor-skill'] - scores['without-skill']:.2f}")
-print(f"  Good skill vs none:  +{scores['good-skill'] - scores['without-skill']:.2f}")
-print(f"  Good skill vs poor:  +{scores['good-skill'] - scores['poor-skill']:.2f}")
+print(f"  Poor skill vs none:  {delta(scores['poor-skill'], scores['without-skill'])}")
+print(f"  Good skill vs none:  {delta(scores['good-skill'], scores['without-skill'])}")
+print(f"  Good skill vs poor:  {delta(scores['good-skill'], scores['poor-skill'])}")
 ```
 
 ```
@@ -507,14 +515,20 @@ async def main():
 
     scores = {}
     for cond, results in conditions.items():
-        mean_score = sum(r.report.score for r in results) / len(results)
+        # report.score is `float | None` (None if an item's grade failed); average only
+        # the defined scores so a failed grade can't crash the mean.
+        valid = [r.report.score for r in results if r.report.score is not None]
+        mean_score = sum(valid) / len(valid) if valid else None
         scores[cond] = mean_score
-        print(f"  {cond}: {mean_score:.2f}")
+        print(f"  {cond}: {mean_score:.2f}" if mean_score is not None else f"  {cond}: n/a")
+
+    def delta(a, b):
+        return f"+{a - b:.2f}" if a is not None and b is not None else "n/a"
 
     print(f"\nDeltas:")
-    print(f"  Poor skill vs none:  +{scores['poor-skill'] - scores['without-skill']:.2f}")
-    print(f"  Good skill vs none:  +{scores['good-skill'] - scores['without-skill']:.2f}")
-    print(f"  Good skill vs poor:  +{scores['good-skill'] - scores['poor-skill']:.2f}")
+    print(f"  Poor skill vs none:  {delta(scores['poor-skill'], scores['without-skill'])}")
+    print(f"  Good skill vs none:  {delta(scores['good-skill'], scores['without-skill'])}")
+    print(f"  Good skill vs poor:  {delta(scores['good-skill'], scores['poor-skill'])}")
 
     # Dimension analysis
     for dim_name, criteria_names in DIMENSIONS.items():

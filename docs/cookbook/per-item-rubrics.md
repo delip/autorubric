@@ -236,7 +236,9 @@ result = await evaluate(dataset, grader, show_progress=True)
 # Results reflect per-item criteria
 for item_result in result.item_results:
     print(f"\n{item_result.item.description}")
-    print(f"  Score: {item_result.report.score:.2f}")
+    # report.score is `float | None` (None if that item's grade failed).
+    score = item_result.report.score
+    print(f"  Score: {score:.2f}" if score is not None else "  Score: n/a")
     print(f"  Criteria evaluated: {len(item_result.report.report)}")
 ```
 
@@ -543,7 +545,9 @@ async def main():
 
     for item_result in result.item_results:
         print(f"\n{item_result.item.description}")
-        print(f"  Score: {item_result.report.score:.2f}")
+        # report.score is `float | None` (None if that item's grade failed).
+        score = item_result.report.score
+        print(f"  Score: {score:.2f}" if score is not None else "  Score: n/a")
         print(f"  Criteria evaluated: {len(item_result.report.report or [])}")
 
         if item_result.report.report:

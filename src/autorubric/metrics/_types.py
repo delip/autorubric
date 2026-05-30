@@ -12,6 +12,28 @@ from pydantic import BaseModel, ConfigDict
 if TYPE_CHECKING:
     import pandas as pd
 
+
+def _fmt_opt(value: float | None, spec: str, width: int = 0) -> str:
+    """Format an optional float, rendering ``None`` as a right-aligned ``'n/a'``.
+
+    A single None-safe formatter shared by every place a metric may be ``None``
+    (genuinely undefined / not applicable) so the rendering of "n/a" never drifts.
+
+    Args:
+        value: The value to format, or ``None``.
+        spec: A :func:`format` spec applied when ``value`` is not None (e.g. ``".3f"``).
+        width: When non-zero, the ``'n/a'`` placeholder is right-aligned to this width
+            (matching the column width the formatted value would occupy).
+
+    Returns:
+        ``format(value, spec)`` when ``value`` is not None; otherwise ``'n/a'`` (right
+        aligned to ``width`` when ``width`` is given).
+    """
+    if value is not None:
+        return format(value, spec)
+    return f"{'n/a':>{width}}" if width else "n/a"
+
+
 # Type alias for CANNOT_ASSESS handling in metrics
 CannotAssessMode = Literal["exclude", "as_unmet", "as_category"]
 """How to handle CANNOT_ASSESS verdicts in metric calculations.
@@ -19,6 +41,23 @@ CannotAssessMode = Literal["exclude", "as_unmet", "as_category"]
 - "exclude": Skip items with CANNOT_ASSESS verdicts from metric calculation (default)
 - "as_unmet": Treat CANNOT_ASSESS as UNMET for agreement calculation
 - "as_category": Treat CANNOT_ASSESS as a distinct third category (3-class classification)
+"""
+
+# Type alias for NA-option handling in multi-choice metrics (mirrors CannotAssessMode).
+NAMode = Literal["exclude", "as_unmet", "as_category"]
+"""How to handle NA options in multi-choice metric calculations.
+
+Mirrors :data:`CannotAssessMode` — NA on multi-choice is the structural analog
+of CANNOT_ASSESS on binary.
+
+- "exclude": Skip pairs where either is NA (default)
+- "as_unmet": Remap NA → the score-minimizing non-NA option, weight-sign aware
+  (mirrors binary ``as_unmet`` which collapses CANNOT_ASSESS → UNMET, the
+  worst-scoring valid verdict). Shares ``Criterion.worst_scored_option()`` with
+  the grader's ``unknown``-error worst-case path.
+- "as_category": Keep NA as a distinct categorical column. Refused for ordinal
+  criteria that define an NA option (NA has no ordinal position; quadratic
+  weighted kappa would assign NA a meaningless geometric distance).
 """
 
 
@@ -96,17 +135,21 @@ class CorrelationResult(BaseModel):
     """Result from correlation calculation (Spearman, Kendall, Pearson).
 
     Attributes:
-        coefficient: The correlation coefficient (-1 to 1).
-        p_value: P-value for testing the null hypothesis of no correlation.
+        coefficient: The correlation coefficient (-1 to 1). ``None`` when the correlation
+            is genuinely undefined — a constant input array (zero variance → NaN) or fewer
+            than 3 samples. A ``0.0`` ("no correlation") would be a lie in those cases.
+        p_value: P-value for testing the null hypothesis of no correlation. ``None`` when
+            the coefficient is undefined (see ``coefficient``).
         ci: Optional confidence interval for the coefficient.
-        interpretation: Human-readable interpretation.
+        interpretation: Human-readable interpretation ("undefined" for a constant/NaN
+            array, "insufficient data" for <3 samples).
         n_samples: Number of samples used in calculation.
         method: Correlation method used (e.g., "spearman", "kendall", "pearson").
     """
 
     model_config = ConfigDict(frozen=True)
 
-    coefficient: float
+    coefficient: float | None
     p_value: float | None = None
     ci: ConfidenceInterval | None = None
     interpretation: str
@@ -138,21 +181,27 @@ class BiasResult(BaseModel):
     Systematic bias occurs when one rater consistently scores higher or lower
     than another, independent of the item being rated.
 
+    A statistic is ``None`` when it is genuinely undefined for the sample size, never a
+    fake ``0.0``. ``mean_bias`` is the single pred−true difference at n=1 (computable) and
+    is ``None`` only at n=0. ``std_bias`` is ``None`` when undefined (n<2). ``effect_size``
+    (Cohen's d) is ``None`` when ``std_bias`` is 0 or undefined.
+
     Attributes:
-        mean_bias: Mean difference (predictions - actuals).
-        std_bias: Standard deviation of differences.
+        mean_bias: Mean difference (predictions - actuals). ``None`` only at n=0.
+        std_bias: Standard deviation of differences. ``None`` when undefined (n < 2).
         is_significant: Whether the bias is statistically significant (p < 0.05).
         p_value: P-value from t-test.
         direction: Direction of bias ("positive" if predictions > actuals).
-        effect_size: Cohen's d effect size.
+        effect_size: Cohen's d effect size. ``None`` when undefined (std_bias 0 or
+            undefined).
         ci: Confidence interval for mean bias.
         n_samples: Number of samples.
     """
 
     model_config = ConfigDict(frozen=True)
 
-    mean_bias: float
-    std_bias: float
+    mean_bias: float | None
+    std_bias: float | None
     is_significant: bool
     p_value: float | None = None
     direction: Literal["positive", "negative", "none"]
@@ -216,12 +265,15 @@ class CriterionMetrics(BaseModel):
         index: Index of the criterion in the rubric.
         criterion_type: Type of criterion ("binary" for this class).
         n_samples: Number of samples used for this criterion.
-        accuracy: Binary accuracy (proportion of exact matches).
-        precision: Precision for MET class.
-        recall: Recall for MET class.
-        f1: F1 score for MET class.
-        kappa: Cohen's kappa coefficient.
-        kappa_interpretation: Human-readable interpretation of kappa.
+        accuracy: Binary accuracy (proportion of exact matches). None when undefined / no
+            samples.
+        precision: Precision for MET class. None when undefined / no samples.
+        recall: Recall for MET class. None when undefined / no samples.
+        f1: F1 score for MET class. None when undefined / no samples.
+        kappa: Cohen's kappa coefficient. None when undefined (degenerate single-class) /
+            no samples.
+        kappa_interpretation: Human-readable interpretation of kappa ("undefined" when
+            kappa is None).
         krippendorff_alpha: Krippendorff's alpha — the general, recommended inter-judge
             agreement statistic. It natively handles unequal/missing raters (errored or
             excluded votes) and is level-aware (nominal for binary criteria). None unless
@@ -240,11 +292,11 @@ class CriterionMetrics(BaseModel):
     index: int
     criterion_type: Literal["binary"] = "binary"
     n_samples: int
-    accuracy: float
-    precision: float
-    recall: float
-    f1: float
-    kappa: float
+    accuracy: float | None
+    precision: float | None
+    recall: float | None
+    f1: float | None
+    kappa: float | None
     kappa_interpretation: str
     krippendorff_alpha: float | None = None
     fleiss_kappa: float | None = None
@@ -265,9 +317,9 @@ class OptionMetrics(BaseModel):
     Attributes:
         label: Label text of the option.
         index: Zero-based index of the option.
-        precision: Precision for this option class.
-        recall: Recall for this option class.
-        f1: F1 score for this option class.
+        precision: Precision for this option class. None when undefined / no samples.
+        recall: Recall for this option class. None when undefined / no samples.
+        f1: F1 score for this option class. None when undefined / no samples.
         support_true: Count of this option in ground truth.
         support_pred: Count of this option in predictions.
     """
@@ -276,9 +328,9 @@ class OptionMetrics(BaseModel):
 
     label: str
     index: int
-    precision: float
-    recall: float
-    f1: float
+    precision: float | None
+    recall: float | None
+    f1: float | None
     support_true: int
     support_pred: int
 
@@ -286,13 +338,23 @@ class OptionMetrics(BaseModel):
 class NAStats(BaseModel):
     """Statistics for NA (not applicable) handling in multi-choice criteria.
 
-    Tracks how NA options are handled in both ground truth and predictions,
-    similar to CANNOT_ASSESS handling for binary criteria.
+    Tracks how the prediction and ground truth agree on the dichotomized
+    {NA, not-NA} decision per item, similar to how CANNOT_ASSESS is handled for
+    binary criteria.
 
     Attributes:
         na_count_true: Number of NA selections in ground truth.
         na_count_pred: Number of NA selections in predictions.
-        na_agreement: Proportion where both agreed on NA (0-1).
+        na_kappa: Cohen's kappa on the {NA, not-NA} dichotomy (pred vs truth).
+            Range [-1, 1]; 1.0 is perfect agreement, 0 is chance-level, negative is
+            worse than chance. None when undefined (no paired NA observations,
+            single class, or NaN). The framework reports prediction-vs-ground-truth
+            categorical agreement as Cohen's kappa across the board (binary `kappa`,
+            ordinal `weighted_kappa`, nominal `kappa`); na_kappa is the dichotomized
+            kappa for the orthogonal abstain decision. Readers who want a raw
+            proportion can derive `A / (A + fp + fn)` from the counts below.
+        na_kappa_interpretation: Landis & Koch interpretation of `na_kappa` via
+            `KappaResult.interpret_kappa`. None when na_kappa is None.
         na_false_positive: Count where prediction was NA but ground truth was not.
         na_false_negative: Count where ground truth was NA but prediction was not.
     """
@@ -301,9 +363,61 @@ class NAStats(BaseModel):
 
     na_count_true: int
     na_count_pred: int
-    na_agreement: float
+    na_kappa: float | None = None
+    na_kappa_interpretation: str | None = None
     na_false_positive: int
     na_false_negative: int
+
+
+class CannotAssessStats(BaseModel):
+    """Statistics for CANNOT_ASSESS handling in binary criteria.
+
+    The binary parallel of :class:`NAStats`: tracks how the prediction and ground truth
+    agree on the dichotomized {CANNOT_ASSESS, not-CANNOT_ASSESS} decision per item.
+
+    Both CANNOT_ASSESS (binary) and NA (multi-choice) are *abstentions* that flow through
+    the same SKIP scoring path (``score_reports``), and both get a parallel dichotomized
+    Cohen's-kappa diagnostic block. They are nonetheless **distinct kinds of abstention**,
+    which is exactly why they are tracked by separate stats types rather than merged:
+
+    - Binary **CANNOT_ASSESS** is the judge being unable to determine MET-vs-UNMET — an
+      *epistemic* abstention on a yes/no question ("I cannot decide whether this
+      requirement is met").
+    - Multi-choice **NA** is "not applicable / cannot pick an applicable option" —
+      abstaining because no scored category fits, a statement about the *option space*
+      rather than a yes/no decision.
+
+    Keeping them separate (and prefixing these fields ``ca_``) makes the semantic
+    distinction explicit in the data model while preserving the structural analogy.
+
+    Attributes:
+        ca_count_true: Number of CANNOT_ASSESS verdicts in ground truth.
+        ca_count_pred: Number of CANNOT_ASSESS verdicts in predictions.
+        ca_kappa: Cohen's kappa on the {CANNOT_ASSESS, not-CANNOT_ASSESS} dichotomy
+            (pred vs truth). Range [-1, 1]; 1.0 is perfect agreement, 0 is chance-level,
+            negative is worse than chance. None when undefined (no paired CANNOT_ASSESS
+            observations, single class, or NaN). The framework reports
+            prediction-vs-ground-truth categorical agreement as Cohen's kappa across the
+            board (binary `kappa`, ordinal `weighted_kappa`, nominal `kappa`, and NA's
+            `na_kappa`); ca_kappa is the dichotomized kappa for the orthogonal binary
+            abstain decision. Readers who want a raw proportion can derive
+            `A / (A + ca_fp + ca_fn)` from the counts below.
+        ca_kappa_interpretation: Landis & Koch interpretation of `ca_kappa` via
+            `KappaResult.interpret_kappa`. None when ca_kappa is None.
+        ca_false_positive: Count where prediction was CANNOT_ASSESS but ground truth
+            was not.
+        ca_false_negative: Count where ground truth was CANNOT_ASSESS but prediction
+            was not.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    ca_count_true: int
+    ca_count_pred: int
+    ca_kappa: float | None = None
+    ca_kappa_interpretation: str | None = None
+    ca_false_positive: int
+    ca_false_negative: int
 
 
 class OrdinalCriterionMetrics(BaseModel):
@@ -318,10 +432,12 @@ class OrdinalCriterionMetrics(BaseModel):
         criterion_type: Type of criterion ("ordinal" for this class).
         n_samples: Number of samples used in computation.
         n_options: Number of options in this criterion.
-        exact_accuracy: Proportion of exact index matches.
-        adjacent_accuracy: Proportion within +/-1 position.
-        weighted_kappa: Quadratic-weighted Cohen's kappa (accounts for distance).
-        kappa_interpretation: Human-readable interpretation of kappa.
+        exact_accuracy: Proportion of exact index matches. None when undefined / no samples.
+        adjacent_accuracy: Proportion within +/-1 position. None when undefined / no samples.
+        weighted_kappa: Quadratic-weighted Cohen's kappa (accounts for distance). None when
+            undefined (degenerate single-class) / no samples.
+        kappa_interpretation: Human-readable interpretation of kappa ("undefined" when
+            weighted_kappa is None).
         krippendorff_alpha: Krippendorff's alpha — the general, recommended inter-judge
             agreement statistic. Computed with ``level_of_measurement="ordinal"`` so it
             is distance-aware (near-miss disagreements penalized less than far-miss), and
@@ -332,8 +448,8 @@ class OrdinalCriterionMetrics(BaseModel):
             criteria. None unless ensemble with >=2 judges and >=2 complete-case items.
         spearman: Spearman rank correlation result.
         kendall: Kendall tau correlation result.
-        rmse: RMSE on option values (0-1 scale).
-        mae: MAE on option values (0-1 scale).
+        rmse: RMSE on option values (0-1 scale). None when undefined / no samples.
+        mae: MAE on option values (0-1 scale). None when undefined / no samples.
         per_option: Per-option precision/recall/F1 breakdown.
         confusion_matrix: N×N confusion matrix (rows=true, cols=pred).
         option_labels: Labels for confusion matrix axes.
@@ -346,16 +462,16 @@ class OrdinalCriterionMetrics(BaseModel):
     criterion_type: Literal["ordinal"] = "ordinal"
     n_samples: int
     n_options: int
-    exact_accuracy: float
-    adjacent_accuracy: float
-    weighted_kappa: float
+    exact_accuracy: float | None
+    adjacent_accuracy: float | None
+    weighted_kappa: float | None
     kappa_interpretation: str
     krippendorff_alpha: float | None = None
     fleiss_kappa: float | None = None
     spearman: CorrelationResult
     kendall: CorrelationResult
-    rmse: float
-    mae: float
+    rmse: float | None
+    mae: float | None
     per_option: list[OptionMetrics]
     confusion_matrix: list[list[int]]
     option_labels: list[str]
@@ -373,9 +489,11 @@ class NominalCriterionMetrics(BaseModel):
         criterion_type: Type of criterion ("nominal" for this class).
         n_samples: Number of samples used in computation.
         n_options: Number of options in this criterion.
-        exact_accuracy: Proportion of exact index matches.
-        kappa: Unweighted Cohen's kappa (N×N).
-        kappa_interpretation: Human-readable interpretation of kappa.
+        exact_accuracy: Proportion of exact index matches. None when undefined / no samples.
+        kappa: Unweighted Cohen's kappa (N×N). None when undefined (degenerate
+            single-class) / no samples.
+        kappa_interpretation: Human-readable interpretation of kappa ("undefined" when
+            kappa is None).
         krippendorff_alpha: Krippendorff's alpha — the general, recommended inter-judge
             agreement statistic. Computed with ``level_of_measurement="nominal"`` and
             natively handles unequal/missing raters. None unless ensemble with >=2 judges
@@ -395,8 +513,8 @@ class NominalCriterionMetrics(BaseModel):
     criterion_type: Literal["nominal"] = "nominal"
     n_samples: int
     n_options: int
-    exact_accuracy: float
-    kappa: float
+    exact_accuracy: float | None
+    kappa: float | None
     kappa_interpretation: str
     krippendorff_alpha: float | None = None
     fleiss_kappa: float | None = None
@@ -472,36 +590,42 @@ class AgreementSummary(BaseModel):
 class DistributionResult(BaseModel):
     """Score distribution statistics.
 
+    A statistic is ``None`` when it is genuinely undefined for the sample size, never a
+    fake ``0.0``. At n=0 every stat is ``None``. A single point still has a defined
+    mean/min/max/median/q25/q75 (and iqr = q75 − q25 = 0.0, the true IQR of one point);
+    ``std``/``variance`` need ≥2 points, ``skewness`` ≥3, ``kurtosis`` ≥4 — each ``None``
+    below its threshold. ``n`` is always the real count.
+
     Attributes:
         n: Number of samples.
-        mean: Mean score.
-        std: Standard deviation.
-        variance: Variance.
-        min: Minimum score.
-        max: Maximum score.
-        median: Median score.
-        q25: 25th percentile.
-        q75: 75th percentile.
-        iqr: Interquartile range.
-        skewness: Skewness (measure of asymmetry).
-        kurtosis: Kurtosis (measure of tail heaviness).
+        mean: Mean score. ``None`` when undefined (n = 0).
+        std: Standard deviation. ``None`` when undefined (n < 2).
+        variance: Variance. ``None`` when undefined (n < 2).
+        min: Minimum score. ``None`` when undefined (n = 0).
+        max: Maximum score. ``None`` when undefined (n = 0).
+        median: Median score. ``None`` when undefined (n = 0).
+        q25: 25th percentile. ``None`` when undefined (n = 0).
+        q75: 75th percentile. ``None`` when undefined (n = 0).
+        iqr: Interquartile range. ``None`` when undefined (n = 0); 0.0 for a single point.
+        skewness: Skewness (measure of asymmetry). ``None`` when undefined (n < 3).
+        kurtosis: Kurtosis (measure of tail heaviness). ``None`` when undefined (n < 4).
         histogram: Tuple of (counts, bin_edges).
     """
 
     model_config = ConfigDict(frozen=True)
 
     n: int
-    mean: float
-    std: float
-    variance: float
-    min: float
-    max: float
-    median: float
-    q25: float
-    q75: float
-    iqr: float
-    skewness: float
-    kurtosis: float
+    mean: float | None
+    std: float | None
+    variance: float | None
+    min: float | None
+    max: float | None
+    median: float | None
+    q25: float | None
+    q75: float | None
+    iqr: float | None
+    skewness: float | None
+    kurtosis: float | None
     histogram: tuple[list[float], list[float]] | None = None
 
 
@@ -512,22 +636,27 @@ class EMDResult(BaseModel):
     into another. Unlike correlation, it captures both shift (systematic bias)
     and shape differences (variance, skew).
 
+    A statistic is ``None`` when it is genuinely undefined, never a fake ``0.0``. With an
+    empty distribution on either side (no data to transport) ``emd``/``mean_diff``/
+    ``std_diff``/``bias_magnitude`` are all ``None``; ``bias_direction`` stays ``"none"``
+    and ``interpretation`` ``"insufficient data"``.
+
     Attributes:
-        emd: Earth Mover's Distance (0 to ~1 if normalized).
-        mean_diff: Difference in means (dist2 - dist1).
-        std_diff: Difference in standard deviations.
+        emd: Earth Mover's Distance (0 to ~1 if normalized). ``None`` for empty input.
+        mean_diff: Difference in means (dist2 - dist1). ``None`` for empty input.
+        std_diff: Difference in standard deviations. ``None`` for empty input.
         bias_direction: Whether dist1 tends higher, lower, or same.
-        bias_magnitude: Absolute mean difference.
+        bias_magnitude: Absolute mean difference. ``None`` for empty input.
         interpretation: Human-readable interpretation.
     """
 
     model_config = ConfigDict(frozen=True)
 
-    emd: float
-    mean_diff: float
-    std_diff: float
+    emd: float | None
+    mean_diff: float | None
+    std_diff: float | None
     bias_direction: Literal["higher", "lower", "none"]
-    bias_magnitude: float
+    bias_magnitude: float | None
     interpretation: str
 
     @staticmethod
@@ -603,19 +732,27 @@ class MetricWithCI(BaseModel):
 class BootstrapResults(BaseModel):
     """Bootstrap confidence interval results.
 
+    The three CIs are MARGINAL — bootstrapped on two independent item-level resample axes (a
+    verdict-item axis for accuracy/kappa, an independent scored-item axis for RMSE), so they
+    reflect each statistic's own sampling distribution, not their joint covariance. Covers any
+    rubric type (binary / multi-choice / mixed).
+
     Attributes:
-        accuracy_ci: 95% CI for criterion-level accuracy.
-        kappa_ci: 95% CI for mean kappa.
-        rmse_ci: 95% CI for score RMSE.
+        accuracy_ci: 95% CI for ``criterion_accuracy``. None when undefined / no samples.
+        kappa_ci: 95% CI for ``mean_kappa`` (ordinal contributes quadratic-weighted kappa).
+            Each replicate's mean conditions on which criteria were non-degenerate in that
+            resample. None when undefined (kappa never defined across resamples) / no samples.
+        rmse_ci: 95% CI for ``score_rmse`` over the scored-item subset. None when no samples
+            (a single scored item yields a degenerate ``(v, v)`` interval, not None).
         n_bootstrap: Number of bootstrap samples used.
         confidence_level: Confidence level (default 0.95).
     """
 
     model_config = ConfigDict(frozen=True)
 
-    accuracy_ci: tuple[float, float]
-    kappa_ci: tuple[float, float]
-    rmse_ci: tuple[float, float]
+    accuracy_ci: tuple[float, float] | None
+    kappa_ci: tuple[float, float] | None
+    rmse_ci: tuple[float, float] | None
     n_bootstrap: int
     confidence_level: float = 0.95
 
@@ -623,13 +760,21 @@ class BootstrapResults(BaseModel):
 class JudgeMetrics(BaseModel):
     """Metrics for a single judge in an ensemble.
 
+    Mirrors the aggregate's type handling field-for-field: precision/recall/f1 are the
+    binary MET-vs-rest metric → ``None`` for a multi-choice-only rubric (no MET class),
+    and accuracy/mean_kappa generalize but are ``None`` when undefined.
+
     Attributes:
         judge_id: Identifier for this judge.
-        criterion_accuracy: Overall criterion-level accuracy.
-        criterion_precision: Overall precision for MET class.
-        criterion_recall: Overall recall for MET class.
-        criterion_f1: Overall F1 for MET class.
-        mean_kappa: Mean Cohen's kappa across criteria.
+        criterion_accuracy: Overall criterion-level accuracy (binary label and/or
+            multi-choice exact-match). ``None`` when undefined.
+        criterion_precision: Overall precision for the binary MET class. ``None`` when
+            not applicable (multi-choice-only — no MET class).
+        criterion_recall: Overall recall for the binary MET class. ``None`` when not
+            applicable (see ``criterion_precision``).
+        criterion_f1: Overall F1 for the binary MET class. ``None`` when not applicable
+            (see ``criterion_precision``).
+        mean_kappa: Mean Cohen's kappa across criteria. ``None`` when undefined.
         score_rmse: RMSE of cumulative scores.
         score_mae: MAE of cumulative scores.
         score_spearman: Spearman correlation result.
@@ -641,11 +786,11 @@ class JudgeMetrics(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     judge_id: str
-    criterion_accuracy: float
-    criterion_precision: float
-    criterion_recall: float
-    criterion_f1: float
-    mean_kappa: float
+    criterion_accuracy: float | None
+    criterion_precision: float | None
+    criterion_recall: float | None
+    criterion_f1: float | None
+    mean_kappa: float | None
     score_rmse: float
     score_mae: float
     score_spearman: CorrelationResult
@@ -666,12 +811,18 @@ class MetricsResult(BaseModel):
     - Optional per-judge metrics for ensemble evaluations
 
     Attributes:
-        criterion_accuracy: Overall accuracy across all criteria.
-        criterion_precision: Overall precision for MET class (binary criteria only).
-        criterion_recall: Overall recall for MET class (binary criteria only).
-        criterion_f1: Overall F1 for MET class (binary criteria only).
+        criterion_accuracy: Overall accuracy across all criteria (binary label accuracy
+            and/or multi-choice exact-match). ``None`` when undefined (no comparable
+            pairs at all).
+        criterion_precision: Overall precision for the binary MET class. ``None`` when
+            not applicable — multi-choice-only rubrics have no MET class (the per-option
+            precision/recall/f1 story lives in each criterion's ``per_option``).
+        criterion_recall: Overall recall for the binary MET class. ``None`` when not
+            applicable (see ``criterion_precision``).
+        criterion_f1: Overall F1 for the binary MET class. ``None`` when not applicable
+            (see ``criterion_precision``).
         mean_kappa: Mean kappa across criteria (weighted for ordinal, unweighted for
-            binary/nominal).
+            binary/nominal). ``None`` when undefined (no criterion contributed a kappa).
         per_criterion: Per-criterion metrics breakdown (polymorphic union type).
         score_rmse: RMSE of cumulative scores.
         score_mae: MAE of cumulative scores.
@@ -687,17 +838,22 @@ class MetricsResult(BaseModel):
         n_ordinal_criteria: Number of ordinal multi-choice criteria.
         n_nominal_criteria: Number of nominal multi-choice criteria.
         na_stats: Statistics for NA handling in multi-choice criteria.
+        cannot_assess_stats: Statistics for CANNOT_ASSESS handling in binary criteria —
+            the binary parallel to ``na_stats`` (a distinct kind of abstention; see
+            CannotAssessStats).
         warnings: Any warnings generated during computation.
     """
 
     model_config = ConfigDict(frozen=True)
 
-    # Aggregate criterion-level metrics
-    criterion_accuracy: float
-    criterion_precision: float
-    criterion_recall: float
-    criterion_f1: float
-    mean_kappa: float
+    # Aggregate criterion-level metrics. precision/recall/f1 are the binary MET-vs-rest
+    # metric → None for multi-choice-only rubrics (no MET class). accuracy/mean_kappa
+    # generalize across types but are None when genuinely undefined (no comparable pairs).
+    criterion_accuracy: float | None
+    criterion_precision: float | None
+    criterion_recall: float | None
+    criterion_f1: float | None
+    mean_kappa: float | None
 
     # Per-criterion breakdown (supports union type)
     per_criterion: list[CriterionMetricsUnion]
@@ -723,6 +879,7 @@ class MetricsResult(BaseModel):
     n_ordinal_criteria: int = 0
     n_nominal_criteria: int = 0
     na_stats: NAStats | None = None
+    cannot_assess_stats: CannotAssessStats | None = None
     warnings: list[str] = []
 
     def summary(self) -> str:
@@ -752,33 +909,36 @@ class MetricsResult(BaseModel):
 
         lines.append("")
         lines.append("Criterion-Level Metrics:")
-        lines.append(f"  Accuracy:   {self.criterion_accuracy:.1%}")
+        lines.append(f"  Accuracy:   {_fmt_opt(self.criterion_accuracy, '.1%')}")
         if self.n_binary_criteria > 0:
-            lines.append(f"  Precision:  {self.criterion_precision:.2f}")
-            lines.append(f"  Recall:     {self.criterion_recall:.2f}")
-            lines.append(f"  F1:         {self.criterion_f1:.2f}")
-        lines.append(f"  Mean Kappa: {self.mean_kappa:.3f}")
+            # Guaranteed non-None here, but render via _fmt_opt so ty is satisfied.
+            lines.append(f"  Precision:  {_fmt_opt(self.criterion_precision, '.2f')}")
+            lines.append(f"  Recall:     {_fmt_opt(self.criterion_recall, '.2f')}")
+            lines.append(f"  F1:         {_fmt_opt(self.criterion_f1, '.2f')}")
+        lines.append(f"  Mean Kappa: {_fmt_opt(self.mean_kappa, '.3f')}")
 
         lines.append("")
         lines.append("Score-Level Metrics:")
         lines.append(f"  RMSE:     {self.score_rmse:.4f}")
         lines.append(f"  MAE:      {self.score_mae:.4f}")
         lines.append(
-            f"  Spearman: {self.score_spearman.coefficient:.4f} "
+            f"  Spearman: {_fmt_opt(self.score_spearman.coefficient, '.4f')} "
             f"({self.score_spearman.interpretation})"
         )
         lines.append(
-            f"  Kendall:  {self.score_kendall.coefficient:.4f} "
+            f"  Kendall:  {_fmt_opt(self.score_kendall.coefficient, '.4f')} "
             f"({self.score_kendall.interpretation})"
         )
         lines.append(
-            f"  Pearson:  {self.score_pearson.coefficient:.4f} "
+            f"  Pearson:  {_fmt_opt(self.score_pearson.coefficient, '.4f')} "
             f"({self.score_pearson.interpretation})"
         )
 
         lines.append("")
         lines.append("Bias Analysis:")
-        lines.append(f"  Mean Bias:   {self.bias.mean_bias:+.4f} ({self.bias.direction})")
+        lines.append(
+            f"  Mean Bias:   {_fmt_opt(self.bias.mean_bias, '+.4f')} ({self.bias.direction})"
+        )
         lines.append(f"  Significant: {'Yes' if self.bias.is_significant else 'No'}")
 
         # NA stats for multi-choice
@@ -787,25 +947,49 @@ class MetricsResult(BaseModel):
             lines.append("NA Handling:")
             lines.append(f"  NA in Ground Truth: {self.na_stats.na_count_true}")
             lines.append(f"  NA in Predictions:  {self.na_stats.na_count_pred}")
-            lines.append(f"  NA Agreement:       {self.na_stats.na_agreement:.1%}")
+            if self.na_stats.na_kappa is not None:
+                interp = self.na_stats.na_kappa_interpretation or ""
+                lines.append(f"  NA Kappa:           {self.na_stats.na_kappa:.3f} ({interp})")
             if self.na_stats.na_false_positive > 0 or self.na_stats.na_false_negative > 0:
                 lines.append(
                     f"  NA FP/FN:           {self.na_stats.na_false_positive} / "
                     f"{self.na_stats.na_false_negative}"
                 )
 
+        # CANNOT_ASSESS stats for binary criteria (parallel to NA Handling above; a
+        # distinct kind of abstention — epistemic MET/UNMET rather than "no option").
+        if self.cannot_assess_stats:
+            ca = self.cannot_assess_stats
+            lines.append("")
+            lines.append("CANNOT_ASSESS Handling:")
+            lines.append(f"  CA in Ground Truth: {ca.ca_count_true}")
+            lines.append(f"  CA in Predictions:  {ca.ca_count_pred}")
+            if ca.ca_kappa is not None:
+                interp = ca.ca_kappa_interpretation or ""
+                lines.append(f"  CA Kappa:           {ca.ca_kappa:.3f} ({interp})")
+            if ca.ca_false_positive > 0 or ca.ca_false_negative > 0:
+                lines.append(
+                    f"  CA FP/FN:           {ca.ca_false_positive} / {ca.ca_false_negative}"
+                )
+
         if self.bootstrap:
             lines.append("")
             lines.append(f"Bootstrap CIs ({self.bootstrap.confidence_level:.0%}):")
+            # Each CI may be None (genuinely undefined / no samples) — render "n/a".
+            acc_ci = self.bootstrap.accuracy_ci
+            kappa_ci = self.bootstrap.kappa_ci
+            rmse_ci = self.bootstrap.rmse_ci
             lines.append(
-                f"  Accuracy: [{self.bootstrap.accuracy_ci[0]:.1%}, "
-                f"{self.bootstrap.accuracy_ci[1]:.1%}]"
+                "  Accuracy: "
+                + (f"[{acc_ci[0]:.1%}, {acc_ci[1]:.1%}]" if acc_ci is not None else "n/a")
             )
             lines.append(
-                f"  Kappa:    [{self.bootstrap.kappa_ci[0]:.3f}, {self.bootstrap.kappa_ci[1]:.3f}]"
+                "  Kappa:    "
+                + (f"[{kappa_ci[0]:.3f}, {kappa_ci[1]:.3f}]" if kappa_ci is not None else "n/a")
             )
             lines.append(
-                f"  RMSE:     [{self.bootstrap.rmse_ci[0]:.4f}, {self.bootstrap.rmse_ci[1]:.4f}]"
+                "  RMSE:     "
+                + (f"[{rmse_ci[0]:.4f}, {rmse_ci[1]:.4f}]" if rmse_ci is not None else "n/a")
             )
 
         if self.per_judge:
@@ -814,11 +998,29 @@ class MetricsResult(BaseModel):
             for judge_id, jm in sorted(self.per_judge.items()):
                 lines.append(
                     f"  {judge_id}: RMSE={jm.score_rmse:.4f}, "
-                    f"Spearman={jm.score_spearman.coefficient:.4f}"
+                    f"Spearman={_fmt_opt(jm.score_spearman.coefficient, '.4f')}"
                 )
 
         lines.append("")
         lines.append("Per-Criterion Breakdown:")
+
+        # Inter-judge agreement (Krippendorff's alpha + Fleiss' kappa) is only populated for
+        # ensembles with >=2 judges; append those columns to a group's table only when at
+        # least one criterion in the group carries them. Krippendorff's alpha is the
+        # recommended statistic, so it leads.
+        def _has_agreement(criteria: list) -> bool:
+            return any(
+                cm.krippendorff_alpha is not None or cm.fleiss_kappa is not None for cm in criteria
+            )
+
+        def _agreement_header() -> str:
+            return f" {'Kripp-α':>9} {'Fleiss':>8}"
+
+        def _agreement_cells(cm) -> str:
+            return (
+                f" {_fmt_opt(cm.krippendorff_alpha, '>9.3f', 9)}"
+                f" {_fmt_opt(cm.fleiss_kappa, '>8.3f', 8)}"
+            )
 
         # Separate display by criterion type
         binary_criteria = [cm for cm in self.per_criterion if cm.criterion_type == "binary"]
@@ -828,39 +1030,62 @@ class MetricsResult(BaseModel):
         if binary_criteria:
             if ordinal_criteria or nominal_criteria:
                 lines.append("\nBinary Criteria:")
+            show_agreement = _has_agreement(binary_criteria)
             header = f"{'Criterion':<20} {'Acc':>8} {'Prec':>8} {'Rec':>8} {'F1':>8} {'Kappa':>8}"
+            if show_agreement:
+                header += _agreement_header()
             lines.append(header)
             lines.append("-" * len(header))
             for cm in binary_criteria:
-                lines.append(
-                    f"{cm.name:<20} {cm.accuracy:>8.1%} {cm.precision:>8.2f} "
-                    f"{cm.recall:>8.2f} {cm.f1:>8.2f} {cm.kappa:>8.3f}"
+                row = (
+                    f"{cm.name:<20} {_fmt_opt(cm.accuracy, '>8.1%', 8)} "
+                    f"{_fmt_opt(cm.precision, '>8.2f', 8)} "
+                    f"{_fmt_opt(cm.recall, '>8.2f', 8)} {_fmt_opt(cm.f1, '>8.2f', 8)} "
+                    f"{_fmt_opt(cm.kappa, '>8.3f', 8)}"
                 )
+                if show_agreement:
+                    row += _agreement_cells(cm)
+                lines.append(row)
 
         if ordinal_criteria:
             lines.append("\nOrdinal Criteria:")
+            show_agreement = _has_agreement(ordinal_criteria)
             header = (
                 f"{'Criterion':<20} {'Exact':>8} {'Adj':>8} "
                 f"{'WKappa':>8} {'Spearman':>10} {'RMSE':>8}"
             )
+            if show_agreement:
+                header += _agreement_header()
             lines.append(header)
             lines.append("-" * len(header))
             for cm in ordinal_criteria:
-                lines.append(
-                    f"{cm.name:<20} {cm.exact_accuracy:>8.1%} {cm.adjacent_accuracy:>8.1%} "
-                    f"{cm.weighted_kappa:>8.3f} {cm.spearman.coefficient:>10.4f} {cm.rmse:>8.4f}"
+                row = (
+                    f"{cm.name:<20} {_fmt_opt(cm.exact_accuracy, '>8.1%', 8)} "
+                    f"{_fmt_opt(cm.adjacent_accuracy, '>8.1%', 8)} "
+                    f"{_fmt_opt(cm.weighted_kappa, '>8.3f', 8)} "
+                    f"{_fmt_opt(cm.spearman.coefficient, '>10.4f', 10)} "
+                    f"{_fmt_opt(cm.rmse, '>8.4f', 8)}"
                 )
+                if show_agreement:
+                    row += _agreement_cells(cm)
+                lines.append(row)
 
         if nominal_criteria:
             lines.append("\nNominal Criteria:")
+            show_agreement = _has_agreement(nominal_criteria)
             header = f"{'Criterion':<20} {'Accuracy':>10} {'Kappa':>8} {'Interpretation':<20}"
+            if show_agreement:
+                header += _agreement_header()
             lines.append(header)
             lines.append("-" * len(header))
             for cm in nominal_criteria:
-                lines.append(
-                    f"{cm.name:<20} {cm.exact_accuracy:>10.1%} {cm.kappa:>8.3f} "
-                    f"{cm.kappa_interpretation:<20}"
+                row = (
+                    f"{cm.name:<20} {_fmt_opt(cm.exact_accuracy, '>10.1%', 10)} "
+                    f"{_fmt_opt(cm.kappa, '>8.3f', 8)} {cm.kappa_interpretation:<20}"
                 )
+                if show_agreement:
+                    row += _agreement_cells(cm)
+                lines.append(row)
 
         return "\n".join(lines)
 
@@ -897,6 +1122,8 @@ class MetricsResult(BaseModel):
                 "bias": self.bias.mean_bias,
                 "adjacent_accuracy": None,
                 "weighted_kappa": None,
+                "krippendorff_alpha": None,
+                "fleiss_kappa": None,
             }
         )
 
@@ -921,6 +1148,8 @@ class MetricsResult(BaseModel):
                         "bias": None,
                         "adjacent_accuracy": None,
                         "weighted_kappa": None,
+                        "krippendorff_alpha": cm.krippendorff_alpha,
+                        "fleiss_kappa": cm.fleiss_kappa,
                     }
                 )
             elif cm.criterion_type == "ordinal":
@@ -942,6 +1171,8 @@ class MetricsResult(BaseModel):
                         "bias": None,
                         "adjacent_accuracy": cm.adjacent_accuracy,
                         "weighted_kappa": cm.weighted_kappa,
+                        "krippendorff_alpha": cm.krippendorff_alpha,
+                        "fleiss_kappa": cm.fleiss_kappa,
                     }
                 )
             else:  # nominal
@@ -963,6 +1194,8 @@ class MetricsResult(BaseModel):
                         "bias": None,
                         "adjacent_accuracy": None,
                         "weighted_kappa": None,
+                        "krippendorff_alpha": cm.krippendorff_alpha,
+                        "fleiss_kappa": cm.fleiss_kappa,
                     }
                 )
 
@@ -987,6 +1220,8 @@ class MetricsResult(BaseModel):
                         "bias": jm.bias.mean_bias,
                         "adjacent_accuracy": None,
                         "weighted_kappa": None,
+                        "krippendorff_alpha": None,
+                        "fleiss_kappa": None,
                     }
                 )
 

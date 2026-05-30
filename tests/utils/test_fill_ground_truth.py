@@ -12,11 +12,11 @@ from autorubric import (
 )
 from autorubric.dataset import DataItem, RubricDataset
 from autorubric.types import (
+    AggregatedMultiChoiceVerdict,
     CriterionReport,
     EnsembleCriterionReport,
     EnsembleEvaluationReport,
     EvaluationReport,
-    MultiChoiceVerdict,
 )
 from autorubric.utils import fill_ground_truth
 
@@ -122,10 +122,11 @@ def create_mock_mixed_report(
                 final_reason="Test reason",
                 votes=[],
                 agreement=1.0,
-                final_multi_choice_verdict=MultiChoiceVerdict(
+                final_multi_choice_verdict=AggregatedMultiChoiceVerdict(
                     selected_index=mc_option_idx,
                     selected_label=multi_choice_label,
                     value=mc_value,
+                    aggregated_value=mc_value,
                 ),
             ),
         ],

@@ -6,7 +6,9 @@ import asyncio
 import dataclasses
 import hashlib
 import logging
+import math
 import random
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -24,11 +26,11 @@ from autorubric.prompts import (
     build_multi_choice_user_prompt,
     build_user_prompt,
 )
+from autorubric.scoring import score_reports
 from autorubric.types import (
     AggregatedMultiChoiceVerdict,
     AggregationStrategy,
     CannotAssessConfig,
-    CannotAssessStrategy,
     Criterion,
     CriterionJudgment,
     CriterionReport,
@@ -69,6 +71,12 @@ def _derive_shuffle_rng(
     return random.Random(derived)
 
 
+# Sentinel used in the item-key slot of ``_derive_shuffle_rng`` for few-shot example
+# selection. Few-shot examples are a fixed property of (criterion, judge), not of the
+# item being graded, so the per-call item content is intentionally not part of the key.
+FEW_SHOT_DOMAIN = "few_shot"
+
+
 def _combine_errors(errors: list[str | None]) -> str | None:
     """Combine per-judge error strings into an ensemble-level error.
 
@@ -81,9 +89,48 @@ def _combine_errors(errors: list[str | None]) -> str | None:
     return " | ".join(e for e in errors if e is not None)
 
 
-def _aggregate_error(votes: list[JudgeVote]) -> str | None:
-    """Ensemble error string for binary votes (see ``_combine_errors``)."""
+def _aggregate_error(votes: Sequence[JudgeVote | MultiChoiceJudgeVote]) -> str | None:
+    """Ensemble error string for a list of votes (see ``_combine_errors``).
+
+    Single source of truth for the ensemble-level ``error`` across both the binary
+    (``JudgeVote``) and multi-choice (``MultiChoiceJudgeVote``) aggregation paths.
+    """
     return _combine_errors([v.error for v in votes])
+
+
+def _inject_affected_criteria(reason: str, judgment: object) -> str:
+    """Append an [Affects: #i, #j] tag when the judgment carries non-empty affected_criteria.
+
+    Shared by the binary and multi-choice success paths so the structured-output
+    affected_criteria convention (used by meta-rubric evaluation) behaves identically
+    for both criterion types.
+    """
+    affected = getattr(judgment, "affected_criteria", None)
+    if affected:
+        tag = ", ".join(f"#{i}" for i in affected)
+        reason = f"{reason} [Affects: {tag}]"
+    return reason
+
+
+def _binary_worst_verdict(weight: float) -> CriterionVerdict:
+    """The score-minimizing binary verdict for a criterion of the given weight.
+
+    Positive (or zero) weight → UNMET (earns 0 instead of the weight); negative weight →
+    MET (subtracts the full penalty). Single source of the "binary worst case" — shared by
+    the ``unknown``-error synthesis path and majority/weighted tie-breaking. Binary analog
+    of ``Criterion.worst_scored_option`` / ``worst_option_among``.
+    """
+    return CriterionVerdict.MET if weight < 0 else CriterionVerdict.UNMET
+
+
+def _top_tied_keys(scores: Mapping[int, float]) -> list[int]:
+    """Option indices tied for the maximum score (vote count or summed judge weight).
+
+    Used to surface mode/weighted_mode tie candidates for resolution via
+    ``Criterion.worst_option_among``. A clear winner yields a single-element list.
+    """
+    top = max(scores.values())
+    return [i for i, s in scores.items() if s == top]
 
 
 @dataclass
@@ -202,10 +249,14 @@ class CriterionGrader(Grader):
         cannot_assess_config: CannotAssessConfig | None = None,
         # Position bias mitigation
         shuffle_options: bool = True,
+        # Multi-choice abstain channel
+        auto_na_option: bool = True,
         # Reproducibility
         seed: int | None = None,
         # Structured output override for binary criteria
         binary_response_format: type[BaseModel] | None = None,
+        # Structured output override for multi-choice criteria
+        multi_choice_response_format: type[BaseModel] | None = None,
     ):
         """Initialize the criterion grader.
 
@@ -214,9 +265,13 @@ class CriterionGrader(Grader):
             judges: List of JudgeSpec for ensemble mode. Mutually exclusive with llm_config.
             aggregation: Strategy for aggregating votes in ensemble mode (binary criteria).
             ordinal_aggregation: Strategy for aggregating ordinal multi-choice votes.
-                Options: "mean", "median", "weighted_mean", "mode".
+                Central tendency: "mean", "median", "weighted_mean", "mode". Conservative/
+                permissive (analogs of binary unanimous/any): "min" (lowest selected
+                option) / "max" (highest selected option).
             nominal_aggregation: Strategy for aggregating nominal multi-choice votes.
-                Options: "mode", "weighted_mode", "unanimous".
+                Options: "mode", "weighted_mode", "unanimous". "unanimous" abstains via the
+                NA option on disagreement, or falls back to mode + warns if there is no NA
+                option.
             training_data: Dataset for few-shot examples. If provided, enables few-shot prompting.
             few_shot_config: Configuration for few-shot example selection.
             system_prompt: Custom system prompt for binary criteria.
@@ -228,6 +283,12 @@ class CriterionGrader(Grader):
                 presented to the LLM to mitigate position bias. Each judge/call sees a
                 different random order, and responses are mapped back to original indices.
                 Disable for deterministic behavior in tests.
+            auto_na_option: If True (default), auto-inject a canonical NA / "cannot assess"
+                option into any multi-choice criterion that lacks one, giving the judge a
+                first-class abstain channel analogous to binary CANNOT_ASSESS. The injected
+                option is appended at the end (highest index) so existing option indices are
+                preserved. Set False for forced-choice classification (the judge must pick a
+                scored option). Never strips an author-supplied NA option — author intent wins.
             seed: Master seed for all non-LLM randomness (option shuffling, few-shot
                 example selection). Auto-generated when None so that randomness is always
                 pinned and reproducible. Inspect via the ``seed`` property after construction.
@@ -236,6 +297,12 @@ class CriterionGrader(Grader):
                 CriterionJudgment. If the model includes an ``affected_criteria`` field
                 (list[int]), matching indices are injected as an ``[Affects: ...]`` tag
                 into the reason string. Defaults to CriterionJudgment.
+            multi_choice_response_format: Pydantic model to use as the structured output
+                schema for multi-choice criterion judgments. Must be a subclass of (or
+                compatible with) MultiChoiceJudgment. If the model includes an
+                ``affected_criteria`` field (list[int]), matching indices are injected as
+                an ``[Affects: ...]`` tag into the reason string (same convention as
+                binary_response_format). Defaults to MultiChoiceJudgment.
 
         Raises:
             ValueError: If neither llm_config nor judges is provided, or both are provided.
@@ -248,11 +315,16 @@ class CriterionGrader(Grader):
         if llm_config is not None and judges is not None:
             raise ValueError("Cannot provide both llm_config and judges")
 
-        # Normalize to ensemble representation (single LLM = ensemble of 1)
+        # Normalize to ensemble representation (single LLM = ensemble of 1).
+        # The validation above guarantees exactly one of llm_config/judges is set, so by
+        # this point `judges` in the else branch is a non-None list[JudgeSpec]; the explicit
+        # attribute annotation lets the type checker see that without a suppression comment.
+        self._judges: list[JudgeSpec]
         if llm_config is not None:
             self._judges = [JudgeSpec(llm_config=llm_config, judge_id="default", weight=1.0)]
         else:
-            self._judges = judges  # type: ignore
+            assert judges is not None
+            self._judges = judges
 
         self._aggregation = aggregation
         self._ordinal_aggregation = ordinal_aggregation
@@ -260,6 +332,7 @@ class CriterionGrader(Grader):
         self._training_data = training_data
         self._cannot_assess_config = cannot_assess_config or CannotAssessConfig()
         self._shuffle_options = shuffle_options
+        self._auto_na_option = auto_na_option
         self._seed = seed if seed is not None else random.randint(0, 2**31 - 1)
 
         # Coordinate few-shot seed with master seed when unset
@@ -268,6 +341,7 @@ class CriterionGrader(Grader):
             fsc = dataclasses.replace(fsc, seed=self._seed)
         self._few_shot_config = fsc
         self._binary_response_format = binary_response_format or CriterionJudgment
+        self._multi_choice_response_format = multi_choice_response_format or MultiChoiceJudgment
 
         # Build system prompts (separate for binary and multi-choice)
         if system_prompt is None:
@@ -289,8 +363,8 @@ class CriterionGrader(Grader):
 
         # Pre-compute few-shot examples if training data provided
         # Note: For multi-choice, examples are stored as (submission, selected_index, reason)
-        self._criterion_examples: dict[int, list[FewShotExample]] = {}
-        self._multi_choice_examples: dict[int, list[tuple[str, int, str | None]]] = {}
+        self._criterion_examples: dict[tuple[int, str], list[FewShotExample]] = {}
+        self._multi_choice_examples: dict[tuple[int, str], list[tuple[str, int, str | None]]] = {}
         if training_data is not None:
             self._prepare_examples()
 
@@ -315,30 +389,42 @@ class CriterionGrader(Grader):
 
     def _prepare_examples(self) -> None:
         """Pre-compute few-shot examples for each criterion."""
-        if self._training_data is None:
+        training_data = self._training_data
+        if training_data is None:
             return
 
-        n_criteria = self._training_data.num_criteria
-        rubric_criteria = self._training_data.rubric.rubric if self._training_data.rubric else []
+        n_criteria = training_data.num_criteria
+        rubric_criteria = training_data.rubric.rubric if training_data.rubric else []
 
         for criterion_idx in range(n_criteria):
             criterion = (
                 rubric_criteria[criterion_idx] if criterion_idx < len(rubric_criteria) else None
             )
-            if criterion is not None and criterion.is_multi_choice:
-                examples = self._select_multi_choice_examples(criterion_idx)
-                self._multi_choice_examples[criterion_idx] = examples
-            else:
-                examples = self._select_examples_for_criterion(criterion_idx)
-                self._criterion_examples[criterion_idx] = examples
+            # Select examples per judge so that ensemble judges see decorrelated few-shot
+            # subsets/orderings, mirroring per-judge option shuffling.
+            for judge in self._judges:
+                if criterion is not None and criterion.is_multi_choice:
+                    examples = self._select_multi_choice_examples(criterion_idx, judge.judge_id)
+                    self._multi_choice_examples[(criterion_idx, judge.judge_id)] = examples
+                else:
+                    binary_examples = self._select_examples_for_criterion(
+                        criterion_idx, judge.judge_id
+                    )
+                    self._criterion_examples[(criterion_idx, judge.judge_id)] = binary_examples
 
-    def _select_examples_for_criterion(self, criterion_idx: int) -> list[FewShotExample]:
-        """Select stratified examples for a specific criterion."""
+    def _select_examples_for_criterion(
+        self, criterion_idx: int, judge_id: str
+    ) -> list[FewShotExample]:
+        """Select stratified examples for a specific criterion and judge."""
         if self._training_data is None:
             return []
 
         config = self._few_shot_config
-        rng = random.Random(config.seed)
+        seed = config.seed
+        # Guaranteed non-None when training_data is present (see __init__ few-shot seed
+        # coordination); _prepare_examples is the only caller and runs only in that case.
+        assert seed is not None
+        rng = _derive_shuffle_rng(seed, FEW_SHOT_DOMAIN, criterion_idx, judge_id)
 
         # Group items by verdict for this criterion
         verdict_groups: dict[CriterionVerdict, list] = {
@@ -456,9 +542,9 @@ class CriterionGrader(Grader):
             return None
 
     def _select_multi_choice_examples(
-        self, criterion_idx: int
+        self, criterion_idx: int, judge_id: str
     ) -> list[tuple[str, int, str | None]]:
-        """Select few-shot examples for a multi-choice criterion.
+        """Select few-shot examples for a multi-choice criterion and judge.
 
         Groups training items by their selected option index and balances
         across options when configured. Ground truth labels are converted
@@ -468,7 +554,11 @@ class CriterionGrader(Grader):
             return []
 
         config = self._few_shot_config
-        rng = random.Random(config.seed)
+        seed = config.seed
+        # Guaranteed non-None when training_data is present (see __init__ few-shot seed
+        # coordination); _prepare_examples is the only caller and runs only in that case.
+        assert seed is not None
+        rng = _derive_shuffle_rng(seed, FEW_SHOT_DOMAIN, criterion_idx, judge_id)
 
         # Group items by option index (converting label to index)
         option_groups: dict[int, list] = {}
@@ -552,7 +642,7 @@ class CriterionGrader(Grader):
         reference_submission: str | None = None,
     ) -> CriterionResult:
         """Judge a binary (MET/UNMET) criterion."""
-        examples = self._criterion_examples.get(criterion_idx, [])
+        examples = self._criterion_examples.get((criterion_idx, judge.judge_id), [])
 
         # Build prompt (with or without few-shot examples)
         if examples:
@@ -577,16 +667,15 @@ class CriterionGrader(Grader):
 
             judgment = result.parsed
             reason = judgment.explanation
-
-            # Inject [Affects: ...] tag if the response model includes affected_criteria
-            if hasattr(judgment, "affected_criteria") and judgment.affected_criteria:
-                tag = ", ".join(f"#{i}" for i in judgment.affected_criteria)
-                reason = f"{reason} [Affects: {tag}]"
+            reason = _inject_affected_criteria(reason, judgment)
 
             report = CriterionReport(
                 requirement=criterion.requirement,
                 verdict=judgment.criterion_status,
                 reason=reason,
+                # Preserve the extended-thinking deliberation trace. getattr
+                # guards custom binary_response_format models that lack the field.
+                reasoning=getattr(judgment, "reasoning", None),
                 weight=criterion.weight,
                 name=criterion.name,
                 options=criterion.options,
@@ -604,7 +693,7 @@ class CriterionGrader(Grader):
             # via CriterionReport.error / is_error.
             category = classify_grading_error(e)
             if category == "unknown":
-                verdict = CriterionVerdict.MET if criterion.weight < 0 else CriterionVerdict.UNMET
+                verdict = _binary_worst_verdict(criterion.weight)
             else:
                 verdict = CriterionVerdict.CANNOT_ASSESS
             logger.warning(
@@ -669,7 +758,7 @@ class CriterionGrader(Grader):
             shuffled_indices = list(range(len(criterion.options)))
             prompt_criterion = criterion
 
-        examples = self._multi_choice_examples.get(criterion_idx, [])
+        examples = self._multi_choice_examples.get((criterion_idx, judge.judge_id), [])
 
         # Build prompt (with or without few-shot examples)
         if examples:
@@ -698,7 +787,7 @@ class CriterionGrader(Grader):
             result: GenerateResult = await client.generate(
                 system_prompt=self._multi_choice_system_prompt,
                 user_prompt=user_prompt,
-                response_format=MultiChoiceJudgment,
+                response_format=self._multi_choice_response_format,
                 return_result=True,
             )
 
@@ -725,11 +814,16 @@ class CriterionGrader(Grader):
                 na=selected_option.na,
             )
 
+            reason = judgment.explanation
+            reason = _inject_affected_criteria(reason, judgment)
+
             report = CriterionReport(
                 requirement=criterion.requirement,
                 verdict=None,  # Binary verdict is None for multi-choice
                 multi_choice_verdict=multi_choice_verdict,
-                reason=judgment.explanation,
+                reason=reason,
+                # Preserve the extended-thinking deliberation trace.
+                reasoning=getattr(judgment, "reasoning", None),
                 weight=criterion.weight,
                 name=criterion.name,
                 options=criterion.options,
@@ -740,43 +834,52 @@ class CriterionGrader(Grader):
             return CriterionResult(report=report, usage=result.usage, cost=result.cost)
 
         except Exception as e:
-            # Classify the failure (see _judge_binary_criterion). Multi-choice has no
-            # CANNOT_ASSESS verdict, so for infrastructure/parse failures we mark the
-            # verdict na=True (excluded from scoring under the default SKIP strategy).
-            # Unknown errors keep the conservative worst-case option.
             category = classify_grading_error(e)
             logger.warning(
                 f"Error evaluating multi-choice criterion '{criterion.requirement[:50]}...' "
                 f"with judge '{judge.judge_id}' [{category}]: {e}"
             )
 
-            # Find worst-case option (lowest value, or NA)
-            worst_idx = 0
-            worst_value = criterion.options[0].value
-            for i, opt in enumerate(criterion.options):
-                if opt.na:
-                    worst_idx = i
-                    break
-                if opt.value < worst_value:
-                    worst_idx = i
-                    worst_value = opt.value
-
-            worst_option = criterion.options[worst_idx]
+            options = criterion.options
             if category == "unknown":
+                # Conservative worst case, weight-sign-aware, among scored (non-NA)
+                # options only — mirrors the binary worst case (MET if weight < 0 else
+                # UNMET). Never auto-select an NA option for an unknown error; NA/skip
+                # is reserved for infrastructure/parse failures. Ties resolve to the
+                # first such option in declaration order (deterministic). The shared
+                # helper is also used by the metrics layer's na_mode="as_unmet" remap
+                # so the two layers cannot drift.
+                worst_idx, worst_option = criterion.worst_scored_option()
                 multi_choice_verdict = MultiChoiceVerdict(
                     selected_index=worst_idx,
                     selected_label=worst_option.label,
                     value=worst_option.value,
-                    na=worst_option.na,
+                    na=False,
                 )
             else:
-                # Exclude from scoring: na=True, zero contribution.
-                multi_choice_verdict = MultiChoiceVerdict(
-                    selected_index=worst_idx,
-                    selected_label=worst_option.label,
-                    value=0.0,
-                    na=True,
-                )
+                # Infrastructure/parse: abstain (excluded under SKIP). Prefer a genuine
+                # NA option — guaranteed when auto_na_option is on — so the abstain verdict
+                # points at a real na=True option (resolves the contradiction for the
+                # default case). With no NA option (forced-choice + no author NA) emit a
+                # GENUINE abstain that selects no option (selected_index/label=None), rather
+                # than forcing na=True onto a scored option (the old contradiction). It
+                # stays na=True → excluded under SKIP, so infra/parse never penalizes.
+                na_idx = criterion.na_option_index
+                if na_idx is not None:
+                    na_option = options[na_idx]
+                    multi_choice_verdict = MultiChoiceVerdict(
+                        selected_index=na_idx,
+                        selected_label=na_option.label,
+                        value=na_option.value,
+                        na=True,
+                    )
+                else:
+                    multi_choice_verdict = MultiChoiceVerdict(
+                        selected_index=None,
+                        selected_label=None,
+                        value=0.0,
+                        na=True,
+                    )
 
             report = CriterionReport(
                 requirement=criterion.requirement,
@@ -819,6 +922,20 @@ class CriterionGrader(Grader):
     # Judge and Aggregate (Grader Interface)
     # =========================================================================
 
+    def _effective_criterion(self, criterion: Criterion) -> Criterion:
+        """Return the criterion as actually evaluated.
+
+        When ``auto_na_option`` is enabled, multi-choice criteria are guaranteed an
+        NA/"cannot assess" option (the abstain channel) via
+        :meth:`Criterion.with_guaranteed_na_option`. Binary criteria and the
+        ``auto_na_option=False`` case are returned unchanged. Pure function of the
+        criterion, so prompt building, verdict mapping, scoring, ensemble aggregation,
+        and the metrics layer can all reconstruct the identical option set.
+        """
+        if self._auto_na_option and criterion.is_multi_choice:
+            return criterion.with_guaranteed_na_option()
+        return criterion
+
     async def judge(
         self,
         to_grade: str,
@@ -827,8 +944,14 @@ class CriterionGrader(Grader):
         reference_submission: str | None = None,
     ) -> list[JudgeCriterionResults]:
         """Judge all criteria with all judges (parallel across judges)."""
+        # Normalize once to the effective rubric (abstain channel guaranteed for
+        # multi-choice under auto_na_option). Same length/order, so criterion_idx — and
+        # thus the shuffle RNG key — stays aligned; the user's rubric is never mutated.
+        effective_rubric = [self._effective_criterion(c) for c in rubric]
         tasks = [
-            self._judge_all_criteria_for_judge(judge, rubric, to_grade, query, reference_submission)
+            self._judge_all_criteria_for_judge(
+                judge, effective_rubric, to_grade, query, reference_submission
+            )
             for judge in self._judges
         ]
         return list(await asyncio.gather(*tasks))
@@ -843,10 +966,12 @@ class CriterionGrader(Grader):
         - Multi-choice: Uses MultiChoiceJudgeVote and _aggregate_multi_choice_votes()
         """
         if not judge_results:
+            # Empty/failed aggregation has no score: emit None, not a fabricated 0.0
+            # (which is a valid catastrophic score, indistinguishable from a real zero).
             return EnsembleEvaluationReport(
-                score=0.0,
-                raw_score=0.0,
-                llm_raw_score=0.0,
+                score=None,
+                raw_score=None,
+                llm_raw_score=None,
                 error="No judge results to aggregate",
             )
 
@@ -862,12 +987,12 @@ class CriterionGrader(Grader):
             if criterion_report.is_multi_choice:
                 # Multi-choice: build MultiChoiceJudgeVote list
                 mc_votes: list[MultiChoiceJudgeVote] = []
-                # MultiChoiceJudgeVote has no error field; track per-judge errors here so
-                # we can surface an ensemble-level error when every judge call failed.
-                mc_errors: list[str | None] = []
+                # Each MultiChoiceJudgeVote carries its own .error (parity with JudgeVote),
+                # so the ensemble error is derived from the votes via _aggregate_error,
+                # mirroring the binary path. Every judge call synthesizes a verdict, so the
+                # `mcv is not None` guard below never drops an errored vote.
                 for judge_result in judge_results:
                     cr = judge_result.criterion_results[criterion_idx]
-                    mc_errors.append(cr.report.error)
                     mcv = cr.report.multi_choice_verdict
                     if mcv is not None:
                         mc_votes.append(
@@ -881,6 +1006,7 @@ class CriterionGrader(Grader):
                                 na=mcv.na,
                                 shuffle_order=cr.report.shuffle_order,
                                 error=cr.report.error,
+                                reasoning=cr.report.reasoning,
                             )
                         )
 
@@ -904,7 +1030,7 @@ class CriterionGrader(Grader):
                         votes=[],  # Binary votes empty for multi-choice
                         final_multi_choice_verdict=final_mc_verdict,
                         multi_choice_votes=mc_votes,
-                        error=_combine_errors(mc_errors),
+                        error=_aggregate_error(mc_votes),
                     )
                 )
             else:
@@ -919,10 +1045,11 @@ class CriterionGrader(Grader):
                             reason=cr.report.reason,
                             weight=judge_result.weight,
                             error=cr.report.error,
+                            reasoning=cr.report.reasoning,
                         )
                     )
 
-                final_verdict, final_reason = self._aggregate_votes(votes)
+                final_verdict, final_reason = self._aggregate_votes(votes, criterion_report.weight)
 
                 ensemble_reports.append(
                     EnsembleCriterionReport(
@@ -980,7 +1107,7 @@ class CriterionGrader(Grader):
         mean_agreement = (
             sum(er.agreement for er in ensemble_reports) / len(ensemble_reports)
             if ensemble_reports
-            else 1.0
+            else None  # No criteria to agree on -> not measured (never fabricate 1.0)
         )
 
         # Count CANNOT_ASSESS (binary) and NA (multi-choice)
@@ -1012,8 +1139,15 @@ class CriterionGrader(Grader):
             completion_cost=total_cost if total_cost > 0 else None,
         )
 
-    def _aggregate_votes(self, votes: list[JudgeVote]) -> tuple[CriterionVerdict, str]:
-        """Aggregate votes from multiple judges into a single verdict."""
+    def _aggregate_votes(
+        self, votes: list[JudgeVote], weight: float
+    ) -> tuple[CriterionVerdict, str]:
+        """Aggregate votes from multiple judges into a single verdict.
+
+        ``weight`` is the criterion weight (not a judge weight); it is used only to break
+        ties in ``majority``/``weighted`` via :func:`_binary_worst_verdict` — UNMET for
+        weight ≥ 0, MET for weight < 0 (consistent with ``worst_scored_option``).
+        """
         if not votes:
             return CriterionVerdict.CANNOT_ASSESS, "No votes"
 
@@ -1028,21 +1162,35 @@ class CriterionGrader(Grader):
         )
 
         if self._aggregation == "majority":
-            verdict = CriterionVerdict.MET if met_weight > unmet_weight else CriterionVerdict.UNMET
+            # True head-count: count judges, ignore weights (> 50%); tie -> worst case.
+            met_count = sum(1 for v in assessable_votes if v.verdict == CriterionVerdict.MET)
+            unmet_count = sum(1 for v in assessable_votes if v.verdict == CriterionVerdict.UNMET)
+            verdict = self._decide_binary(met_count, unmet_count, weight)
         elif self._aggregation == "weighted":
-            verdict = CriterionVerdict.MET if met_weight > unmet_weight else CriterionVerdict.UNMET
+            verdict = self._decide_binary(met_weight, unmet_weight, weight)
         elif self._aggregation == "unanimous":
             verdict = CriterionVerdict.MET if unmet_weight == 0 else CriterionVerdict.UNMET
         elif self._aggregation == "any":
             verdict = CriterionVerdict.MET if met_weight > 0 else CriterionVerdict.UNMET
         else:
-            verdict = CriterionVerdict.MET if met_weight > unmet_weight else CriterionVerdict.UNMET
+            verdict = self._decide_binary(met_weight, unmet_weight, weight)
 
         # Combine reasons
         reasons = [f"{v.judge_id}: {v.reason}" for v in votes]
         combined_reason = " | ".join(reasons)
 
         return verdict, combined_reason
+
+    @staticmethod
+    def _decide_binary(met: float, unmet: float, weight: float) -> CriterionVerdict:
+        """MET if ``met`` strictly wins, UNMET if ``unmet`` strictly wins, else the
+        weight-sign worst case. ``met``/``unmet`` are head-counts or summed
+        weights depending on the strategy."""
+        if met > unmet:
+            return CriterionVerdict.MET
+        if unmet > met:
+            return CriterionVerdict.UNMET
+        return _binary_worst_verdict(weight)
 
     def _aggregate_multi_choice_votes(
         self,
@@ -1064,12 +1212,12 @@ class CriterionGrader(Grader):
         if not votes:
             # Return NA verdict if no votes
             if criterion.options:
-                na_opt = next((o for o in criterion.options if o.na), None)
-                if na_opt:
-                    idx = criterion.options.index(na_opt)
+                na_idx = criterion.na_option_index
+                if na_idx is not None:
+                    na_opt = criterion.options[na_idx]
                     return (
                         AggregatedMultiChoiceVerdict(
-                            selected_index=idx,
+                            selected_index=na_idx,
                             selected_label=na_opt.label,
                             value=na_opt.value,
                             na=True,
@@ -1077,23 +1225,42 @@ class CriterionGrader(Grader):
                         ),
                         "No votes",
                     )
-            # Fallback: return first option as worst case
+            # No NA option to abstain into: fall back to the weight-sign worst case
+            # (consistent with worst_scored_option / the unknown-error path).
+            if criterion.options:
+                worst_idx, worst_opt = criterion.worst_scored_option()
+                return (
+                    AggregatedMultiChoiceVerdict(
+                        selected_index=worst_idx,
+                        selected_label=worst_opt.label,
+                        value=worst_opt.value,
+                        na=worst_opt.na,
+                        aggregated_value=worst_opt.value,
+                    ),
+                    "No votes",
+                )
             return (
                 AggregatedMultiChoiceVerdict(
                     selected_index=0,
-                    selected_label=criterion.options[0].label if criterion.options else "",
-                    value=criterion.options[0].value if criterion.options else 0.0,
-                    na=criterion.options[0].na if criterion.options else False,
+                    selected_label="",
+                    value=0.0,
+                    na=False,
                     aggregated_value=0.0,
                 ),
                 "No votes",
             )
 
-        # Filter out NA votes for aggregation (unless all are NA)
-        assessable_votes = [v for v in votes if not v.na]
+        # Filter out NA votes for aggregation (unless all are NA). The extra
+        # ``selected_index is not None`` is redundant at runtime (a None index always
+        # carries na=True, so it is already excluded by ``not v.na``) but narrows the
+        # type so the downstream index reads need no None-guards.
+        assessable_votes = [v for v in votes if not v.na and v.selected_index is not None]
         if not assessable_votes:
-            # All votes are NA
-            na_vote = votes[0]
+            # All votes are NA. Prefer a vote that abstained into a GENUINE NA option
+            # (selected_index is not None) so the aggregate keeps a real NA index where one
+            # exists (the default auto_na_option case); fall back to a clean None-abstain
+            # only when every NA vote is itself a no-NA-option error-abstain.
+            na_vote = next((v for v in votes if v.selected_index is not None), votes[0])
             reasons = [f"{v.judge_id}: {v.reason}" for v in votes]
             return (
                 AggregatedMultiChoiceVerdict(
@@ -1113,10 +1280,10 @@ class CriterionGrader(Grader):
         # Determine which aggregation to use
         if scale_type == "ordinal":
             agg = agg_strategy or self._ordinal_aggregation
-            result = self._aggregate_ordinal_votes(assessable_votes, criterion.options or [], agg)
+            result = self._aggregate_ordinal_votes(assessable_votes, criterion, agg)
         else:  # nominal
             agg = agg_strategy or self._nominal_aggregation
-            result = self._aggregate_nominal_votes(assessable_votes, criterion.options or [], agg)
+            result = self._aggregate_nominal_votes(assessable_votes, criterion, agg)
 
         # Combine reasons
         reasons = [f"{v.judge_id}: {v.reason}" for v in votes]
@@ -1127,7 +1294,7 @@ class CriterionGrader(Grader):
     def _aggregate_ordinal_votes(
         self,
         votes: list[MultiChoiceJudgeVote],
-        options: list,  # list[CriterionOption]
+        criterion: Criterion,
         strategy: str,
     ) -> AggregatedMultiChoiceVerdict:
         """Aggregate ordinal multi-choice votes.
@@ -1137,11 +1304,24 @@ class CriterionGrader(Grader):
         - median: Median of score values, snap to nearest option
         - weighted_mean: Weighted average by judge weight
         - mode: Most common selection
+        - min: Lowest-value option any judge selected (conservative; analog of binary
+          ``unanimous``)
+        - max: Highest-value option any judge selected (permissive; analog of binary ``any``)
+
+        Tie-breaking (mode count tie, mean/median snap equidistance): the
+        score-minimizing tied option by weight sign via ``criterion.worst_option_among``
+        (lowest value for weight ≥ 0, highest for weight < 0; lowest index on a value
+        tie). ``min``/``max`` already resolve value ties to the lowest index.
         """
         from collections import Counter
 
+        options = criterion.options or []
         values = [v.value for v in votes]
         weights = [v.weight for v in votes]
+        # Assessable votes always carry a concrete index (None is reserved for the
+        # error-abstain, filtered out before aggregation). The guard makes that contract
+        # explicit and narrows the type to ``int`` for the index-based strategies.
+        indices = [v.selected_index for v in votes if v.selected_index is not None]
 
         if strategy == "mean":
             aggregated_value = sum(values) / len(values)
@@ -1159,9 +1339,8 @@ class CriterionGrader(Grader):
             else:
                 aggregated_value = sum(values) / len(values)
         elif strategy == "mode":
-            # For mode on ordinal, we use the index
-            indices = [v.selected_index for v in votes]
-            most_common_idx = Counter(indices).most_common(1)[0][0]
+            # Most common selection; count ties -> worst tied option by weight sign.
+            most_common_idx = criterion.worst_option_among(_top_tied_keys(Counter(indices)))
             selected_option = options[most_common_idx]
             return AggregatedMultiChoiceVerdict(
                 selected_index=most_common_idx,
@@ -1170,19 +1349,35 @@ class CriterionGrader(Grader):
                 na=selected_option.na,
                 aggregated_value=selected_option.value,  # For mode, no continuous value
             )
+        elif strategy in ("min", "max"):
+            # Conservative / permissive analogs of binary unanimous / any: the lowest-
+            # (min) or highest- (max) value option any judge selected. Value ties resolve
+            # to the lowest option index (deterministic; tie rules out of scope).
+            scored = [(v.value, idx) for v in votes if (idx := v.selected_index) is not None]
+            if strategy == "min":
+                _, chosen_idx = min(scored, key=lambda t: (t[0], t[1]))
+            else:
+                _, chosen_idx = max(scored, key=lambda t: (t[0], -t[1]))
+            selected_option = options[chosen_idx]
+            return AggregatedMultiChoiceVerdict(
+                selected_index=chosen_idx,
+                selected_label=selected_option.label,
+                value=selected_option.value,
+                na=selected_option.na,
+                aggregated_value=selected_option.value,
+            )
         else:
             # Default to mean
             aggregated_value = sum(values) / len(values)
 
-        # Snap to nearest option by value
-        closest_idx = 0
-        closest_diff = float("inf")
-        for i, opt in enumerate(options):
-            if not opt.na:
-                diff = abs(opt.value - aggregated_value)
-                if diff < closest_diff:
-                    closest_diff = diff
-                    closest_idx = i
+        # Snap to nearest non-NA option by value; equidistant ties -> worst tied option
+        # by weight sign (deterministic, independent of option declaration order).
+        distances = [
+            (abs(opt.value - aggregated_value), i) for i, opt in enumerate(options) if not opt.na
+        ]
+        min_diff = min(d for d, _ in distances)
+        tied = [i for d, i in distances if math.isclose(d, min_diff, abs_tol=1e-9)]
+        closest_idx = criterion.worst_option_among(tied)
 
         selected_option = options[closest_idx]
         return AggregatedMultiChoiceVerdict(
@@ -1196,7 +1391,7 @@ class CriterionGrader(Grader):
     def _aggregate_nominal_votes(
         self,
         votes: list[MultiChoiceJudgeVote],
-        options: list,  # list[CriterionOption]
+        criterion: Criterion,
         strategy: str,
     ) -> AggregatedMultiChoiceVerdict:
         """Aggregate nominal multi-choice votes.
@@ -1204,32 +1399,53 @@ class CriterionGrader(Grader):
         Strategies:
         - mode: Most common selection (majority)
         - weighted_mode: Weight votes by judge weight
-        - unanimous: All judges must agree (else pick most common)
+        - unanimous: All judges must select the same option. On disagreement, abstain
+          via the criterion's NA option (verdict na=True); if there is no NA option,
+          fall back to mode and warn.
+
+        Tie-breaking (mode count tie, weighted_mode equal-weight tie): the
+        score-minimizing tied option by weight sign via ``criterion.worst_option_among``
+        (lowest value for weight ≥ 0, highest for weight < 0; lowest index on a value
+        tie) — deterministic, independent of judge order.
         """
         from collections import Counter
 
-        indices = [v.selected_index for v in votes]
+        options = criterion.options or []
+        # Assessable votes always carry a concrete index (None is reserved for the
+        # error-abstain, filtered out before aggregation). The guard makes that contract
+        # explicit and narrows the type to ``int``.
+        indices = [v.selected_index for v in votes if v.selected_index is not None]
 
         if strategy == "mode":
-            most_common_idx = Counter(indices).most_common(1)[0][0]
+            most_common_idx = criterion.worst_option_among(_top_tied_keys(Counter(indices)))
         elif strategy == "weighted_mode":
-            # Accumulate weights per index
+            # Accumulate weights per index; equal-weight ties -> worst tied option.
             weight_per_idx: dict[int, float] = {}
             for v in votes:
+                if v.selected_index is None:
+                    continue
                 weight_per_idx[v.selected_index] = (
                     weight_per_idx.get(v.selected_index, 0.0) + v.weight
                 )
-            most_common_idx = max(weight_per_idx, key=weight_per_idx.get)  # type: ignore
+            most_common_idx = criterion.worst_option_among(_top_tied_keys(weight_per_idx))
         elif strategy == "unanimous":
             unique_indices = set(indices)
             if len(unique_indices) == 1:
                 most_common_idx = indices[0]
             else:
-                # Not unanimous, fall back to mode
-                most_common_idx = Counter(indices).most_common(1)[0][0]
-        else:
-            # Default to mode
-            most_common_idx = Counter(indices).most_common(1)[0][0]
+                # Judges disagree -> abstain via the NA option if one exists (na=True flows
+                # through the SKIP scoring path). Never set na=True against a real option.
+                # With no NA option, fall back to mode and warn.
+                na_idx = criterion.na_option_index
+                if na_idx is not None:
+                    most_common_idx = na_idx
+                else:
+                    logger.warning(
+                        "Nominal 'unanimous' aggregation: judges disagreed (indices %s) "
+                        "and the criterion has no NA option; falling back to mode.",
+                        sorted(unique_indices),
+                    )
+                    most_common_idx = criterion.worst_option_among(_top_tied_keys(Counter(indices)))
 
         selected_option = options[most_common_idx]
         return AggregatedMultiChoiceVerdict(
@@ -1243,92 +1459,5 @@ class CriterionGrader(Grader):
     def _calculate_score_from_reports(
         self, reports: list[CriterionReport], normalize: bool
     ) -> float:
-        """Calculate score from criterion reports using CANNOT_ASSESS config.
-
-        Supports both binary and multi-choice criteria using the score_value property.
-        """
-        config = self._cannot_assess_config
-
-        # Separate assessable from cannot_assess (handles both binary CANNOT_ASSESS
-        # and multi-choice NA options via the is_na property)
-        assessable = [r for r in reports if not r.is_na]
-        cannot_assess = [r for r in reports if r.is_na]
-
-        # Apply strategy
-        if config.strategy == CannotAssessStrategy.SKIP:
-            working_reports = assessable
-        elif config.strategy == CannotAssessStrategy.FAIL:
-            # For binary: UNMET for positive, MET for negative
-            # For multi-choice NA: use score_value of 0.0 (worst case for positive weight)
-            fail_reports = []
-            for r in cannot_assess:
-                if r.is_multi_choice:
-                    # For multi-choice, we don't modify - the NA value is already 0
-                    fail_reports.append(r)
-                else:
-                    # For binary, convert to worst case verdict
-                    fail_reports.append(
-                        CriterionReport(
-                            requirement=r.requirement,
-                            verdict=CriterionVerdict.UNMET
-                            if r.weight > 0
-                            else CriterionVerdict.MET,
-                            reason=r.reason,
-                            weight=r.weight,
-                            name=r.name,
-                            options=r.options,
-                            scale_type=r.scale_type,
-                            aggregation=r.aggregation,
-                        )
-                    )
-            working_reports = assessable + fail_reports
-        elif config.strategy == CannotAssessStrategy.ZERO:
-            # Treat as UNMET (0 contribution) for both binary and multi-choice
-            zero_reports = []
-            for r in cannot_assess:
-                if r.is_multi_choice:
-                    # Already has value from NA option
-                    zero_reports.append(r)
-                else:
-                    zero_reports.append(
-                        CriterionReport(
-                            requirement=r.requirement,
-                            verdict=CriterionVerdict.UNMET,
-                            reason=r.reason,
-                            weight=r.weight,
-                            name=r.name,
-                            options=r.options,
-                            scale_type=r.scale_type,
-                            aggregation=r.aggregation,
-                        )
-                    )
-            working_reports = assessable + zero_reports
-        else:  # PARTIAL
-            working_reports = assessable
-
-        # Calculate weights
-        if config.strategy == CannotAssessStrategy.SKIP:
-            total_positive_weight = sum(max(0.0, r.weight) for r in working_reports)
-            total_negative_weight = sum(abs(r.weight) for r in working_reports if r.weight < 0)
-        else:
-            total_positive_weight = sum(max(0.0, r.weight) for r in reports)
-            total_negative_weight = sum(abs(r.weight) for r in reports if r.weight < 0)
-
-        # Calculate weighted sum using score_value (handles both binary and multi-choice)
-        weighted_sum = sum(r.score_value * r.weight for r in working_reports)
-
-        # Add partial credit for PARTIAL strategy
-        if config.strategy == CannotAssessStrategy.PARTIAL:
-            for r in cannot_assess:
-                if r.weight > 0:
-                    weighted_sum += config.partial_credit * r.weight
-
-        if not normalize:
-            return weighted_sum
-
-        if total_positive_weight > 0:
-            return max(0.0, min(1.0, weighted_sum / total_positive_weight))
-        elif total_negative_weight > 0:
-            return max(0.0, min(1.0, 1.0 + weighted_sum / total_negative_weight))
-        else:
-            return 0.0
+        """Calculate score from criterion reports via the shared scoring core."""
+        return score_reports(reports, self._cannot_assess_config, normalize)

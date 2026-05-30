@@ -75,8 +75,9 @@ async def main():
         query="Compare NMC and LFP cathode materials for EV battery applications.",
     )
 
-    # 4. Review results
-    print(f"Score: {result.score:.2f}")  # Score is 0.0-1.0
+    # 4. Review results. result.score is `float | None` — a float 0.0-1.0, or None
+    # if the grade failed (so guard before formatting).
+    print(f"Score: {result.score:.2f}" if result.score is not None else "Score: n/a (grade failed)")
     for criterion in result.report:
         print(f"  [{criterion.final_verdict}] {criterion.criterion.requirement}")
         print(f"    -> {criterion.final_reason}")

@@ -136,8 +136,8 @@ result = asyncio.run(main())
 The `EvaluationReport` contains the overall score and per-criterion breakdown:
 
 ```python
-# Overall score (0.0 to 1.0)
-print(f"Score: {result.score:.2f}")  # e.g., "Score: 0.92"
+# Overall score: `float | None` — 0.0 to 1.0, or None if the grade failed.
+print(f"Score: {result.score:.2f}" if result.score is not None else "Score: n/a (grade failed)")
 
 # Check token usage and cost
 if result.token_usage:
@@ -382,7 +382,8 @@ async def main():
         )
 
         print(f"\n--- Ticket {i}: {ticket['description']} ---")
-        print(f"Score: {result.score:.2f}")
+        # result.score is `float | None` (None if the grade failed).
+        print(f"Score: {result.score:.2f}" if result.score is not None else "Score: n/a (grade failed)")
 
         if result.completion_cost:
             total_cost += result.completion_cost

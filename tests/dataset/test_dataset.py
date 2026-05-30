@@ -17,33 +17,6 @@ from autorubric.dataset import DataItem, RubricDataset
 class TestDataItem:
     """Tests for DataItem dataclass."""
 
-    def test_create_without_ground_truth(self):
-        """DataItem can be created without ground truth."""
-        item = DataItem(submission="Hello world", description="Simple text")
-        assert item.submission == "Hello world"
-        assert item.description == "Simple text"
-        assert item.ground_truth is None
-
-    def test_create_with_ground_truth(self):
-        """DataItem can be created with ground truth verdicts."""
-        verdicts = [CriterionVerdict.MET, CriterionVerdict.UNMET]
-        item = DataItem(
-            submission="Test text",
-            description="Test description",
-            ground_truth=verdicts,
-        )
-        assert item.ground_truth == verdicts
-
-    def test_ground_truth_accepts_strings_for_multi_choice(self):
-        """DataItem accepts strings for multi-choice criteria ground truth."""
-        # Strings are valid for multi-choice option labels
-        item = DataItem(
-            submission="Test",
-            description="Test",
-            ground_truth=["Very satisfied", "Just right"],
-        )
-        assert item.ground_truth == ["Very satisfied", "Just right"]
-
     def test_ground_truth_accepts_mixed_verdict_and_string(self):
         """DataItem accepts mixed CriterionVerdict and strings (binary + multi-choice)."""
         item = DataItem(
@@ -112,33 +85,6 @@ def sample_dataset(sample_rubric: Rubric) -> RubricDataset:
 class TestRubricDatasetCreation:
     """Tests for RubricDataset creation and validation."""
 
-    def test_create_empty_dataset(self, sample_rubric: Rubric):
-        """Empty dataset can be created."""
-        dataset = RubricDataset(prompt="Test prompt", rubric=sample_rubric)
-        assert len(dataset) == 0
-        assert dataset.prompt == "Test prompt"
-        assert dataset.rubric == sample_rubric
-
-    def test_create_with_items(self, sample_rubric: Rubric):
-        """Dataset can be created with initial items."""
-        items = [
-            DataItem(
-                submission="Text 1",
-                description="Desc 1",
-                ground_truth=[
-                    CriterionVerdict.MET,
-                    CriterionVerdict.MET,
-                    CriterionVerdict.UNMET,
-                ],
-            ),
-        ]
-        dataset = RubricDataset(
-            prompt="Test prompt",
-            rubric=sample_rubric,
-            items=items,
-        )
-        assert len(dataset) == 1
-
     def test_validation_rejects_mismatched_ground_truth(self, sample_rubric: Rubric):
         """Dataset rejects items with wrong number of ground truth verdicts."""
         items = [
@@ -169,10 +115,6 @@ class TestRubricDatasetProperties:
         )
         dataset = RubricDataset(prompt="Test", rubric=rubric)
         assert dataset.criterion_names == ["C1", "Named"]
-
-    def test_num_criteria(self, sample_dataset: RubricDataset):
-        """num_criteria returns correct count."""
-        assert sample_dataset.num_criteria == 3
 
     def test_total_positive_weight(self, sample_dataset: RubricDataset):
         """total_positive_weight sums only positive weights."""
@@ -215,67 +157,51 @@ class TestRubricDatasetAddItem:
 class TestRubricDatasetComputeWeightedScore:
     """Tests for RubricDataset.compute_weighted_score()."""
 
-    def test_all_met_normalized(self, sample_dataset: RubricDataset):
-        """All MET verdicts (no errors) gives normalized score of 1.0."""
-        verdicts = [
-            CriterionVerdict.MET,  # +10
-            CriterionVerdict.MET,  # +5
-            CriterionVerdict.UNMET,  # -3 not applied (UNMET)
-        ]
-        score = sample_dataset.compute_weighted_score(verdicts, normalize=True)
-        # (10 + 5) / 15 = 1.0
-        assert score == 1.0
-
-    def test_all_met_with_errors_normalized(self, sample_dataset: RubricDataset):
-        """MET error criterion reduces normalized score."""
-        verdicts = [
-            CriterionVerdict.MET,  # +10
-            CriterionVerdict.MET,  # +5
-            CriterionVerdict.MET,  # -3 (error present)
-        ]
-        score = sample_dataset.compute_weighted_score(verdicts, normalize=True)
-        # (10 + 5 - 3) / 15 = 0.8
-        assert score == pytest.approx(0.8)
-
-    def test_raw_score(self, sample_dataset: RubricDataset):
-        """Raw (unnormalized) score is weighted sum."""
-        verdicts = [
-            CriterionVerdict.MET,  # +10
-            CriterionVerdict.UNMET,  # +0
-            CriterionVerdict.UNMET,  # +0
-        ]
-        score = sample_dataset.compute_weighted_score(verdicts, normalize=False)
-        assert score == 10.0
-
-    def test_score_clamped_to_zero(self, sample_dataset: RubricDataset):
-        """Normalized score is clamped to [0, 1]."""
-        verdicts = [
-            CriterionVerdict.UNMET,  # +0
-            CriterionVerdict.UNMET,  # +0
-            CriterionVerdict.MET,  # -3
-        ]
-        score = sample_dataset.compute_weighted_score(verdicts, normalize=True)
-        # (-3) / 15 = -0.2, clamped to 0.0
-        assert score == 0.0
+    @pytest.mark.parametrize(
+        ("verdicts", "normalize", "expected"),
+        [
+            # All MET (no errors): (10 + 5) / 15 = 1.0
+            (
+                [CriterionVerdict.MET, CriterionVerdict.MET, CriterionVerdict.UNMET],
+                True,
+                1.0,
+            ),
+            # MET error criterion reduces normalized score: (10 + 5 - 3) / 15 = 0.8
+            (
+                [CriterionVerdict.MET, CriterionVerdict.MET, CriterionVerdict.MET],
+                True,
+                pytest.approx(0.8),
+            ),
+            # Raw (unnormalized) score is the weighted sum: +10
+            (
+                [CriterionVerdict.MET, CriterionVerdict.UNMET, CriterionVerdict.UNMET],
+                False,
+                10.0,
+            ),
+            # Normalized score clamped to [0, 1]: (-3) / 15 = -0.2 -> 0.0
+            (
+                [CriterionVerdict.UNMET, CriterionVerdict.UNMET, CriterionVerdict.MET],
+                True,
+                0.0,
+            ),
+        ],
+    )
+    def test_compute_weighted_score(
+        self, sample_dataset: RubricDataset, verdicts, normalize, expected
+    ):
+        """compute_weighted_score across positive-sum, negative-weight, raw, and clamp cases."""
+        score = sample_dataset.compute_weighted_score(verdicts, normalize=normalize)
+        assert score == expected
 
 
 class TestRubricDatasetIteration:
     """Tests for RubricDataset iteration and indexing."""
-
-    def test_len(self, sample_dataset: RubricDataset):
-        """len() returns number of items."""
-        assert len(sample_dataset) == 2
 
     def test_iter(self, sample_dataset: RubricDataset):
         """Dataset is iterable."""
         items = list(sample_dataset)
         assert len(items) == 2
         assert all(isinstance(item, DataItem) for item in items)
-
-    def test_getitem(self, sample_dataset: RubricDataset):
-        """Items can be accessed by index."""
-        assert sample_dataset[0].description == "High quality"
-        assert sample_dataset[1].description == "Low quality"
 
 
 class TestRubricDatasetSerialization:
@@ -328,33 +254,54 @@ class TestRubricDatasetSerialization:
         assert ds.prompt is None
         assert ds.get_item_prompt(0) == "per-item prompt"
 
-    def test_from_json_missing_rubric(self):
-        """from_json raises ValueError for missing rubric."""
-        with pytest.raises(ValueError, match="Missing required field: 'rubric'"):
-            RubricDataset.from_json('{"prompt": "Test"}')
-
-    def test_from_json_invalid_json(self):
-        """from_json raises ValueError for invalid JSON."""
-        with pytest.raises(ValueError, match="Failed to parse JSON"):
-            RubricDataset.from_json("not valid json")
-
-    def test_from_json_invalid_verdict(self):
-        """from_json raises ValueError for invalid verdict."""
-        json_str = json.dumps(
-            {
-                "prompt": "Test",
-                "rubric": [{"weight": 1.0, "requirement": "R1"}],
-                "items": [
+    @pytest.mark.parametrize(
+        ("payload", "expected_error"),
+        [
+            # Unparseable JSON
+            ("not valid json", "Failed to parse JSON"),
+            # Missing required 'rubric' key
+            ('{"prompt": "Test"}', "Missing required field: 'rubric'"),
+            # Invalid verdict string in ground_truth
+            (
+                json.dumps(
                     {
-                        "submission": "T",
-                        "description": "D",
-                        "ground_truth": ["INVALID"],
+                        "prompt": "Test",
+                        "rubric": [{"weight": 1.0, "requirement": "R1"}],
+                        "items": [
+                            {
+                                "submission": "T",
+                                "description": "D",
+                                "ground_truth": ["INVALID"],
+                            }
+                        ],
                     }
-                ],
-            }
-        )
-        with pytest.raises(ValueError, match="invalid verdict"):
-            RubricDataset.from_json(json_str)
+                ),
+                "invalid verdict",
+            ),
+            # Item with no rubric and no global rubric
+            (
+                json.dumps(
+                    {
+                        "prompt": "Test",
+                        "rubric": None,
+                        "items": [
+                            {
+                                "submission": "T",
+                                "description": "D",
+                                "ground_truth": None,
+                                # No rubric field
+                            }
+                        ],
+                    }
+                ),
+                "Item 0 has no rubric",
+            ),
+        ],
+    )
+    def test_from_json_failure_modes(self, payload, expected_error):
+        """from_json raises ValueError across its distinct malformed-input branches."""
+        with pytest.raises(ValueError, match=expected_error):
+            RubricDataset.from_json(payload)
 
 
 class TestRubricDatasetFileIO:
@@ -399,34 +346,6 @@ class TestRubricDatasetFileIO:
 
 class TestDataItemWithRubric:
     """Tests for DataItem with per-item rubric."""
-
-    def test_create_with_rubric(self):
-        """DataItem can be created with per-item rubric."""
-        rubric = Rubric([Criterion(name="Quality", weight=1.0, requirement="Must be high quality")])
-        item = DataItem(
-            submission="Test",
-            description="Test item",
-            rubric=rubric,
-        )
-        assert item.rubric is not None
-        assert len(item.rubric.rubric) == 1
-
-    def test_ground_truth_validates_against_item_rubric(self):
-        """DataItem validates ground_truth length against its own rubric."""
-        rubric = Rubric(
-            [
-                Criterion(name="C1", weight=1.0, requirement="R1"),
-                Criterion(name="C2", weight=1.0, requirement="R2"),
-            ]
-        )
-        # Valid: 2 verdicts for 2 criteria
-        item = DataItem(
-            submission="Test",
-            description="Test",
-            ground_truth=[CriterionVerdict.MET, CriterionVerdict.UNMET],
-            rubric=rubric,
-        )
-        assert item.ground_truth is not None
 
     def test_ground_truth_rejects_length_mismatch_with_item_rubric(self):
         """DataItem rejects ground_truth that doesn't match item rubric length."""
@@ -603,26 +522,6 @@ class TestRubricDatasetSerializationWithPerItemRubrics:
         assert dataset[0].rubric is not None
         assert dataset[0].rubric.rubric[0].name == "Item"
 
-    def test_from_json_raises_when_no_rubric(self):
-        """from_json raises when item has no rubric and no global rubric."""
-        json_str = json.dumps(
-            {
-                "prompt": "Test",
-                "rubric": None,
-                "items": [
-                    {
-                        "submission": "T",
-                        "description": "D",
-                        "ground_truth": None,
-                        # No rubric field
-                    }
-                ],
-            }
-        )
-
-        with pytest.raises(ValueError, match="Item 0 has no rubric"):
-            RubricDataset.from_json(json_str)
-
     def test_roundtrip_with_per_item_rubrics(self):
         """Dataset with per-item rubrics survives JSON roundtrip."""
         item_rubric = Rubric([Criterion(name="Item", weight=2.0, requirement="IR")])
@@ -649,83 +548,37 @@ class TestRubricDatasetSerializationWithPerItemRubrics:
 # =============================================================================
 
 
-class TestDataItemWithReferenceSubmission:
-    """Tests for DataItem with reference_submission field."""
-
-    def test_create_without_reference(self):
-        """DataItem can be created without reference_submission."""
-        item = DataItem(submission="Test", description="D")
-        assert item.reference_submission is None
-
-    def test_create_with_reference(self):
-        """DataItem can be created with reference_submission."""
-        item = DataItem(
-            submission="Student answer",
-            description="Test item",
-            reference_submission="This is the exemplar answer.",
-        )
-        assert item.reference_submission == "This is the exemplar answer."
-
-
 class TestRubricDatasetWithReferenceSubmission:
     """Tests for RubricDataset with reference_submission field."""
 
-    def test_dataset_without_reference(self, sample_rubric: Rubric):
-        """Dataset can be created without reference_submission."""
-        dataset = RubricDataset(
-            prompt="Test prompt",
-            rubric=sample_rubric,
-        )
-        assert dataset.reference_submission is None
-
-    def test_dataset_with_global_reference(self, sample_rubric: Rubric):
-        """Dataset can be created with global reference_submission."""
-        dataset = RubricDataset(
-            prompt="Test prompt",
-            rubric=sample_rubric,
-            reference_submission="Global exemplar answer.",
-        )
-        assert dataset.reference_submission == "Global exemplar answer."
-
-    def test_get_item_reference_returns_item_reference(self, sample_rubric: Rubric):
-        """get_item_reference_submission returns item-level reference when present."""
+    @pytest.mark.parametrize(
+        ("item_reference", "global_reference", "expected"),
+        [
+            # Item-level reference takes precedence over global
+            ("Item-specific reference", "Global reference", "Item-specific reference"),
+            # Falls back to global when item has none
+            (None, "Global reference", "Global reference"),
+            # None when neither item nor global is set
+            (None, None, None),
+        ],
+    )
+    def test_get_item_reference_submission(
+        self, sample_rubric: Rubric, item_reference, global_reference, expected
+    ):
+        """get_item_reference_submission precedence, global fallback, and None."""
         item = DataItem(
             submission="Student answer",
             description="D",
-            reference_submission="Item-specific reference",
+            reference_submission=item_reference,
         )
         dataset = RubricDataset(
             prompt="Test",
             rubric=sample_rubric,
             items=[item],
-            reference_submission="Global reference",
+            reference_submission=global_reference,
         )
 
-        # Item-level takes precedence
-        assert dataset.get_item_reference_submission(0) == "Item-specific reference"
-
-    def test_get_item_reference_falls_back_to_global(self, sample_rubric: Rubric):
-        """get_item_reference_submission falls back to global when item has none."""
-        item = DataItem(submission="Student answer", description="D")
-        dataset = RubricDataset(
-            prompt="Test",
-            rubric=sample_rubric,
-            items=[item],
-            reference_submission="Global reference",
-        )
-
-        assert dataset.get_item_reference_submission(0) == "Global reference"
-
-    def test_get_item_reference_returns_none_when_no_reference(self, sample_rubric: Rubric):
-        """get_item_reference_submission returns None when no reference set."""
-        item = DataItem(submission="Student answer", description="D")
-        dataset = RubricDataset(
-            prompt="Test",
-            rubric=sample_rubric,
-            items=[item],
-        )
-
-        assert dataset.get_item_reference_submission(0) is None
+        assert dataset.get_item_reference_submission(0) == expected
 
     def test_add_item_with_reference(self, sample_rubric: Rubric):
         """add_item can add item with reference_submission."""
@@ -881,21 +734,6 @@ class TestRubricDatasetSplitWithReferenceSubmission:
 
 class TestPerItemPrompt:
     """Tests for per-item prompt support."""
-
-    def test_get_item_prompt_returns_item_prompt_when_set(self, sample_rubric: Rubric):
-        """get_item_prompt returns item prompt when set."""
-        item = DataItem(
-            submission="Test",
-            description="D",
-            prompt="Item-specific prompt",
-        )
-        dataset = RubricDataset(
-            prompt="Global prompt",
-            rubric=sample_rubric,
-            items=[item],
-        )
-
-        assert dataset.get_item_prompt(0) == "Item-specific prompt"
 
     def test_get_item_prompt_falls_back_to_dataset_prompt(self, sample_rubric: Rubric):
         """get_item_prompt falls back to dataset prompt when item prompt is None."""

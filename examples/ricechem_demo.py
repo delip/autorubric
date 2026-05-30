@@ -257,10 +257,13 @@ async def main():
     for q, (eval_result, metrics, dataset) in enumerate(all_results, 1):
         pred, true = extract_verdicts(eval_result, dataset)
         qm = micro_average_from_verdicts(pred, true)
+        kappa_str = (
+            f"{metrics.mean_kappa:>10.3f}" if metrics.mean_kappa is not None else f"{'N/A':>10}"
+        )
         print(
             f"Q{q:<9} {qm['accuracy']:>10.3f} {qm['f1']:>10.3f} "
             f"{qm['precision']:>10.3f} {qm['recall']:>10.3f} "
-            f"{metrics.mean_kappa:>10.3f} {qm['total']:>8}"
+            f"{kappa_str} {qm['total']:>8}"
         )
 
     print("-" * 68)

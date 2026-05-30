@@ -70,30 +70,27 @@ class TestNormalizeToGradeInput:
 class TestComputeLengthPenaltyWithPenaltyType:
     """Tests for compute_length_penalty with penalty_type."""
 
-    def test_output_only_ignores_thinking(self):
-        """Test OUTPUT_ONLY doesn't count thinking tokens."""
+    @pytest.mark.parametrize(
+        ("penalty_type", "thinking", "output", "expected_predicate"),
+        [
+            # OUTPUT_ONLY ignores a long thinking section -> short output -> no penalty.
+            ("OUTPUT_ONLY", " ".join(["x"] * 100), "short", lambda p: p == 0.0),
+            # THINKING_ONLY ignores a long output section -> short thinking -> no penalty.
+            ("THINKING_ONLY", "brief", " ".join(["x"] * 100), lambda p: p == 0.0),
+            # ALL counts both sections -> combined length exceeds budget -> penalty.
+            ("ALL", "one two", "three four five six", lambda p: p > 0),
+        ],
+    )
+    def test_penalty_type_selects_counted_sections(
+        self, penalty_type, thinking, output, expected_predicate
+    ):
+        """penalty_type dispatch counts only the configured section(s)."""
         config = LengthPenalty(
-            free_budget=5, max_cap=10, penalty_at_cap=1.0, penalty_type="OUTPUT_ONLY"
+            free_budget=5, max_cap=10, penalty_at_cap=1.0, penalty_type=penalty_type
         )
-        text = ThinkingOutputDict(thinking=" ".join(["x"] * 100), output="short")
+        text = ThinkingOutputDict(thinking=thinking, output=output)
         penalty = compute_length_penalty(text, config)
-        assert penalty == 0.0  # Short output, no penalty
-
-    def test_thinking_only_ignores_output(self):
-        """Test THINKING_ONLY doesn't count output tokens."""
-        config = LengthPenalty(
-            free_budget=5, max_cap=10, penalty_at_cap=1.0, penalty_type="THINKING_ONLY"
-        )
-        text = ThinkingOutputDict(thinking="brief", output=" ".join(["x"] * 100))
-        penalty = compute_length_penalty(text, config)
-        assert penalty == 0.0  # Short thinking, no penalty
-
-    def test_all_counts_both_sections(self):
-        """Test ALL counts both thinking and output."""
-        config = LengthPenalty(free_budget=5, max_cap=10, penalty_at_cap=1.0, penalty_type="ALL")
-        text = ThinkingOutputDict(thinking="one two", output="three four five six")
-        penalty = compute_length_penalty(text, config)
-        assert penalty > 0  # Combined length exceeds budget
+        assert expected_predicate(penalty)
 
     def test_backwards_compatible_string_input(self):
         """Test plain string input still works."""

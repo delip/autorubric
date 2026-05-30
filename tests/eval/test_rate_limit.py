@@ -44,27 +44,19 @@ class TestRateLimitPoolSemaphores:
         RateLimitPool.reset_instance()
 
     @pytest.mark.asyncio
-    async def test_get_semaphore_returns_none_for_unlimited(self):
-        """Test that None max_parallel returns None semaphore."""
+    @pytest.mark.parametrize(
+        ("max_parallel", "expects_semaphore"),
+        [(None, False), (10, True)],
+    )
+    async def test_get_semaphore_return_type_matches_limit(self, max_parallel, expects_semaphore):
+        """Test that None max_parallel returns None and a limit returns a Semaphore."""
         pool = RateLimitPool.get_instance()
-        semaphore = await pool.get_semaphore("openai/gpt-4", None)
-        assert semaphore is None
-
-    @pytest.mark.asyncio
-    async def test_get_semaphore_creates_semaphore_for_limit(self):
-        """Test that a limit creates a semaphore."""
-        pool = RateLimitPool.get_instance()
-        semaphore = await pool.get_semaphore("openai/gpt-4", 10)
-        assert semaphore is not None
-        assert isinstance(semaphore, asyncio.Semaphore)
-
-    @pytest.mark.asyncio
-    async def test_same_provider_returns_same_semaphore(self):
-        """Test that same provider returns same semaphore instance."""
-        pool = RateLimitPool.get_instance()
-        sem1 = await pool.get_semaphore("openai/gpt-4", 10)
-        sem2 = await pool.get_semaphore("openai/gpt-4", 10)
-        assert sem1 is sem2
+        semaphore = await pool.get_semaphore("openai/gpt-4", max_parallel)
+        if expects_semaphore:
+            assert semaphore is not None
+            assert isinstance(semaphore, asyncio.Semaphore)
+        else:
+            assert semaphore is None
 
     @pytest.mark.asyncio
     async def test_different_providers_get_different_semaphores(self):

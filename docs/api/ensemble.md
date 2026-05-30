@@ -28,9 +28,14 @@ grader = CriterionGrader(
 
 result = await rubric.grade(to_grade=response, grader=grader)
 
-# Ensemble-specific fields
-print(f"Score: {result.score:.3f}")
-print(f"Mean Agreement: {result.mean_agreement:.1%}")
+# Ensemble-specific fields. score / mean_agreement are `float | None`
+# (None on a failed grade or an empty rubric); guard before formatting.
+print(f"Score: {result.score:.3f}" if result.score is not None else "Score: n/a (grade failed)")
+print(
+    f"Mean Agreement: {result.mean_agreement:.1%}"
+    if result.mean_agreement is not None
+    else "Mean Agreement: n/a"
+)
 print(f"Judge Scores: {result.judge_scores}")
 
 # Per-criterion vote breakdown
@@ -48,6 +53,11 @@ for cr in result.report:
 | `weighted` | Weighted vote using judge weights |
 | `unanimous` | All judges must vote MET |
 | `any` | Any judge voting MET results in MET |
+
+These apply to **binary** criteria only and are independent of multi-choice aggregation
+(`ordinal_aggregation` / `nominal_aggregation`). Conceptually, binary `unanimous` ≡ the
+**min** over the {0, 1} option values and `any` ≡ the **max**; the ordinal analogs are the
+`min` / `max` strategies (see the [multi-choice cookbook](../cookbook/multi-choice-rubrics.md)).
 
 ---
 

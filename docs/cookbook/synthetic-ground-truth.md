@@ -201,8 +201,11 @@ result = await evaluate(
 metrics = result.compute_metrics(labeled_dataset)
 
 print(f"Agreement with GPT-4 labels:")
-print(f"  Accuracy: {metrics.criterion_accuracy:.1%}")
-print(f"  Kappa: {metrics.mean_kappa:.3f}")
+# criterion_accuracy / mean_kappa are `float | None`; render None as "n/a".
+acc = metrics.criterion_accuracy
+kappa = metrics.mean_kappa
+print(f"  Accuracy: {acc:.1%}" if acc is not None else "  Accuracy: n/a")
+print(f"  Kappa: {kappa:.3f}" if kappa is not None else "  Kappa: n/a")
 print(f"  Cost: ${result.total_completion_cost:.4f}")
 ```
 
@@ -221,13 +224,17 @@ strong_result = await evaluate(
 strong_metrics = strong_result.compute_metrics(labeled_dataset)
 production_metrics = result.compute_metrics(labeled_dataset)
 
+# criterion_accuracy / mean_kappa are `float | None`; render None as a right-aligned "n/a".
+def cell(x, width, fmt):
+    return f"{x:>{width}.{fmt}}" if x is not None else f"{'n/a':>{width}}"
+
 print("\nModel Comparison:")
 print(f"{'Model':<20} {'Accuracy':>10} {'Kappa':>10} {'Cost':>10}")
 print("-" * 50)
-print(f"{'GPT-4 (GT source)':<20} {strong_metrics.criterion_accuracy:>9.1%} "
-      f"{strong_metrics.mean_kappa:>10.3f} ${strong_result.total_completion_cost or 0:>8.4f}")
-print(f"{'GPT-4-mini (prod)':<20} {production_metrics.criterion_accuracy:>9.1%} "
-      f"{production_metrics.mean_kappa:>10.3f} ${result.total_completion_cost or 0:>8.4f}")
+print(f"{'GPT-4 (GT source)':<20} {cell(strong_metrics.criterion_accuracy, 9, '1%')} "
+      f"{cell(strong_metrics.mean_kappa, 10, '3f')} ${strong_result.total_completion_cost or 0:>8.4f}")
+print(f"{'GPT-4-mini (prod)':<20} {cell(production_metrics.criterion_accuracy, 9, '1%')} "
+      f"{cell(production_metrics.mean_kappa, 10, '3f')} ${result.total_completion_cost or 0:>8.4f}")
 ```
 
 Sample output:
@@ -532,16 +539,26 @@ async def main():
 
     metrics = result.compute_metrics(labeled_dataset)
 
+    # Metric fields are `float | None`; None when genuinely undefined (never a fake 0.0).
+    def pct(x):
+        return f"{x:.1%}" if x is not None else "n/a"
+
+    def num(x):
+        return f"{x:.3f}" if x is not None else "n/a"
+
     print(f"\nProduction Model vs GPT-4 Ground Truth:")
-    print(f"  Criterion Accuracy: {metrics.criterion_accuracy:.1%}")
-    print(f"  Cohen's Kappa: {metrics.mean_kappa:.3f}")
-    print(f"  F1 Score: {metrics.criterion_f1:.3f}")
+    print(f"  Criterion Accuracy: {pct(metrics.criterion_accuracy)}")
+    print(f"  Cohen's Kappa: {num(metrics.mean_kappa)}")
+    print(f"  F1 Score: {num(metrics.criterion_f1)}")
     print(f"  Eval Cost: ${result.total_completion_cost or 0:.4f}")
 
     # Per-criterion breakdown
     print("\nPer-Criterion Agreement:")
     for cr_metrics in metrics.per_criterion:
-        print(f"  {cr_metrics.name}: {cr_metrics.accuracy:.0%} accuracy, κ={cr_metrics.kappa:.2f}")
+        # accuracy / kappa are `float | None` per criterion.
+        acc = f"{cr_metrics.accuracy:.0%}" if cr_metrics.accuracy is not None else "n/a"
+        k = f"{cr_metrics.kappa:.2f}" if cr_metrics.kappa is not None else "n/a"
+        print(f"  {cr_metrics.name}: {acc} accuracy, κ={k}")
 
 
 if __name__ == "__main__":

@@ -115,6 +115,11 @@ class Grader(ABC):
         report = await self.aggregate(judge_results, normalize=self.normalize)
 
         if self.length_penalty is not None:
+            # A grade-FAILURE has no score (errored/empty report): there is nothing to
+            # penalize, so return it unchanged rather than subtracting from None.
+            if report.score is None:
+                return report
+
             # Normalize to_grade to dict format for penalty calculation
             to_grade_normalized = normalize_to_grade_input(to_grade)
 

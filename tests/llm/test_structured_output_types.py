@@ -12,24 +12,22 @@ from autorubric.types import (
 class TestCriterionJudgment:
     """Tests for CriterionJudgment structured output type."""
 
-    def test_valid_met_judgment(self):
-        """CriterionJudgment accepts valid MET status."""
+    @pytest.mark.parametrize(
+        ("status", "explanation"),
+        [
+            (CriterionVerdict.MET, "The requirement is satisfied."),
+            (CriterionVerdict.UNMET, "The requirement is not satisfied."),
+        ],
+    )
+    def test_valid_judgment(self, status, explanation):
+        """CriterionJudgment accepts valid MET/UNMET status with default reasoning None."""
         judgment = CriterionJudgment(
-            criterion_status=CriterionVerdict.MET,
-            explanation="The requirement is satisfied.",
+            criterion_status=status,
+            explanation=explanation,
         )
-        assert judgment.criterion_status == CriterionVerdict.MET
-        assert judgment.explanation == "The requirement is satisfied."
+        assert judgment.criterion_status == status
+        assert judgment.explanation == explanation
         assert judgment.reasoning is None
-
-    def test_valid_unmet_judgment(self):
-        """CriterionJudgment accepts valid UNMET status."""
-        judgment = CriterionJudgment(
-            criterion_status=CriterionVerdict.UNMET,
-            explanation="The requirement is not satisfied.",
-        )
-        assert judgment.criterion_status == CriterionVerdict.UNMET
-        assert judgment.explanation == "The requirement is not satisfied."
 
     def test_with_reasoning(self):
         """CriterionJudgment can include optional reasoning."""
