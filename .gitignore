@@ -1,3 +1,11 @@
+health_bench/raw_data/*.json
+health_bench/raw_data/*.jsonl
+health_bench/autorubric_dataset/*.json
+health_bench/autorubric_dataset/*.jsonl
+
+# local clone of openai/simple-evals (see health_bench/download_raw_data.py)
+simple-evals/
+
 # these can be generated
 examples/data/research-plan-gen/*.json
 
