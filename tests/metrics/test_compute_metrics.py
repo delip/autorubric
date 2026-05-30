@@ -363,6 +363,22 @@ def create_single_criterion_dataset(ground_truths: list[list[CriterionVerdict]])
     return dataset
 
 
+def test_negative_kappa_interpretation_uses_canonical_label():
+    """P3-2: per-criterion kappa<0 uses the single canonical KappaResult mapping
+    ('poor (worse than chance)'), not the old _compute._interpret_kappa '"poor"'."""
+    MET, UNMET = CriterionVerdict.MET, CriterionVerdict.UNMET
+    # Perfectly anti-correlated pred vs ground truth → Cohen's kappa = -1.0.
+    dataset = create_single_criterion_dataset([[MET], [UNMET], [MET], [UNMET]])
+    predictions = [[UNMET], [MET], [UNMET], [MET]]
+    eval_result = create_mock_eval_result(dataset, predictions)
+
+    metrics = compute_metrics(eval_result, dataset)
+    cm = metrics.per_criterion[0]
+    assert cm.kappa is not None and cm.kappa < 0
+    # Fails today ("poor"); after P3-2 the per-criterion path uses the canonical label.
+    assert cm.kappa_interpretation == "poor (worse than chance)"
+
+
 class TestComputeMetricsCannotAssess:
     """Tests for CANNOT_ASSESS handling, including the as_category mode (Issue #1)."""
 

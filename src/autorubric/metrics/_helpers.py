@@ -280,13 +280,16 @@ def extract_all_verdicts_from_report(
         - None if extraction failed
     """
     if report.report is None:
-        # No report available - return defaults based on criterion type
-        result = []
+        # No report available — binary gets the conservative UNMET default; multi-choice gets
+        # None (extraction failed), NOT a fabricated option 0. A real option index would bypass
+        # the consumer's None→NA normalization and be miscounted as a genuine vote (T2-B / the
+        # "never fabricate a value" principle); None is routed to NA downstream.
+        result: list[CriterionVerdict | int | None] = []
         for criterion in criteria:
             if criterion.is_binary:
                 result.append(CriterionVerdict.UNMET)
             else:
-                result.append(0)  # Default to first option
+                result.append(None)
         return result
 
     verdicts: list[CriterionVerdict | int | None] = []

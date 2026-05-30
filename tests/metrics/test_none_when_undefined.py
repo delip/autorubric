@@ -13,7 +13,7 @@ import pytest
 
 from autorubric.dataset import RubricDataset
 from autorubric.eval import EvalResult, EvalTimingStats, ItemResult
-from autorubric.metrics import compute_metrics
+from autorubric.metrics import compute_metrics, extract_all_verdicts_from_report
 from autorubric.metrics._compute import (
     _compute_adjacent_accuracy,
     _compute_bootstrap_ci,
@@ -280,6 +280,23 @@ def test_nominal_empty_data_metrics_none_counts_zero():
     assert m.confusion_matrix == [[0, 0, 0], [0, 0, 0], [0, 0, 0]]
 
 
+def test_ordinal_empty_data_fleiss_kappa_from_matrix():
+    """P3-3: with 0 GT-paired samples, fleiss_kappa is still computed from the (GT-independent)
+    inter-judge fleiss_matrix — matching binary, not hardcoded None."""
+    crit = _ordinal_criterion()
+    m = _compute_ordinal_criterion_metrics([], [], crit, 0, fleiss_matrix=[[2, 0, 0], [0, 2, 0]])
+    assert m.n_samples == 0  # still empty on the GT-paired axis
+    assert m.fleiss_kappa == pytest.approx(1.0)  # fails today: hardcoded None
+
+
+def test_nominal_empty_data_fleiss_kappa_from_matrix():
+    """P3-3 (nominal analog)."""
+    crit = _nominal_criterion()
+    m = _compute_nominal_criterion_metrics([], [], crit, 0, fleiss_matrix=[[2, 0, 0], [0, 2, 0]])
+    assert m.n_samples == 0
+    assert m.fleiss_kappa == pytest.approx(1.0)  # fails today: hardcoded None
+
+
 def test_per_option_metrics_empty_precision_recall_f1_none_support_counts_real():
     crit = _ordinal_criterion()
     opts = _compute_per_option_metrics([], [], crit)
@@ -503,6 +520,38 @@ def test_bootstrap_ci_single_class_kappa_none_summary_ok():
     assert metrics.bootstrap.kappa_ci is None
     # summary() must None-guard the CI lines.
     assert isinstance(metrics.summary(), str)
+
+
+# =============================================================================
+# Multi-choice extraction failure → None (not a fabricated option 0) — P3-4
+# =============================================================================
+
+
+def test_extract_no_report_multichoice_returns_none_not_zero():
+    """A missing report (``report.report is None``, e.g. the grader's score-less "No judge
+    results to aggregate" report) must yield ``None`` for multi-choice criteria — NOT a
+    fabricated option ``0``. A fabricated ``0`` bypasses the None→NA normalization
+    (``_needs_na``: ``0 >= n_author`` and ``0 is None`` both False) and is miscounted as a
+    genuine option-0 vote, corrupting per-criterion kappa / per-option support / NAStats.
+    Binary keeps the conservative ``UNMET`` default (the consumer maps it the same either way).
+    """
+    binary = Criterion(name="acc", weight=10.0, requirement="accurate")
+    multichoice = Criterion(
+        name="sat",
+        weight=10.0,
+        requirement="satisfaction",
+        scale_type="ordinal",
+        options=[
+            {"label": "low", "value": 0.0},
+            {"label": "high", "value": 1.0},
+        ],
+    )
+    report = EvaluationReport(
+        score=None, raw_score=None, report=None, error="No judge results to aggregate"
+    )
+    result = extract_all_verdicts_from_report(report, [binary, multichoice])
+    # Fails today: [CriterionVerdict.UNMET, 0]. After P3-4: [CriterionVerdict.UNMET, None].
+    assert result == [CriterionVerdict.UNMET, None]
 
 
 # =============================================================================

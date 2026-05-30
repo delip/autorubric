@@ -80,25 +80,6 @@ if TYPE_CHECKING:
     from ..eval import EvalResult
 
 
-def _interpret_kappa(kappa: float) -> str:
-    """Return human-readable interpretation of kappa value.
-
-    Based on Landis & Koch (1977) guidelines.
-    """
-    if kappa < 0:
-        return "poor"
-    elif kappa < 0.21:
-        return "slight"
-    elif kappa < 0.41:
-        return "fair"
-    elif kappa < 0.61:
-        return "moderate"
-    elif kappa < 0.81:
-        return "substantial"
-    else:
-        return "almost perfect"
-
-
 def _interpret_correlation(r: float) -> str:
     """Return human-readable interpretation of correlation coefficient."""
     abs_r = abs(r)
@@ -452,7 +433,9 @@ def _compute_ordinal_criterion_metrics(
             weighted_kappa=None,
             kappa_interpretation="undefined",
             krippendorff_alpha=krippendorff_alpha,
-            fleiss_kappa=None,
+            # Inter-judge fleiss is GT-independent: compute from the passed matrix even with
+            # 0 GT-paired samples, matching the binary empty branch (already None-guarded).
+            fleiss_kappa=_compute_fleiss_kappa(fleiss_matrix),
             spearman=CorrelationResult(
                 coefficient=None,
                 p_value=None,
@@ -516,7 +499,9 @@ def _compute_ordinal_criterion_metrics(
         adjacent_accuracy=adjacent_accuracy,
         weighted_kappa=weighted_kappa,
         kappa_interpretation=(
-            _interpret_kappa(weighted_kappa) if weighted_kappa is not None else "undefined"
+            KappaResult.interpret_kappa(weighted_kappa)
+            if weighted_kappa is not None
+            else "undefined"
         ),
         krippendorff_alpha=krippendorff_alpha,
         fleiss_kappa=fleiss_kappa,
@@ -567,7 +552,9 @@ def _compute_nominal_criterion_metrics(
             kappa=None,
             kappa_interpretation="undefined",
             krippendorff_alpha=krippendorff_alpha,
-            fleiss_kappa=None,
+            # Inter-judge fleiss is GT-independent: compute from the passed matrix even with
+            # 0 GT-paired samples, matching the binary empty branch (already None-guarded).
+            fleiss_kappa=_compute_fleiss_kappa(fleiss_matrix),
             per_option=[],
             confusion_matrix=[[0] * n_options for _ in range(n_options)],
             option_labels=option_labels,
@@ -598,7 +585,9 @@ def _compute_nominal_criterion_metrics(
         n_options=n_options,
         exact_accuracy=float(exact_accuracy),
         kappa=kappa,
-        kappa_interpretation=(_interpret_kappa(kappa) if kappa is not None else "undefined"),
+        kappa_interpretation=(
+            KappaResult.interpret_kappa(kappa) if kappa is not None else "undefined"
+        ),
         krippendorff_alpha=krippendorff_alpha,
         fleiss_kappa=fleiss_kappa,
         per_option=per_option,
@@ -1533,7 +1522,7 @@ def compute_metrics(
                     f1=float(c_f1),
                     kappa=c_kappa,
                     kappa_interpretation=(
-                        _interpret_kappa(c_kappa) if c_kappa is not None else "undefined"
+                        KappaResult.interpret_kappa(c_kappa) if c_kappa is not None else "undefined"
                     ),
                     krippendorff_alpha=krippendorff_alpha,
                     fleiss_kappa=fleiss_kappa,

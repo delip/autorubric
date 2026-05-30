@@ -1041,8 +1041,10 @@ class FewShotConfig:
 
     Attributes:
         n_examples: Total number of examples to include per criterion.
-        balance_verdicts: If True, attempt to balance MET/UNMET/CANNOT_ASSESS.
-            If False, randomly sample without balancing.
+        balance_verdicts: If True, attempt to balance examples across label classes — verdicts
+            (MET/UNMET/CANNOT_ASSESS) for binary criteria, option indices for multi-choice
+            criteria. If False, randomly sample without balancing. (The name is historical; the
+            balancing logic is class-agnostic and applies to both criterion types.)
         include_reason: If True, include the reason/explanation in examples.
             Note: Ground truth datasets typically don't have reasons.
         seed: Random seed for reproducible sampling.
