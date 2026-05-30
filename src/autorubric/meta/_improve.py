@@ -33,7 +33,7 @@ from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from rich.console import Console
 from rich.panel import Panel
@@ -53,6 +53,8 @@ from autorubric.dataset import RubricDataset
 from autorubric.graders import CriterionGrader
 from autorubric.graders.criterion_grader import JudgeSpec
 from autorubric.llm import LLMClient, LLMConfig
+from autorubric.metrics import ConfusionMatrix
+from autorubric.metrics._types import CannotAssessMode
 from autorubric.rubric import Rubric
 from autorubric.types import (
     CriterionVerdict,
@@ -111,7 +113,20 @@ class CriterionExemplar:
 
 @dataclass
 class CriterionErrorReport:
-    """Per-criterion error analysis from held-out grading."""
+    """Per-criterion error analysis from held-out grading.
+
+    Attributes:
+        kappa: Cohen's kappa between judge and ground-truth MET/UNMET labels over
+            the usable pairs, or None when undefined (e.g. a constant array). Never
+            a fabricated 0.0.
+        coverage: Fraction of ground-truth-paired items that yielded a usable
+            (non-abstained) verdict, over the raw pre-exclusion denominator, or None
+            when there were no paired items.
+        ca_rate: Fraction of ground-truth-paired items the judge abstained on
+            (CANNOT_ASSESS), over the same raw denominator, or None.
+        confusion_matrix: 2x2 MET/UNMET confusion matrix over the usable verdicts,
+            or None when there were no usable samples.
+    """
 
     criterion_index: int
     criterion_name: str
@@ -121,16 +136,30 @@ class CriterionErrorReport:
     false_negative_rate: float
     disagreement_exemplars: list[CriterionExemplar]
     agreement_exemplars: list[CriterionExemplar]
+    kappa: float | None = None
+    coverage: float | None = None
+    ca_rate: float | None = None
+    confusion_matrix: ConfusionMatrix | None = None
 
 
 @dataclass
 class HeldOutValidationResult:
-    """Result from held-out validation with per-criterion diagnostics."""
+    """Result from held-out validation with per-criterion diagnostics.
+
+    Attributes:
+        cannot_assess: How abstentions (CANNOT_ASSESS) were handled when pairing
+            judge verdicts against ground truth ("exclude" by default).
+        mean_coverage: None-skipping mean of the per-criterion coverage values.
+        mean_ca_rate: None-skipping mean of the per-criterion abstention rates.
+    """
 
     mean_accuracy: float
     per_criterion: list[CriterionErrorReport]
     total_cost: float | None
     item_reports: list[EnsembleEvaluationReport]
+    cannot_assess: CannotAssessMode = "exclude"
+    mean_coverage: float | None = None
+    mean_ca_rate: float | None = None
 
 
 @dataclass
@@ -221,6 +250,10 @@ class ImprovementConfig:
         max_exemplars_per_criterion: Max disagreement exemplars per criterion
             in the held-out revision prompt.
         held_out_min_accuracy: Convergence threshold for held_out strategy.
+        cannot_assess: How abstentions are handled in held-out validation when
+            pairing judge verdicts against ground truth. "exclude" (default) drops
+            abstained pairs; "as_unmet" folds CANNOT_ASSESS into UNMET; "as_category"
+            keeps it as a distinct label.
         history_window: Number of recent iterations to include in revision prompt.
         reject_agreement_regression: Whether to reject revisions that decrease
             validation reliability.
@@ -257,6 +290,7 @@ class ImprovementConfig:
     plateau_patience: int = 2
     max_exemplars_per_criterion: int = 3
     held_out_min_accuracy: float = 0.90
+    cannot_assess: CannotAssessMode = "exclude"
 
     history_window: int = 3
     reject_agreement_regression: bool = True
@@ -1223,6 +1257,7 @@ async def validate_held_out(
     task_prompt: str | None = None,
     *,
     max_exemplars_per_criterion: int = 3,
+    cannot_assess: CannotAssessMode = "exclude",
     on_item_complete: Callable[[], None] | None = None,
     _capture: list | None = None,
 ) -> HeldOutValidationResult:
@@ -1234,23 +1269,40 @@ async def validate_held_out(
         grader: Grader configured from ``eval_llm``.
         task_prompt: Optional task prompt for grading context.
         max_exemplars_per_criterion: Max disagreement exemplars per criterion.
+        cannot_assess: How judge abstentions are paired against ground truth.
+            "exclude" (default) drops abstained pairs from the confusion tallies;
+            "as_unmet" folds CANNOT_ASSESS into UNMET; "as_category" keeps it as a
+            distinct label. Coverage and the abstention rate are always measured over
+            the raw, pre-exclusion per-criterion denominator (numerically aligned
+            with ``CoverageStats``).
         on_item_complete: Callback invoked after each item is graded.
         _capture: When provided, per-item results are appended for artifact persistence.
 
     Returns:
         HeldOutValidationResult with per-criterion error analysis.
     """
+    from autorubric.metrics._compute import _kappa_or_none, _mean_or_none
     from autorubric.metrics._helpers import extract_verdicts_from_report, filter_cannot_assess
 
     num_criteria = len(rubric.rubric)
     item_reports: list[EnsembleEvaluationReport] = []
     total_cost: float = 0.0
 
-    # Per-criterion confusion tallies
+    # Per-criterion confusion tallies (over usable, post-handling pairs)
     tp = [0] * num_criteria
     fp = [0] * num_criteria
     tn = [0] * num_criteria
     fn = [0] * num_criteria
+
+    # Raw (pre-exclusion) coverage/abstention tallies, numerically aligned with
+    # CoverageStats: n_paired counts items with a ground-truth label for the
+    # criterion; n_ca counts judge abstentions (CANNOT_ASSESS).
+    n_paired = [0] * num_criteria
+    n_ca = [0] * num_criteria
+
+    # Per-criterion MET/UNMET label vectors (usable pairs only) for Cohen's kappa.
+    kappa_gt: list[list[int]] = [[] for _ in range(num_criteria)]
+    kappa_pred: list[list[int]] = [[] for _ in range(num_criteria)]
 
     # Collect exemplars per criterion
     all_exemplars: list[list[CriterionExemplar]] = [[] for _ in range(num_criteria)]
@@ -1277,8 +1329,18 @@ async def validate_held_out(
                 gt_verdicts.append(CriterionVerdict(gt_val))
 
         for c_idx in range(num_criteria):
+            # Raw denominator: this item contributes one ground-truth-paired
+            # observation for the criterion, regardless of how the abstention is
+            # later handled.
+            n_paired[c_idx] += 1
+            if (
+                llm_verdicts[c_idx] == CriterionVerdict.CANNOT_ASSESS
+                or gt_verdicts[c_idx] == CriterionVerdict.CANNOT_ASSESS
+            ):
+                n_ca[c_idx] += 1
+
             filtered_llm, filtered_gt = filter_cannot_assess(
-                [llm_verdicts[c_idx]], [gt_verdicts[c_idx]]
+                [llm_verdicts[c_idx]], [gt_verdicts[c_idx]], mode=cannot_assess
             )
             if not filtered_llm:
                 continue
@@ -1287,6 +1349,9 @@ async def validate_held_out(
             gt_v = filtered_gt[0]
             is_met_llm = llm_v == CriterionVerdict.MET
             is_met_gt = gt_v == CriterionVerdict.MET
+
+            kappa_gt[c_idx].append(1 if is_met_gt else 0)
+            kappa_pred[c_idx].append(1 if is_met_llm else 0)
 
             if is_met_llm and is_met_gt:
                 tp[c_idx] += 1
@@ -1332,6 +1397,28 @@ async def validate_held_out(
         fpr = fp[c_idx] / (fp[c_idx] + tn[c_idx]) if (fp[c_idx] + tn[c_idx]) > 0 else 0.0
         fnr = fn[c_idx] / (fn[c_idx] + tp[c_idx]) if (fn[c_idx] + tp[c_idx]) > 0 else 0.0
 
+        # Cohen's kappa over the usable pairs; None when undefined (e.g. a constant
+        # array) — never a fabricated 0.0.
+        kappa = _kappa_or_none(kappa_gt[c_idx], kappa_pred[c_idx]) if total > 0 else None
+
+        # Coverage and abstention rate over the RAW (pre-exclusion) denominator,
+        # numerically aligned with CoverageStats. None when nothing was paired.
+        raw = n_paired[c_idx]
+        coverage = total / raw if raw > 0 else None
+        ca_rate = n_ca[c_idx] / raw if raw > 0 else None
+
+        # 2x2 MET/UNMET confusion matrix (rows=true, cols=pred) over the usable
+        # verdicts; None when there are no usable samples so a constructed all-zero
+        # matrix never masquerades as data.
+        confusion_matrix = (
+            ConfusionMatrix(
+                matrix=[[tp[c_idx], fn[c_idx]], [fp[c_idx], tn[c_idx]]],
+                labels=["MET", "UNMET"],
+            )
+            if total > 0
+            else None
+        )
+
         criterion = rubric.rubric[c_idx]
 
         # Sort disagreements by criterion weight (higher weight = higher impact)
@@ -1352,17 +1439,27 @@ async def validate_held_out(
                 false_negative_rate=fnr,
                 disagreement_exemplars=disagreements,
                 agreement_exemplars=agreements,
+                kappa=kappa,
+                coverage=coverage,
+                ca_rate=ca_rate,
+                confusion_matrix=confusion_matrix,
             )
         )
 
     accuracies = [cr.accuracy for cr in per_criterion if cr.n_samples > 0]
     mean_accuracy = sum(accuracies) / len(accuracies) if accuracies else 1.0
 
+    mean_coverage = _mean_or_none([cr.coverage for cr in per_criterion])
+    mean_ca_rate = _mean_or_none([cr.ca_rate for cr in per_criterion])
+
     return HeldOutValidationResult(
         mean_accuracy=mean_accuracy,
         per_criterion=per_criterion,
         total_cost=total_cost if total_cost > 0 else None,
         item_reports=item_reports,
+        cannot_assess=cannot_assess,
+        mean_coverage=mean_coverage,
+        mean_ca_rate=mean_ca_rate,
     )
 
 
@@ -1781,6 +1878,9 @@ def _serialize_iteration(iter_result: IterationResult) -> dict:
         held_out_data = {
             "mean_accuracy": ho.mean_accuracy,
             "total_cost": ho.total_cost,
+            "cannot_assess": ho.cannot_assess,
+            "mean_coverage": ho.mean_coverage,
+            "mean_ca_rate": ho.mean_ca_rate,
             "per_criterion": [
                 {
                     "criterion_index": cr.criterion_index,
@@ -1789,6 +1889,14 @@ def _serialize_iteration(iter_result: IterationResult) -> dict:
                     "accuracy": cr.accuracy,
                     "false_positive_rate": cr.false_positive_rate,
                     "false_negative_rate": cr.false_negative_rate,
+                    "kappa": cr.kappa,
+                    "coverage": cr.coverage,
+                    "ca_rate": cr.ca_rate,
+                    "confusion_matrix": (
+                        cr.confusion_matrix.model_dump(mode="json")
+                        if cr.confusion_matrix is not None
+                        else None
+                    ),
                     "num_disagreements": len(cr.disagreement_exemplars),
                     "num_agreements": len(cr.agreement_exemplars),
                 }
@@ -2424,6 +2532,7 @@ class ImprovementRunner:
                 validation_grader,
                 task_prompt=self.task_prompt,
                 max_exemplars_per_criterion=config.max_exemplars_per_criterion,
+                cannot_assess=config.cannot_assess,
                 on_item_complete=(progress.advance if progress else None),
                 _capture=validation_capture,
             )
@@ -2663,7 +2772,12 @@ def _build_config(
     When ``config`` is None, creates a new config from kwargs (requires
     eval_llm and revision_llm).
     """
-    overrides_map = {
+    # The override values are a deliberately heterogeneous mix of unrelated field
+    # types (configs, datasets, literals, numbers, paths, bools). They are matched
+    # to the dataclass fields by name at the ``**overrides`` splat below, which the
+    # type checker cannot verify positionally; typing the dict as ``dict[str, Any]``
+    # reflects that genuine dynamism honestly.
+    overrides_map: dict[str, Any] = {
         "eval_llm": eval_llm,
         "revision_llm": revision_llm,
         "validation_data": validation_data,

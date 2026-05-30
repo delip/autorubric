@@ -801,9 +801,12 @@ def _rendering_metrics(criterion_type: str):
 
 @pytest.mark.parametrize("criterion_type", ["binary", "ordinal", "nominal"])
 def test_summary_and_dataframe_surface_agreement(criterion_type):
-    """The (type-agnostic) rendering helpers surface both agreement stats across criterion
-    types: summary() contains the 'Kripp-α' AND 'Fleiss' column headers, and to_dataframe()
-    carries krippendorff_alpha + fleiss_kappa columns with the criterion row ~1.0."""
+    """The rendering surfaces inter-judge agreement type-aware. On binary/nominal data
+    Krippendorff's nominal α equals Fleiss' κ up to a finite-sample correction, so α is the
+    single primary statistic: summary() shows the 'Kripp-α' column and drops the bare Fleiss
+    data column (the explanatory note may still name Fleiss), and the criterion-row bare
+    ``fleiss_kappa`` value stays None in to_dataframe(). On ordinal data α is distance-aware
+    while Fleiss is nominal (different geometry), so both are kept."""
     pytest.importorskip("pandas")
     metrics = _rendering_metrics(criterion_type)
     # Guard: the ensemble path actually populated both agreement stats.
@@ -812,14 +815,26 @@ def test_summary_and_dataframe_surface_agreement(criterion_type):
 
     summary = metrics.summary()
     assert "Kripp-α" in summary
-    assert "Fleiss" in summary
 
     df = metrics.to_dataframe()
     assert "krippendorff_alpha" in df.columns
     assert "fleiss_kappa" in df.columns
     crit_row = df[df["level"] == "criterion"].iloc[0]
     assert crit_row["krippendorff_alpha"] == pytest.approx(1.0)
-    assert crit_row["fleiss_kappa"] == pytest.approx(1.0)
+
+    if criterion_type == "ordinal":
+        # Ordinal keeps both — different geometry.
+        assert "Fleiss" in summary
+        assert crit_row["fleiss_kappa"] == pytest.approx(1.0)
+    else:
+        # Binary/nominal: bare Fleiss column dropped (α primary). It is absent from the
+        # Kripp-α data line, and the criterion-row bare fleiss_kappa value is None.
+        import pandas as pd
+
+        for line in summary.splitlines():
+            if "Kripp-α" in line:
+                assert "Fleiss" not in line
+        assert pd.isna(crit_row["fleiss_kappa"])
 
 
 def test_summary_omits_agreement_columns_for_single_judge():
@@ -829,8 +844,16 @@ def test_summary_omits_agreement_columns_for_single_judge():
     )
     assert metrics.per_criterion[0].krippendorff_alpha is None
     summary = metrics.summary()
-    assert "Kripp-α" not in summary
-    assert "Fleiss" not in summary
+    # No inter-judge agreement column is appended to the per-criterion table. The aggregate
+    # "Mean Kripp-α (macro)" line always renders (as 'n/a' here), so check that no
+    # per-criterion data row carries a Kripp-α cell, and no bare Fleiss column appears.
+    in_breakdown = False
+    for line in summary.splitlines():
+        if line.startswith("Per-Criterion Breakdown:"):
+            in_breakdown = True
+        if in_breakdown:
+            assert "Kripp-α" not in line
+            assert "Fleiss" not in line
 
 
 def test_to_dataframe_agreement_none_for_single_judge():

@@ -11,6 +11,7 @@
 - Filter `error is not None` results in training pipelines
 - Rate limiting via `LLMConfig.max_parallel_requests` (per-provider semaphore)
 - Multi-choice criteria get a guaranteed abstain option by default (`CriterionGrader(auto_na_option=True)`, auto-injected NA — binary-CANNOT_ASSESS parity; see [Multi-Choice Criteria](multi-choice.md)); set `auto_na_option=False` for forced-choice. Never strips an author NA option
+- **Single-source metric-redundancy notes.** The conflation / cluster / different-geometry / κ−φ-gap notes are rendered **only** in `MetricsResult.summary()` / `to_dataframe()` and the metric field docstrings (`metrics/_types.py`); they are never copied into the Rich/HTML report paths (`meta/_display.py`). On binary/nominal data Krippendorff's α is the single primary inter-judge statistic and the bare Fleiss column is dropped (they coincide up to a finite-sample correction); ordinal keeps both with a different-geometry note. See [Metrics](metrics.md) (Rendering) for the full surface
 
 ## Public Exports
 
