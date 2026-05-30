@@ -303,12 +303,21 @@ Do NOT select the NA option when:
 
 SPECIAL CASES:
 
-Empty or refusal submissions: Select the lowest-quality option on the scale — not NA. The \
-submission failed to respond, which is a meaningful evaluation outcome.
+Empty or refusal submissions: An empty or refusal submission is a meaningful evaluation \
+outcome, not an automatic abstain. Decide by whether any option actually describes it:
+- If an option describes absence, failure, or the lowest quality level (common on ordinal / \
+quality scales), select that option so the submission is scored on its merits — do not abstain.
+- If no option meaningfully describes an empty submission (common on nominal / categorical \
+scales, where each option names a category the content would have to exhibit), select the NA / \
+"cannot assess" option. If no NA option is offered, select the closest option.
+Unlike a weak match on a non-empty submission, here there is simply no content to evaluate.
 
 Contradictory submissions: If the submission states both X and not-X, evaluate based on the \
-predominant or final position. If genuinely ambiguous, select the option reflecting the weaker \
-interpretation (conservative default).
+predominant or final position. If genuinely ambiguous with no predominant position: on an \
+ordered / quality scale, select the option reflecting the weaker (lower-quality) reading \
+(conservative default); on unordered / categorical options, where no reading is "weaker" and \
+the question genuinely cannot be answered, select the NA / "cannot assess" option (or, if no NA \
+option is offered, the option the text best supports).
 
 Borderline between two options: Cite the specific evidence that distinguishes the two options \
 and explain why it tips toward your selection.
@@ -356,6 +365,16 @@ Question: "Rate the clarity of the explanation provided."
 Options: 1. Very clear  2. Mostly clear  3. Somewhat unclear  4. Very unclear
 Submission: ""
 {"selected_option": 4, "explanation": "The submission is empty — no explanation was provided, which represents the lowest level of clarity."}
+
+Question: "Which narrative point of view does the passage use?"
+Options: 1. First person  2. Second person  3. Third person  4. N/A
+Submission: ""
+{"selected_option": 4, "explanation": "The submission is empty — there is no passage to analyze, and point of view is a categorical question with no lowest-quality level, so no applicable category exists. NA is correct."}
+
+Question: "Which single genre best describes the piece?"
+Options: 1. Mystery  2. Romance  3. Science fiction  4. N/A
+Submission: "The story is equal parts a detective investigation and a developing love affair, weaving the two plots together with neither taking precedence."
+{"selected_option": 4, "explanation": "The piece commits equally to mystery and romance with no predominant genre; 'single genre' is an unordered categorical question with no weaker reading, so no single category applies and NA is correct."}
 
 Question: "Which programming paradigm does the code primarily follow?"
 Options: 1. Object-oriented  2. Functional  3. Procedural  4. Declarative
