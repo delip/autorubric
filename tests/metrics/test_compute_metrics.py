@@ -216,8 +216,14 @@ class TestComputeMetricsOptions:
             )
             assert metrics.bootstrap is not None
             assert metrics.bootstrap.n_bootstrap == 100
+            # T8-A: CIs now come from an item-level resample (was binary pair-flattening),
+            # so the exact endpoints differ from before; the bracket invariant still holds,
+            # and accuracy_ci<-criterion_accuracy, kappa_ci<-mean_kappa.
             assert metrics.bootstrap.accuracy_ci[0] <= metrics.criterion_accuracy
             assert metrics.bootstrap.accuracy_ci[1] >= metrics.criterion_accuracy
+            assert metrics.bootstrap.kappa_ci is not None
+            assert metrics.bootstrap.kappa_ci[0] <= metrics.mean_kappa
+            assert metrics.bootstrap.kappa_ci[1] >= metrics.mean_kappa
         else:
             metrics = compute_metrics(eval_result, dataset, bootstrap=False)
             assert metrics.bootstrap is None

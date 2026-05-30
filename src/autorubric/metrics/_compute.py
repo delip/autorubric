@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import math
 import warnings
-from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
@@ -664,59 +663,83 @@ def _compute_correlation(x: list[float], y: list[float], method: str) -> Correla
 
 
 def _compute_bootstrap_ci(
-    y_true: Sequence[int] | Sequence[str],
-    y_pred: Sequence[int] | Sequence[str],
+    per_criterion_pred: list[list[CriterionVerdict | int]],
+    per_criterion_true: list[list[CriterionVerdict | int]],
+    criterion_types: list[str],
+    effective_criteria: list[Criterion],
+    cannot_assess: CannotAssessMode,
+    na_mode: NAMode,
     true_scores: list[float],
     pred_scores: list[float],
     n_bootstrap: int,
     confidence_level: float,
     seed: int | None,
 ) -> BootstrapResults:
-    """Compute bootstrap confidence intervals for key metrics."""
+    """Bootstrap confidence intervals over an ITEM-LEVEL resample, for ANY rubric type
+    (binary / multi-choice / mixed).
+
+    Two independent resample axes (we report only marginal CIs):
+
+    - A verdict-item axis drives ``accuracy_ci`` (← ``criterion_accuracy``) and ``kappa_ci``
+      (← ``mean_kappa``, the mean of per-criterion kappas, ordinal quadratic-weighted). Each
+      replicate resamples items with a single shared index applied across all criteria, then
+      recomputes those statistics via the SAME single-source helpers
+      (``_per_criterion_kappas`` + ``_criterion_level_scalars``), so the CIs track the reported
+      point estimates and cannot drift.
+    - An independent score-item axis drives ``rmse_ci`` over the per-item cumulative scores
+      (the scored subset; ``rmse`` is defined for n≥1, so a single scored item yields a
+      degenerate ``(v, v)`` interval rather than ``None``).
+
+    Each CI is ``None`` when its axis is empty or every resample was degenerate (single-class
+    → kappa undefined) — never a fabricated ``(0.0, 0.0)``. ``effective_criteria`` must be the
+    option set fixed ONCE on the full sample; re-deriving it per resample would jitter the NA
+    index space and the ordinal weight matrix.
+    """
     rng = np.random.default_rng(seed)
-    n = len(y_true)
+    n_items = len(per_criterion_pred[0]) if per_criterion_pred else 0
+    n_scores = len(true_scores)
 
-    if n == 0:
-        # No samples → every CI is genuinely undefined (None), never a fake (0.0, 0.0).
-        return BootstrapResults(
-            accuracy_ci=None,
-            kappa_ci=None,
-            rmse_ci=None,
-            n_bootstrap=n_bootstrap,
-            confidence_level=confidence_level,
-        )
+    true_scores_arr = np.asarray(true_scores, dtype=float)
+    pred_scores_arr = np.asarray(pred_scores, dtype=float)
 
-    y_true_arr = np.array(y_true)
-    y_pred_arr = np.array(y_pred)
-    true_scores_arr = np.array(true_scores)
-    pred_scores_arr = np.array(pred_scores)
+    acc_samples: list[float] = []
+    kappa_samples: list[float] = []
+    rmse_samples: list[float] = []
 
-    acc_samples = []
-    kappa_samples = []
-    rmse_samples = []
+    with warnings.catch_warnings():
+        # Single-class resamples are an expected, handled part of bootstrapping (kappa -> None
+        # via _kappa_or_none). Suppress the resulting spurious sklearn warnings so the loop does
+        # not flood output, mirroring the local scipy-constant suppression elsewhere here.
+        warnings.filterwarnings("ignore", message="A single label was found")
+        warnings.filterwarnings("ignore", message="invalid value encountered")
+        for _ in range(n_bootstrap):
+            # Verdict-item axis: resample items (shared index across all criteria), then
+            # recompute the SAME criterion_accuracy + mean_kappa the aggregate reports.
+            if n_items > 0:
+                idx_v = rng.choice(n_items, size=n_items, replace=True)
+                rs_pred = [[col[i] for i in idx_v] for col in per_criterion_pred]
+                rs_true = [[col[i] for i in idx_v] for col in per_criterion_true]
+                kappas = _per_criterion_kappas(
+                    rs_pred, rs_true, criterion_types, effective_criteria, cannot_assess, na_mode
+                )
+                accuracy, _p, _r, _f1, mean_kappa = _criterion_level_scalars(
+                    rs_pred, rs_true, criterion_types, cannot_assess, precomputed_kappas=kappas
+                )
+                # Append only defined values; a degenerate replicate contributes nothing (so an
+                # all-degenerate axis → empty samples → None CI, never a fabricated 0.0).
+                if accuracy is not None:
+                    acc_samples.append(accuracy)
+                if mean_kappa is not None:
+                    kappa_samples.append(mean_kappa)
 
-    for _ in range(n_bootstrap):
-        # Sample indices with replacement
-        idx = rng.choice(n, size=n, replace=True)
-
-        # Criterion-level metrics
-        yt = y_true_arr[idx]
-        yp = y_pred_arr[idx]
-
-        if len(np.unique(yt)) > 1 and len(np.unique(yp)) > 1:
-            acc_samples.append(accuracy_score(yt, yp))
-            try:
-                kappa_samples.append(cohen_kappa_score(yt, yp))
-            except Exception:
-                pass
-        else:
-            acc_samples.append(accuracy_score(yt, yp))
-
-        # Score-level metrics
-        score_idx = rng.choice(len(true_scores), size=len(true_scores), replace=True)
-        ts = true_scores_arr[score_idx]
-        ps = pred_scores_arr[score_idx]
-        rmse_samples.append(np.sqrt(mean_squared_error(ts, ps)))
+            # Score-item axis (independent draw): resample per-item scores for RMSE.
+            if n_scores > 0:
+                idx_s = rng.choice(n_scores, size=n_scores, replace=True)
+                rmse_samples.append(
+                    float(
+                        np.sqrt(mean_squared_error(true_scores_arr[idx_s], pred_scores_arr[idx_s]))
+                    )
+                )
 
     alpha = 1 - confidence_level
     lower_q = alpha / 2 * 100
@@ -853,6 +876,66 @@ def _criterion_level_scalars(
     return accuracy, precision, recall, f1, mean_kappa
 
 
+def _per_criterion_kappas(
+    per_criterion_pred: list[list[CriterionVerdict | int]],
+    per_criterion_true: list[list[CriterionVerdict | int]],
+    criterion_types: list[str],
+    effective_criteria: list[Criterion],
+    cannot_assess: CannotAssessMode,
+    na_mode: NAMode,
+) -> list[float | None]:
+    """Per-criterion kappa list (criterion order) — the single source of truth shared by the
+    aggregate, per-judge, and bootstrap paths so they cannot drift.
+
+    binary -> Cohen's kappa on ``prepare_binary_metric_inputs`` label reps, APPENDED ONLY when
+    label pairs survive (mirrors the aggregate's empty-binary skip); ordinal -> quadratic-weighted
+    kappa; nominal -> unweighted kappa (multi-choice paths run ``filter_na_multi_choice`` first).
+    All three go through the SAME ``_kappa_or_none`` primitive the per-criterion metric functions
+    use on the same filtered indices, so values match the aggregate exactly — without building a
+    throwaway full ``OrdinalCriterionMetrics``/``NominalCriterionMetrics`` object per resample.
+    Each entry may be ``None`` (degenerate single-class) — ``_mean_or_none`` drops ``None`` when
+    averaging into ``mean_kappa``.
+
+    The arrays are criteria x items, NA-normalized (no ``None``) and item-aligned; pass a
+    resampled (bootstrap) or per-judge slice to recompute the same kappas on that subset.
+
+    Args:
+        per_criterion_pred: criteria x items predictions (binary ``CriterionVerdict``,
+            multi-choice ``int`` option index).
+        per_criterion_true: criteria x items ground truth, same shape/types.
+        criterion_types: per-criterion type ("binary"/"ordinal"/"nominal").
+        effective_criteria: post-NA-injection criteria (option index space must be fixed; the
+            binary path ignores the criterion object).
+        cannot_assess: CANNOT_ASSESS handling mode for binary criteria.
+        na_mode: NA handling mode for multi-choice criteria.
+    """
+    kappas: list[float | None] = []
+    for c in range(len(criterion_types)):
+        c_type = criterion_types[c]
+        if c_type == "binary":
+            pred_verdicts = [v for v in per_criterion_pred[c] if isinstance(v, CriterionVerdict)]
+            true_verdicts = [v for v in per_criterion_true[c] if isinstance(v, CriterionVerdict)]
+            label_pred, label_true, _met_pred, _met_true = prepare_binary_metric_inputs(
+                pred_verdicts, true_verdicts, cannot_assess
+            )
+            if label_pred:
+                # None on degenerate single-class data (NaN) or failure — never fake 0.0.
+                kappas.append(_kappa_or_none(label_true, label_pred))
+        else:
+            eff_criterion = effective_criteria[c]
+            pred_idx = [v for v in per_criterion_pred[c] if isinstance(v, int)]
+            true_idx = [v for v in per_criterion_true[c] if isinstance(v, int)]
+            pred_filtered, true_filtered, _agree, _fp, _fn = filter_na_multi_choice(
+                pred_idx, true_idx, eff_criterion, mode=na_mode
+            )
+            # Same primitive + same filtered indices the metric functions use internally
+            # (ordinal -> quadratic-weighted, nominal -> unweighted), so the value is identical
+            # without building a full per-criterion metrics object on every resample.
+            weights = "quadratic" if c_type == "ordinal" else None
+            kappas.append(_kappa_or_none(true_filtered, pred_filtered, weights=weights))
+    return kappas
+
+
 def _compute_judge_metrics(
     judge_id: str,
     judge_scores: list[float],
@@ -916,39 +999,10 @@ def _compute_judge_metrics(
                 pj_true[c].append(true_val)
 
     # Per-criterion kappas, mirroring the aggregate construction EXACTLY so per-judge ==
-    # aggregate by construction: binary -> cohen on label reps (only when label pairs
-    # exist); ordinal -> weighted kappa; nominal -> unweighted kappa (always appended).
-    pj_kappas: list[float | None] = []
-    for c in range(n_criteria):
-        c_type = criterion_types[c]
-        if c_type == "binary":
-            pred_verdicts = [v for v in pj_pred[c] if isinstance(v, CriterionVerdict)]
-            true_v_list = [v for v in pj_true[c] if isinstance(v, CriterionVerdict)]
-            label_pred, label_true, _met_pred, _met_true = prepare_binary_metric_inputs(
-                pred_verdicts, true_v_list, cannot_assess
-            )
-            if label_pred:
-                # None on degenerate single-class data (NaN) or failure — never fake 0.0.
-                pj_kappas.append(_kappa_or_none(label_true, label_pred))
-        else:
-            eff_criterion = effective_criteria[c]
-            pred_idx = [v for v in pj_pred[c] if isinstance(v, int)]
-            true_idx = [v for v in pj_true[c] if isinstance(v, int)]
-            pred_filtered, true_filtered, _agree, _fp, _fn = filter_na_multi_choice(
-                pred_idx, true_idx, eff_criterion, mode=na_mode
-            )
-            if c_type == "ordinal":
-                pj_kappas.append(
-                    _compute_ordinal_criterion_metrics(
-                        pred_filtered, true_filtered, eff_criterion, c
-                    ).weighted_kappa
-                )
-            else:  # nominal
-                pj_kappas.append(
-                    _compute_nominal_criterion_metrics(
-                        pred_filtered, true_filtered, eff_criterion, c
-                    ).kappa
-                )
+    # aggregate by construction (shared with the bootstrap path via _per_criterion_kappas).
+    pj_kappas = _per_criterion_kappas(
+        pj_pred, pj_true, criterion_types, effective_criteria, cannot_assess, na_mode
+    )
 
     criterion_accuracy, criterion_precision, criterion_recall, criterion_f1, mean_kappa = (
         _criterion_level_scalars(
@@ -1012,7 +1066,10 @@ def compute_metrics(
     Args:
         eval_result: The evaluation result from EvalRunner.
         dataset: The dataset with ground truth labels.
-        bootstrap: If True, compute bootstrap confidence intervals (expensive).
+        bootstrap: If True, compute bootstrap confidence intervals (expensive). Covers ANY
+            rubric type via an item-level resample: ``accuracy_ci``←``criterion_accuracy``,
+            ``kappa_ci``←``mean_kappa`` (ordinal quadratic-weighted), ``rmse_ci``←``score_rmse``.
+            Each CI is ``None`` when undefined (empty/degenerate axis).
         n_bootstrap: Number of bootstrap samples if bootstrap=True.
         per_judge: If True and ensemble, compute per-judge metrics.
         cannot_assess: How to handle CANNOT_ASSESS verdicts (binary criteria):
@@ -1411,14 +1468,6 @@ def compute_metrics(
             ]
             krippendorff_alphas[c_idx] = _compute_krippendorff_alpha(reliability_data, level)
 
-    # For binary-only aggregate metrics:
-    # label_*_flat feed accuracy/kappa (may be 3-class under "as_category");
-    # met_*_flat feed precision/recall/f1 (MET one-vs-rest).
-    label_pred_flat: list[str] = []
-    label_true_flat: list[str] = []
-    met_pred_flat: list[int] = []
-    met_true_flat: list[int] = []
-
     for c_idx in range(n_criteria):
         criterion = criteria[c_idx]
         c_type = criterion_types[c_idx]
@@ -1434,12 +1483,6 @@ def compute_metrics(
             label_pred, label_true, met_pred, met_true = prepare_binary_metric_inputs(
                 pred_verdicts, true_verdicts, cannot_assess
             )
-
-            # Add to aggregate
-            label_pred_flat.extend(label_pred)
-            label_true_flat.extend(label_true)
-            met_pred_flat.extend(met_pred)
-            met_true_flat.extend(met_true)
 
             name = criterion.name or f"Criterion {c_idx + 1}"
 
@@ -1590,12 +1633,19 @@ def compute_metrics(
     # Bias analysis
     bias = systematic_bias(all_pred_scores, all_true_scores)
 
-    # Bootstrap CIs (optional) - uses binary metrics for backwards compat
+    # Bootstrap CIs (optional) — item-level resample over ANY rubric type (binary /
+    # multi-choice / mixed). Per-metric None when its resample axis is empty / degenerate.
+    # per_criterion_pred has been normalized to ints (no None) by the effective-criteria pass
+    # above, so its static type matches the helper's list[CriterionVerdict | int].
     bootstrap_results = None
-    if bootstrap and label_pred_flat:
+    if bootstrap:
         bootstrap_results = _compute_bootstrap_ci(
-            label_true_flat,
-            label_pred_flat,
+            per_criterion_pred,  # type: ignore[arg-type]
+            per_criterion_true,
+            list(criterion_types),
+            effective_criteria,
+            cannot_assess,
+            na_mode,
             all_true_scores,
             all_pred_scores,
             n_bootstrap=n_bootstrap,

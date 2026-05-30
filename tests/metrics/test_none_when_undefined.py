@@ -444,10 +444,14 @@ def test_to_file_roundtrip_with_none_fields(tmp_path):
 
 def test_bootstrap_ci_empty_returns_none():
     res = _compute_bootstrap_ci(
-        [],
-        [],
-        [],
-        [],
+        [],  # per_criterion_pred
+        [],  # per_criterion_true
+        [],  # criterion_types
+        [],  # effective_criteria
+        "exclude",  # cannot_assess
+        "exclude",  # na_mode
+        [],  # true_scores
+        [],  # pred_scores
         n_bootstrap=10,
         confidence_level=0.95,
         seed=0,
@@ -455,6 +459,28 @@ def test_bootstrap_ci_empty_returns_none():
     assert res.accuracy_ci is None
     assert res.kappa_ci is None
     assert res.rmse_ci is None
+
+
+def test_bootstrap_ci_empty_verdicts_nonempty_scores_n1_rmse():
+    """Two independent axes: an empty verdict axis leaves accuracy/kappa None, while a single
+    scored item still yields a degenerate-but-real ``(v, v)`` rmse_ci (RMSE is defined n>=1)."""
+    res = _compute_bootstrap_ci(
+        [],  # per_criterion_pred (empty verdict axis)
+        [],
+        [],
+        [],
+        "exclude",
+        "exclude",
+        [0.5],  # true_scores (single scored item)
+        [0.3],  # pred_scores
+        n_bootstrap=50,
+        confidence_level=0.95,
+        seed=0,
+    )
+    assert res.accuracy_ci is None
+    assert res.kappa_ci is None
+    assert res.rmse_ci is not None
+    assert res.rmse_ci[0] == res.rmse_ci[1]  # n=1 → every resample identical
 
 
 def test_bootstrap_ci_single_class_kappa_none_summary_ok():

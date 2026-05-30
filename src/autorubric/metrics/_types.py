@@ -732,11 +732,18 @@ class MetricWithCI(BaseModel):
 class BootstrapResults(BaseModel):
     """Bootstrap confidence interval results.
 
+    The three CIs are MARGINAL — bootstrapped on two independent item-level resample axes (a
+    verdict-item axis for accuracy/kappa, an independent scored-item axis for RMSE), so they
+    reflect each statistic's own sampling distribution, not their joint covariance. Covers any
+    rubric type (binary / multi-choice / mixed).
+
     Attributes:
-        accuracy_ci: 95% CI for criterion-level accuracy. None when undefined / no samples.
-        kappa_ci: 95% CI for mean kappa. None when undefined (kappa never defined across
-            resamples) / no samples.
-        rmse_ci: 95% CI for score RMSE. None when undefined / no samples.
+        accuracy_ci: 95% CI for ``criterion_accuracy``. None when undefined / no samples.
+        kappa_ci: 95% CI for ``mean_kappa`` (ordinal contributes quadratic-weighted kappa).
+            Each replicate's mean conditions on which criteria were non-degenerate in that
+            resample. None when undefined (kappa never defined across resamples) / no samples.
+        rmse_ci: 95% CI for ``score_rmse`` over the scored-item subset. None when no samples
+            (a single scored item yields a degenerate ``(v, v)`` interval, not None).
         n_bootstrap: Number of bootstrap samples used.
         confidence_level: Confidence level (default 0.95).
     """

@@ -834,13 +834,17 @@ def hybrid_dataset(hybrid_rubric) -> RubricDataset:
     return dataset
 
 
-def _make_ordinal_report(selected_index: int) -> EvaluationReport:
-    """Create a mock EvaluationReport for ordinal criterion."""
+def _make_ordinal_report(selected_index: int, score: float = 0.5) -> EvaluationReport:
+    """Create a mock EvaluationReport for ordinal criterion.
+
+    ``score`` is configurable so bootstrap tests can vary per-item scores (a constant
+    score makes ``rmse_ci`` a degenerate point).
+    """
     from autorubric.types import CriterionReport
 
     return EvaluationReport(
-        score=0.5,
-        raw_score=5.0,
+        score=score,
+        raw_score=score * 10.0,
         report=[
             CriterionReport(
                 weight=10.0,
@@ -862,13 +866,14 @@ def _make_hybrid_report(
     binary_verdict: CriterionVerdict,
     ordinal_index: int,
     nominal_index: int,
+    score: float = 0.5,
 ) -> EvaluationReport:
-    """Create a mock EvaluationReport for hybrid rubric."""
+    """Create a mock EvaluationReport for hybrid rubric (``score`` configurable)."""
     from autorubric.types import CriterionReport
 
     return EvaluationReport(
-        score=0.5,
-        raw_score=10.0,
+        score=score,
+        raw_score=score * 25.0,
         report=[
             # Binary criterion
             CriterionReport(
@@ -1725,3 +1730,285 @@ class TestAggregatePrecisionRecallF1None:
         assert isinstance(metrics.criterion_f1, float)
         assert isinstance(metrics.criterion_accuracy, float)
         assert isinstance(metrics.mean_kappa, float)
+
+
+# =============================================================================
+# T8-A — Bootstrap CIs for multi-choice / mixed rubrics
+# =============================================================================
+
+
+def _ordinal_ds(gt_labels: list[str]) -> RubricDataset:
+    """Single ordinal-criterion dataset (4-point satisfaction scale) with the given GT."""
+    rubric = Rubric(
+        [
+            Criterion(
+                name="satisfaction",
+                weight=10.0,
+                requirement="Satisfaction level",
+                scale_type="ordinal",
+                options=[
+                    {"label": "1", "value": 0.0},
+                    {"label": "2", "value": 0.33},
+                    {"label": "3", "value": 0.67},
+                    {"label": "4", "value": 1.0},
+                ],
+            )
+        ]
+    )
+    ds = RubricDataset(prompt="Test", rubric=rubric)
+    for i, gt in enumerate(gt_labels):
+        ds.add_item(submission=f"s{i}", description="d", ground_truth=[gt])
+    return ds
+
+
+def _nominal_ds(gt_labels: list[str]) -> RubricDataset:
+    """Single nominal-criterion dataset (3 unordered categories) with the given GT."""
+    rubric = Rubric(
+        [
+            Criterion(
+                name="length",
+                weight=5.0,
+                requirement="Is the response length appropriate?",
+                scale_type="nominal",
+                options=[
+                    {"label": "Too brief", "value": 0.0},
+                    {"label": "Too verbose", "value": 0.0},
+                    {"label": "Just right", "value": 1.0},
+                ],
+            )
+        ]
+    )
+    ds = RubricDataset(prompt="Test", rubric=rubric)
+    for i, gt in enumerate(gt_labels):
+        ds.add_item(submission=f"s{i}", description="d", ground_truth=[gt])
+    return ds
+
+
+def _make_nominal_report(selected_index: int, score: float = 0.5) -> EvaluationReport:
+    """Mock report for the single nominal 'length' criterion (3 options)."""
+    return EvaluationReport(
+        score=score,
+        raw_score=score * 5.0,
+        report=[
+            CriterionReport(
+                weight=5.0,
+                requirement="Is the response length appropriate?",
+                name="length",
+                verdict=CriterionVerdict.MET if selected_index == 2 else CriterionVerdict.UNMET,
+                reason="Test",
+                multi_choice_verdict=MultiChoiceVerdict(
+                    selected_index=selected_index,
+                    selected_label=str(selected_index),
+                    value=1.0 if selected_index == 2 else 0.0,
+                ),
+            ),
+        ],
+    )
+
+
+def _ordinal_eval(gt_labels, pred_indices, scores) -> EvalResult:
+    ds = _ordinal_ds(gt_labels)
+    item_results = [
+        ItemResult(
+            item_idx=i,
+            item=ds.items[i],
+            report=_make_ordinal_report(pred_indices[i], score=scores[i]),
+            duration_seconds=0.1,
+        )
+        for i in range(len(gt_labels))
+    ]
+    return _wrap_eval_result(item_results)
+
+
+class TestBootstrapMultiChoice:
+    """T8-A: bootstrap CIs now cover multi-choice (ordinal/nominal) and mixed rubrics.
+
+    Each CI must be the CI of the SAME aggregate statistic compute_metrics reports
+    (accuracy_ci<-criterion_accuracy, kappa_ci<-mean_kappa, rmse_ci<-score_rmse), so the
+    point estimate is bracketed. Pure multi-choice previously returned bootstrap=None.
+    """
+
+    def test_pure_ordinal_all_cis_present_and_bracket(self):
+        gt = ["1", "2", "3", "4", "1", "2", "3", "4"]
+        preds = [0, 1, 2, 3, 0, 1, 2, 2]  # one (adjacent) error -> not perfect, not single-class
+        scores = [0.10, 0.35, 0.65, 0.95, 0.15, 0.40, 0.70, 0.60]
+        ds = _ordinal_ds(gt)
+        eval_result = _ordinal_eval(gt, preds, scores)
+        m = compute_metrics(eval_result, ds, bootstrap=True, n_bootstrap=500, seed=42)
+
+        assert m.bootstrap is not None  # FAILS today: pure multi-choice -> bootstrap None
+        b = m.bootstrap
+        assert b.accuracy_ci is not None
+        assert b.accuracy_ci[0] <= m.criterion_accuracy <= b.accuracy_ci[1]
+        assert b.kappa_ci is not None
+        assert b.kappa_ci[0] <= m.mean_kappa <= b.kappa_ci[1]
+        # The bootstrapped kappa is the QUADRATIC-weighted ordinal kappa (mean over 1 criterion).
+        assert m.mean_kappa == pytest.approx(m.per_criterion[0].weighted_kappa)
+        assert b.rmse_ci is not None
+        assert b.rmse_ci[0] <= m.score_rmse <= b.rmse_ci[1]
+
+    def test_pure_nominal_unweighted_kappa_ci(self):
+        gt = [
+            "Too brief",
+            "Too verbose",
+            "Just right",
+            "Too brief",
+            "Too verbose",
+            "Just right",
+            "Just right",
+            "Too brief",
+        ]
+        # indices: 0,1,2,0,1,2,2,0 ; one error at item 6 (pred 1 vs true 2)
+        preds = [0, 1, 2, 0, 1, 2, 1, 0]
+        scores = [0.2, 0.1, 0.9, 0.25, 0.15, 0.85, 0.5, 0.3]
+        ds = _nominal_ds(gt)
+        item_results = [
+            ItemResult(
+                item_idx=i,
+                item=ds.items[i],
+                report=_make_nominal_report(preds[i], score=scores[i]),
+                duration_seconds=0.1,
+            )
+            for i in range(len(gt))
+        ]
+        m = compute_metrics(
+            _wrap_eval_result(item_results), ds, bootstrap=True, n_bootstrap=500, seed=42
+        )
+
+        assert m.bootstrap is not None
+        b = m.bootstrap
+        assert b.accuracy_ci is not None
+        assert b.accuracy_ci[0] <= m.criterion_accuracy <= b.accuracy_ci[1]
+        assert b.kappa_ci is not None
+        assert b.kappa_ci[0] <= m.mean_kappa <= b.kappa_ci[1]
+        # Nominal -> UNWEIGHTED kappa (mean over the single criterion).
+        assert m.mean_kappa == pytest.approx(m.per_criterion[0].kappa)
+        assert b.rmse_ci is not None
+
+    def test_hybrid_all_cis_present_and_bracket(self, hybrid_dataset_big):
+        ds, eval_result = hybrid_dataset_big
+        m = compute_metrics(eval_result, ds, bootstrap=True, n_bootstrap=500, seed=42)
+
+        assert m.bootstrap is not None
+        b = m.bootstrap
+        assert b.accuracy_ci is not None
+        assert b.accuracy_ci[0] <= m.criterion_accuracy <= b.accuracy_ci[1]
+        assert b.kappa_ci is not None
+        assert b.kappa_ci[0] <= m.mean_kappa <= b.kappa_ci[1]
+        assert b.rmse_ci is not None
+        assert b.rmse_ci[0] <= m.score_rmse <= b.rmse_ci[1]
+
+    def test_multichoice_single_class_kappa_ci_none_accuracy_present(self):
+        # All GT and predictions are the same option -> single class every resample.
+        gt = ["3", "3", "3", "3", "3", "3"]
+        preds = [2, 2, 2, 2, 2, 2]  # "3" == index 2; all correct -> accuracy 1.0
+        scores = [0.6, 0.7, 0.65, 0.55, 0.6, 0.68]  # vary so rmse is non-degenerate
+        ds = _ordinal_ds(gt)
+        eval_result = _ordinal_eval(gt, preds, scores)
+        m = compute_metrics(eval_result, ds, bootstrap=True, n_bootstrap=200, seed=7)
+
+        assert m.bootstrap is not None
+        assert m.bootstrap.accuracy_ci is not None  # accuracy is defined (all correct)
+        assert m.bootstrap.kappa_ci is None  # single-class every resample -> kappa undefined
+        assert m.bootstrap.rmse_ci is not None  # scores vary -> rmse defined
+        assert isinstance(m.summary(), str)  # None-guarded rendering does not crash
+
+    def test_one_criterion_none_others_survive_kappa_ci_present(self, hybrid_one_class_binary):
+        # Binary criterion is single-class (kappa None); ordinal+nominal survive ->
+        # per-replicate mean_kappa is the mean of the surviving criteria (not None).
+        ds, eval_result = hybrid_one_class_binary
+        m = compute_metrics(eval_result, ds, bootstrap=True, n_bootstrap=400, seed=42)
+
+        assert m.bootstrap is not None
+        assert m.bootstrap.kappa_ci is not None
+        assert m.bootstrap.kappa_ci[0] <= m.mean_kappa <= m.bootstrap.kappa_ci[1]
+
+    def test_determinism_same_seed_identical_diff_seed_differs(self):
+        gt = ["1", "2", "3", "4", "1", "2", "3", "4"]
+        preds = [0, 1, 2, 3, 0, 1, 2, 2]
+        scores = [0.10, 0.35, 0.65, 0.95, 0.15, 0.40, 0.70, 0.60]
+        ds = _ordinal_ds(gt)
+        m1 = compute_metrics(
+            _ordinal_eval(gt, preds, scores), ds, bootstrap=True, n_bootstrap=200, seed=123
+        )
+        m2 = compute_metrics(
+            _ordinal_eval(gt, preds, scores), ds, bootstrap=True, n_bootstrap=200, seed=123
+        )
+        m3 = compute_metrics(
+            _ordinal_eval(gt, preds, scores), ds, bootstrap=True, n_bootstrap=200, seed=999
+        )
+        assert m1.bootstrap is not None
+        assert m1.bootstrap == m2.bootstrap  # same seed -> bit-identical (frozen model eq)
+        assert m1.bootstrap != m3.bootstrap  # different seed -> different CIs
+
+
+@pytest.fixture
+def hybrid_dataset_big(hybrid_rubric):
+    """Mixed binary+ordinal+nominal dataset with enough spread for stable bootstrap CIs."""
+    ds = RubricDataset(prompt="Test", rubric=hybrid_rubric)
+    rows = [
+        (CriterionVerdict.MET, "Very satisfied", "Just right"),
+        (CriterionVerdict.UNMET, "Dissatisfied", "Too brief"),
+        (CriterionVerdict.MET, "Satisfied", "Just right"),
+        (CriterionVerdict.UNMET, "Very dissatisfied", "Too verbose"),
+        (CriterionVerdict.MET, "Satisfied", "Too brief"),
+        (CriterionVerdict.UNMET, "Dissatisfied", "Just right"),
+    ]
+    for i, (bv, ol, nl) in enumerate(rows):
+        ds.add_item(submission=f"s{i}", description="d", ground_truth=[bv, ol, nl])
+    # Predictions: a few errors across each criterion type. (binary, ordinal_idx, nominal_idx)
+    preds = [
+        (CriterionVerdict.MET, 3, 2),
+        (CriterionVerdict.UNMET, 1, 0),
+        (CriterionVerdict.MET, 2, 2),
+        (CriterionVerdict.MET, 0, 1),  # binary error
+        (CriterionVerdict.MET, 1, 0),  # ordinal adjacent error
+        (CriterionVerdict.UNMET, 1, 2),
+    ]
+    scores = [0.9, 0.2, 0.7, 0.35, 0.6, 0.45]
+    item_results = [
+        ItemResult(
+            item_idx=i,
+            item=ds.items[i],
+            report=_make_hybrid_report(*preds[i], score=scores[i]),
+            duration_seconds=0.1,
+        )
+        for i in range(len(rows))
+    ]
+    return ds, _wrap_eval_result(item_results)
+
+
+@pytest.fixture
+def hybrid_one_class_binary(hybrid_rubric):
+    """Mixed dataset where the binary criterion is single-class (all MET) so its kappa is
+    None, while ordinal+nominal carry real spread."""
+    ds = RubricDataset(prompt="Test", rubric=hybrid_rubric)
+    rows = [
+        (CriterionVerdict.MET, "Very satisfied", "Just right"),
+        (CriterionVerdict.MET, "Dissatisfied", "Too brief"),
+        (CriterionVerdict.MET, "Satisfied", "Just right"),
+        (CriterionVerdict.MET, "Very dissatisfied", "Too verbose"),
+        (CriterionVerdict.MET, "Satisfied", "Too brief"),
+        (CriterionVerdict.MET, "Dissatisfied", "Just right"),
+    ]
+    for i, (bv, ol, nl) in enumerate(rows):
+        ds.add_item(submission=f"s{i}", description="d", ground_truth=[bv, ol, nl])
+    preds = [
+        (CriterionVerdict.MET, 3, 2),
+        (CriterionVerdict.MET, 1, 0),
+        (CriterionVerdict.MET, 2, 1),  # nominal error
+        (CriterionVerdict.MET, 0, 1),
+        (CriterionVerdict.MET, 2, 0),
+        (CriterionVerdict.MET, 1, 2),
+    ]
+    scores = [0.9, 0.4, 0.6, 0.3, 0.7, 0.5]
+    item_results = [
+        ItemResult(
+            item_idx=i,
+            item=ds.items[i],
+            report=_make_hybrid_report(*preds[i], score=scores[i]),
+            duration_seconds=0.1,
+        )
+        for i in range(len(rows))
+    ]
+    return ds, _wrap_eval_result(item_results)
