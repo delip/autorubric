@@ -472,7 +472,7 @@ If the loop doesn't converge:
 
 ## Appendix: Complete Code
 
-See [`examples/rubric_improvement_demo.py`](https://github.com/anthropics/autorubric/blob/main/examples/rubric_improvement_demo.py) for a complete, runnable implementation.
+The following is a complete, self-contained version of this recipe built around `improve_rubric()`. For a different, fuller example that improves a rubric against ground-truth data, see [`examples/rubric_improvement_demo.py`](https://github.com/delip/autorubric/blob/main/examples/rubric_improvement_demo.py).
 
 ```python
 #!/usr/bin/env python3

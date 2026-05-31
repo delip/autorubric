@@ -280,19 +280,23 @@ async def main():
         print(f"  Error:           {fmt(score_error, '.3f')}")
 
         if result.report:
-            # Show per-criterion verdicts
+            # Show per-criterion verdicts. Each `cr` is an EnsembleCriterionReport
+            # (a single judge is an ensemble of 1), so the aggregated verdict lives on
+            # `final_verdict` (binary) / `final_multi_choice_verdict` (multi-choice).
             print("  Verdicts:")
             for i, cr in enumerate(result.report):
-                criterion = dataset.rubric.rubric[i]
+                name = cr.criterion.name
                 gt = item.ground_truth[i]
-                if cr.verdict is not None:
-                    verdict = cr.verdict.value
+                if cr.final_verdict is not None:
+                    verdict = cr.final_verdict.value
                     match = "✓" if str(verdict) == str(gt) else "✗"
-                    print(f"    {criterion.name}: {verdict} (GT: {gt}) {match}")
-                elif cr.multi_choice_verdict is not None:
-                    mc = cr.multi_choice_verdict
+                    print(f"    {name}: {verdict} (GT: {gt}) {match}")
+                elif cr.final_multi_choice_verdict is not None:
+                    mc = cr.final_multi_choice_verdict
+                    # selected_label is str | None (None on a no-option-selected abstain).
+                    label = mc.selected_label if mc.selected_label is not None else "N/A"
                     match = "✓" if mc.selected_label == gt else "✗"
-                    print(f"    {criterion.name}: {mc.selected_label} (GT: {gt}) {match}")
+                    print(f"    {name}: {label} (GT: {gt}) {match}")
 
     # Timing stats
     print("\n" + "-" * 80)

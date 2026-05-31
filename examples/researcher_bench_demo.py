@@ -161,7 +161,7 @@ async def main() -> None:
         total = 0
         if ir.report.report is not None:
             for cr in ir.report.report:
-                verdict = cr.verdict
+                verdict = cr.final_verdict
                 if verdict == CriterionVerdict.CANNOT_ASSESS:
                     continue
                 total += 1

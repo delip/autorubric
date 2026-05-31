@@ -9,11 +9,11 @@ import asyncio
 
 from autorubric import (
     Criterion,
-    CriterionGrader,
     LLMConfig,
     Rubric,
     RubricDataset,
 )
+from autorubric.graders import CriterionGrader
 
 
 async def main():
@@ -93,8 +93,9 @@ convert CO2 into glucose. The overall equation is:
 
         score_str = f"{report.score:.2f}" if report.score is not None else "N/A"
         print(f"\nScore: {score_str}")
-        for cr in report.report:
-            print(f"  - {cr.name}: {cr.verdict.value} ({cr.reason})")
+        for cr in report.report or []:
+            verdict_str = cr.final_verdict.value if cr.final_verdict else "N/A"
+            print(f"  - {cr.criterion.name}: {verdict_str} ({cr.final_reason})")
 
 
 if __name__ == "__main__":

@@ -304,6 +304,76 @@ binary `any` ≡ the **max**):
 | Conservative | `unanimous` (≡ min over {0,1})| `min` (lowest selected option)            | `unanimous` (abstain via NA on disagreement) |
 | Permissive   | `any` (≡ max over {0,1})      | `max` (highest selected option)           | — (unordered ⇒ no permissive analog)         |
 
+### Step 8: Bootstrap Confidence Intervals for Multi-Choice Criteria
+
+[Judge Validation](judge-validation.md) shows `compute_metrics(bootstrap=True)` for a binary
+rubric. The same item-level resample covers **ordinal and nominal criteria too** — you don't
+opt in separately. Every CI lives on `metrics.bootstrap` (a `BootstrapResults`), and each one
+generalizes across the criterion types your rubric mixes:
+
+- **`accuracy_ci`** — CI for `criterion_accuracy`, which for multi-choice criteria is
+  exact-match accuracy (the selected option index equals the ground-truth index).
+- **`kappa_ci`** — CI for `mean_kappa`, the mean of the per-criterion kappas. Each criterion
+  type contributes its own chance-corrected agreement statistic into that mean: an **ordinal**
+  criterion contributes its quadratic-**weighted** kappa (`OrdinalCriterionMetrics.weighted_kappa`,
+  which penalizes far-apart disagreements more) and a **nominal** criterion contributes its
+  unweighted kappa (`NominalCriterionMetrics.kappa`, where every disagreement counts equally).
+- **`rmse_ci`** — CI for `score_rmse` on the per-item weighted score, which on multi-choice
+  rubrics is driven by each option's `value`.
+
+!!! note "One aggregate CI per statistic, not one per criterion"
+    The bootstrap CIs are aggregate scalars: there is a single `kappa_ci` covering
+    `mean_kappa`, not a separate per-criterion `weighted_kappa_ci`/`kappa_ci`. The
+    per-criterion `weighted_kappa` (ordinal) and `kappa` (nominal) on each entry of
+    `metrics.per_criterion` remain point estimates without their own interval.
+
+```python
+from autorubric import RubricDataset, evaluate
+
+# Bootstrap CIs need ground truth, so evaluate a *labeled* dataset — each item's
+# ground_truth carries the reference option (index or label) for every criterion.
+# compute_metrics() lives on the EvalResult that evaluate() returns, not on the
+# single report a one-off rubric.grade() produces.
+dataset = RubricDataset.from_file("multi_choice_labeled.json")
+result = await evaluate(dataset, grader)  # `grader` from the earlier steps
+
+metrics = result.compute_metrics(
+    dataset,
+    bootstrap=True,
+    n_bootstrap=1000,
+    confidence_level=0.95,
+    seed=42,
+)
+
+# Each bootstrap CI is `tuple[float, float] | None` — None on an empty axis or when every
+# resample was degenerate (e.g. a multi-choice criterion that collapsed onto one option,
+# leaving kappa undefined). Always guard before subscripting.
+acc_ci = metrics.bootstrap.accuracy_ci
+kappa_ci = metrics.bootstrap.kappa_ci
+rmse_ci = metrics.bootstrap.rmse_ci
+
+print(
+    f"Exact-match accuracy 95% CI: [{acc_ci[0]:.1%}, {acc_ci[1]:.1%}]"
+    if acc_ci is not None else "Exact-match accuracy 95% CI: n/a"
+)
+# Ordinal contributes weighted kappa, nominal contributes unweighted kappa, into mean_kappa.
+print(
+    f"Mean kappa 95% CI:           [{kappa_ci[0]:.3f}, {kappa_ci[1]:.3f}]"
+    if kappa_ci is not None else "Mean kappa 95% CI:           n/a"
+)
+print(
+    f"Score RMSE 95% CI:           [{rmse_ci[0]:.4f}, {rmse_ci[1]:.4f}]"
+    if rmse_ci is not None else "Score RMSE 95% CI:           n/a"
+)
+```
+
+!!! tip "Sparse multi-choice data widens (or voids) the kappa CI"
+    A multi-choice criterion needs at least two distinct ground-truth options among the
+    resampled items for its kappa to be defined. With few labeled items per criterion, many
+    resamples collapse onto a single option and contribute nothing — so `kappa_ci` may come
+    back wider than the binary case, or `None` entirely. Treat a `None` CI as a signal to
+    label more items rather than a metric failure.
+
 ## Key Takeaways
 
 - **Ordinal scales** for ordered options (satisfaction, quality ratings)

@@ -158,7 +158,37 @@ grader_fail = CriterionGrader(
 !!! tip "Choosing a default strategy"
     SKIP is the safest default because it avoids penalizing submissions for criteria the judge genuinely cannot evaluate. The denominator shrinks, so assessed criteria still receive their full weight. However, ZERO or FAIL may be more appropriate when the inability to assess itself signals a problem -- for instance, if a response lacks citations and citation quality is a criterion, the missing evidence is the finding.
 
-### Step 4: Compare Strategy Effects
+### Step 4: One Abstain Concept, Two Surfaces
+
+Binary `CANNOT_ASSESS` and multi-choice NA are *the same abstain concept* wearing two interfaces. A binary judge abstains by returning the `CANNOT_ASSESS` verdict; a multi-choice judge abstains by selecting a dedicated NA option (`na=True`). Both are routed through the same `CannotAssessStrategy` by the shared `scoring.score_reports` core, so the choices you made in Step 3 apply uniformly: under the default `SKIP`, *both* are excluded from the numerator and denominator.
+
+For multi-choice criteria, that abstain option needs to exist for the judge to use it. `CriterionGrader` guarantees it with `auto_na_option` (default `True`): every multi-choice criterion that doesn't already define an NA option gets the canonical `CANONICAL_NA_OPTION` ("Cannot assess / not applicable", `na=True`) **appended at the end** (highest index), so existing option indices stay stable. This gives the judge a first-class abstain channel that mirrors binary `CANNOT_ASSESS`.
+
+```python
+from autorubric import LLMConfig
+from autorubric.graders import CriterionGrader
+
+# Default: every multi-choice criterion is guaranteed an NA / abstain option.
+grader_with_na = CriterionGrader(
+    llm_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    auto_na_option=True,  # default
+)
+
+# Forced-choice grading: the judge must pick a scored option (no NA injected).
+grader_forced_choice = CriterionGrader(
+    llm_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    auto_na_option=False,
+)
+```
+
+!!! note "auto_na_option never overrides author intent"
+    If a criterion already declares its own NA option, `auto_na_option=True` leaves it
+    untouched -- it only *adds* the canonical option to criteria that lack one. Binary
+    criteria are unaffected: `CANNOT_ASSESS` is always available to a binary judge. Setting
+    `auto_na_option=False` removes the abstain channel for multi-choice criteria that
+    didn't author one, forcing a scored option.
+
+### Step 5: Compare Strategy Effects
 
 See how different strategies affect the same response:
 
@@ -222,7 +252,7 @@ FAIL             0.60         1
 
 ![CANNOT_ASSESS strategy score comparison](../images/cannot-assess-strategy-comparison.png)
 
-### Step 5: Monitor CANNOT_ASSESS Frequency
+### Step 6: Monitor CANNOT_ASSESS Frequency
 
 Track how often the judge can't make a determination:
 
