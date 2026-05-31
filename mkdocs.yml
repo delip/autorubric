@@ -142,18 +142,18 @@ nav:
           - Improving Agent Skills: cookbook/improving-agent-skills.md
   - API Reference:
       - api/index.md
-      - CANNOT_ASSESS Handling: api/cannot-assess.md
       - Core Grading: api/core-grading.md
-      - Dataset: api/dataset.md
-      - Distribution Metrics: api/distribution-metrics.md
-      - Ensemble: api/ensemble.md
-      - Eval Runner: api/eval-runner.md
-      - Few-Shot: api/few-shot.md
       - Graders: api/graders.md
+      - Dataset: api/dataset.md
+      - Eval Runner: api/eval-runner.md
+      - Ensemble: api/ensemble.md
+      - Multi-Choice: api/multi-choice.md
+      - Few-Shot: api/few-shot.md
       - Length Penalty: api/length-penalty.md
-      - LLM Infrastructure: api/llm.md
+      - CANNOT_ASSESS Handling: api/cannot-assess.md
+      - Metrics: api/metrics.md
+      - Distribution Metrics: api/distribution-metrics.md
       - Meta-Rubric Evaluation: api/meta.md
       - Rubric Improvement: api/meta-improvement.md
-      - Metrics: api/metrics.md
-      - Multi-Choice: api/multi-choice.md
+      - LLM Infrastructure: api/llm.md
       - Utilities: api/utilities.md

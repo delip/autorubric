@@ -209,7 +209,7 @@ for idx, item in enumerate(dataset):
     effective_rubric = dataset.get_item_rubric(idx)
 
     print(f"\nItem {idx}: {item.description}")
-    print(f"  Criteria: {[c.name for c in effective_rubric.criteria]}")
+    print(f"  Criteria: {[c.name for c in effective_rubric.rubric]}")
     print(f"  Has custom rubric: {item.rubric is not None}")
 
     # Get reference submission if available
@@ -239,7 +239,7 @@ for item_result in result.item_results:
     # report.score is `float | None` (None if that item's grade failed).
     score = item_result.report.score
     print(f"  Score: {score:.2f}" if score is not None else "  Score: n/a")
-    print(f"  Criteria evaluated: {len(item_result.report.report)}")
+    print(f"  Criteria evaluated: {len(item_result.report.report or [])}")
 ```
 
 ### Step 7: Mix Binary and Multi-Choice Criteria
@@ -528,7 +528,7 @@ async def main():
 
         print(f"\n[{idx}] {item.description}")
         print(f"    Custom rubric: {'Yes' if item.rubric else 'No (uses global)'}")
-        print(f"    Criteria: {[c.name for c in effective_rubric.criteria]}")
+        print(f"    Criteria: {[c.name for c in effective_rubric.rubric]}")
         print(f"    Has reference: {'Yes' if reference else 'No'}")
 
     # Configure grader
@@ -552,11 +552,13 @@ async def main():
 
         if item_result.report.report:
             for cr in item_result.report.report:
-                if cr.verdict:
-                    status = cr.verdict.value
+                if cr.final_verdict:
+                    status = cr.final_verdict.value
+                elif cr.final_multi_choice_verdict:
+                    status = cr.final_multi_choice_verdict.selected_label or "?"
                 else:
-                    status = cr.multi_choice_verdict.selected_label if cr.multi_choice_verdict else "?"
-                print(f"    [{status}] {cr.name}")
+                    status = "?"
+                print(f"    [{status}] {cr.criterion.name}")
 
 
 if __name__ == "__main__":

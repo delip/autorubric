@@ -102,9 +102,9 @@ else:
 | Words | Penalty (exponent=1.6) |
 |-------|------------------------|
 | 200 | 0% (within budget) |
-| 250 | ~5% |
-| 300 | ~12% |
-| 350 | ~21% |
+| 250 | ~3% |
+| 300 | ~10% |
+| 350 | ~19% |
 | 400+ | 30% (capped) |
 
 ![Length penalty curves for different exponents](../images/length-penalty-curve.png)
@@ -233,10 +233,10 @@ grader = CriterionGrader(
 | Property | Normalized Mode | Raw Mode |
 |---|---|---|
 | Score range | 0.0 - 1.0 | Unbounded weighted sum |
-| `penalty_at_cap` meaning | Fraction of score removed (e.g., 0.3 = 30%) | Absolute points subtracted (e.g., 50.0) |
+| `penalty_at_cap` meaning | Absolute amount subtracted from the `[0, 1]` score (e.g., 0.3 subtracts 0.30) | Absolute points subtracted (e.g., 50.0) |
 | `free_budget` | Words/tokens before any penalty applies | Same |
 | Typical use case | Leaderboard ranking, human-readable reports | RL reward shaping, training signal |
-| How penalty is applied | `score * (1 - penalty)` | `raw_score - penalty` |
+| How penalty is applied | `max(0.0, score - penalty)` | `raw_score - penalty` |
 
 ### Step 6: OUTPUT_ONLY with Extended Thinking
 
@@ -278,7 +278,7 @@ result = await rubric.grade(
 
 - **`free_budget`**: Words/tokens allowed without penalty
 - **`max_cap`**: Length at which maximum penalty applies
-- **`penalty_at_cap`**: Maximum penalty (0.3 = 30% for normalized scores)
+- **`penalty_at_cap`**: Maximum penalty (for normalized scores, 0.3 subtracts 0.30 from the `[0, 1]` score)
 - **`exponent`**: Controls curve shape (higher = more lenient near budget)
 - **`count_fn`**: Custom function for precise token counting
 - **`penalty_type`**: TARGET `ALL`, `OUTPUT_ONLY`, or `THINKING_ONLY`
@@ -514,8 +514,9 @@ async def main():
     print(f"Raw score: {result.raw_score:.2f}" if result.raw_score is not None else "Raw score: n/a")
     print("\nPer-criterion verdicts:")
     for cr in result.report:
-        verdict = cr.verdict.value
-        print(f"  [{verdict}] {cr.name} (weight: {cr.weight:+.0f})")
+        # final_verdict is None for error/multi-choice reports.
+        verdict = cr.final_verdict.value if cr.final_verdict is not None else "N/A"
+        print(f"  [{verdict}] {cr.criterion.name} (weight: {cr.criterion.weight:+.0f})")
 
 
 if __name__ == "__main__":

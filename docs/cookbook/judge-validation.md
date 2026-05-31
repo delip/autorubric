@@ -13,6 +13,7 @@ You've deployed an LLM judge for content moderation. Before trusting it at scale
 - Detecting systematic bias with `metrics.bias`
 - Per-criterion breakdown for targeted improvements
 - Bootstrap confidence intervals for statistical rigor
+- Reading Matthews φ, macro vs micro aggregation, and the confusion matrix (FPR/FNR)
 
 ## The Solution
 
@@ -66,7 +67,7 @@ result = await evaluate(
 )
 
 print(f"Evaluated: {result.successful_items}/{result.total_items}")
-print(f"Cost: ${result.total_completion_cost:.4f}")
+print(f"Cost: ${result.total_completion_cost or 0:.4f}")
 ```
 
 ### Step 3: Compute Validation Metrics
@@ -166,7 +167,7 @@ def num(x):
     return f"{x:.3f}" if x is not None else "n/a"
 
 print(f"  Mean bias: {num(bias.mean_bias)}")
-print(f"  Bias direction: {bias.direction}")  # "permissive" or "strict"
+print(f"  Bias direction: {bias.direction}")  # "positive", "negative", or "none"
 print(f"  Statistically significant: {bias.is_significant}")
 print(f"  P-value: {bias.p_value:.4f}" if bias.p_value is not None else "  P-value: n/a")
 print(f"  Effect size: {num(bias.effect_size)}")
@@ -197,11 +198,15 @@ metrics = result.compute_metrics(
 # criterion_accuracy / mean_kappa are `float | None` (None when undefined).
 acc = metrics.criterion_accuracy
 kappa = metrics.mean_kappa
+# Bootstrap CIs are `tuple[float, float] | None` (None on no-samples / all-degenerate
+# resamples), so guard before subscripting.
+acc_ci = metrics.bootstrap.accuracy_ci
+kappa_ci = metrics.bootstrap.kappa_ci
 print(f"\nAccuracy: {acc:.1%}" if acc is not None else "\nAccuracy: n/a")
-print(f"  95% CI: [{metrics.bootstrap.accuracy_ci[0]:.1%}, {metrics.bootstrap.accuracy_ci[1]:.1%}]")
+print(f"  95% CI: [{acc_ci[0]:.1%}, {acc_ci[1]:.1%}]" if acc_ci is not None else "  95% CI: n/a")
 
 print(f"\nKappa: {kappa:.3f}" if kappa is not None else "\nKappa: n/a")
-print(f"  95% CI: [{metrics.bootstrap.kappa_ci[0]:.3f}, {metrics.bootstrap.kappa_ci[1]:.3f}]")
+print(f"  95% CI: [{kappa_ci[0]:.3f}, {kappa_ci[1]:.3f}]" if kappa_ci is not None else "  95% CI: n/a")
 ```
 
 !!! warning "Bootstrap Cost"
@@ -225,7 +230,91 @@ print(f"  RMSE:     {metrics.score_rmse:.3f}")
 
 High correlation (>0.8) indicates the judge ranks items similarly to humans, even if individual verdicts differ.
 
-### Step 8: Export Results
+### Step 8: Matthews φ, Macro vs Micro, and the Confusion Matrix
+
+Accuracy and kappa summarize agreement, but two further diagnostics tell you *why* a judge disagrees and *where* its errors land.
+
+**Matthews correlation (φ).** The φ coefficient is the Matthews correlation coefficient on the binary {MET, UNMET} dichotomy. `compute_metrics()` exposes it at two levels: the aggregate `metrics.criterion_phi` (pooled over every binary decision) and per binary criterion as `cr_metrics.phi`.
+
+```python
+# Aggregate Matthews phi is `float | None` (None for a multi-choice-only rubric,
+# or when a class is entirely absent so the coefficient is undefined).
+print(f"\nMatthews phi (aggregate, MET/UNMET): {num(metrics.criterion_phi)}")
+
+print("\nPER-CRITERION phi vs kappa")
+print("-" * 50)
+print(f"{'Criterion':<25} {'Kappa':>8} {'Phi':>8}")
+print("-" * 50)
+for cr_metrics in metrics.per_criterion:
+    # phi is only defined for binary criteria; multi-choice criteria expose no `.phi`.
+    if cr_metrics.criterion_type != "binary":
+        continue
+    print(f"{cr_metrics.name:<25} "
+          f"{cell(cr_metrics.kappa, 8, '3f')} {cell(cr_metrics.phi, 8, '3f')}")
+```
+
+!!! note "When to read φ vs κ"
+    On binary data φ coincides with Pearson/Spearman/Kendall and the MCC — they are *one* statistic, not corroborating evidence. The useful signal is the **κ–φ relationship**:
+
+    - **φ == κ** when the judge's MET rate matches the human's (matched marginals). Agreement is genuine, not an artifact of base rates.
+    - **φ > κ** when the judge's positive (MET) rate drifts away from the human's. The κ–φ gap *is* that positive-rate drift, so a wide gap flags a judge that is systematically more permissive or stricter than the labels — corroborate with `metrics.bias` from Step 5.
+    - **φ is None** when one class is entirely absent (all-MET or all-UNMET ground truth), where the coefficient is genuinely undefined. The framework returns `None` rather than a misleading `0.0` — so always guard before formatting.
+
+    Reach for φ when you suspect base-rate imbalance is inflating or deflating accuracy; reach for κ as the headline chance-corrected agreement number.
+
+**Macro vs micro accuracy.** `metrics.criterion_accuracy` is the *micro* accuracy: it pools every decision, so a high-support criterion dominates. `metrics.macro_accuracy` is the unweighted mean across criteria, so each criterion counts equally regardless of how often it fires. `metrics.micro_kappa` is the analogous pooled Cohen's kappa (versus the per-criterion mean in `metrics.mean_kappa`).
+
+```python
+# micro pools decisions (high-support criteria dominate); macro averages criteria equally.
+print(f"\nAccuracy (micro): {pct(metrics.criterion_accuracy)}")
+print(f"Accuracy (macro): {pct(metrics.macro_accuracy)}")
+print(f"Kappa (micro):    {num(metrics.micro_kappa)}")
+print(f"Kappa (macro):    {num(metrics.mean_kappa)}")
+```
+
+A large micro-vs-macro split means a few frequent criteria are carrying the headline number while rarer criteria fare differently — inspect the per-criterion breakdown from Step 4.
+
+**Confusion matrix, FPR/FNR, and degeneracy.** Each binary criterion carries a 2×2 `ConfusionMatrix` (rows = ground truth, columns = prediction; labels `["MET", "UNMET"]`) plus derived false-positive / false-negative rates. `is_degenerate` flags a criterion that *had* samples but whose ground truth collapsed onto a single class, so kappa could not be estimated.
+
+```python
+print("\nCONFUSION & ERROR RATES (binary criteria)")
+print("-" * 50)
+for cr_metrics in metrics.per_criterion:
+    if cr_metrics.criterion_type != "binary":
+        continue
+    if cr_metrics.is_degenerate:
+        # Had samples but a single ground-truth class — agreement is undefined.
+        print(f"{cr_metrics.name}: degenerate (single class, kappa undefined)")
+        continue
+
+    cm = cr_metrics.confusion_matrix  # ConfusionMatrix | None
+    if cm is None:
+        print(f"{cr_metrics.name}: no samples")
+        continue
+
+    # tp/fp/fn/tn are defined on the binary 2x2 layout (labels[0] == "MET").
+    print(f"{cr_metrics.name}:")
+    print(f"  TP={cm.tp}  FP={cm.fp}  FN={cm.fn}  TN={cm.tn}")
+    # fpr / fnr are `float | None` (None when their denominator is zero).
+    print(f"  FPR={num(cr_metrics.fpr)}  FNR={num(cr_metrics.fnr)}")
+```
+
+Illustrative output (your numbers will differ):
+
+```
+CONFUSION & ERROR RATES (binary criteria)
+--------------------------------------------------
+hate_speech:
+  TP=8  FP=1  FN=2  TN=89
+  FPR=0.011  FNR=0.200
+misinformation:
+  TP=6  FP=9  FN=4  TN=81
+  FPR=0.100  FNR=0.400
+```
+
+A high **FNR** means the judge misses real violations (it under-predicts MET — a strict judge); a high **FPR** means it flags clean content (it over-predicts MET — a permissive judge). This decomposes the systematic bias from Step 5 into the two error directions, so you can choose remediation (e.g. few-shot examples of the missed class) per criterion.
+
+### Step 9: Export Results
 
 Save metrics for reporting:
 
@@ -244,6 +333,8 @@ df.to_csv("validation_results.csv")
 - **Cohen's kappa** is more meaningful than accuracy for imbalanced labels
 - **Per-criterion analysis** identifies weak spots for targeted improvement
 - **Systematic bias** detection reveals if judge is too permissive or strict
+- **Matthews φ** vs kappa exposes positive-rate drift (φ > κ); macro vs micro reveals whether frequent criteria dominate the headline number
+- **Confusion matrix** with FPR/FNR decomposes errors into misses vs false flags per criterion
 - **Bootstrap CIs** provide statistical confidence in your metrics
 - **Score correlation** shows overall ranking agreement
 
@@ -462,7 +553,7 @@ async def main():
 
         for j, cr in enumerate(item_result.report.report or []):
             total += 1
-            if cr.verdict == CriterionVerdict.MET:
+            if cr.final_verdict == CriterionVerdict.MET:
                 pred_met += 1
             if item.ground_truth[j] == CriterionVerdict.MET:
                 gt_met += 1

@@ -10,7 +10,7 @@ You're a QA lead at a tech company. Support agents respond to customer tickets, 
 flowchart LR
     R[Rubric] --> G[grade]
     Gr[CriterionGrader] --> G
-    G --> E[EvaluationReport]
+    G --> E[EnsembleEvaluationReport]
     E --> S[score]
     E --> V[verdicts]
     E --> Re[reasons]
@@ -147,15 +147,16 @@ if result.completion_cost:
 
 # Per-criterion breakdown
 for criterion in result.report:
-    # Get the verdict (MET, UNMET, or CANNOT_ASSESS)
-    verdict = criterion.verdict.value
+    # Get the verdict (MET, UNMET, or CANNOT_ASSESS).
+    # final_verdict is None for failed/multi-choice criteria, so guard it.
+    verdict = criterion.final_verdict.value if criterion.final_verdict else "n/a"
 
-    # The weight and requirement
-    name = criterion.name or "unnamed"
-    weight = criterion.weight
+    # The criterion's name and weight live on the nested criterion
+    name = criterion.criterion.name or "unnamed"
+    weight = criterion.criterion.weight
 
     # The judge's explanation
-    reason = criterion.reason
+    reason = criterion.final_reason
 
     print(f"\n[{verdict}] {name} (weight: {weight})")
     print(f"  Reason: {reason}")
@@ -390,10 +391,11 @@ async def main():
 
         # Show per-criterion verdicts
         for criterion in result.report:
-            verdict = criterion.verdict.value
-            name = criterion.name or "unnamed"
-            symbol = "+" if criterion.weight > 0 else "-"
-            print(f"  [{verdict:^6}] {symbol}{abs(criterion.weight):.0f} {name}")
+            verdict = criterion.final_verdict.value if criterion.final_verdict else "n/a"
+            name = criterion.criterion.name or "unnamed"
+            weight = criterion.criterion.weight
+            symbol = "+" if weight > 0 else "-"
+            print(f"  [{verdict:^6}] {symbol}{abs(weight):.0f} {name}")
 
     print(f"\n{'=' * 60}")
     print(f"Total evaluation cost: ${total_cost:.4f}")

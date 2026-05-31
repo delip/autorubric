@@ -206,7 +206,7 @@ acc = metrics.criterion_accuracy
 kappa = metrics.mean_kappa
 print(f"  Accuracy: {acc:.1%}" if acc is not None else "  Accuracy: n/a")
 print(f"  Kappa: {kappa:.3f}" if kappa is not None else "  Kappa: n/a")
-print(f"  Cost: ${result.total_completion_cost:.4f}")
+print(f"  Cost: ${result.total_completion_cost or 0:.4f}")
 ```
 
 ### Step 6: Estimate Quality Gap

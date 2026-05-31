@@ -112,6 +112,13 @@ result = asyncio.run(main())
 
 The output shows per-section results with verdicts and explanations:
 
+!!! note "Scores and verdicts are illustrative"
+    The verdicts, explanations, and scores shown throughout this page (e.g. `SCORE: 0.42`,
+    and the flawed/improved comparison below) are illustrative outputs from a live LLM judge
+    (`openai/gpt-4.1-mini`). They are not deterministic fixtures and will vary between runs and
+    as the meta-rubric evolves. Treat them as qualitative ("flawed scores much lower than
+    improved"), not as exact numbers to reproduce.
+
 ```
 ═══════════════════════════════════════════════════════════════
 STANDALONE EVALUATION (rubric quality in isolation)
@@ -147,14 +154,16 @@ SCORE: 0.42
 
 ### Step 3: Understanding Meta-Rubric Criteria
 
-The standalone meta-rubric evaluates four areas:
+The standalone meta-rubric evaluates six areas:
 
 | Section | What It Checks |
 |---------|---------------|
 | **Clarity & Precision** | Clear requirements, specific language, single-dimension criteria, behavioral language |
 | **Structure & Design** | Reasonable criteria count, balanced weights, non-overlapping criteria |
 | **LLM-Friendliness** | Independent verification, objectivity, well-defined multi-choice options |
+| **Reliability Predictors** | Clear decision boundaries, deterministic assessability, consistent granularity |
 | **Anti-Patterns** | Double-barreled, vague, circular, overlapping, verbose, hedging, generic (negative weights) |
+| **LLM-Judge Anti-Patterns** | Missing negative criteria, unfalsifiable bars, ambiguous boundaries, verbosity-rewarding, poorly anchored ordinals, count-dependent checks (negative weights) |
 
 Anti-pattern criteria have **negative weights**—a verdict of MET means the issue was detected:
 
@@ -177,6 +186,12 @@ for criterion in meta_rubric.rubric:
   [-6] overly_verbose
   [-6] hedging_language
   [-8] generic_boilerplate
+  [-6] no_negative_criteria
+  [-8] unfalsifiable_criteria
+  [-8] boundary_ambiguity
+  [-6] verbosity_rewarding
+  [-6] poorly_anchored_ordinal
+  [-4] counting_dependent
 ```
 
 !!! warning "Negative weights and MET verdicts"

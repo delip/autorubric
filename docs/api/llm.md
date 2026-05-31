@@ -193,3 +193,27 @@ Type alias for thinking parameter (level or budget).
 ::: autorubric.ThinkingParam
     options:
       show_source: true
+
+---
+
+## classify_grading_error
+
+Classify an exception raised while grading a single criterion into an [`ErrorCategory`](#errorcategory). The grading pipeline uses the result to route a failed judge call: `infrastructure` and `parse` errors are treated as abstentions (mapped to `CANNOT_ASSESS` / `na=True` and excluded from scoring under the default `SKIP` strategy), while `unknown` errors fall back to a conservative worst-case verdict.
+
+::: autorubric.classify_grading_error
+    options:
+      show_source: true
+
+---
+
+## ErrorCategory
+
+Type alias for the category of a grading failure: `Literal["infrastructure", "parse", "unknown"]`.
+
+- `"infrastructure"`: API/network failure (timeout, connection, rate limit, server error). Not the submission's fault.
+- `"parse"`: the judge responded but its output could not be parsed/validated into the expected schema. Also not the submission's fault.
+- `"unknown"`: an unexpected error that does not fit the above categories.
+
+::: autorubric.ErrorCategory
+    options:
+      show_source: true

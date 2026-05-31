@@ -4,7 +4,7 @@ Complete API documentation for AutoRubric, organized by functional area.
 
 ## Overview
 
-AutoRubric exports 89 public items across the main module and `autorubric.graders`, plus 12 additional building-block functions and types available from `autorubric.meta`. This reference is organized into thematic chapters for easier navigation.
+AutoRubric exports 91 public items across the main module and `autorubric.graders`, plus 20 additional building-block functions and types available from `autorubric.meta`. This reference is organized into thematic chapters for easier navigation.
 
 ## Quick Links
 
@@ -82,6 +82,9 @@ from autorubric.meta import (
 
     # Improvement - types
     ConvergenceFn,
+    CriterionErrorReport,
+    CriterionExemplar,
+    HeldOutValidationResult,
     ImprovementConfig,
     ImprovementProgressDisplay,
     ImprovementResult,
@@ -95,11 +98,15 @@ from autorubric.meta import (
     extract_issues,
     format_agreement_for_prompt,
     format_ground_truth_for_prompt,
+    format_held_out_for_prompt,
     format_issues_for_prompt,
     pareto_accept,
     revise_rubric,
+    revise_rubric_held_out,
     validate_agreement,
+    validate_criteria_structure,
     validate_ground_truth,
+    validate_held_out,
 )
 ```
 
@@ -144,7 +151,7 @@ score = clamp(weighted_sum / total_positive_weight, 0, 1)  # if normalized
 ## Conventions
 
 - All graders return `EnsembleEvaluationReport` for consistent interface
-- `raw_score` is always populated regardless of `normalize` setting
-- Parse failures use conservative defaults (UNMET for positive, MET for negative weights)
+- `raw_score` (the unnormalized weighted sum) is populated regardless of the `normalize` setting on a successful grade, but is `None` on a failed/error report (consumers should filter on `error is not None`)
+- Judge-call failures route via `classify_grading_error`: infrastructure/parse failures become `CANNOT_ASSESS` (`na=True`, excluded from scoring under the default SKIP strategy); only `unknown` errors fall back to the conservative worst-case verdict (UNMET for positive weight, MET for negative weight). Failed reports carry a category-prefixed `error` and `is_error`
 - Filter `error is not None` results in training pipelines
 - Rate limiting via `LLMConfig.max_parallel_requests` (per-provider semaphore)

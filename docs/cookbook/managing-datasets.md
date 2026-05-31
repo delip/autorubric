@@ -468,10 +468,16 @@ async def main():
         # Compare predicted vs ground truth
         if item.ground_truth:
             for j, criterion in enumerate(result.report):
-                predicted = criterion.verdict
+                # EnsembleEvaluationReport.report items are EnsembleCriterionReport:
+                # use `final_verdict` (None on error/multi-choice) and the nested criterion.
+                predicted = criterion.final_verdict
                 actual = item.ground_truth[j]
                 match = "✓" if predicted == actual else "✗"
-                print(f"  {match} {criterion.name}: predicted={predicted.value}, actual={actual.value}")
+                predicted_label = predicted.value if predicted is not None else "n/a"
+                print(
+                    f"  {match} {criterion.criterion.name}: "
+                    f"predicted={predicted_label}, actual={actual.value}"
+                )
 
                 if predicted == actual:
                     correct_verdicts += 1

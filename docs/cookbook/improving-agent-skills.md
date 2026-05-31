@@ -38,7 +38,7 @@ The preliminary skill is deliberately generic --- no mention of peer review, no 
 V1_SKILL = "Provide brief feedback on the text below."
 ```
 
-The gap is fundamental. The preliminary skill gives no task-specific guidance at all: no mention of scientific methodology, no procedure, no formatting constraints. The rubric expects concrete outputs ("2-3 sentence summary", "at least 2 specific strengths", section headers in a specific order), but the skill says only "brief feedback." Paired with a small open-source model (Llama 3.1 8B), the lack of guidance produces short, unstructured reactions that fail on 7 of 10 criteria: `paper_summary` (0%), `statistical_evaluation` (20%), `constructive_tone` (60%), `structured_format` (0%), `specific_references` (40%), `clear_recommendation` (0%), and `factual_misrepresentation` (40%).
+The gap is fundamental. The preliminary skill gives no task-specific guidance at all: no mention of scientific methodology, no procedure, no formatting constraints. The rubric expects concrete outputs ("2-3 sentence summary", "at least 2 specific strengths", section headers in a specific order), but the skill says only "brief feedback." Paired with a small open-source model (Llama 3.1 8B), the lack of guidance produces short, unstructured reactions that fail on 6 of 10 criteria: `paper_summary` (0%), `statistical_evaluation` (20%), `structured_format` (0%), `specific_references` (50%), `clear_recommendation` (0%), and `factual_misrepresentation` (20% flagged for fabrication).
 
 ### Step 2: Generate reviews and grade them
 
@@ -96,21 +96,30 @@ async def grade_reviews(rubric, grader, reviews, papers):
         for r, p in zip(reviews, papers)
     ]
     reports = await asyncio.gather(*tasks)
-    return [
-        {
-            "paper_id": r["paper_id"],
-            "score": report.score,
-            "per_criterion": {
-                cr.name: {
-                    "verdict": cr.verdict.value,
-                    "reason": cr.reason,
-                }
-                for cr in report.report
-            },
-            "cost": report.completion_cost or 0.0,
-        }
-        for r, report in zip(reviews, reports)
-    ]
+    graded = []
+    for r, report in zip(reviews, reports):
+        per_criterion = {}
+        # `rubric.grade(..., grader=CriterionGrader)` returns an
+        # EnsembleEvaluationReport, whose `report` items are EnsembleCriterionReport
+        # (final_verdict / final_reason / nested criterion). A single CriterionReport
+        # exposes verdict / reason / name directly; the hasattr fallback handles both.
+        for cr in report.report:
+            verdict = cr.final_verdict if hasattr(cr, "final_verdict") else cr.verdict
+            reason = cr.final_reason if hasattr(cr, "final_reason") else cr.reason
+            name = cr.criterion.name if hasattr(cr, "criterion") else cr.name
+            per_criterion[name] = {
+                "verdict": verdict.value,
+                "reason": reason,
+            }
+        graded.append(
+            {
+                "paper_id": r["paper_id"],
+                "score": report.score,
+                "per_criterion": per_criterion,
+                "cost": report.completion_cost or 0.0,
+            }
+        )
+    return graded
 ```
 
 ### Step 3: Per-criterion failure analysis
@@ -236,7 +245,10 @@ async def run_improvement_loop(rubric, papers, agent_client, eval_grader,
         graded = await grade_reviews(rubric, eval_grader, reviews, papers)
 
         pass_rates = compute_pass_rates(graded, criteria_names)
-        mean_score = sum(g["score"] for g in graded) / len(graded)
+        # `score` is float | None (None on a failed/error report, never a fabricated
+        # 0.0), so average only over reports that produced a real score.
+        scores = [g["score"] for g in graded if g["score"] is not None]
+        mean_score = sum(scores) / len(scores)
         iterations.append({
             "iteration": i, "skill": current_skill,
             "mean_score": mean_score, "pass_rates": pass_rates,
@@ -275,13 +287,13 @@ async def run_improvement_loop(rubric, papers, agent_client, eval_grader,
 
 #### Score convergence
 
-The preliminary skill scores 0.46 on iteration 0. After a single revision, the score jumps to 0.89 and plateaus:
+The preliminary skill scores 0.51 on iteration 0. After a single revision, the score jumps to 0.89, then climbs to 0.92 on the next iteration and converges there (the third revision yields delta=0.000):
 
 ![Score convergence](../images/skill-improvement-convergence.png)
 
-The 0.46-to-0.89 jump happens because the preliminary skill fails on 7 of 10 criteria simultaneously. Three criteria start at 0% (`paper_summary`, `structured_format`, `clear_recommendation`), three more are below 70% (`statistical_evaluation` at 20%, `specific_references` at 40%, `constructive_tone` at 60%), and `factual_misrepresentation` triggers at 40%. The revision LLM addresses the structural gaps in a single rewrite by adding a 7-section procedure with explicit headers, a summary requirement, a recommendation label, and statistical analysis instructions. The second iteration refines fact-checking constraints but the score plateaus at 0.89.
+The 0.51-to-0.89 jump happens because the preliminary skill fails on 6 of 10 criteria simultaneously. Three criteria start at 0% (`paper_summary`, `structured_format`, `clear_recommendation`), three more are below 70% (`statistical_evaluation` at 20%, `specific_references` at 50%, `factual_misrepresentation` at 20% flagged). The revision LLM addresses the structural gaps in a single rewrite by adding a 7-section procedure with explicit headers, a summary requirement, a recommendation label, and statistical analysis instructions. A second iteration refines fact-checking constraints and lifts the score to 0.92, after which it plateaus.
 
-The improved skill surpasses the curated skill (0.83). The curated skill was designed by a human expert, but the revision LLM's explicit formatting and fact-checking constraints produce better pass rates on this rubric when paired with Llama 3.1 8B.
+The improved skill surpasses the curated skill (0.79). The curated skill was designed by a human expert, but the revision LLM's explicit formatting and fact-checking constraints produce better pass rates on this rubric when paired with Llama 3.1 8B.
 
 #### Per-criterion comparison
 
@@ -293,7 +305,7 @@ The three-way chart adds the curated skill:
 
 ![Three-way comparison](../images/skill-improvement-three-way.png)
 
-The improved skill beats the curated skill on `constructive_tone` (100% vs 50%), `statistical_evaluation` (90% vs 70%), and `specific_references` (100% vs 90%). The curated skill's concise instructions leave room for a small model like Llama 3.1 8B to produce off-tone or incomplete responses, while the improved skill's explicit constraints compensate. Neither skill eliminates `factual_misrepresentation` --- the improved skill reduces the trigger rate from 40% to 60% "met" (i.e., more reviews are flagged for fabrication), reflecting the 8B model's tendency to hallucinate details regardless of instructions.
+The improved skill beats the curated skill on `constructive_tone` (90% vs 40%), `statistical_evaluation` (100% vs 60%), and `structured_format` (100% vs 90%); both reach 100% on `specific_references`. The curated skill's concise instructions leave room for a small model like Llama 3.1 8B to produce off-tone or incomplete responses, while the improved skill's explicit constraints compensate. Neither skill eliminates `factual_misrepresentation` --- the improved skill's "met" (flagged-for-fabrication) rate rises from 20% to 40%, reflecting the 8B model's tendency to hallucinate more details as the longer, more structured output format creates more opportunities for fabrication.
 
 #### Skill text evolution
 
@@ -311,7 +323,7 @@ The convergence is not from copying. The revision LLM never sees the curated ski
 
 #### The thoroughness/conciseness tradeoff
 
-The improved skill is notably longer and more prescriptive than the curated skill. It adds explicit fact-checking constraints ("locate the exact text in the paper and verify the data matches before writing") that the curated skill leaves implicit. With a capable model, these extra constraints might be unnecessary. With Llama 3.1 8B, they measurably improve pass rates --- the improved skill scores 0.89 vs the curated skill's 0.83. The tradeoff: the improved skill is tightly coupled to this rubric and this model. A different model or rubric might reward a different skill structure.
+The improved skill is notably longer and more prescriptive than the curated skill. It adds explicit fact-checking constraints ("locate the exact text in the paper and verify the data matches before writing") that the curated skill leaves implicit. With a capable model, these extra constraints might be unnecessary. With Llama 3.1 8B, they measurably improve pass rates --- the improved skill scores 0.92 vs the curated skill's 0.79. The tradeoff: the improved skill is tightly coupled to this rubric and this model. A different model or rubric might reward a different skill structure.
 
 ### Step 6: Curated skill comparison
 
@@ -319,19 +331,19 @@ The curated skill (from the [Evaluating Agent Skills](agent-skill-evaluation.md)
 
 | Metric | Preliminary Skill | Improved Skill | Curated Skill |
 |--------|----------|----------------|------------|
-| Mean score | 0.46 | 0.89 | 0.83 |
-| Criteria at 100% | 3/10 | 5/10 | 4/10 |
-| `paper_summary` | 0% | 90% | 90% |
-| `statistical_evaluation` | 20% | 90% | 70% |
-| `constructive_tone` | 60% | 100% | 50% |
-| `structured_format` | 0% | 100% | 100% |
-| `specific_references` | 40% | 100% | 90% |
+| Mean score | 0.51 | 0.92 | 0.79 |
+| Criteria at 100% | 3/10 | 7/10 | 5/10 |
+| `paper_summary` | 0% | 90% | 80% |
+| `statistical_evaluation` | 20% | 100% | 60% |
+| `constructive_tone` | 80% | 90% | 40% |
+| `structured_format` | 0% | 100% | 90% |
+| `specific_references` | 50% | 100% | 100% |
 | `clear_recommendation` | 0% | 100% | 100% |
-| `factual_misrepresentation` | 40% | 60% | 40% |
+| `factual_misrepresentation` | 20% | 40% | 40% |
 
-The improved skill surpasses the curated skill by 6 points (0.89 vs 0.83). The gap comes from `constructive_tone` (100% vs 50%) and `statistical_evaluation` (90% vs 70%): the curated skill's concise instructions leave Llama 3.1 8B without enough guidance to consistently produce actionable suggestions or detailed statistical assessments. The improved skill's explicit constraints compensate for the model's weaker instruction-following.
+The improved skill surpasses the curated skill by 13 points (0.92 vs 0.79). The gap comes from `constructive_tone` (90% vs 40%) and `statistical_evaluation` (100% vs 60%): the curated skill's concise instructions leave Llama 3.1 8B without enough guidance to consistently produce actionable suggestions or detailed statistical assessments. The improved skill's explicit constraints compensate for the model's weaker instruction-following.
 
-The `factual_misrepresentation` criterion remains the ceiling. Even with explicit source-checking constraints, Llama 3.1 8B fabricates details in 60% of reviews (up from 40% in the preliminary skill --- the longer, more structured output format creates more opportunities for hallucination). This is a model capability limitation that skill design alone cannot fully address.
+The `factual_misrepresentation` criterion remains the ceiling. Even with explicit source-checking constraints, Llama 3.1 8B fabricates details in 40% of reviews (up from 20% in the preliminary skill --- the longer, more structured output format creates more opportunities for hallucination). This is a model capability limitation that skill design alone cannot fully address.
 
 The improvement loop optimizes for the signal it receives (10 papers and 10 criteria). Broader generalization requires held-out validation.
 
@@ -346,10 +358,10 @@ The improvement loop optimizes for the signal it receives (10 papers and 10 crit
 | Convergence | Score plateau detection (delta < 0.02) |
 
 - **Per-criterion pass rates are a sufficient optimization signal** in this experiment. The revision LLM does not need access to the curated skill or labeled data; rubric feedback alone recovers expert-level skill design patterns.
-- **Skill design can compensate for model capability.** The improved skill (0.89) surpasses the manually curated skill (0.83) when paired with Llama 3.1 8B, because its explicit constraints compensate for the model's weaker instruction-following. Stronger models may not need this level of prescription.
-- **One iteration captures most of the gain.** The preliminary-to-improved jump (0.46 to 0.89) happened in a single revision cycle. The second iteration refines fact-checking constraints but the score plateaus. The biggest gains come from addressing structural gaps (missing summary, missing headers, missing recommendation).
+- **Skill design can compensate for model capability.** The improved skill (0.92) surpasses the manually curated skill (0.79) when paired with Llama 3.1 8B, because its explicit constraints compensate for the model's weaker instruction-following. Stronger models may not need this level of prescription.
+- **The first iteration captures most of the gain.** The preliminary-to-improved jump (0.51 to 0.89) happened in a single revision cycle. A second iteration refines fact-checking constraints and lifts the score to 0.92, after which it plateaus. The biggest gains come from addressing structural gaps (missing summary, missing headers, missing recommendation).
 - **Watch for rubric overfitting.** The improved skill is optimized for this specific rubric and model. Validate on held-out data before deploying a loop-improved skill in production.
-- **Negative-weight criteria expose model limits.** The `factual_misrepresentation` criterion (a penalty for hallucinated content) worsens as the skill becomes more prescriptive --- more structured output means more opportunities for a small model to fabricate details. This is a model capability limitation that skill design alone cannot fix.
+- **Negative-weight criteria expose model limits.** The `factual_misrepresentation` criterion (a penalty for hallucinated content) worsens as the skill becomes more prescriptive --- more structured output means more opportunities for a small model to fabricate details (its "met"/flagged rate rises from 20% to 40%). This is a model capability limitation that skill design alone cannot fix.
 
 ## Going Further
 
@@ -360,6 +372,8 @@ The improvement loop optimizes for the signal it receives (10 papers and 10 crit
 ---
 
 ## Appendix: Complete Code
+
+This is an abridged version of `scripts/run_skill_improvement.py`, which produced the shipped `skill_improvement_results.json` the charts above read. The script additionally records a delta-annotated `convergence_reason` (e.g. `"score_plateau (delta=0.000)"`), the aggregated `total_cost`, and a `config` block; run it to reproduce the exact JSON.
 
 ```python
 """Skill Improvement Loop
@@ -483,21 +497,29 @@ async def grade_reviews(rubric, grader, reviews, papers):
         for r, p in zip(reviews, papers)
     ]
     reports = await asyncio.gather(*tasks)
-    return [
-        {
-            "paper_id": r["paper_id"],
-            "score": report.score,
-            "per_criterion": {
-                cr.name: {
-                    "verdict": cr.verdict.value,
-                    "reason": cr.reason,
-                }
-                for cr in report.report
-            },
-            "cost": report.completion_cost or 0.0,
-        }
-        for r, report in zip(reviews, reports)
-    ]
+    graded = []
+    for r, report in zip(reviews, reports):
+        per_criterion = {}
+        # EnsembleEvaluationReport.report items are EnsembleCriterionReport
+        # (final_verdict / final_reason / nested criterion); the hasattr fallback
+        # also accepts a plain CriterionReport (verdict / reason / name).
+        for cr in report.report:
+            verdict = cr.final_verdict if hasattr(cr, "final_verdict") else cr.verdict
+            reason = cr.final_reason if hasattr(cr, "final_reason") else cr.reason
+            name = cr.criterion.name if hasattr(cr, "criterion") else cr.name
+            per_criterion[name] = {
+                "verdict": verdict.value,
+                "reason": reason,
+            }
+        graded.append(
+            {
+                "paper_id": r["paper_id"],
+                "score": report.score,
+                "per_criterion": per_criterion,
+                "cost": report.completion_cost or 0.0,
+            }
+        )
+    return graded
 
 
 def compute_pass_rates(graded, criteria_names):
@@ -556,7 +578,9 @@ async def run_improvement_loop(rubric, papers, agent_client, eval_grader,
         graded = await grade_reviews(rubric, eval_grader, reviews, papers)
 
         pass_rates = compute_pass_rates(graded, criteria_names)
-        mean_score = sum(g["score"] for g in graded) / len(graded)
+        # `score` is float | None (None on a failed/error report); average over real ones.
+        scores = [g["score"] for g in graded if g["score"] is not None]
+        mean_score = sum(scores) / len(scores)
 
         iterations.append({
             "iteration": i,
@@ -628,7 +652,8 @@ async def main():
     gold_graded = await grade_reviews(rubric, eval_grader, gold_reviews, papers)
     criteria_names = [c.name for c in rubric.rubric]
     gold_pass_rates = compute_pass_rates(gold_graded, criteria_names)
-    gold_mean = sum(g["score"] for g in gold_graded) / len(gold_graded)
+    gold_scores = [g["score"] for g in gold_graded if g["score"] is not None]
+    gold_mean = sum(gold_scores) / len(gold_scores)
 
     output = {
         "v1_skill": V1_SKILL,

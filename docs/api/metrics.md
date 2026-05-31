@@ -105,7 +105,7 @@ for judge_id, jm in metrics.per_judge.items():
 | `mean_krippendorff_alpha` | Macro mean of the per-criterion Krippendorff's α (inter-judge). `float | None`. |
 | `cannot_assess_mode` / `na_mode` | How CANNOT_ASSESS / NA were handled when the metrics were computed (`exclude` / `as_unmet` / `as_category`). Frozen on the result and round-tripped by `to_file` so a serialized number is never ambiguous among the estimands. |
 | `n_samples` | Total paired observations contributing to the aggregate metrics. `int | None`. |
-| `coverage_stats` | Under the `exclude` mode, how much of the raw paired sample survived abstention/error exclusion (`coverage`, judge/gt abstain rates, errored count). `CoverageStats | None`. |
+| `coverage_stats` | Under the `exclude` mode, how much of the raw paired sample survived abstention/error exclusion (`CoverageStats | None`). Counts `n_total` (raw pre-exclusion denominator), `n_covered` (== per-criterion `n_samples`), and `n_errored`; rates `coverage`, `judge_abstain_rate`, `gt_abstain_rate`, `union_exclusion_rate`, `error_rate` are each `float | None` (`None` when `n_total == 0`). |
 | `per_criterion` | Per-criterion metrics breakdown (polymorphic: `CriterionMetrics`, `OrdinalCriterionMetrics`, `NominalCriterionMetrics`). Their per-criterion numeric fields (`accuracy`, `precision`, `recall`, `f1`, `kappa`, `weighted_kappa`, `adjacent_accuracy`, per-option metrics) are likewise `float | None` when undefined. |
 | `score_rmse` | RMSE of cumulative scores (always a `float`). |
 | `score_mae` | MAE of cumulative scores (always a `float`). |
@@ -120,7 +120,8 @@ for judge_id, jm in metrics.per_judge.items():
 | `n_binary_criteria` | Number of binary criteria |
 | `n_ordinal_criteria` | Number of ordinal multi-choice criteria |
 | `n_nominal_criteria` | Number of nominal multi-choice criteria |
-| `na_stats` | Statistics for NA handling in multi-choice criteria (`NAStats`) |
+| `na_stats` | Statistics for NA handling in multi-choice criteria (`NAStats`): `na_count_true` / `na_count_pred` counts, `na_kappa` (`float | None`) on the {NA, not-NA} dichotomy, and `na_false_positive` / `na_false_negative`. |
+| `cannot_assess_stats` | Statistics for CANNOT_ASSESS handling in binary criteria (`CannotAssessStats`) — the binary parallel of `na_stats` (a **distinct** kind of abstention; see below): `ca_count_true` / `ca_count_pred` counts, `ca_kappa` (`float | None`) on the {CANNOT_ASSESS, not-CANNOT_ASSESS} dichotomy, and `ca_false_positive` / `ca_false_negative`. |
 | `warnings` | Any warnings generated during computation |
 
 ---
@@ -250,6 +251,28 @@ Per-criterion metrics for nominal multi-choice criteria.
 Statistics for NA (not applicable) handling in multi-choice criteria.
 
 ::: autorubric.metrics.NAStats
+    options:
+      show_source: true
+      members_order: source
+
+---
+
+## CannotAssessStats
+
+Statistics for CANNOT_ASSESS handling in binary criteria — the binary parallel of `NAStats`. Both are abstentions that flow through the same SKIP scoring path and get a dichotomized Cohen's-kappa diagnostic, but they are tracked as **distinct types**: CANNOT_ASSESS is an *epistemic* abstention on a yes/no decision ("I cannot determine MET vs. UNMET"), while multi-choice NA is "no applicable option" (a statement about the option space). Its fields are `ca_`-prefixed: `ca_count_true`, `ca_count_pred`, `ca_kappa` (`float | None`), `ca_kappa_interpretation`, `ca_false_positive`, `ca_false_negative`.
+
+::: autorubric.metrics.CannotAssessStats
+    options:
+      show_source: true
+      members_order: source
+
+---
+
+## CoverageStats
+
+How much of the raw paired sample survived abstention/error exclusion. Built only under the `exclude` handling mode (under `as_unmet` / `as_category` no observation is dropped, so coverage would be trivially `1.0` and these stats are left `None`). `n_total` is the raw pre-exclusion denominator and `n_covered` equals the per-criterion `n_samples`; every rate (`coverage`, `judge_abstain_rate`, `gt_abstain_rate`, `union_exclusion_rate`, `error_rate`) is `float | None`, `None` when its denominator is zero.
+
+::: autorubric.metrics.CoverageStats
     options:
       show_source: true
       members_order: source

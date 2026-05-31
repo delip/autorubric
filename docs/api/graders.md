@@ -61,10 +61,17 @@ grader = CriterionGrader(
     # Position bias mitigation (for multi-choice)
     shuffle_options=True,    # Default: enabled
 
+    # Multi-choice abstain channel
+    auto_na_option=True,     # Default: True — guarantees every multi-choice criterion a
+                             # first-class NA/abstain option (auto-injected if absent).
+                             # Set False for forced-choice (no auto NA option).
+
     # Reproducibility — pins all non-LLM randomness (shuffles, few-shot selection)
     seed=42,                 # Default: auto-generated
 )
 ```
+
+With `auto_na_option=True`, an auto-injected NA option is appended at the end (highest index), so existing option indices are preserved; an author-supplied NA option is never stripped.
 
 ---
 

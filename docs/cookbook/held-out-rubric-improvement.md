@@ -123,7 +123,7 @@ async def main():
     best = result.iterations[result.best_iteration]
     print(f"Accuracy: {initial.quality_score:.0%} -> {best.quality_score:.0%}")
     print(f"Converged: {result.convergence_reason}")
-    print(f"Cost: ${result.total_completion_cost:.4f}")
+    print(f"Cost: ${result.total_completion_cost or 0:.4f}")
 
 asyncio.run(main())
 ```
