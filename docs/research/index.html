@@ -4,49 +4,98 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Publications — AutoRubric</title>
+    <title>Research — AutoRubric</title>
     <meta name="description"
-        content="Papers and preprints from the AutoRubric project on rubric-based LLM evaluation, LLM-as-a-Judge, ensemble judging, and meta-rubric evaluation.">
+        content="Publications and preprints from the AutoRubric project on rubric-based LLM evaluation, LLM-as-a-Judge, ensemble judging, and meta-rubric evaluation.">
     <meta name="keywords"
         content="AutoRubric, publications, rubric-based LLM evaluation, LLM-as-a-Judge, ensemble judging, meta-rubric evaluation, Delip Rao, Chris Callison-Burch, arXiv 2603.00077">
     <meta name="robots" content="index, follow, max-image-preview:large">
-    <link rel="canonical" href="https://autorubric.org/publications/">
+    <link rel="canonical" href="https://autorubric.org/research/">
 
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="AutoRubric">
-    <meta property="og:title" content="Publications — AutoRubric">
+    <meta property="og:title" content="Research — AutoRubric">
     <meta property="og:description"
-        content="Papers and preprints from the AutoRubric project on rubric-based LLM evaluation.">
-    <meta property="og:url" content="https://autorubric.org/publications/">
+        content="Publications and preprints from the AutoRubric project on rubric-based LLM evaluation.">
+    <meta property="og:url" content="https://autorubric.org/research/">
     <meta name="twitter:card" content="summary">
-    <meta name="twitter:title" content="Publications — AutoRubric">
+    <meta name="twitter:title" content="Research — AutoRubric">
     <meta name="twitter:description"
-        content="Papers and preprints from the AutoRubric project on rubric-based LLM evaluation.">
+        content="Publications and preprints from the AutoRubric project on rubric-based LLM evaluation.">
 
     <script type="application/ld+json">
 {
   "@context": "https://schema.org",
   "@type": "CollectionPage",
-  "name": "Publications — AutoRubric",
-  "url": "https://autorubric.org/publications/",
-  "about": ["rubric-based LLM evaluation", "LLM-as-a-Judge", "meta-rubric evaluation"],
+  "name": "Research — AutoRubric",
+  "url": "https://autorubric.org/research/",
+  "about": [
+    "rubric-based LLM evaluation",
+    "LLM-as-a-Judge",
+    "meta-rubric evaluation"
+  ],
   "hasPart": [
+    {
+      "@type": "ScholarlyArticle",
+      "name": "Agreement Metrics for LLM-as-Judge Evaluation: What to Report and Why",
+      "headline": "Agreement Metrics for LLM-as-Judge Evaluation: What to Report and Why",
+      "author": [
+        {
+          "@type": "Person",
+          "name": "Delip Rao"
+        },
+        {
+          "@type": "Person",
+          "name": "Chris Callison-Burch"
+        }
+      ],
+      "datePublished": "2026",
+      "url": "https://arxiv.org/abs/2606.00093",
+      "sameAs": "https://arxiv.org/abs/2606.00093",
+      "identifier": "arXiv:2606.00093",
+      "publisher": {
+        "@type": "Organization",
+        "name": "arXiv"
+      },
+      "creativeWorkStatus": "Preprint",
+      "inLanguage": "en",
+      "about": [
+        "LLM-as-a-Judge",
+        "agreement metrics",
+        "inter-rater reliability",
+        "Cohen's kappa"
+      ],
+      "abstract": "Validating an LLM judge against human annotations usually means reporting several agreement statistics: accuracy, precision, recall, F1, Cohen's kappa, and one or more rank correlations. A survey of 24 recent LLM-as-judge papers finds metric choice entangled with the judgment scale, tie handling, invalid outputs, and abstention handling, and those choices rarely stated. For binary criteria (the common case in rubric-based evaluation, where each criterion is graded MET or UNMET) most of the reported numbers are redundant: Pearson's r, Spearman's rho, Kendall's tau-b, the phi coefficient, and the Matthews Correlation Coefficient all reduce to a single number on non-degenerate binary data, so reporting several of them only creates an illusion of corroborating evidence. Cohen's kappa is the one agreement coefficient that adds information: it shares phi's numerator but normalizes differently, and the gap between them measures how far the judge's positive-label rate has drifted from the human's. We then trace what changes when a judge may abstain with a CANNOT_ASSESS verdict: the three common ways of handling abstentions are not interchangeable preprocessing choices but answer different questions, and they break the binary equivalences. The same equivalences reappear, up to a negligible finite-sample correction, for multi-judge ensembles scored with Fleiss' kappa or Krippendorff's alpha. We close with a reporting checklist that names the judgment scale, the abstention and tie handling mode, coverage, the confusion matrix, and the aggregation level alongside any scalar agreement coefficient."
+    },
     {
       "@type": "ScholarlyArticle",
       "name": "AutoRubric: A Unified Framework for Rubric-Based LLM Evaluation",
       "headline": "AutoRubric: A Unified Framework for Rubric-Based LLM Evaluation",
       "author": [
-        {"@type": "Person", "name": "Delip Rao"},
-        {"@type": "Person", "name": "Chris Callison-Burch"}
+        {
+          "@type": "Person",
+          "name": "Delip Rao"
+        },
+        {
+          "@type": "Person",
+          "name": "Chris Callison-Burch"
+        }
       ],
       "datePublished": "2026",
       "url": "https://arxiv.org/abs/2603.00077",
       "sameAs": "https://arxiv.org/abs/2603.00077",
       "identifier": "arXiv:2603.00077",
-      "publisher": {"@type": "Organization", "name": "arXiv"},
+      "publisher": {
+        "@type": "Organization",
+        "name": "arXiv"
+      },
       "creativeWorkStatus": "Preprint",
       "inLanguage": "en",
-      "about": ["LLM evaluation", "rubric-based evaluation", "LLM-as-a-Judge"],
+      "about": [
+        "LLM evaluation",
+        "rubric-based evaluation",
+        "LLM-as-a-Judge"
+      ],
       "abstract": "Rubric-based evaluation with large language models (LLMs) has become standard practice for assessing text generation at scale, yet the underlying techniques are scattered across papers with inconsistent terminology and partial solutions. We present a unified framework: each identified technique is paired with its realization in AutoRubric, an open-source Python framework proposed in this paper. AutoRubric supports binary, ordinal, and nominal criteria with configurable weights; single-judge and multi-judge ensemble evaluation with majority, weighted, unanimous, and any-vote aggregation; few-shot calibration with verdict-balanced sampling; and mitigations for position bias (option shuffling), verbosity bias (length penalties), and criterion conflation (per-criterion atomic evaluation with natural language explanations). The framework provides reliability metrics drawn from psychometrics (Cohen's kappa, weighted kappa, correlation coefficients, and distribution-level tests) alongside production infrastructure including response caching, checkpointing with resumable runs, multi-provider rate limiting, and cost tracking. We evaluate AutoRubric on three benchmarks spanning educational assessment, deep research evaluation, and chatbot quality assessment, demonstrating that it produces results consistent with published benchmarks. We also contribute CHARM-100, a 100-sample chatbot evaluation dataset with per-sample ground truth labels across all three criterion types. Beyond measurement, we demonstrate an application where per-criterion rubric scores serve as an optimization signal for iterative agent skill improvement, raising a peer review agent's score from 0.46 to 0.89 in a single revision."
     }
   ]
@@ -57,6 +106,13 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono&display=swap"
         rel="stylesheet">
+
+    <!-- KaTeX: render inline LaTeX in publication abstracts -->
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" crossorigin="anonymous">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" crossorigin="anonymous"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" crossorigin="anonymous"></script>
+
     <style>
         * {
             margin: 0;
@@ -232,9 +288,9 @@
             text-decoration-color: var(--text-secondary);
         }
 
-        /* Abstract: inset, colored panel, collapsible.
-           The first (featured) paper stays open with no toggle; later papers
-           render without `is-featured`/`open` so they collapse by default. */
+        /* Abstract: inset, colored panel, collapsible — collapsed by default
+           (click "▸ Abstract" to expand). Optional: add `is-featured open` to a
+           <details> to keep one paper's abstract always expanded with no toggle. */
         .pub-abstract {
             max-width: 800px;
             margin-bottom: 16px;
@@ -434,7 +490,7 @@
             <nav>
                 <a href="/docs/">Docs</a>
                 <a href="/docs/cookbook/">Cookbook</a>
-                <a href="/publications/" aria-current="page">Publications</a>
+                <a href="/research/" aria-current="page">Research</a>
                 <a href="https://github.com/delip/autorubric">GitHub</a>
                 <a href="https://pypi.org/project/autorubric/">PyPI</a>
             </nav>
@@ -444,14 +500,44 @@
     <main id="main">
         <section class="page-head">
             <div class="container">
-                <h1>Publications</h1>
-                <p class="tagline">Papers and preprints from the AutoRubric project.</p>
+                <h1>Research</h1>
+                <p class="tagline">Publications and preprints from the AutoRubric project.</p>
             </div>
         </section>
 
         <section class="pubs">
             <div class="container">
-                <h2 class="pub-year">2026</h2>
+                <article class="pub">
+                    <h3 class="pub-title">
+                        <a href="https://arxiv.org/abs/2606.00093" target="_blank" rel="noopener noreferrer">Agreement Metrics for LLM-as-Judge Evaluation: What to Report and Why</a>
+                    </h3>
+                    <p class="pub-authors"><a href="https://deliprao.com" target="_blank" rel="noopener noreferrer">Delip Rao</a>, <a href="https://www.cis.upenn.edu/~ccb/index.html" target="_blank" rel="noopener noreferrer">Chris Callison-Burch</a></p>
+                    <p class="pub-meta">arXiv preprint &middot; cs.CL &middot; 2026</p>
+                    <details class="pub-abstract">
+                        <summary>Abstract</summary>
+                        <div class="pub-abstract-body">Validating an LLM judge against human annotations usually means reporting several agreement statistics: accuracy, precision, recall, $F_1$, Cohen's $\kappa$, and one or more rank correlations. A survey of 24 recent LLM-as-judge papers finds metric choice entangled with the judgment scale, tie handling, invalid outputs, and abstention handling, and those choices rarely stated. For binary criteria &mdash; the common case in rubric-based evaluation, where each criterion is graded MET or UNMET &mdash; most of the reported numbers are redundant: Pearson's $r$, Spearman's $\rho$, Kendall's $\tau_b$, the phi coefficient $\phi$, and the Matthews Correlation Coefficient all reduce to a single number on non-degenerate binary data, so reporting several of them only creates an illusion of corroborating evidence. Cohen's $\kappa$ is the one agreement coefficient that adds information: it shares $\phi$'s numerator but normalizes differently, and the gap between them measures how far the judge's positive-label rate has drifted from the human's. We then trace what changes when a judge may abstain with a CANNOT_ASSESS verdict: the three common ways of handling abstentions are not interchangeable preprocessing choices but answer different questions, and they break the binary equivalences. The same equivalences reappear, up to a negligible finite-sample correction, for multi-judge ensembles scored with Fleiss' $\kappa$ or Krippendorff's $\alpha$. We close with a reporting checklist that names the judgment scale, the abstention and tie handling mode, coverage, the confusion matrix, and the aggregation level alongside any scalar agreement coefficient.</div>
+                    </details>
+                    <div class="pub-links">
+                        <a class="chip chip-arxiv" href="https://arxiv.org/abs/2606.00093" target="_blank" rel="noopener noreferrer">arXiv</a>
+                        <a class="chip" href="https://arxiv.org/pdf/2606.00093" target="_blank" rel="noopener noreferrer">PDF</a>
+                        <a class="chip" href="https://github.com/delip/autorubric" target="_blank" rel="noopener noreferrer">Code</a>
+                    </div>
+                    <details class="cite">
+                        <summary class="chip">Cite (BibTeX)</summary>
+                        <div class="cite-panel">
+                            <button class="copy-bib" type="button" data-bib="bib-rao2026agreement">Copy</button>
+                            <pre id="bib-rao2026agreement">@misc{rao2026agreement,
+    title={Agreement Metrics for LLM-as-Judge Evaluation: What to Report and Why},
+    author={Delip Rao and Chris Callison-Burch},
+    year={2026},
+    eprint={2606.00093},
+    archivePrefix={arXiv},
+    primaryClass={cs.CL},
+    url={https://arxiv.org/abs/2606.00093},
+}</pre>
+                        </div>
+                    </details>
+                </article>
 
                 <article class="pub">
                     <h3 class="pub-title">
@@ -459,9 +545,9 @@
                     </h3>
                     <p class="pub-authors"><a href="https://deliprao.com" target="_blank" rel="noopener noreferrer">Delip Rao</a>, <a href="https://www.cis.upenn.edu/~ccb/index.html" target="_blank" rel="noopener noreferrer">Chris Callison-Burch</a></p>
                     <p class="pub-meta">arXiv preprint · cs.CL · 2026</p>
-                    <details class="pub-abstract is-featured" open>
+                    <details class="pub-abstract">
                         <summary>Abstract</summary>
-                        <div class="pub-abstract-body">Rubric-based evaluation with large language models (LLMs) has become standard practice for assessing text generation at scale, yet the underlying techniques are scattered across papers with inconsistent terminology and partial solutions. We present a unified framework: each identified technique is paired with its realization in AutoRubric, an open-source Python framework proposed in this paper. AutoRubric supports binary, ordinal, and nominal criteria with configurable weights; single-judge and multi-judge ensemble evaluation with majority, weighted, unanimous, and any-vote aggregation; few-shot calibration with verdict-balanced sampling; and mitigations for position bias (option shuffling), verbosity bias (length penalties), and criterion conflation (per-criterion atomic evaluation with natural language explanations). The framework provides reliability metrics drawn from psychometrics (Cohen's &#954;, weighted &#954;, correlation coefficients, and distribution-level tests) alongside production infrastructure including response caching, checkpointing with resumable runs, multi-provider rate limiting, and cost tracking. We evaluate AutoRubric on three benchmarks spanning educational assessment, deep research evaluation, and chatbot quality assessment, demonstrating that it produces results consistent with published benchmarks while exercising the framework's key capabilities: per-criterion binary evaluation with few-shot calibration (RiceChem), multi-judge ensemble evaluation across judge models (ResearcherBench), and mixed criterion types combining binary, ordinal, and nominal scales (CHARM-100). We also contribute CHARM-100, a 100-sample chatbot evaluation dataset with per-sample ground truth labels across all three criterion types, designed to stress-test rubric evaluation frameworks on heterogeneous criteria. Beyond measurement, we demonstrate an application where per-criterion rubric scores serve as an optimization signal for iterative agent skill improvement, raising a peer review agent's score from 0.46 to 0.89 in a single revision.</div>
+                        <div class="pub-abstract-body">Rubric-based evaluation with large language models (LLMs) has become standard practice for assessing text generation at scale, yet the underlying techniques are scattered across papers with inconsistent terminology and partial solutions. We present a unified framework: each identified technique is paired with its realization in AutoRubric, an open-source Python framework proposed in this paper. AutoRubric supports binary, ordinal, and nominal criteria with configurable weights; single-judge and multi-judge ensemble evaluation with majority, weighted, unanimous, and any-vote aggregation; few-shot calibration with verdict-balanced sampling; and mitigations for position bias (option shuffling), verbosity bias (length penalties), and criterion conflation (per-criterion atomic evaluation with natural language explanations). The framework provides reliability metrics drawn from psychometrics (Cohen's $\kappa$, weighted $\kappa$, correlation coefficients, and distribution-level tests) alongside production infrastructure including response caching, checkpointing with resumable runs, multi-provider rate limiting, and cost tracking. We evaluate AutoRubric on three benchmarks spanning educational assessment, deep research evaluation, and chatbot quality assessment, demonstrating that it produces results consistent with published benchmarks while exercising the framework's key capabilities: per-criterion binary evaluation with few-shot calibration (RiceChem), multi-judge ensemble evaluation across judge models (ResearcherBench), and mixed criterion types combining binary, ordinal, and nominal scales (CHARM-100). We also contribute CHARM-100, a 100-sample chatbot evaluation dataset with per-sample ground truth labels across all three criterion types, designed to stress-test rubric evaluation frameworks on heterogeneous criteria. Beyond measurement, we demonstrate an application where per-criterion rubric scores serve as an optimization signal for iterative agent skill improvement, raising a peer review agent's score from 0.46 to 0.89 in a single revision.</div>
                     </details>
                     <div class="pub-links">
                         <a class="chip chip-arxiv" href="https://arxiv.org/abs/2603.00077" target="_blank" rel="noopener noreferrer">arXiv</a>
@@ -512,6 +598,20 @@
                     var prev = btn.textContent;
                     btn.textContent = 'Copied!';
                     setTimeout(function () { btn.textContent = prev; }, 1500);
+                });
+            });
+        });
+
+        // Render inline LaTeX in abstracts with KaTeX (after the deferred libs load).
+        document.addEventListener('DOMContentLoaded', function () {
+            if (!window.renderMathInElement) return;
+            document.querySelectorAll('.pub-abstract-body').forEach(function (el) {
+                renderMathInElement(el, {
+                    delimiters: [
+                        { left: '$$', right: '$$', display: true },
+                        { left: '$', right: '$', display: false }
+                    ],
+                    throwOnError: false
                 });
             });
         });
