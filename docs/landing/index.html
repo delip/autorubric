@@ -6,7 +6,76 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AutoRubric - Research-Backed LLM Evaluation</title>
     <meta name="description"
-        content="Evaluate LLM outputs with structured rubrics. Ensemble judging, bias mitigation, and meta-rubric feedback to improve your evaluations.">
+        content="Evaluate LLM-generated and human-authored content with weighted rubrics and LLM-as-a-Judge — ensemble judging, bias mitigation, and agreement metrics.">
+    <meta name="keywords" content="LLM evaluation, LLM-as-a-Judge, LLM judge, rubric evaluation, weighted rubric criteria, analytic rubrics, automated grading, structured evaluation, LLM-generated content, human-authored content evaluation, ensemble judging, multi-judge panel, bias mitigation, position bias, self-preference bias, verbosity bias, few-shot calibration, CANNOT_ASSESS, abstention, length penalty, multi-choice rubrics, ordinal scale, nominal scale, extended thinking, meta-rubric evaluation, automated rubric improvement, held-out rubric improvement, judge validation, synthetic ground truth, agent skill evaluation, batch evaluation, cost optimization, Cohen's kappa, Krippendorff's alpha, Fleiss' kappa, inter-rater agreement, Matthews correlation coefficient, accuracy, precision, recall, F1, Spearman correlation, Kendall correlation, Pearson correlation, Earth Mover's Distance, KS test, bootstrap confidence intervals, distribution analysis, systematic bias detection, LiteLLM, OpenAI, Anthropic, Google, Azure, Groq, Ollama, Python evaluation library, open source">
+    <meta name="robots" content="index, follow, max-image-preview:large">
+    <link rel="canonical" href="https://autorubric.org/">
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="AutoRubric">
+    <meta property="og:title" content="AutoRubric — Research-Backed LLM Evaluation">
+    <meta property="og:description"
+        content="Evaluate LLM-generated and human-authored content with weighted rubrics and LLM-as-a-Judge — ensemble judging, bias mitigation, and agreement metrics.">
+    <meta property="og:url" content="https://autorubric.org/">
+
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="AutoRubric — Research-Backed LLM Evaluation">
+    <meta name="twitter:description"
+        content="Evaluate LLM-generated and human-authored content with weighted rubrics and LLM-as-a-Judge — ensemble judging, bias mitigation, and agreement metrics.">
+
+    <!-- Structured data: keyword-rich feature list for search engines -->
+    <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "AutoRubric",
+  "alternateName": "AutoRubric — Research-Backed LLM Evaluation",
+  "description": "Evaluate LLM-generated and human-authored content with weighted rubrics and LLM-as-a-Judge: ensemble judging, bias mitigation, agreement metrics (Cohen's kappa), and meta-rubric feedback.",
+  "applicationCategory": "DeveloperApplication",
+  "operatingSystem": "Cross-platform (Python 3.11+)",
+  "url": "https://autorubric.org/",
+  "softwareHelp": "https://autorubric.org/docs/",
+  "codeRepository": "https://github.com/delip/autorubric",
+  "downloadUrl": "https://pypi.org/project/autorubric/",
+  "license": "https://opensource.org/licenses/MIT",
+  "author": {
+    "@type": "Person",
+    "name": "Delip Rao"
+  },
+  "sameAs": [
+    "https://github.com/delip/autorubric",
+    "https://pypi.org/project/autorubric/",
+    "https://arxiv.org/abs/2603.00077"
+  ],
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "USD"
+  },
+  "keywords": "LLM evaluation, LLM-as-a-Judge, LLM judge, rubric evaluation, weighted rubric criteria, analytic rubrics, automated grading, structured evaluation, LLM-generated content, human-authored content evaluation, ensemble judging, multi-judge panel, bias mitigation, position bias, self-preference bias, verbosity bias, few-shot calibration, CANNOT_ASSESS, abstention, length penalty, multi-choice rubrics, ordinal scale, nominal scale, extended thinking, meta-rubric evaluation, automated rubric improvement, held-out rubric improvement, judge validation, synthetic ground truth, agent skill evaluation, batch evaluation, cost optimization, Cohen's kappa, Krippendorff's alpha, Fleiss' kappa, inter-rater agreement, Matthews correlation coefficient, accuracy, precision, recall, F1, Spearman correlation, Kendall correlation, Pearson correlation, Earth Mover's Distance, KS test, bootstrap confidence intervals, distribution analysis, systematic bias detection, LiteLLM, OpenAI, Anthropic, Google, Azure, Groq, Ollama, Python evaluation library, open source",
+  "featureList": [
+    "Weighted rubric criteria with positive and negative weights",
+    "Binary and multi-choice verdicts (ordinal and nominal scales)",
+    "Ensemble judging with majority and weighted voting",
+    "Cross-provider judge panels to mitigate self-preference bias",
+    "Position-bias mitigation via option shuffling",
+    "CANNOT_ASSESS verdict for explicit uncertainty and abstention",
+    "Few-shot calibration with balanced sampling",
+    "Length penalties to control verbosity bias",
+    "Agreement metrics: Cohen's kappa, Krippendorff's alpha, Fleiss' kappa, accuracy, precision, recall, F1",
+    "Matthews correlation coefficient (phi) and confusion matrices",
+    "Distribution analysis with Earth Mover's Distance and KS tests",
+    "Bootstrap confidence intervals",
+    "Meta-rubric evaluation and automated rubric improvement",
+    "Judge validation against human ground truth",
+    "Synthetic ground-truth generation",
+    "Batch evaluation with rate limiting, checkpointing, and cost tracking",
+    "100+ LLM providers via LiteLLM with extended-thinking support"
+  ]
+}
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono&display=swap"
@@ -92,8 +161,73 @@
             line-height: 1.15;
         }
 
-        .hero h1 span {
+        /* Roll timing shared by JS (transform) and CSS (color/opacity). */
+        :root {
+            --roll-ms: 650ms;
+            --roll-ease: cubic-bezier(0.22, 1, 0.36, 1);   /* gentle ease-out settle */
+        }
+
+        /* Accent re-scoped from `.hero h1 span` to a class so the roller wrapper
+           spans don't turn line 1 gold. (Atomic change.) */
+        .hero h1 .accent {
             color: var(--accent);
+            transition: color var(--roll-ms) ease;
+        }
+
+        /* --- Hero H1 vertical roll (always-up, invisible-snap, gray-on-exit) --- */
+        .hero h1.hero-headline {
+            position: relative;
+        }
+
+        .roll-viewport {
+            display: block;
+            height: 2.3em;        /* 2 lines * line-height 1.15; em tracks 3.2rem & 2.25rem */
+            overflow: hidden;
+        }
+
+        .roll-track {
+            display: block;
+            transform: translateY(0);
+            /* transition is added by JS only when enhancing, so no-JS shows phrase A */
+        }
+
+        .roll-phrase {
+            display: block;
+            height: 2.3em;        /* one stage; JS overrides with the measured max height */
+            color: var(--text-primary);
+            transition: color var(--roll-ms) ease, opacity var(--roll-ms) ease;
+        }
+
+        /* The outgoing phrase gently desaturates to gray and dims as it rolls up. */
+        .roll-phrase.is-leaving {
+            color: var(--text-secondary);
+            opacity: 0.55;
+        }
+        .roll-phrase.is-leaving .accent {
+            color: var(--text-secondary);
+        }
+
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0 0 0 0);
+            white-space: nowrap;
+            border: 0;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .roll-track {
+                transform: none !important;
+                transition: none !important;
+            }
+            .roll-phrase,
+            .roll-phrase .accent {
+                transition: none !important;
+            }
         }
 
         .hero .tagline {
@@ -323,7 +457,7 @@
             <nav>
                 <a href="/docs/">Docs</a>
                 <a href="/docs/cookbook/">Cookbook</a>
-                <a href="https://arxiv.org/abs/2603.00077" target="_blank" rel="noopener noreferrer">Paper</a>
+                <a href="/research/">Research</a>
                 <a href="https://github.com/delip/autorubric">GitHub</a>
                 <a href="https://pypi.org/project/autorubric/">PyPI</a>
             </nav>
@@ -333,7 +467,16 @@
     <main>
         <section class="hero">
             <div class="container">
-                <h1>Structured evaluation for<br><span>LLM-generated content</span></h1>
+                <h1 class="hero-headline">
+                    <span class="sr-only">Structured evaluation for LLM-generated content. LLM-based grading for human-authored content.</span>
+                    <span class="roll-viewport" aria-hidden="true">
+                        <span class="roll-track">
+                            <span class="roll-phrase">Structured evaluation for<br><span class="accent">LLM-generated content</span></span>
+                            <span class="roll-phrase">LLM-based grading for<br><span class="accent">Human-authored content</span></span>
+                            <span class="roll-phrase">Structured evaluation for<br><span class="accent">LLM-generated content</span></span>
+                        </span>
+                    </span>
+                </h1>
                 <p class="tagline">AutoRubric brings together best practices from rubric science and LLM-as-a-Judge
                     research. Define criteria, validate against humans, and iterate on your rubrics with built-in
                     meta-evaluation.</p>
@@ -347,7 +490,7 @@
                         </svg>
                         Cookbook
                     </a>
-                    <a href="https://arxiv.org/abs/2603.00077" target="_blank" rel="noopener noreferrer" class="btn btn-secondary">
+                    <a href="/research/" class="btn btn-secondary">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                             stroke-width="2">
                             <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path>
@@ -356,7 +499,7 @@
                             <line x1="16" y1="17" x2="8" y2="17"></line>
                             <line x1="10" y1="9" x2="8" y2="9"></line>
                         </svg>
-                        Paper
+                        Research
                     </a>
                 </div>
 
@@ -559,6 +702,79 @@ asyncio.run(main())</pre>
             </div>
         </div>
     </footer>
+    <script>
+        /* Hero H1 vertical roll: 3 stacked phrases [A, B, A'], always rolls up,
+           invisible snap from the duplicate A' back to A. The outgoing phrase
+           desaturates to gray as it leaves. Vanilla, no deps. */
+        (function () {
+            var vp = document.querySelector('.roll-viewport');
+            var track = vp && vp.querySelector('.roll-track');
+            if (!track) return;
+            var phrases = track.querySelectorAll('.roll-phrase');
+            if (phrases.length < 3) return;
+
+            var mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+            var ROLL_MS = 650;                            // match --roll-ms in CSS
+            var DWELL = [5200, 2600];                     // [default, alternate] hold (default ~2x)
+            var EASE = 'cubic-bezier(0.22, 1, 0.36, 1)';  // match --roll-ease in CSS
+            var stage = 0, step = 0, timer = null, running = false;
+
+            function measure() {
+                var i, h = 0;
+                for (i = 0; i < phrases.length; i++) phrases[i].style.height = 'auto';
+                for (i = 0; i < phrases.length; i++) {
+                    h = Math.max(h, phrases[i].getBoundingClientRect().height);
+                }
+                stage = h;
+                for (i = 0; i < phrases.length; i++) phrases[i].style.height = stage + 'px';
+                vp.style.height = stage + 'px';
+                apply(step, false);
+            }
+            function apply(s, animate) {
+                track.style.transition = animate ? ('transform ' + ROLL_MS + 'ms ' + EASE) : 'none';
+                track.style.transform = 'translateY(' + (-s * stage) + 'px)';
+            }
+            function setLeaving(idx) {
+                for (var i = 0; i < phrases.length; i++) phrases[i].classList.remove('is-leaving');
+                if (idx != null) phrases[idx].classList.add('is-leaving');
+            }
+            function clear() { if (timer) { clearTimeout(timer); timer = null; } }
+            function next() {
+                if (step === 0) {                         // roll up to the alternate
+                    setLeaving(0); step = 1; apply(1, true);
+                    timer = setTimeout(next, ROLL_MS + DWELL[1]);
+                } else {                                  // roll up to the duplicate default, then snap
+                    setLeaving(1); step = 2; apply(2, true);
+                    timer = setTimeout(function () {
+                        setLeaving(null); step = 0; apply(0, false);   // invisible: A' == A
+                        timer = setTimeout(next, DWELL[0]);
+                    }, ROLL_MS);
+                }
+            }
+            function start() {
+                if (running || mq.matches) return;
+                running = true; measure(); setLeaving(null);
+                clear(); timer = setTimeout(next, DWELL[0]);
+            }
+            function stop() { running = false; clear(); step = 0; setLeaving(null); apply(0, false); }
+
+            document.addEventListener('visibilitychange', function () {
+                if (document.hidden) { clear(); }
+                else if (running && !timer && !mq.matches) {
+                    step = 0; setLeaving(null); apply(0, false); timer = setTimeout(next, DWELL[0]);
+                }
+            });
+            if (mq.addEventListener) {
+                mq.addEventListener('change', function () { mq.matches ? stop() : start(); });
+            }
+            var rt; window.addEventListener('resize', function () {
+                clearTimeout(rt); rt = setTimeout(measure, 150);
+            });
+
+            if (document.fonts && document.fonts.ready) document.fonts.ready.then(start);
+            else start();
+        })();
+    </script>
 </body>
 
 </html>

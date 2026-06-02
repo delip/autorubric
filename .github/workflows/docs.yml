@@ -37,6 +37,10 @@ jobs:
           # Copy landing page to root
           cp docs/landing/index.html site/
 
+          # Copy standalone Research page to /research/
+          mkdir -p site/research
+          cp docs/research/index.html site/research/index.html
+
           # Copy CNAME to root for custom domain
           cp docs/CNAME site/
 
