@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Publications — AutoRubric</title>
+    <meta name="description"
+        content="Papers and preprints from the AutoRubric project on rubric-based LLM evaluation, LLM-as-a-Judge, ensemble judging, and meta-rubric evaluation.">
+    <meta name="keywords"
+        content="AutoRubric, publications, rubric-based LLM evaluation, LLM-as-a-Judge, ensemble judging, meta-rubric evaluation, Delip Rao, Chris Callison-Burch, arXiv 2603.00077">
+    <meta name="robots" content="index, follow, max-image-preview:large">
+    <link rel="canonical" href="https://autorubric.org/publications/">
+
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="AutoRubric">
+    <meta property="og:title" content="Publications — AutoRubric">
+    <meta property="og:description"
+        content="Papers and preprints from the AutoRubric project on rubric-based LLM evaluation.">
+    <meta property="og:url" content="https://autorubric.org/publications/">
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="Publications — AutoRubric">
+    <meta name="twitter:description"
+        content="Papers and preprints from the AutoRubric project on rubric-based LLM evaluation.">
+
+    <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "CollectionPage",
+  "name": "Publications — AutoRubric",
+  "url": "https://autorubric.org/publications/",
+  "about": ["rubric-based LLM evaluation", "LLM-as-a-Judge", "meta-rubric evaluation"],
+  "hasPart": [
+    {
+      "@type": "ScholarlyArticle",
+      "name": "AutoRubric: A Unified Framework for Rubric-Based LLM Evaluation",
+      "headline": "AutoRubric: A Unified Framework for Rubric-Based LLM Evaluation",
+      "author": [
+        {"@type": "Person", "name": "Delip Rao"},
+        {"@type": "Person", "name": "Chris Callison-Burch"}
+      ],
+      "datePublished": "2026",
+      "url": "https://arxiv.org/abs/2603.00077",
+      "sameAs": "https://arxiv.org/abs/2603.00077",
+      "identifier": "arXiv:2603.00077",
+      "publisher": {"@type": "Organization", "name": "arXiv"},
+      "creativeWorkStatus": "Preprint",
+      "inLanguage": "en",
+      "about": ["LLM evaluation", "rubric-based evaluation", "LLM-as-a-Judge"],
+      "abstract": "Rubric-based evaluation with large language models (LLMs) has become standard practice for assessing text generation at scale, yet the underlying techniques are scattered across papers with inconsistent terminology and partial solutions. We present a unified framework: each identified technique is paired with its realization in AutoRubric, an open-source Python framework proposed in this paper. AutoRubric supports binary, ordinal, and nominal criteria with configurable weights; single-judge and multi-judge ensemble evaluation with majority, weighted, unanimous, and any-vote aggregation; few-shot calibration with verdict-balanced sampling; and mitigations for position bias (option shuffling), verbosity bias (length penalties), and criterion conflation (per-criterion atomic evaluation with natural language explanations). The framework provides reliability metrics drawn from psychometrics (Cohen's kappa, weighted kappa, correlation coefficients, and distribution-level tests) alongside production infrastructure including response caching, checkpointing with resumable runs, multi-provider rate limiting, and cost tracking. We evaluate AutoRubric on three benchmarks spanning educational assessment, deep research evaluation, and chatbot quality assessment, demonstrating that it produces results consistent with published benchmarks. We also contribute CHARM-100, a 100-sample chatbot evaluation dataset with per-sample ground truth labels across all three criterion types. Beyond measurement, we demonstrate an application where per-criterion rubric scores serve as an optimization signal for iterative agent skill improvement, raising a peer review agent's score from 0.46 to 0.89 in a single revision."
+    }
+  ]
+}
+    </script>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono&display=swap"
+        rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --text-primary: #e6edf3;
+            --text-secondary: #8b949e;
+            --accent: #f0b429;
+            --accent-hover: #f7c948;
+            --border: #30363d;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        a { color: inherit; }
+
+        :focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+            border-radius: 4px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 24px;
+        }
+
+        .skip-link {
+            position: absolute;
+            left: -9999px;
+            top: 8px;
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            padding: 8px 16px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            text-decoration: none;
+            z-index: 10;
+        }
+        .skip-link:focus { left: 24px; }
+
+        /* Header */
+        header {
+            padding: 20px 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        header .container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            text-decoration: none;
+        }
+
+        nav {
+            display: flex;
+            gap: 32px;
+        }
+
+        nav a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-weight: 500;
+            transition: color 0.2s;
+        }
+
+        nav a:hover,
+        nav a[aria-current="page"] {
+            color: var(--text-primary);
+        }
+
+        /* Page head */
+        .page-head {
+            padding: 80px 0 40px;
+        }
+
+        .page-head h1 {
+            font-size: 2.25rem;
+            font-weight: 700;
+            line-height: 1.15;
+            margin-bottom: 16px;
+        }
+
+        .page-head .tagline {
+            font-size: 1.25rem;
+            color: var(--text-secondary);
+            max-width: 700px;
+            line-height: 1.6;
+        }
+
+        /* Publications list */
+        .pubs {
+            padding: 0 0 80px;
+        }
+
+        .pub-year {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 24px;
+        }
+
+        .pub-year:not(:first-child) {
+            margin-top: 48px;
+        }
+
+        .pub {
+            max-width: 800px;
+            padding: 0 0 32px;
+        }
+
+        .pub-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            line-height: 1.35;
+            margin-bottom: 8px;
+        }
+
+        .pub-title a {
+            color: var(--text-primary);
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+
+        .pub-title a:hover {
+            color: var(--accent);
+        }
+
+        .pub-authors {
+            font-size: 1rem;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+        }
+
+        .pub-meta {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            margin-bottom: 16px;
+        }
+
+        .pub-authors a {
+            color: var(--text-secondary);
+            text-decoration: underline;
+            text-underline-offset: 2px;
+            text-decoration-color: var(--border);
+            transition: color 0.2s, text-decoration-color 0.2s;
+        }
+
+        .pub-authors a:hover {
+            color: var(--text-primary);
+            text-decoration-color: var(--text-secondary);
+        }
+
+        /* Abstract: inset, colored panel, collapsible.
+           The first (featured) paper stays open with no toggle; later papers
+           render without `is-featured`/`open` so they collapse by default. */
+        .pub-abstract {
+            max-width: 800px;
+            margin-bottom: 16px;
+        }
+
+        .pub-abstract > summary {
+            list-style: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+            font-size: 0.82rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            transition: color 0.2s;
+        }
+
+        .pub-abstract > summary:hover {
+            color: var(--text-primary);
+        }
+
+        .pub-abstract > summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .pub-abstract > summary::before {
+            content: '\25B8';
+            font-size: 0.7rem;
+            transition: transform 0.2s;
+        }
+
+        .pub-abstract[open] > summary::before {
+            transform: rotate(90deg);
+        }
+
+        .pub-abstract.is-featured > summary {
+            display: none;
+        }
+
+        .pub-abstract-body {
+            margin-top: 12px;
+            padding: 16px 20px;
+            background: var(--bg-secondary);
+            border-left: 3px solid var(--accent);
+            border-radius: 0 8px 8px 0;
+            font-size: 1rem;
+            line-height: 1.7;
+            color: var(--text-secondary);
+        }
+
+        .pub-abstract.is-featured .pub-abstract-body {
+            margin-top: 0;
+        }
+
+        .pub-links {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: 8px;
+            font-size: 0.82rem;
+            font-weight: 600;
+            font-family: inherit;
+            text-decoration: none;
+            cursor: pointer;
+            color: var(--text-primary);
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            transition: border-color 0.2s, background 0.2s, color 0.2s;
+        }
+
+        .chip:hover {
+            border-color: var(--text-secondary);
+        }
+
+        /* arXiv chip carries the single gold accent */
+        .chip-arxiv {
+            background: transparent;
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        .chip-arxiv:hover {
+            border-color: var(--accent-hover);
+            color: var(--accent-hover);
+            background: rgba(240, 180, 41, 0.08);
+        }
+
+        /* Cite / BibTeX disclosure */
+        .cite {
+            margin-top: 12px;
+        }
+
+        .cite summary {
+            list-style: none;
+            display: inline-flex;
+        }
+
+        .cite summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .cite-panel {
+            position: relative;
+            margin-top: 12px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px 16px 16px;
+        }
+
+        .cite-panel pre {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.82rem;
+            line-height: 1.6;
+            color: var(--text-secondary);
+            overflow-x: auto;
+            white-space: pre;
+        }
+
+        .copy-bib {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            font-family: inherit;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 4px 10px;
+            cursor: pointer;
+            transition: border-color 0.2s, color 0.2s;
+        }
+
+        .copy-bib:hover {
+            border-color: var(--text-secondary);
+            color: var(--text-primary);
+        }
+
+        /* Footer */
+        footer {
+            margin-top: auto;
+            padding: 40px 0;
+            border-top: 1px solid var(--border);
+        }
+
+        footer .container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 16px;
+        }
+
+        footer p {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        footer a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+
+        footer a:hover {
+            color: var(--text-primary);
+        }
+
+        .footer-links {
+            display: flex;
+            gap: 24px;
+        }
+
+        @media (max-width: 768px) {
+            .page-head h1 { font-size: 1.75rem; }
+            .page-head { padding: 50px 0 32px; }
+            nav { gap: 20px; }
+        }
+    </style>
+</head>
+
+<body>
+    <a href="#main" class="skip-link">Skip to content</a>
+    <header>
+        <div class="container">
+            <a href="/" class="logo">AutoRubric</a>
+            <nav>
+                <a href="/docs/">Docs</a>
+                <a href="/docs/cookbook/">Cookbook</a>
+                <a href="/publications/" aria-current="page">Publications</a>
+                <a href="https://github.com/delip/autorubric">GitHub</a>
+                <a href="https://pypi.org/project/autorubric/">PyPI</a>
+            </nav>
+        </div>
+    </header>
+
+    <main id="main">
+        <section class="page-head">
+            <div class="container">
+                <h1>Publications</h1>
+                <p class="tagline">Papers and preprints from the AutoRubric project.</p>
+            </div>
+        </section>
+
+        <section class="pubs">
+            <div class="container">
+                <h2 class="pub-year">2026</h2>
+
+                <article class="pub">
+                    <h3 class="pub-title">
+                        <a href="https://arxiv.org/abs/2603.00077" target="_blank" rel="noopener noreferrer">AutoRubric: A Unified Framework for Rubric-Based LLM Evaluation</a>
+                    </h3>
+                    <p class="pub-authors"><a href="https://deliprao.com" target="_blank" rel="noopener noreferrer">Delip Rao</a>, <a href="https://www.cis.upenn.edu/~ccb/index.html" target="_blank" rel="noopener noreferrer">Chris Callison-Burch</a></p>
+                    <p class="pub-meta">arXiv preprint · cs.CL · 2026</p>
+                    <details class="pub-abstract is-featured" open>
+                        <summary>Abstract</summary>
+                        <div class="pub-abstract-body">Rubric-based evaluation with large language models (LLMs) has become standard practice for assessing text generation at scale, yet the underlying techniques are scattered across papers with inconsistent terminology and partial solutions. We present a unified framework: each identified technique is paired with its realization in AutoRubric, an open-source Python framework proposed in this paper. AutoRubric supports binary, ordinal, and nominal criteria with configurable weights; single-judge and multi-judge ensemble evaluation with majority, weighted, unanimous, and any-vote aggregation; few-shot calibration with verdict-balanced sampling; and mitigations for position bias (option shuffling), verbosity bias (length penalties), and criterion conflation (per-criterion atomic evaluation with natural language explanations). The framework provides reliability metrics drawn from psychometrics (Cohen's &#954;, weighted &#954;, correlation coefficients, and distribution-level tests) alongside production infrastructure including response caching, checkpointing with resumable runs, multi-provider rate limiting, and cost tracking. We evaluate AutoRubric on three benchmarks spanning educational assessment, deep research evaluation, and chatbot quality assessment, demonstrating that it produces results consistent with published benchmarks while exercising the framework's key capabilities: per-criterion binary evaluation with few-shot calibration (RiceChem), multi-judge ensemble evaluation across judge models (ResearcherBench), and mixed criterion types combining binary, ordinal, and nominal scales (CHARM-100). We also contribute CHARM-100, a 100-sample chatbot evaluation dataset with per-sample ground truth labels across all three criterion types, designed to stress-test rubric evaluation frameworks on heterogeneous criteria. Beyond measurement, we demonstrate an application where per-criterion rubric scores serve as an optimization signal for iterative agent skill improvement, raising a peer review agent's score from 0.46 to 0.89 in a single revision.</div>
+                    </details>
+                    <div class="pub-links">
+                        <a class="chip chip-arxiv" href="https://arxiv.org/abs/2603.00077" target="_blank" rel="noopener noreferrer">arXiv</a>
+                        <a class="chip" href="https://arxiv.org/pdf/2603.00077" target="_blank" rel="noopener noreferrer">PDF</a>
+                        <a class="chip" href="https://github.com/delip/autorubric" target="_blank" rel="noopener noreferrer">Code</a>
+                    </div>
+                    <details class="cite">
+                        <summary class="chip">Cite (BibTeX)</summary>
+                        <div class="cite-panel">
+                            <button class="copy-bib" type="button" data-bib="bib-rao2026">Copy</button>
+                            <pre id="bib-rao2026">@misc{rao2026autorubric,
+    title={AutoRubric: A Unified Framework for Rubric-Based LLM Evaluation},
+    author={Delip Rao and Chris Callison-Burch},
+    year={2026},
+    eprint={2603.00077},
+    archivePrefix={arXiv},
+    primaryClass={cs.CL},
+    url={https://arxiv.org/abs/2603.00077},
+}</pre>
+                        </div>
+                    </details>
+                </article>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>&copy; <span id="year">2026</span> Delip Rao. MIT License.</p>
+            <div class="footer-links">
+                <a href="https://github.com/delip/autorubric">GitHub</a>
+                <a href="https://pypi.org/project/autorubric/">PyPI</a>
+                <a href="/docs/">Docs</a>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        // Dynamic year (progressive enhancement; no document.write).
+        document.getElementById('year').textContent = new Date().getFullYear();
+
+        // Copy-to-clipboard for BibTeX chips.
+        document.querySelectorAll('.copy-bib').forEach(function (btn) {
+            if (!navigator.clipboard) { btn.style.display = 'none'; return; }
+            btn.addEventListener('click', function () {
+                var pre = document.getElementById(btn.dataset.bib);
+                navigator.clipboard.writeText(pre.textContent.trim()).then(function () {
+                    var prev = btn.textContent;
+                    btn.textContent = 'Copied!';
+                    setTimeout(function () { btn.textContent = prev; }, 1500);
+                });
+            });
+        });
+    </script>
+</body>
+
+</html>
