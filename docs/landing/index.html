@@ -468,12 +468,14 @@
         <section class="hero">
             <div class="container">
                 <h1 class="hero-headline">
-                    <span class="sr-only">Structured evaluation for LLM-generated content. LLM-based grading for human-authored content.</span>
+                    <span class="sr-only">Structured evaluation for LLM-generated content. LLM-based grading for human-authored content. Structured evaluation for non-verifiable domains.</span>
                     <span class="roll-viewport" aria-hidden="true">
                         <span class="roll-track">
                             <span class="roll-phrase">Structured evaluation for<br><span class="accent">LLM-generated content</span></span>
                             <span class="roll-phrase">LLM-based grading for<br><span class="accent">Human-authored content</span></span>
                             <span class="roll-phrase">Structured evaluation for<br><span class="accent">Non-verifiable domains</span></span>
+                            <!-- seam: duplicate of the first phrase so the roll can snap back invisibly -->
+                            <span class="roll-phrase">Structured evaluation for<br><span class="accent">LLM-generated content</span></span>
                         </span>
                     </span>
                 </h1>
@@ -703,19 +705,21 @@ asyncio.run(main())</pre>
         </div>
     </footer>
     <script>
-        /* Hero H1 vertical roll: 3 stacked phrases [A, B, A'], always rolls up,
-           invisible snap from the duplicate A' back to A. The outgoing phrase
-           desaturates to gray as it leaves. Vanilla, no deps. */
+        /* Hero H1 vertical roll: N real phrases plus a trailing duplicate of the
+           first (the seam) stacked vertically. Always rolls up, dwelling on each
+           real phrase, then snaps invisibly from the seam back to the first. The
+           outgoing phrase desaturates to gray as it leaves. Vanilla, no deps. */
         (function () {
             var vp = document.querySelector('.roll-viewport');
             var track = vp && vp.querySelector('.roll-track');
             if (!track) return;
             var phrases = track.querySelectorAll('.roll-phrase');
-            if (phrases.length < 3) return;
+            var REAL = phrases.length - 1;                // last phrase is the seam (duplicate of the first)
+            if (REAL < 1) return;
 
             var mq = window.matchMedia('(prefers-reduced-motion: reduce)');
             var ROLL_MS = 650;                            // match --roll-ms in CSS
-            var DWELL = [5200, 2600];                     // [default, alternate] hold (default ~2x)
+            var DWELL = 3500;                             // hold per phrase (equal rotation)
             var EASE = 'cubic-bezier(0.22, 1, 0.36, 1)';  // match --roll-ease in CSS
             var stage = 0, step = 0, timer = null, running = false;
 
@@ -740,28 +744,27 @@ asyncio.run(main())</pre>
             }
             function clear() { if (timer) { clearTimeout(timer); timer = null; } }
             function next() {
-                if (step === 0) {                         // roll up to the alternate
-                    setLeaving(0); step = 1; apply(1, true);
-                    timer = setTimeout(next, ROLL_MS + DWELL[1]);
-                } else {                                  // roll up to the duplicate default, then snap
-                    setLeaving(1); step = 2; apply(2, true);
+                setLeaving(step); step += 1; apply(step, true);   // roll up to the next stage
+                if (step < REAL) {                        // landed on a real phrase: roll in, then dwell
+                    timer = setTimeout(next, ROLL_MS + DWELL);
+                } else {                                  // landed on the seam: roll in, then snap back
                     timer = setTimeout(function () {
-                        setLeaving(null); step = 0; apply(0, false);   // invisible: A' == A
-                        timer = setTimeout(next, DWELL[0]);
+                        setLeaving(null); step = 0; apply(0, false);   // invisible: seam == first phrase
+                        timer = setTimeout(next, DWELL);
                     }, ROLL_MS);
                 }
             }
             function start() {
                 if (running || mq.matches) return;
                 running = true; measure(); setLeaving(null);
-                clear(); timer = setTimeout(next, DWELL[0]);
+                clear(); timer = setTimeout(next, DWELL);
             }
             function stop() { running = false; clear(); step = 0; setLeaving(null); apply(0, false); }
 
             document.addEventListener('visibilitychange', function () {
                 if (document.hidden) { clear(); }
                 else if (running && !timer && !mq.matches) {
-                    step = 0; setLeaving(null); apply(0, false); timer = setTimeout(next, DWELL[0]);
+                    step = 0; setLeaving(null); apply(0, false); timer = setTimeout(next, DWELL);
                 }
             });
             if (mq.addEventListener) {
