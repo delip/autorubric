@@ -83,6 +83,74 @@ Full documentation, API reference, and a cookbook with several dozen recipes are
 | API reference | [autorubric.org/docs/api](https://autorubric.org/docs/api/)           |
 | Cookbook      | [autorubric.org/docs/cookbook](https://autorubric.org/docs/cookbook/) |
 
+## Using AutoRubric in Claude Code, Codex, Gemini CLI, and other coding agents
+
+AutoRubric's documentation is indexed by [Context7](https://context7.com/websites/autorubric), so you can give your coding agent live access to the current API reference and cookbook. With it connected, the agent writes correct, idiomatic AutoRubric code — right imports, the async grading API, weighted criteria, ensemble and multi-choice config — instead of guessing from stale memory.
+
+### 1. Connect the Context7 MCP server
+
+Get a free API key at [context7.com/dashboard](https://context7.com/dashboard), then add the server to your agent (swap in your key):
+
+**Claude Code**
+
+```bash
+claude mcp add --scope user --header "CONTEXT7_API_KEY: YOUR_API_KEY" \
+  --transport http context7 https://mcp.context7.com/mcp
+```
+
+**Codex CLI**
+
+```bash
+codex mcp add context7 -- npx -y @upstash/context7-mcp --api-key YOUR_API_KEY
+```
+
+**Gemini CLI** — add to `~/.gemini/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "context7": {
+      "httpUrl": "https://mcp.context7.com/mcp",
+      "headers": { "CONTEXT7_API_KEY": "YOUR_API_KEY" }
+    }
+  }
+}
+```
+
+**Other clients** (Cursor, VS Code, Windsurf, Zed, …): run `npx ctx7 setup`, or see the [full client list](https://context7.com/docs/resources/all-clients). The underlying package is `@upstash/context7-mcp`.
+
+### 2. Point the agent at AutoRubric
+
+Reference the library in your prompt so Context7 loads the right docs — AutoRubric's library ID is `/websites/autorubric`:
+
+> Write an AutoRubric grader that scores answers against weighted criteria with an ensemble of two judges. use context7, library /websites/autorubric
+
+Context7 exposes a `resolve-library-id` tool (to find the library) and a docs-query tool (to fetch version-specific docs and examples); your agent invokes these automatically.
+
+### Make it the default — drop this into your `CLAUDE.md` / `AGENTS.md`
+
+To get high-quality AutoRubric code on every task (not just when you remember to ask), add a block like this to your agent's instruction file — `CLAUDE.md` for Claude Code, `AGENTS.md` for Codex, Gemini CLI, and most other agents:
+
+```markdown
+## Writing AutoRubric code
+
+When writing or editing code that uses AutoRubric:
+
+- Load the current docs via Context7 (library `/websites/autorubric`) first — rely on
+  the real API, not prior memory or guesswork.
+- The grading APIs are async: `await` `Rubric.grade`, `Grader.grade`, and `EvalRunner`,
+  and treat `result.score` as `float | None` (guard before formatting).
+- Use the feature that fits the task: weighted (±) criteria, `CriterionGrader`, ensemble
+  judging with aggregation strategies, multi-choice (ordinal/nominal) criteria, batch
+  `EvalRunner` with checkpointing, agreement metrics and bootstrap CIs, YAML configs, or
+  meta-rubric improvement.
+- Verify exact signatures and types against the API reference
+  (https://autorubric.org/docs/api/) and reuse patterns from the cookbook
+  (https://autorubric.org/docs/cookbook/).
+- Ensure provider keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, …) are set; AutoRubric
+  reaches 100+ providers via LiteLLM.
+```
+
 ## Features
 
 | Feature                    | Description                                                              |
