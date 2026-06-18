@@ -344,6 +344,42 @@ def _print_debug_prompt(system_prompt: str, user_prompt: str, model: str) -> Non
     _debug_console.print()
 
 
+def _provider_response_format(response_format: type[BaseModel]) -> type[BaseModel] | dict[str, Any]:
+    """Build the ``response_format`` payload sent to the provider for structured output.
+
+    The judgment schemas carry an optional ``reasoning`` field that is never read from the
+    model's output: it is injected after the fact from the provider's separate thinking
+    channel (see ``LLMClient.generate``). Under OpenAI/Groq *strict* structured output, every
+    property is forced into ``required``, so leaving ``reasoning`` in the schema makes models
+    that follow the prompt — which never asks for ``reasoning`` — fail schema validation and
+    abstain (observed for Llama and Qwen on Groq, where the verdict collapses to
+    ``CANNOT_ASSESS``). Strip ``reasoning`` from what the provider must emit; parsing still
+    uses the full Pydantic model, so reasoning injection when thinking is enabled is unaffected.
+
+    Models without a ``reasoning`` field are returned unchanged. Any unexpected schema shape
+    falls back to the original model so behaviour never regresses.
+    """
+    if "reasoning" not in getattr(response_format, "model_fields", {}):
+        return response_format
+    try:
+        from litellm.utils import type_to_response_format_param
+
+        param = type_to_response_format_param(response_format)
+    except Exception:
+        param = None
+    # Unknown litellm shape — keep current behaviour (pass the model through).
+    if not isinstance(param, dict):
+        return response_format
+    schema = param.get("json_schema", {}).get("schema")
+    if not isinstance(schema, dict):
+        return response_format
+    schema.get("properties", {}).pop("reasoning", None)
+    required = schema.get("required")
+    if isinstance(required, list):
+        schema["required"] = [key for key in required if key != "reasoning"]
+    return param
+
+
 @dataclass
 class LLMConfig:
     """Configuration for LLM calls.
@@ -738,9 +774,12 @@ class LLMClient:
         if self.config.seed is not None:
             params["seed"] = self.config.seed
 
-        # Enable structured output if Pydantic model provided
+        # Enable structured output if Pydantic model provided. The schema sent to the
+        # provider drops the post-hoc ``reasoning`` slot so strict-mode backends don't force
+        # non-OpenAI models (e.g. Llama/Qwen on Groq) to emit it; see
+        # _provider_response_format. Parsing below still uses the full Pydantic model.
         if response_format is not None:
-            params["response_format"] = response_format
+            params["response_format"] = _provider_response_format(response_format)
 
         # Print debug prompt if debug mode is enabled
         import autorubric

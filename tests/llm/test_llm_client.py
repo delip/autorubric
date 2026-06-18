@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from pydantic import BaseModel
 
-from autorubric.llm import LLMClient, LLMConfig
+from autorubric.llm import LLMClient, LLMConfig, _provider_response_format
 
 
 class MockResponse(BaseModel):
@@ -396,3 +396,61 @@ class TestLLMClientGenerate:
                 assert client._cache.get(cache_key) == "Response"
 
             client.close()
+
+
+class TestProviderResponseFormat:
+    """Tests for _provider_response_format.
+
+    It strips the unused ``reasoning`` slot from the schema sent to the provider so that
+    strict-mode backends (OpenAI/Groq) do not force non-OpenAI models to emit it. Parsing
+    still uses the full Pydantic model, so reasoning injection (when thinking is on) is
+    unaffected.
+    """
+
+    def test_strips_reasoning_from_provider_schema(self):
+        from autorubric.types import CriterionJudgment
+
+        param = _provider_response_format(CriterionJudgment)
+        # A model carrying `reasoning` becomes a json_schema dict with that field removed.
+        assert isinstance(param, dict)
+        schema = param["json_schema"]["schema"]
+        assert "reasoning" not in schema.get("properties", {})
+        assert "reasoning" not in schema.get("required", [])
+        # The fields the prompt actually asks for survive.
+        assert "criterion_status" in schema["properties"]
+        assert "explanation" in schema["properties"]
+
+    def test_passthrough_when_no_reasoning_field(self):
+        # A response format without a `reasoning` field is returned unchanged.
+        assert _provider_response_format(MockResponse) is MockResponse
+
+    @pytest.mark.asyncio
+    async def test_generate_sends_schema_without_reasoning(self):
+        from autorubric.types import CriterionJudgment
+
+        mock_message = MagicMock()
+        mock_message.content = '{"criterion_status": "MET", "explanation": "ok"}'
+        mock_message.reasoning_content = None
+        mock_message.thinking_blocks = None
+        mock_message.thinking = None
+        mock_choice = MagicMock()
+        mock_choice.message = mock_message
+        mock_response = MagicMock()
+        mock_response.choices = [mock_choice]
+
+        client = LLMClient(LLMConfig(model="groq/llama-3.3-70b-versatile"))
+        with patch("autorubric.llm.litellm.acompletion", new_callable=AsyncMock) as mock_completion:
+            mock_completion.return_value = mock_response
+            result = await client.generate(
+                system_prompt="judge this",
+                user_prompt="submission",
+                response_format=CriterionJudgment,
+            )
+
+        sent = mock_completion.call_args.kwargs["response_format"]
+        assert isinstance(sent, dict)
+        assert "reasoning" not in sent["json_schema"]["schema"].get("required", [])
+        # Parsing still uses the full model; reasoning defaults to None when not emitted.
+        assert isinstance(result, CriterionJudgment)
+        assert result.criterion_status.value == "MET"
+        assert result.reasoning is None
