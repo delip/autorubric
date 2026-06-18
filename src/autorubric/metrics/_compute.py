@@ -50,6 +50,7 @@ from ._types import (
     NominalCriterionMetrics,
     OptionMetrics,
     OrdinalCriterionMetrics,
+    PooledScaleMetrics,
 )
 from .distribution import systematic_bias
 
@@ -81,6 +82,7 @@ except ImportError:
 if TYPE_CHECKING:
     from ..dataset import RubricDataset
     from ..eval import EvalResult
+    from ..rubric import Rubric
 
 
 def _interpret_correlation(r: float) -> str:
@@ -1193,6 +1195,220 @@ def _compute_judge_metrics(
     )
 
 
+def _rubric_signature(rubric: Rubric) -> tuple:
+    """Structural identity of a rubric for homogeneity comparison: per criterion, its
+    requirement, scale type, and option labels. Two items share a per-criterion table iff
+    their signatures are equal."""
+    return tuple(
+        (
+            c.requirement,
+            getattr(c, "scale_type", None) if not c.is_binary else "binary",
+            tuple(o.label for o in (c.options or [])),
+        )
+        for c in rubric.rubric
+    )
+
+
+def _has_heterogeneous_rubrics(dataset: RubricDataset, common_indices: list[int]) -> bool:
+    """True if items use different rubric structures (so there is no shared per-criterion
+    table and pooled rubric-point metrics are the only meaningful aggregate)."""
+    reference: tuple | None = None
+    for idx in common_indices:
+        sig = _rubric_signature(dataset.get_item_rubric(idx))
+        if reference is None:
+            reference = sig
+        elif sig != reference:
+            return True
+    return False
+
+
+def _compute_per_item_pooled_metrics(
+    eval_map: dict[int, Any],
+    dataset: RubricDataset,
+    common_indices: list[int],
+    *,
+    result_warnings: list[str],
+    cannot_assess: CannotAssessMode,
+    na_mode: NAMode,
+) -> MetricsResult:
+    """Pooled rubric-point metrics for per-item, heterogeneous-rubric datasets (HealthBench).
+
+    Each item is graded against its OWN rubric, so there is no shared per-criterion table.
+    Every rubric point reduces to a normalized value in [0, 1] (binary MET=1/UNMET=0,
+    multi-choice ``option.value``) and an exact-selection match; we pool both within each
+    scale type. Categorical metrics that need a shared option space (weighted/nominal kappa,
+    per-option, N×N confusion) are omitted; only binary points get a 2×2 confusion + Cohen
+    kappa + phi (MET/UNMET is universal). Abstentions (CANNOT_ASSESS / NA) are excluded.
+    """
+    # Per-scale pools.
+    val_true: dict[str, list[float]] = {"binary": [], "ordinal": [], "nominal": []}
+    val_pred: dict[str, list[float]] = {"binary": [], "ordinal": [], "nominal": []}
+    exact_hits: dict[str, int] = {"binary": 0, "ordinal": 0, "nominal": 0}
+    n_abstain: dict[str, int] = {"binary": 0, "ordinal": 0, "nominal": 0}
+    # Binary MET/UNMET (1/0) for chance-corrected agreement + confusion.
+    bin_true: list[int] = []
+    bin_pred: list[int] = []
+    n_items = 0
+
+    for idx in common_indices:
+        item = dataset.items[idx]
+        item_result = eval_map[idx]
+        if item.ground_truth is None:
+            result_warnings.append(f"Item {idx} has no ground truth, skipping")
+            continue
+        if item_result.error is not None:
+            continue
+        rubric = dataset.get_item_rubric(idx)
+        criteria = rubric.rubric
+        if len(item.ground_truth) != len(criteria):
+            result_warnings.append(
+                f"Item {idx}: ground truth length {len(item.ground_truth)} != "
+                f"{len(criteria)} criteria, skipping"
+            )
+            continue
+        report = item_result.report
+        if report is None:
+            continue
+        n_items += 1
+        # Report-type-agnostic (single or ensemble): binary → CriterionVerdict, multi-choice →
+        # selected option index (effective frame) or None on a genuine abstain.
+        pred_all = extract_all_verdicts_from_report(report, criteria)
+        try:
+            true_all = resolve_ground_truth(list(item.ground_truth), criteria)
+        except ValueError as e:
+            result_warnings.append(f"Item {idx}: {e}")
+            continue
+
+        for c_idx, crit in enumerate(criteria):
+            pv = pred_all[c_idx]
+            tv = true_all[c_idx]
+            if crit.is_binary:
+                # pv: CriterionVerdict | None ; tv: CriterionVerdict
+                if pv is None or pv == CriterionVerdict.CANNOT_ASSESS:
+                    n_abstain["binary"] += 1
+                    continue
+                tval = 1.0 if tv == CriterionVerdict.MET else 0.0
+                pval = 1.0 if pv == CriterionVerdict.MET else 0.0
+                val_true["binary"].append(tval)
+                val_pred["binary"].append(pval)
+                bin_true.append(int(tval))
+                bin_pred.append(int(pval))
+                if pv == tv:
+                    exact_hits["binary"] += 1
+            else:
+                scale = "nominal" if getattr(crit, "scale_type", "") == "nominal" else "ordinal"
+                # pv is an option index in the EFFECTIVE frame (auto-NA appended) or None.
+                # Reconstruct the effective criterion when an out-of-range NA index or a None
+                # abstain is observed — the same `with_guaranteed_na_option` the grader uses.
+                eff = crit
+                n_author = len(crit.options) if crit.options else 0
+                if pv is None or (isinstance(pv, int) and pv >= n_author):
+                    eff = crit.with_guaranteed_na_option()
+                if pv is None:
+                    pv = eff.na_option_index
+                if not isinstance(pv, int) or eff.options is None or not 0 <= pv < len(eff.options):
+                    n_abstain[scale] += 1
+                    continue
+                pred_opt = eff.options[pv]
+                if pred_opt.na:
+                    n_abstain[scale] += 1
+                    continue
+                # resolve_ground_truth already validated the multi-choice index; this only
+                # narrows the type (tv: CriterionVerdict | int, options: list | None).
+                if not isinstance(tv, int) or crit.options is None:
+                    continue
+                true_opt = crit.options[tv]
+                pred_v = float(pred_opt.value) if pred_opt.value is not None else 0.0
+                true_v = float(true_opt.value) if true_opt.value is not None else 0.0
+                val_true[scale].append(true_v)
+                val_pred[scale].append(pred_v)
+                if pred_opt.label == true_opt.label:
+                    exact_hits[scale] += 1
+
+    # Assemble per-scale pooled metrics.
+    pooled_by_scale: list[PooledScaleMetrics] = []
+    for scale in ("binary", "ordinal", "nominal"):
+        n = len(val_true[scale])
+        if n == 0 and n_abstain[scale] == 0:
+            continue
+        exact_acc = exact_hits[scale] / n if n else None
+        v_rmse = float(np.sqrt(mean_squared_error(val_true[scale], val_pred[scale]))) if n else None
+        v_mae = (
+            float(np.mean(np.abs(np.array(val_true[scale]) - np.array(val_pred[scale]))))
+            if n
+            else None
+        )
+        v_spearman = _compute_correlation(val_pred[scale], val_true[scale], "spearman").coefficient
+        v_pearson = _compute_correlation(val_pred[scale], val_true[scale], "pearson").coefficient
+        entry_kwargs: dict[str, Any] = dict(
+            scale_type=scale,
+            n_points=n,
+            exact_accuracy=exact_acc,
+            value_rmse=v_rmse,
+            value_mae=v_mae,
+            value_spearman=v_spearman,
+            value_pearson=v_pearson,
+            n_abstain=n_abstain[scale],
+        )
+        if scale == "binary" and n:
+            cm = _build_binary_2x2_confusion_matrix(bin_true, bin_pred)
+            entry_kwargs.update(
+                kappa=_kappa_or_none(bin_true, bin_pred),
+                phi=_mcc_or_none(bin_true, bin_pred),
+                precision=cm.precision,
+                recall=cm.recall,
+                f1=(
+                    2 * cm.precision * cm.recall / (cm.precision + cm.recall)
+                    if cm.precision and cm.recall
+                    else None
+                ),
+                confusion_matrix=cm,
+            )
+        pooled_by_scale.append(PooledScaleMetrics(**entry_kwargs))
+
+    # Overall / aggregate scalars across ALL covered points.
+    all_true = [v for s in ("binary", "ordinal", "nominal") for v in val_true[s]]
+    all_pred = [v for s in ("binary", "ordinal", "nominal") for v in val_pred[s]]
+    n_total = len(all_true)
+    total_exact = sum(exact_hits.values())
+    overall_acc = total_exact / n_total if n_total else None
+    binary_entry = next((e for e in pooled_by_scale if e.scale_type == "binary"), None)
+    score_rmse = float(np.sqrt(mean_squared_error(all_true, all_pred))) if n_total else 0.0
+    score_mae = float(np.mean(np.abs(np.array(all_true) - np.array(all_pred)))) if n_total else 0.0
+    macro_acc = _mean_or_none([e.exact_accuracy for e in pooled_by_scale])
+
+    result_warnings.append(
+        "Per-item heterogeneous rubrics: reporting pooled rubric-point metrics "
+        "(per-criterion table and weighted-score correlation are undefined across "
+        "differing rubrics). See `pooled_by_scale`."
+    )
+
+    return MetricsResult(
+        criterion_accuracy=overall_acc,
+        criterion_precision=binary_entry.precision if binary_entry else None,
+        criterion_recall=binary_entry.recall if binary_entry else None,
+        criterion_f1=binary_entry.f1 if binary_entry else None,
+        mean_kappa=binary_entry.kappa if binary_entry else None,
+        per_criterion=[],
+        score_rmse=score_rmse,
+        score_mae=score_mae,
+        score_spearman=_compute_correlation(all_pred, all_true, "spearman"),
+        score_kendall=_compute_correlation(all_pred, all_true, "kendall"),
+        score_pearson=_compute_correlation(all_pred, all_true, "pearson"),
+        bias=systematic_bias(all_pred, all_true),
+        n_items=n_items,
+        n_criteria=n_total,
+        cannot_assess_mode=cannot_assess,
+        na_mode=na_mode,
+        n_samples=n_total,
+        criterion_phi=binary_entry.phi if binary_entry else None,
+        macro_accuracy=macro_acc,
+        micro_kappa=binary_entry.kappa if binary_entry else None,
+        pooled_by_scale=pooled_by_scale,
+        warnings=result_warnings,
+    )
+
+
 def compute_metrics(
     eval_result: EvalResult,
     dataset: RubricDataset,
@@ -1204,6 +1420,7 @@ def compute_metrics(
     na_mode: NAMode = "exclude",
     confidence_level: float = 0.95,
     seed: int | None = None,
+    per_item_metrics: Literal["auto", "pooled", "per_criterion"] = "auto",
 ) -> MetricsResult:
     """Compute comprehensive evaluation metrics.
 
@@ -1244,9 +1461,19 @@ def compute_metrics(
               meaningless distance.
         confidence_level: Confidence level for bootstrap CIs (default 0.95).
         seed: Random seed for bootstrap reproducibility.
+        per_item_metrics: How to handle per-item-rubric datasets (no global rubric):
+
+            - "auto" (default): pool rubric-point metrics ONLY when the dataset has no global
+              rubric AND item rubrics genuinely differ (heterogeneous, e.g. HealthBench);
+              otherwise use the normal per-criterion path.
+            - "pooled": always pool (see ``MetricsResult.pooled_by_scale``).
+            - "per_criterion": always use the per-criterion path (requires a homogeneous
+              criteria structure across items, else raises).
 
     Returns:
-        MetricsResult with comprehensive metrics and optional per-judge breakdown.
+        MetricsResult with comprehensive metrics and optional per-judge breakdown. For
+        heterogeneous per-item rubrics, ``per_criterion`` is empty and the pooled rubric-point
+        view is in ``pooled_by_scale`` (one entry per scale type present).
 
     Raises:
         ValueError: If no common items between eval_result and dataset.
@@ -1279,6 +1506,23 @@ def compute_metrics(
 
     if not common_indices:
         raise ValueError("No common items between eval_result and dataset")
+
+    # Per-item heterogeneous rubrics (e.g. HealthBench) have no shared per-criterion table;
+    # pool rubric-point decisions instead of forcing an index-aligned per-criterion view.
+    use_pooled = per_item_metrics == "pooled" or (
+        per_item_metrics == "auto"
+        and dataset.rubric is None
+        and _has_heterogeneous_rubrics(dataset, common_indices)
+    )
+    if use_pooled:
+        return _compute_per_item_pooled_metrics(
+            eval_map,
+            dataset,
+            common_indices,
+            result_warnings=result_warnings,
+            cannot_assess=cannot_assess,
+            na_mode=na_mode,
+        )
 
     # Validate rubric homogeneity for metrics computation
     # If using per-item rubrics, all must have the same structure
@@ -1425,7 +1669,12 @@ def compute_metrics(
                         # Default to first option if index is invalid
                         true_score_verdicts.append(criterion.options[0].label)
 
-            true_score = dataset.compute_weighted_score(true_score_verdicts)
+            # Use the item's effective rubric (== the global rubric when one is set, so this
+            # is a no-op there) so homogeneous per-item-rubric datasets don't raise on a
+            # missing global rubric. The predicted score was computed with the same rubric.
+            true_score = dataset.compute_weighted_score(
+                true_score_verdicts, rubric=dataset.get_item_rubric(idx)
+            )
 
             all_pred_scores.append(report.score)
             all_true_scores.append(true_score)

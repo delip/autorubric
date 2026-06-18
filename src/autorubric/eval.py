@@ -510,6 +510,7 @@ class EvalResult:
         na_mode: NAMode = "exclude",
         confidence_level: float = 0.95,
         seed: int | None = None,
+        per_item_metrics: Literal["auto", "pooled", "per_criterion"] = "auto",
     ) -> MetricsResult:
         """Compute comprehensive evaluation metrics against ground truth.
 
@@ -542,6 +543,10 @@ class EvalResult:
                   ``ValueError``).
             confidence_level: Confidence level for bootstrap CIs (default 0.95).
             seed: Random seed for bootstrap reproducibility.
+            per_item_metrics: For per-item-rubric datasets — "auto" (default) pools
+                rubric-point metrics only when item rubrics genuinely differ (heterogeneous,
+                e.g. HealthBench), "pooled" always pools, "per_criterion" always uses the
+                per-criterion path. Pooled results populate ``MetricsResult.pooled_by_scale``.
 
         Returns:
             MetricsResult with comprehensive metrics. Use .summary() for
@@ -566,6 +571,7 @@ class EvalResult:
             na_mode=na_mode,
             confidence_level=confidence_level,
             seed=seed,
+            per_item_metrics=per_item_metrics,
         )
 
     @classmethod

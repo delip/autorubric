@@ -71,6 +71,7 @@ from ._types import (
     NominalCriterionMetrics,
     OptionMetrics,
     OrdinalCriterionMetrics,
+    PooledScaleMetrics,
 )
 
 # Distribution metrics (unique value-add, not in sklearn)
@@ -107,6 +108,7 @@ __all__ = [
     "NAMode",
     "NAStats",
     "NominalCriterionMetrics",
+    "PooledScaleMetrics",
     "OptionMetrics",
     "OrdinalCriterionMetrics",
     # Distribution metrics (unique to autorubric)

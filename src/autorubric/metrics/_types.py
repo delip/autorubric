@@ -707,6 +707,55 @@ Use the `criterion_type` field to determine which type:
 """
 
 
+class PooledScaleMetrics(BaseModel):
+    """Pooled rubric-point metrics for ONE scale type in a per-item, heterogeneous-rubric
+    dataset (e.g. HealthBench), where criteria differ across items so there is no shared
+    per-criterion table.
+
+    Every rubric point is reduced to (a) a normalized value in [0, 1] (binary MET=1/UNMET=0,
+    multi-choice ``option.value``) and (b) an exact-selection match against ground truth, then
+    pooled within its scale type. Option-set-dependent categorical metrics (weighted/nominal
+    kappa, per-option breakdown, an N×N confusion matrix) are **omitted (None)** because
+    heterogeneous rubrics share no option space — only scale-agnostic quantities are reported.
+    The binary-only fields are populated solely for ``scale_type == "binary"`` (MET/UNMET is a
+    universal shared 2-class space); they are ``None`` for ordinal/nominal.
+
+    Attributes:
+        scale_type: Which scale these pooled points belong to ("binary"/"ordinal"/"nominal").
+        n_points: Number of (item, criterion) decisions pooled (after abstention exclusion).
+        exact_accuracy: Fraction of points whose selected option matches ground truth. None
+            when there are no covered points.
+        value_rmse: RMSE between predicted and true normalized values. None when no points.
+        value_mae: Mean absolute error between predicted and true normalized values.
+        value_spearman: Spearman correlation of predicted vs true values (None when undefined).
+        value_pearson: Pearson correlation of predicted vs true values (None when undefined).
+        kappa: Cohen's kappa over MET/UNMET — binary scale only, else None.
+        phi: Matthews correlation (phi) over MET/UNMET — binary scale only, else None.
+        precision: MET-class precision — binary scale only, else None.
+        recall: MET-class recall — binary scale only, else None.
+        f1: MET-class F1 — binary scale only, else None.
+        confusion_matrix: 2×2 MET/UNMET confusion — binary scale only, else None.
+        n_abstain: Rubric points the judge abstained on (CANNOT_ASSESS / NA), excluded above.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    scale_type: CriterionType
+    n_points: int
+    exact_accuracy: float | None
+    value_rmse: float | None
+    value_mae: float | None
+    value_spearman: float | None
+    value_pearson: float | None
+    kappa: float | None = None
+    phi: float | None = None
+    precision: float | None = None
+    recall: float | None = None
+    f1: float | None = None
+    confusion_matrix: ConfusionMatrix | None = None
+    n_abstain: int = 0
+
+
 class ScoreCorrelationResult(BaseModel):
     """Correlation between predicted and actual scores.
 
@@ -1060,6 +1109,11 @@ class MetricsResult(BaseModel):
     macro_accuracy: float | None = None
     micro_kappa: float | None = None
     coverage_stats: CoverageStats | None = None
+
+    # Per-item heterogeneous-rubric datasets (e.g. HealthBench) have no shared per-criterion
+    # table, so `per_criterion` is empty and the pooled rubric-point view goes here instead —
+    # one entry per scale type present. None for the normal (homogeneous) per-criterion path.
+    pooled_by_scale: list[PooledScaleMetrics] | None = None
 
     warnings: list[str] = []
 
