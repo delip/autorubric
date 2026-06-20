@@ -1,3 +1,5 @@
+.vscode/
+
 health_bench/raw_data/*.json
 health_bench/raw_data/*.jsonl
 health_bench/autorubric_dataset/*.json
