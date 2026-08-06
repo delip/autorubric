@@ -81,7 +81,6 @@ pattern = "(?P<version>.+)"
 [tool.hatch.build.targets.sdist]
 exclude = [
     "researcher_bench/",
-    "paper/",
     "examples/",
     "experiments/",
     "tests/",
