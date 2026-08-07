@@ -2,9 +2,9 @@
 
 ## A.1 Dataset Overview
 
-Several chatbot evaluation benchmarks exist, but they uniformly adopt a single scale type across all criteria. MT Bench (Zheng et al., 2023) and Vicuna Bench (Chiang et al., 2023) use 1-5 Likert scales; Arena-Hard Auto (Li et al., 2024) uses pairwise ordinal judgments; WildBench (Lin et al., 2024) uses binary checklists aggregated into a composite score; and HelpSteer2 (Wang et al., 2024) and LLM-Rubric (Hashemi et al., 2024) use multi-dimensional Likert ratings. None of these combine ordinal, nominal, and binary criteria within a single rubric, and none provide per-sample ground truth labels against which a rubric evaluation framework can be validated end-to-end.
+Several chatbot evaluation benchmarks exist, but they uniformly adopt a single scale type across all criteria. MT Bench (Zheng et al., 2023) and Vicuna Bench (Chiang et al., 2023) use 1-5 Likert scales; Arena-Hard Auto (Li et al., 2024) uses pairwise ordinal judgments; WildBench (Lin et al., 2024) uses binary checklists aggregated into a composite score; and HelpSteer2 (Wang et al., 2024) and LLM-Rubric (Hashemi et al., 2024) use multi-dimensional Likert ratings. None of these combine ordinal, nominal, and binary criteria within a single rubric while providing per-sample criterion-level reference labels for end-to-end framework testing.
 
-The CHARM-100 dataset (**Ch**atbot **A**ssessment with Mixed **R**ubric **M**etrics, 100 samples) was created to fill this gap and to exercise the capabilities of rubric evaluation frameworks such as `autorubric` that support heterogeneous criterion types. It contains 100 annotated single-turn chatbot conversations, each with ground truth labels across six evaluation criteria spanning ordinal, nominal, and binary measurement scales. All conversations were synthetically authored in English and serialized as JSON conforming to the `RubricDataset` schema.
+The CHARM-100 dataset (**Ch**atbot **A**ssessment with Mixed **R**ubric **M**etrics, 100 samples) was created to fill this gap and to exercise the capabilities of rubric evaluation frameworks such as `autorubric` that support heterogeneous criterion types. It contains 100 annotated single-turn chatbot conversations, each with operational reference labels across six evaluation criteria spanning ordinal, nominal, and binary measurement scales. All conversations were synthetically authored in English and serialized as JSON conforming to the `RubricDataset` schema.
 
 | Property | Value                                        |
 | -------- | -------------------------------------------- |
@@ -16,7 +16,7 @@ The CHARM-100 dataset (**Ch**atbot **A**ssessment with Mixed **R**ubric **M**etr
 
 ## A.2 Annotation Schema
 
-The dataset uses a hybrid rubric combining ordinal, nominal, and binary criteria. Each sample receives exactly six ground truth labels, one per criterion. Real-world evaluation rubrics rarely consist of a single criterion type, so a benchmark restricted to one measurement scale would give an incomplete picture of judge capabilities.
+The dataset uses a hybrid rubric combining ordinal, nominal, and binary criteria. Each sample receives exactly six operational reference labels, one per criterion. Real-world evaluation rubrics rarely consist of a single criterion type, so a benchmark restricted to one measurement scale would give an incomplete picture of judge capabilities.
 
 ### A.2.1 Criteria summary
 
@@ -53,50 +53,50 @@ All 100 samples were synthetically authored to cover a controlled distribution o
 
 The dataset was constructed according to four principles.
 
-Quality tier stratification ensures that samples span the full quality spectrum. Samples were authored in five tiers (Excellent, Good, Mediocre/Mixed, Below Average, Poor) plus a separate Edge Cases tier, so the benchmark tests discrimination at every point along the continuum rather than only between clearly good and clearly bad responses.
+The item descriptions span the full quality spectrum. For audit sampling, a deterministic classifier maps description prefixes and failure keywords into five quality strata plus an Edge Cases stratum; these post hoc tags are not explicit fields in the released JSON.
 
-Criteria independence was enforced by deliberately introducing conflicts between criteria. A response might be factually wrong but naturally written, or technically correct but robotic. These conflicts prevent a judge from achieving high accuracy by applying a single "overall quality" heuristic and projecting it across all criteria.
+Cross-criteria conflicts were deliberately introduced. A response might be factually wrong but naturally written, or technically correct but robotic. These conflicts are designed to expose reliance on a single "overall quality" heuristic projected across all criteria.
 
-Non-trivial responses were required even at the lowest quality tiers. The "poor" samples contain substantive text with identifiable flaws, not empty outputs or obviously broken formatting. The benchmark therefore tests identification of subtle problems in realistic-looking text.
+Non-trivial responses were required even for descriptions classified into the lowest-quality strata. The "poor" samples contain substantive text with identifiable flaws, not empty outputs or obviously broken formatting. The benchmark therefore tests identification of subtle problems in realistic-looking text.
 
 Diversity was maximized across multiple dimensions: 100 unique system prompts, more than 35 topic domains, and more than 25 distinct assistant personas. This reduces the risk that a judge's accuracy is inflated by topic-specific heuristics or memorized patterns.
 
 ## A.4 Topic and domain coverage
 
-The 100 samples span nine broad topic clusters, chosen to represent the range of subjects that users typically bring to general-purpose chatbots. Practical and STEM topics are slightly overrepresented to approximate real-world usage patterns.
+For descriptive coverage, each sample was assigned post hoc to one mutually exclusive primary-topic cluster using the main information need in the user message. The assignment covers all 100 items and is not intended to estimate deployment traffic.
 
-| Cluster                | Domains                                                                                   | Approx. Count |
-| ---------------------- | ----------------------------------------------------------------------------------------- | ------------- |
-| STEM & Technology      | ML/AI, cybersecurity, chemistry, physics, biology, statistics                             | 12            |
-| Health & Wellness      | nutrition, mental health, exercise science, sleep, first aid                              | 10            |
-| Practical Life         | home repair, automotive, budgeting, interviews, travel, parenting                         | 12            |
-| Academic               | history, philosophy, literature, economics, geography                                     | 10            |
-| Creative & Hobbies     | music, photography, gaming, crafts, pets                                                  | 10            |
-| Professional           | software engineering, project management, data privacy, public speaking, entrepreneurship | 10            |
-| Social & Cultural      | etiquette, media literacy, language learning                                              | 8             |
-| Edge/Unusual           | sourdough, aquariums, cross-domain topics                                                 | 8             |
-| Existing (original 10) | programming, cooking, science, fitness, legal, finance, gardening, math                   | 10            |
+| Cluster                                        | Domains                                                                                                            | Count |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ----- |
+| Computing & Technology                         | programming, ML/AI, cybersecurity, digital privacy, software operations, computer support                        | 9     |
+| Science & Mathematics                          | mathematics, statistics, physics, chemistry, biology, astronomy, environmental science                           | 14    |
+| Health & Wellness                              | medicine, nutrition, mental health, sleep, exercise, rehabilitation, first aid                                    | 12    |
+| Home & Practical Skills                        | cooking, baking, home repair, electrical safety, automotive maintenance, gardening                               | 17    |
+| Finance, Law & Consumer Affairs                | budgeting, saving and investing, taxation, legal rights, major purchases                                          | 9     |
+| Work & Business                                | project management, presentations, interviewing, career development, negotiation, entrepreneurship               | 6     |
+| Humanities, Social Sciences & Education        | history, philosophy, literature, economics, geography, art history, psychology, study and research methods       | 12    |
+| Arts, Hobbies & Animal Care                    | photography, music and audio production, gaming, crafts, creative writing, pets, aquariums                        | 10    |
+| Language, Culture & Social Life                | travel, etiquette, language learning and translation, media literacy, parenting, relationships                   | 11    |
 
 Every sample uses a unique system prompt, preventing a judge from learning system-prompt-specific shortcuts.
 
-## A.5 Quality tier distribution
+## A.5 Description-derived quality strata
 
-The 100 samples are distributed across six quality tiers. The Mediocre/Mixed tier is the largest (25 samples) because this region of the quality spectrum is where automated judges are most likely to struggle and where the most diagnostic signal can be extracted.
+The released JSON has no explicit quality-tier field. The companion second-annotation audit uses a fixed, deterministic classifier over each item's description prefix and failure keywords to assign six post hoc strata for sampling. These tags are heuristic metadata, not independently authored annotations.
 
-| Tier           | Count | Description                                                                                                                          |
+| Stratum        | Count | Description                                                                                                                          |
 | -------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| Excellent      | 20    | All or nearly all top marks. Specific, accurate, well-structured, natural.                                                           |
-| Good           | 20    | Mostly high ratings with one or two minor shortcomings (e.g., slightly verbose or mildly mechanical).                                |
-| Mediocre/Mixed | 25    | Split verdicts across criteria with deliberate conflicts.                                                                            |
+| Excellent      | 15    | All or nearly all top marks. Specific, accurate, well-structured, natural.                                                           |
+| Good           | 12    | Mostly high ratings with one or two minor shortcomings (e.g., slightly verbose or mildly mechanical).                                |
+| Mediocre/Mixed | 27    | Split verdicts across criteria with deliberate conflicts.                                                                            |
 | Below Average  | 15    | Generic, mechanical, missing key information, or deflective. Partially addresses the question but falls short on several dimensions. |
-| Poor           | 10    | Useless, evasive, broken, or containing dangerous misinformation.                                                                    |
-| Edge Cases     | 10    | Borderline or debatable labels designed to challenge automated judges.                                                               |
+| Poor           | 11    | Useless, evasive, broken, or containing dangerous misinformation.                                                                    |
+| Edge Cases     | 20    | Borderline or debatable labels designed to challenge automated judges.                                                               |
 
-The Excellent and Good tiers account for 40% of the dataset, Below Average and Poor for 25%, and Mediocre/Mixed and Edge Cases for the remaining 35%.
+The classifier yields counts 15/12/27/15/11/20 for Excellent, Good, Mediocre/Mixed, Below Average, Poor, and Edge Cases, respectively.
 
-## A.6 Ground truth label distribution
+## A.6 Reference label distribution
 
-Ground truth labels were distributed broadly across options for each criterion. If a single label dominated (e.g., 95% "Very satisfied"), a judge could achieve high accuracy by always predicting the majority class. The ordinal criteria were engineered to have near-uniform distributions (high normalized entropy), so accuracy on this benchmark is a meaningful signal rather than an artifact of class imbalance.
+Reference labels were distributed broadly across options for each criterion. If a single label dominated (e.g., 95% "Very satisfied"), a judge could achieve high accuracy by always predicting the majority class. The four ordinal criteria were constructed with relatively broad distributions, while response length and factual accuracy have majority-class shares of 66% and 72%, respectively; per-criterion interpretation should therefore consider the displayed class balance rather than accuracy alone.
 
 ### A.6.1 Satisfaction (ordinal, 4-point)
 
@@ -164,7 +164,7 @@ Specificity has the highest raw entropy (2.21 / 2.32, normalized: 0.95) because 
 
 ## A.7 Response anti-pattern taxonomy
 
-The dataset includes a structured taxonomy of response failure modes distributed across the quality tiers in Section A.5. These anti-patterns provide coverage of the failures that automated judges must detect, and they enable fine-grained error analysis when a judge underperforms on a particular criterion.
+The dataset includes a structured taxonomy of response failure modes distributed across the description-derived strata in Section A.5. These anti-patterns provide coverage of the failures that automated judges must detect, and they enable fine-grained error analysis when a judge underperforms on a particular criterion.
 
 ### A.7.1 Factual failures
 
@@ -252,13 +252,13 @@ The `description` field provides a human-readable summary of the sample's qualit
 | Samples with N/A labels                        | 9 (specificity only)                                    |
 | Mean normalized entropy (across criteria)      | 0.92                                                    |
 
-User messages have a median length of 19 words. Assistant responses range from 9 to 497 words (mean 167, stdev 98). The high coefficient of variation reflects the intentional diversity of response lengths across quality tiers.
+User messages have a median length of 19 words. Assistant responses range from 9 to 497 words (mean 167, stdev 98). The high coefficient of variation reflects the intentional diversity of response lengths across description-derived strata.
 
-Mean normalized entropy of 0.92 across all six criteria confirms that ground truth labels are well-distributed. Majority-class baseline accuracy is correspondingly low, making the benchmark a meaningful test of discriminative ability.
+Mean normalized entropy is 0.92 across all six criteria. The four ordinal criteria are comparatively balanced (majority-class baselines 27--36%), whereas response length and factual accuracy are more skewed (66% and 72%); the benchmark therefore spans both balanced and imbalanced label distributions.
 
 ## A.11 Intended use
 
-This dataset benchmarks LLM-as-a-judge systems on their ability to reproduce human-like quality judgments across multiple criteria simultaneously. Because it requires the judge to handle ordinal, nominal, and binary criteria in a single pass, it provides a more realistic test than benchmarks restricted to a single measurement scale.
+This dataset benchmarks LLM-as-a-judge systems on their ability to reproduce the dataset's operational reference labels across multiple criteria simultaneously. Because it requires the judge to handle ordinal, nominal, and binary criteria in a single pass, it provides a more varied measurement task than benchmarks restricted to a single scale type.
 
 The dataset also supports per-criterion discrimination analysis. Factual accuracy and naturalness, for instance, test very different capabilities (fact verification versus stylistic judgment), and a judge may perform well on one while struggling with the other. The hybrid rubric enables criterion-appropriate agreement metrics: weighted (quadratic) kappa for ordinal criteria, unweighted Cohen's kappa for nominal and binary criteria, adjacent accuracy, Spearman and Kendall rank correlations, and per-option precision/recall/F1.
 
@@ -279,7 +279,7 @@ print(f"Loaded {len(dataset.items)} items")
 
 All conversations are synthetic: authored by a language model rather than collected from a production chatbot system. The distribution of response patterns, error types, and conversational styles may therefore not fully represent real-world deployments. Synthetic authoring provides precise control over the joint distribution of quality labels but reduces ecological validity.
 
-Ground truth labels were assigned by a single annotator (the authoring LLM), with no inter-annotator agreement measurement. On unambiguous samples this is unlikely to be problematic, but on edge cases the labels may reflect arbitrary tie-breaking rather than consensus. Disagreements between a judge and the ground truth on these samples may represent legitimate differences of interpretation.
+Reference labels were assigned by the authoring LLM, so they are operational annotations rather than independently adjudicated truth. The initial dataset release included no agreement measurement. A subsequent seed-42, quality-tier-stratified second annotation pass covered 50 items; its recorded subset, label key, guidelines, and summary are preserved in the [companion paper repository](https://github.com/delip/autorubric-paper/tree/45581b07f0b45bcdfe31b5dbfbf2671c1694db58/data). Agreement with the reference labels ranged from Cohen's kappa 0.506 to 0.870 by criterion. The descriptive macro-average (0.687) mixes quadratic-weighted and unweighted coefficients and should not be treated as a common-scale reliability statistic or as full-dataset human--human agreement. On edge cases, disagreements may represent legitimate differences of interpretation.
 
 The dataset is English-only. All prompts, queries, and responses are in English, and the evaluation criteria assume English-language conventions for naturalness, formality, and specificity. Results may not generalize to multilingual settings.
 
@@ -302,9 +302,9 @@ The following results were obtained by running `autorubric` on CHARM-100 with Ge
 | Spearman correlation (scores) | 0.810                | --               |
 | Kendall correlation (scores)  | 0.663                | --               |
 | RMSE (scores)                 | 0.246                | [0.212, 0.274]   |
-| Mean bias                     | +0.170 (significant) | --               |
+| Mean bias                     | +0.170               | --               |
 
-The model exhibits a statistically significant positive bias of +0.17, systematically rating responses higher than the ground truth. This bias manifests differently across criterion types, as the per-criterion breakdown reveals.
+The model has a positive mean bias of +0.17, rating responses higher than the reference labels on average. No inferential test is reported for this statistic. The pattern manifests differently across criterion types, as the per-criterion breakdown reveals.
 
 ### Per-criterion breakdown
 
@@ -384,7 +384,7 @@ The response_length criterion exposes an asymmetry that would be invisible in an
 
 ### N/A handling
 
-The model over-predicts N/A for the specificity criterion: 16 N/A predictions versus 9 in the ground truth. Agreement on N/A status is low (24%), with 10 false positives (predicted N/A when a specificity judgment was expected) and 3 false negatives.
+The model predicts N/A for the specificity criterion 16 times versus 9 reference N/A labels. The N/A-status confusion counts are TP=6, FP=10, FN=3, and TN=81: raw status agreement is 87.0% and Cohen's kappa is 0.412. Treating N/A as positive, precision is 37.5%, recall is 66.7%, and Jaccard similarity is 31.6%. Specificity-label metrics use the 81 cases in which neither side is N/A.
 
 ### Connection to dataset design
 
