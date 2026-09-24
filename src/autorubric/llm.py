@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from enum import Enum
 from pathlib import Path, PurePath
 from typing import TYPE_CHECKING, Any, Literal, TypeVar
@@ -538,29 +538,9 @@ class LLMConfig:
         if "model" not in data:
             raise ValueError("LLM config YAML must specify 'model' field")
 
-        # Handle extra_params specially - any unknown keys go there
-        known_fields = {
-            "model",
-            "temperature",
-            "max_tokens",
-            "top_p",
-            "timeout",
-            "max_retries",
-            "retry_min_wait",
-            "retry_max_wait",
-            "cache_enabled",
-            "cache_dir",
-            "cache_ttl",
-            "api_key",
-            "api_base",
-            # Thinking/Reasoning
-            "thinking",
-            # Other provider-specific features
-            "prompt_caching",
-            "seed",
-            "extra_headers",
-            "extra_params",
-        }
+        # Every dataclass field is a known key (derived, so new fields can't be missed);
+        # anything else is a provider-specific param and goes to extra_params.
+        known_fields = {f.name for f in fields(cls)}
         extra = {k: v for k, v in data.items() if k not in known_fields}
         if extra:
             data.setdefault("extra_params", {}).update(extra)

@@ -1,7 +1,7 @@
 """Tests for LLMConfig class."""
 
 import tempfile
-from dataclasses import asdict
+from dataclasses import MISSING, asdict, fields
 from pathlib import Path
 
 import pytest
@@ -29,6 +29,7 @@ class TestLLMConfigCreation:
             max_retries=5,
             retry_min_wait=2.0,
             retry_max_wait=120.0,
+            max_parallel_requests=8,
             cache_enabled=True,
             cache_dir="/tmp/test_cache",
             cache_ttl=7200,
@@ -48,6 +49,7 @@ class TestLLMConfigCreation:
         assert config.max_retries == 5
         assert config.retry_min_wait == 2.0
         assert config.retry_max_wait == 120.0
+        assert config.max_parallel_requests == 8
         assert config.cache_enabled is True
         assert config.cache_dir == "/tmp/test_cache"
         assert config.cache_ttl == 7200
@@ -74,6 +76,7 @@ class TestLLMConfigDefaults:
         assert config.max_retries == 3
         assert config.retry_min_wait == 1.0
         assert config.retry_max_wait == 60.0
+        assert config.max_parallel_requests is None
         assert config.cache_enabled is False
         assert config.cache_dir == ".autorubric_cache"
         assert config.cache_ttl is None
@@ -187,6 +190,19 @@ class TestLLMConfigFromYaml:
                 "existing": "param",
                 "unknown_key": "value",
             }
+        finally:
+            Path(temp_path).unlink()
+
+    def test_from_yaml_loads_max_parallel_requests(self):
+        """max_parallel_requests is a config field, not a provider param for extra_params."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            yaml.safe_dump({"model": "m", "max_parallel_requests": 4}, f)
+            temp_path = f.name
+
+        try:
+            config = LLMConfig.from_yaml(temp_path)
+            assert config.max_parallel_requests == 4
+            assert config.extra_params == {}
         finally:
             Path(temp_path).unlink()
 
@@ -314,6 +330,52 @@ class TestLLMConfigToYaml:
             assert loaded.cache_enabled == original.cache_enabled
             assert loaded.thinking == original.thinking
             assert loaded.extra_params == original.extra_params
+        finally:
+            Path(temp_path).unlink()
+
+    def test_roundtrip_yaml_every_field_non_default(self):
+        """Every LLMConfig field survives to_yaml/from_yaml when set to a non-default value."""
+        original = LLMConfig(
+            model="anthropic/claude-sonnet-4-5-20250929",
+            temperature=0.7,
+            max_tokens=1024,
+            top_p=0.9,
+            timeout=120.0,
+            max_retries=5,
+            retry_min_wait=2.0,
+            retry_max_wait=120.0,
+            max_parallel_requests=4,
+            cache_enabled=True,
+            cache_dir="/tmp/test_cache",
+            cache_ttl=7200,
+            api_key="test-key",
+            api_base="https://api.example.com",
+            thinking="high",
+            prompt_caching=False,
+            seed=42,
+            extra_headers={"X-Custom": "header"},
+            extra_params={"custom_param": "value"},
+        )
+
+        # Guard: a field added to LLMConfig later must be set here too, or this
+        # test would silently stop covering it.
+        for config_field in fields(LLMConfig):
+            if config_field.default is not MISSING:
+                default = config_field.default
+            elif config_field.default_factory is not MISSING:
+                default = config_field.default_factory()
+            else:
+                continue
+            name = config_field.name
+            assert getattr(original, name) != default, f"{name} is left at its default"
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            temp_path = f.name
+
+        try:
+            original.to_yaml(temp_path)
+            loaded = LLMConfig.from_yaml(temp_path)
+            assert loaded == original
         finally:
             Path(temp_path).unlink()
 
