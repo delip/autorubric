@@ -475,7 +475,7 @@ class TestLLMConfigThinkingSerialization:
     def test_to_yaml_output_unchanged_for_plain_values(self, tmp_path):
         """Configs that serialized before enum support still produce the same bytes."""
         path = tmp_path / "llm_config.yaml"
-        config = LLMConfig(model="m", thinking="high", cache_dir=Path("/tmp/autorubric_cache"))
+        config = LLMConfig(model="m", thinking="high", cache_dir=Path("autorubric_cache"))
 
         config.to_yaml(path)
 
@@ -486,7 +486,7 @@ class TestLLMConfigThinkingSerialization:
             "retry_min_wait: 1.0\n"
             "retry_max_wait: 60.0\n"
             "cache_enabled: false\n"
-            "cache_dir: /tmp/autorubric_cache\n"
+            "cache_dir: autorubric_cache\n"
             "thinking: high\n"
             "prompt_caching: true\n"
         )
