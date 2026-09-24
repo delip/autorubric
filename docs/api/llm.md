@@ -14,7 +14,6 @@ from autorubric import LLMConfig, LLMClient, generate
 # Configuration
 config = LLMConfig(
     model="openai/gpt-4.1-mini",
-    temperature=0.0,
     max_tokens=1024,
     cache_enabled=True,
     max_parallel_requests=10,
@@ -47,12 +46,28 @@ result = await client.generate(
 | Groq | `groq/llama-3.1-70b-versatile` | `GROQ_API_KEY` |
 | Ollama | `ollama/qwen3:14b` | (local, no key needed) |
 
+## Temperature
+
+`LLMConfig.temperature` defaults to `None`: `temperature` is left out of the request, so the provider's own default applies. Many current models need or recommend this: reasoning models such as the GPT-5.x family accept only their default temperature, Gemini 3 recommends keeping its default of 1.0, and Anthropic requires temperature 1 when extended thinking is enabled.
+
+An explicit value, including `0.0`, is sent unchanged. A `temperature=` keyword argument to `LLMClient.generate()` overrides the config for that call (`temperature=None` omits it for that call). The response cache keys on the temperature actually used for the request (including a per-call override), and an unset temperature has its own key.
+
+```python
+LLMConfig(model="openai/gpt-5.2")                        # temperature omitted: provider default
+LLMConfig(model="openai/gpt-4.1-mini", temperature=0.0)  # temperature=0.0 sent
+```
+
+A low temperature reduces run-to-run variance, but most providers do not guarantee identical outputs even at `0.0`.
+
+!!! warning "Default changed after v1.5.3"
+    Up to and including v1.5.3, `temperature` defaulted to `0.0` and was always sent. A config that never sets it now samples at the provider's default, so its grades may differ from earlier runs, and responses cached by those runs are not reused (an unset temperature has its own cache key). To keep the old behaviour, set `temperature=0.0` explicitly (`temperature: 0.0` in YAML). Configs that already set `temperature` explicitly send the same value and keep their cached responses.
+
 ## YAML Configuration
 
 ```yaml
 # llm_config.yaml
 model: openai/gpt-4.1
-temperature: 0.0
+temperature: 0.0  # optional; omit to use the provider default
 max_tokens: 1024
 cache_enabled: true
 cache_ttl: 3600

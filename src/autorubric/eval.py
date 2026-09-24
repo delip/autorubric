@@ -90,6 +90,8 @@ def _serialize_grader_config(grader: Grader) -> dict[str, Any]:
     """Serialize grader configuration for manifest storage.
 
     Captures key configuration for reproducibility without storing sensitive data.
+    For each judge this records ``judge_id``, ``model``, ``temperature`` (None when the
+    provider default is used), ``weight``, and ``max_parallel_requests``.
     Gracefully handles mocks and missing attributes.
     """
     config: dict[str, Any] = {
@@ -121,10 +123,16 @@ def _serialize_grader_config(grader: Grader) -> dict[str, Any]:
                             if isinstance(jmodel, str):
                                 weight = getattr(j, "weight", 1.0)
                                 mpr = getattr(jcfg, "max_parallel_requests", None)
+                                temp = getattr(jcfg, "temperature", None)
+                                is_number = isinstance(temp, (int, float)) and not isinstance(
+                                    temp, bool
+                                )
                                 config["judges"].append(
                                     {
                                         "judge_id": jid,
                                         "model": jmodel,
+                                        # None = provider default (temperature not sent).
+                                        "temperature": temp if is_number else None,
                                         "weight": weight
                                         if isinstance(weight, (int, float))
                                         else 1.0,

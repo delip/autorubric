@@ -106,7 +106,7 @@ print(f"Cleared {cleared} cached entries")
 ```
 
 !!! warning "Cache Invalidation"
-    Changing the model, temperature, rubric criteria, or system prompt invalidates cached responses. Use distinct experiment names or cache keys when testing different configurations so that stale results from a prior setup are never reused.
+    Changing the model, temperature, rubric criteria, or system prompt invalidates cached responses. An unset `temperature` (provider default) and an explicit `temperature=0.0` are different cache keys. Use distinct experiment names or cache keys when testing different configurations so that stale results from a prior setup are never reused.
 
 ### Step 5: Enable Prompt Caching (Anthropic)
 

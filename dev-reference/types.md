@@ -38,7 +38,7 @@ Note: `FewShotConfig` is listed in the Core Types table above (defined in `src/a
 
 | Type | Purpose |
 | --- | --- |
-| `LLMConfig` | model, temperature, max_tokens, thinking, prompt_caching, max_parallel_requests |
+| `LLMConfig` | model, temperature (`float \| None`, default `None` = omitted from the request, provider default applies; see [Key Conventions](conventions.md)), max_tokens, thinking, prompt_caching, max_parallel_requests |
 | `LLMClient` | Async client with generate(), caching, rate limiting |
 | `ThinkingConfig` | level (LOW/MEDIUM/HIGH) or budget_tokens |
 | `ErrorCategory` | `Literal["infrastructure", "parse", "unknown"]` — classification of a grading exception |

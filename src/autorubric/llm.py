@@ -389,7 +389,13 @@ class LLMConfig:
                "anthropic/claude-sonnet-4-5-20250929", "gemini/gemini-3-pro-preview",
                "ollama/qwen3:14b"). REQUIRED - no default.
                See LiteLLM docs for full list of supported models.
-        temperature: Sampling temperature (0.0 = deterministic).
+        temperature: Sampling temperature. None (default) omits it from the request so
+            the provider's own default applies; this is recommended for reasoning models
+            such as GPT-5.x and for Gemini 3, and required for Anthropic extended
+            thinking. An explicit value, including 0.0, is sent unchanged. Temperature
+            0.0 reduces but does not guarantee determinism on most providers.
+            Note: the default changed from 0.0 to None after v1.5.3. To keep the previous
+            behavior, pass ``temperature=0.0`` explicitly (it keeps the same cache keys).
         max_tokens: Maximum tokens in response.
         top_p: Nucleus sampling parameter.
         timeout: Request timeout in seconds.
@@ -429,8 +435,11 @@ class LLMConfig:
         extra_params: Additional provider-specific parameters passed to LiteLLM.
 
     Examples:
-        # Basic usage without thinking
+        # Basic usage without thinking (provider-default temperature)
         config = LLMConfig(model="openai/gpt-5.2")
+
+        # Explicit temperature
+        config = LLMConfig(model="openai/gpt-4.1-mini", temperature=0.0)  # explicit; sent as-is
 
         # Enable thinking with a level
         config = LLMConfig(model="anthropic/claude-sonnet-4-5-20250929", thinking="high")
@@ -447,7 +456,7 @@ class LLMConfig:
     """
 
     model: str  # REQUIRED - no default, must always be specified
-    temperature: float = 0.0
+    temperature: float | None = None  # None = provider default (not sent)
     max_tokens: int | None = None
     top_p: float | None = None
     timeout: float = 60.0
@@ -490,7 +499,7 @@ class LLMConfig:
 
         Example YAML file (llm_config.yaml):
             model: openai/gpt-5.2
-            temperature: 0.0
+            # temperature omitted: the provider's default applies
             max_tokens: 1024
             cache_enabled: true
             cache_ttl: 3600
@@ -601,18 +610,31 @@ class LLMClient:
         system_prompt: str,
         user_prompt: str,
         response_format: type | None = None,
+        overrides: dict[str, Any] | None = None,
     ) -> str:
         """Generate a unique cache key for the request.
 
         Includes sampling parameters so that different configurations
         (temperature, thinking, top_p, seed) produce distinct cache entries.
+
+        Args:
+            model: Model identifier sent with the request.
+            system_prompt: System message for the LLM.
+            user_prompt: User message for the LLM.
+            response_format: Optional Pydantic model class for structured output.
+            overrides: The per-call overrides passed to ``generate``. A ``temperature``
+                override replaces ``config.temperature`` in the key, so an override never
+                reuses a response cached at a different temperature. None (provider
+                default) is rendered as ``None``; explicit values keep the same key format
+                as before, so existing cache entries still match.
         """
+        temperature = (overrides or {}).get("temperature", self.config.temperature)
         schema_name = response_format.__name__ if response_format else "str"
         thinking_config = self.config.get_thinking_config()
         thinking_str = str(thinking_config) if thinking_config else "none"
         content = (
             f"{model}:{system_prompt}:{user_prompt}:{schema_name}"
-            f":temp={self.config.temperature}"
+            f":temp={temperature}"
             f":top_p={self.config.top_p}"
             f":max_tokens={self.config.max_tokens}"
             f":thinking={thinking_str}"
@@ -669,7 +691,9 @@ class LLMClient:
                 including usage statistics and completion cost. This is useful when
                 you need to track token usage. When True, takes precedence over the
                 default return behavior.
-            **kwargs: Override any LLMConfig parameters for this call.
+            **kwargs: Override any LLMConfig parameters for this call. In particular,
+                ``temperature`` accepts a float to send for this call, or None to omit it
+                so the provider's default applies (regardless of ``config.temperature``).
 
         Returns:
             If return_result=True or return_thinking=True: GenerateResult with content,
@@ -686,12 +710,19 @@ class LLMClient:
         # Determine caching behavior for this request
         should_cache = use_cache if use_cache is not None else self.config.cache_enabled
 
+        # Effective temperature: a per-call override wins; None means "omit from the request".
+        temperature: float | None = kwargs.get("temperature", self.config.temperature)
+
         # Check cache first
         cache_key: str | None = None
         if should_cache:
             cache = self._ensure_cache()
             cache_key = self._cache_key(
-                self.config.model, system_prompt, user_prompt, response_format
+                self.config.model,
+                system_prompt,
+                user_prompt,
+                response_format,
+                kwargs,
             )
             cached = cache.get(cache_key)
             if cached is not None:
@@ -732,7 +763,9 @@ class LLMClient:
         params: dict[str, Any] = {
             "model": model,
             "messages": messages,
-            "temperature": kwargs.get("temperature", self.config.temperature),
+            # Only send temperature when set, so the provider default applies otherwise
+            # (0.0 is a real value and is sent).
+            **({"temperature": temperature} if temperature is not None else {}),
             "timeout": kwargs.get("timeout", self.config.timeout),
             **self.config.extra_params,
         }

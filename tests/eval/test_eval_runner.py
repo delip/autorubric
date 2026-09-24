@@ -1375,3 +1375,43 @@ class TestManifestSeedPersistence:
             assert manifest["grader_config"]["master_seed"] == 42
             assert manifest["grader_config"]["shuffle_options"] is True
             assert manifest["grader_config"]["auto_na_option"] is False
+
+
+class TestManifestJudgeConfig:
+    """Tests for per-judge LLM settings recorded in experiment manifests."""
+
+    @pytest.mark.asyncio
+    async def test_manifest_judges_include_temperature(self, sample_dataset):
+        """Manifest judges record temperature: None for provider default, else the float."""
+        from autorubric.graders import JudgeSpec
+
+        mock_grader = create_mock_grader()
+        mock_grader._judges = [
+            JudgeSpec(llm_config=LLMConfig(model="judge-default"), judge_id="default"),
+            JudgeSpec(
+                llm_config=LLMConfig(model="judge-explicit", temperature=0.0),
+                judge_id="explicit",
+            ),
+        ]
+        mock_grader._aggregation = "majority"
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = EvalConfig(
+                show_progress=False,
+                experiments_dir=tmp_dir,
+                experiment_name="temperature-test",
+            )
+            runner = EvalRunner(
+                dataset=sample_dataset,
+                grader=mock_grader,
+                config=config,
+            )
+            await runner.run()
+
+            with open(Path(tmp_dir) / "temperature-test" / "manifest.json") as f:
+                manifest = json.load(f)
+
+            judges = {j["judge_id"]: j for j in manifest["grader_config"]["judges"]}
+            assert "temperature" in judges["default"]
+            assert judges["default"]["temperature"] is None
+            assert judges["explicit"]["temperature"] == 0.0

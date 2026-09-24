@@ -177,7 +177,7 @@ asyncio.run(verify_reproducibility())
 ```
 
 !!! note "LLM outputs may still differ"
-    With `temperature > 0`, the LLM's chosen option may differ between runs even with identical shuffle orders. The seed guarantees identical *presentation* to the LLM, not identical *responses*.
+    The LLM's chosen option may differ between runs even with identical shuffle orders. This is most likely at `temperature > 0` or at the provider's default temperature (used when `temperature` is unset), and most providers do not guarantee identical outputs even at `0.0`. The seed guarantees identical *presentation* to the LLM, not identical *responses*.
 
 ### Step 6: Check the Checkpoint
 
@@ -192,6 +192,7 @@ with open(Path("experiments/seeded-run-42/manifest.json")) as f:
 
 print(manifest["grader_config"]["master_seed"])      # 42
 print(manifest["grader_config"]["shuffle_options"])   # True
+print(manifest["grader_config"]["judges"][0]["temperature"])  # 0.3 (None = provider default)
 ```
 
 When resuming an interrupted evaluation, the same seed produces the same shuffle orders for remaining items—no special handling required.
