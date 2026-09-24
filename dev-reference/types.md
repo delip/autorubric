@@ -40,7 +40,7 @@ Note: `FewShotConfig` is listed in the Core Types table above (defined in `src/a
 | --- | --- |
 | `LLMConfig` | model, temperature (`float \| None`, default `None` = omitted from the request, provider default applies; see [Key Conventions](conventions.md)), max_tokens, thinking, prompt_caching, max_parallel_requests |
 | `LLMClient` | Async client with generate(), caching, rate limiting |
-| `ThinkingConfig` | level (LOW/MEDIUM/HIGH) or budget_tokens |
+| `ThinkingConfig` | level (LOW/MEDIUM/HIGH) or budget_tokens. YAML: `LLMConfig.to_yaml` writes every `thinking` form as plain YAML via the private `_LLMConfigDumper` (a `yaml.SafeDumper` that writes any `Enum` as its value and any `PurePath` as a string); a `ThinkingConfig` becomes a `{level, budget_tokens}` mapping that `from_yaml` rebuilds into a `ThinkingConfig` (unknown mapping keys → `ValueError`). A `ThinkingLevel` member is written as its string value and deliberately loads back as that plain string, not the enum (it is a `str` enum, so it compares equal and `get_thinking_config()` is unchanged). Strings and int budgets are written unchanged |
 | `ErrorCategory` | `Literal["infrastructure", "parse", "unknown"]` — classification of a grading exception |
 | `classify_grading_error` | `classify_grading_error(exc) -> ErrorCategory`: `infrastructure` for `openai.APIError` subclasses (litellm API/network/timeout/rate-limit/server), `parse` for `pydantic.ValidationError` / `ValueError` (incl. `json.JSONDecodeError`), `unknown` otherwise. Routing: see [Grading Flow](grading-flow.md) |
 

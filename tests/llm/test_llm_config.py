@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from autorubric.llm import LLMConfig
+from autorubric.llm import LLMConfig, ThinkingConfig, ThinkingLevel
 
 
 class TestLLMConfigCreation:
@@ -346,3 +346,85 @@ class TestLLMConfigTemperatureSerialization:
         data = asdict(LLMConfig(model="m", temperature=0.0))
 
         assert LLMConfig(**data).temperature == 0.0
+
+
+class TestLLMConfigThinkingSerialization:
+    """YAML serialization of every ThinkingParam form."""
+
+    @pytest.mark.parametrize(
+        ("thinking", "yaml_value", "loaded_type"),
+        [
+            pytest.param("high", "high", str, id="level-string"),
+            pytest.param(32000, 32000, int, id="int-budget"),
+            # A ThinkingLevel is written as its string value and loads back as that plain
+            # string: equal to the member, same get_thinking_config().
+            pytest.param(ThinkingLevel.HIGH, "high", str, id="level-enum"),
+            pytest.param(ThinkingLevel.NONE, "none", str, id="level-enum-none"),
+            pytest.param(
+                ThinkingConfig(level=ThinkingLevel.HIGH),
+                {"level": "high", "budget_tokens": None},
+                ThinkingConfig,
+                id="config-level",
+            ),
+            pytest.param(
+                ThinkingConfig(budget_tokens=9000),
+                {"level": "medium", "budget_tokens": 9000},
+                ThinkingConfig,
+                id="config-budget",
+            ),
+            pytest.param(
+                ThinkingConfig(level="low", budget_tokens=500),
+                {"level": "low", "budget_tokens": 500},
+                ThinkingConfig,
+                id="config-level-and-budget",
+            ),
+        ],
+    )
+    def test_thinking_roundtrips_through_yaml(self, tmp_path, thinking, yaml_value, loaded_type):
+        """Each thinking form is written as plain YAML and loads back equivalent."""
+        path = tmp_path / "llm_config.yaml"
+        original = LLMConfig(model="m", thinking=thinking)
+
+        original.to_yaml(path)
+
+        assert yaml.safe_load(path.read_text(encoding="utf-8"))["thinking"] == yaml_value
+        loaded = LLMConfig.from_yaml(path)
+        assert type(loaded.thinking) is loaded_type
+        assert loaded.get_thinking_config() == original.get_thinking_config()
+        assert loaded == original
+
+    def test_from_yaml_loads_hand_written_thinking_mapping(self, tmp_path):
+        """A thinking mapping may omit fields; omitted ones take ThinkingConfig defaults."""
+        path = tmp_path / "llm_config.yaml"
+        path.write_text("model: m\nthinking:\n  budget_tokens: 32000\n", encoding="utf-8")
+
+        config = LLMConfig.from_yaml(path)
+
+        assert config.thinking == ThinkingConfig(level=ThinkingLevel.MEDIUM, budget_tokens=32000)
+
+    def test_from_yaml_rejects_unknown_thinking_mapping_key(self, tmp_path):
+        """An unknown key in the thinking mapping is a config error, not a later TypeError."""
+        path = tmp_path / "llm_config.yaml"
+        path.write_text("model: m\nthinking:\n  effort: high\n", encoding="utf-8")
+
+        with pytest.raises(ValueError, match="Invalid 'thinking' mapping"):
+            LLMConfig.from_yaml(path)
+
+    def test_to_yaml_output_unchanged_for_plain_values(self, tmp_path):
+        """Configs that serialized before enum support still produce the same bytes."""
+        path = tmp_path / "llm_config.yaml"
+        config = LLMConfig(model="m", thinking="high", cache_dir=Path("/tmp/autorubric_cache"))
+
+        config.to_yaml(path)
+
+        assert path.read_text(encoding="utf-8") == (
+            "model: m\n"
+            "timeout: 60.0\n"
+            "max_retries: 3\n"
+            "retry_min_wait: 1.0\n"
+            "retry_max_wait: 60.0\n"
+            "cache_enabled: false\n"
+            "cache_dir: /tmp/autorubric_cache\n"
+            "thinking: high\n"
+            "prompt_caching: true\n"
+        )
