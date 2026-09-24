@@ -10,9 +10,9 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from enum import Enum
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import TYPE_CHECKING, Any, Literal, TypeVar
 
 import diskcache
@@ -380,6 +380,23 @@ def _provider_response_format(response_format: type[BaseModel]) -> type[BaseMode
     return param
 
 
+class _LLMConfigDumper(yaml.SafeDumper):
+    """SafeDumper that writes enums and paths as plain YAML scalars.
+
+    ``asdict()`` leaves ``ThinkingLevel`` members (bare, or inside a ``ThinkingConfig``)
+    and ``Path`` values in place, and ``yaml.SafeDumper`` refuses both. Writing their plain
+    values keeps ``LLMConfig.to_yaml`` output loadable by ``yaml.safe_load``.
+    """
+
+
+_LLMConfigDumper.add_multi_representer(
+    Enum, lambda dumper, value: dumper.represent_data(value.value)
+)
+_LLMConfigDumper.add_multi_representer(
+    PurePath, lambda dumper, value: dumper.represent_str(str(value))
+)
+
+
 @dataclass
 class LLMConfig:
     """Configuration for LLM calls.
@@ -503,6 +520,10 @@ class LLMConfig:
             max_tokens: 1024
             cache_enabled: true
             cache_ttl: 3600
+
+        ``thinking`` accepts a level string (``high``), an int token budget (``32000``),
+        or a mapping of ``ThinkingConfig`` fields (``{level: high, budget_tokens: 9000}``),
+        which is loaded as a ``ThinkingConfig``.
         """
         path = Path(path)
         if not path.exists():
@@ -517,39 +538,42 @@ class LLMConfig:
         if "model" not in data:
             raise ValueError("LLM config YAML must specify 'model' field")
 
-        # Handle extra_params specially - any unknown keys go there
-        known_fields = {
-            "model",
-            "temperature",
-            "max_tokens",
-            "top_p",
-            "timeout",
-            "max_retries",
-            "retry_min_wait",
-            "retry_max_wait",
-            "cache_enabled",
-            "cache_dir",
-            "cache_ttl",
-            "api_key",
-            "api_base",
-            # Thinking/Reasoning
-            "thinking",
-            # Other provider-specific features
-            "prompt_caching",
-            "seed",
-            "extra_headers",
-            "extra_params",
-        }
+        # Every dataclass field is a known key (derived, so new fields can't be missed);
+        # anything else is a provider-specific param and goes to extra_params.
+        known_fields = {f.name for f in fields(cls)}
         extra = {k: v for k, v in data.items() if k not in known_fields}
         if extra:
             data.setdefault("extra_params", {}).update(extra)
             for k in extra:
                 del data[k]
 
+        # to_yaml writes a ThinkingConfig as a mapping of its fields; rebuild it. Level
+        # strings and int budgets are already valid ThinkingParam values.
+        thinking = data.get("thinking")
+        if isinstance(thinking, dict):
+            try:
+                data["thinking"] = ThinkingConfig(**thinking)
+            except TypeError as e:
+                raise ValueError(f"Invalid 'thinking' mapping in LLM config YAML: {e}") from e
+
         return cls(**data)
 
     def to_yaml(self, path: str | Path) -> None:
         """Save LLMConfig to a YAML file.
+
+        The file holds only plain YAML (``yaml.safe_load`` reads it): enums are written as
+        their values and paths as strings (so a ``Path`` ``cache_dir`` loads back as a
+        ``str``). ``thinking`` is written so that ``from_yaml`` restores an equal value
+        with the same ``get_thinking_config()``:
+
+        - A level string or an int budget is written unchanged.
+        - A ``ThinkingConfig`` is written as a mapping of its fields
+          (``{level: high, budget_tokens: 9000}``) and loads back as a ``ThinkingConfig``.
+        - A ``ThinkingLevel`` member is written as its string value (``high``) and loads
+          back as that plain string, not the enum. Restoring the enum would need a custom
+          YAML tag, which ``yaml.safe_load`` and hand-written files do not use, and it
+          would add nothing: ``ThinkingLevel`` is a ``str`` enum, so the string compares
+          equal to the member and normalizes to the same ``ThinkingConfig``.
 
         Args:
             path: Path to write YAML configuration file.
@@ -557,15 +581,11 @@ class LLMConfig:
         path = Path(path)
         data = asdict(self)
 
-        # Convert Path to string for YAML serialization
-        if isinstance(data.get("cache_dir"), Path):
-            data["cache_dir"] = str(data["cache_dir"])
-
         # Remove None values and empty dicts for cleaner YAML
         data = {k: v for k, v in data.items() if v is not None and v != {}}
 
         with open(path, "w", encoding="utf-8") as f:
-            yaml.safe_dump(data, f, default_flow_style=False, sort_keys=False)
+            yaml.dump(data, f, Dumper=_LLMConfigDumper, default_flow_style=False, sort_keys=False)
 
 
 class LLMClient:

@@ -78,6 +78,16 @@ config = LLMConfig.from_yaml("llm_config.yaml")
 config.to_yaml("llm_config_backup.yaml")
 ```
 
+`thinking` can be a level (`thinking: high`), a token budget (`thinking: 32000`), or a `ThinkingConfig` written as a mapping:
+
+```yaml
+thinking:
+  level: high
+  budget_tokens: 9000
+```
+
+`to_yaml` writes a `ThinkingLevel` enum as its string value, so it loads back as the string `"high"`. That string is equal to `ThinkingLevel.HIGH` and gives the same thinking settings.
+
 ## Extended Thinking
 
 Enable step-by-step reasoning for complex evaluations:

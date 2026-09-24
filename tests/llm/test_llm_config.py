@@ -1,13 +1,13 @@
 """Tests for LLMConfig class."""
 
 import tempfile
-from dataclasses import asdict
+from dataclasses import MISSING, asdict, fields
 from pathlib import Path
 
 import pytest
 import yaml
 
-from autorubric.llm import LLMConfig
+from autorubric.llm import LLMConfig, ThinkingConfig, ThinkingLevel
 
 
 class TestLLMConfigCreation:
@@ -29,6 +29,7 @@ class TestLLMConfigCreation:
             max_retries=5,
             retry_min_wait=2.0,
             retry_max_wait=120.0,
+            max_parallel_requests=8,
             cache_enabled=True,
             cache_dir="/tmp/test_cache",
             cache_ttl=7200,
@@ -48,6 +49,7 @@ class TestLLMConfigCreation:
         assert config.max_retries == 5
         assert config.retry_min_wait == 2.0
         assert config.retry_max_wait == 120.0
+        assert config.max_parallel_requests == 8
         assert config.cache_enabled is True
         assert config.cache_dir == "/tmp/test_cache"
         assert config.cache_ttl == 7200
@@ -74,6 +76,7 @@ class TestLLMConfigDefaults:
         assert config.max_retries == 3
         assert config.retry_min_wait == 1.0
         assert config.retry_max_wait == 60.0
+        assert config.max_parallel_requests is None
         assert config.cache_enabled is False
         assert config.cache_dir == ".autorubric_cache"
         assert config.cache_ttl is None
@@ -187,6 +190,19 @@ class TestLLMConfigFromYaml:
                 "existing": "param",
                 "unknown_key": "value",
             }
+        finally:
+            Path(temp_path).unlink()
+
+    def test_from_yaml_loads_max_parallel_requests(self):
+        """max_parallel_requests is a config field, not a provider param for extra_params."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            yaml.safe_dump({"model": "m", "max_parallel_requests": 4}, f)
+            temp_path = f.name
+
+        try:
+            config = LLMConfig.from_yaml(temp_path)
+            assert config.max_parallel_requests == 4
+            assert config.extra_params == {}
         finally:
             Path(temp_path).unlink()
 
@@ -317,6 +333,52 @@ class TestLLMConfigToYaml:
         finally:
             Path(temp_path).unlink()
 
+    def test_roundtrip_yaml_every_field_non_default(self):
+        """Every LLMConfig field survives to_yaml/from_yaml when set to a non-default value."""
+        original = LLMConfig(
+            model="anthropic/claude-sonnet-4-5-20250929",
+            temperature=0.7,
+            max_tokens=1024,
+            top_p=0.9,
+            timeout=120.0,
+            max_retries=5,
+            retry_min_wait=2.0,
+            retry_max_wait=120.0,
+            max_parallel_requests=4,
+            cache_enabled=True,
+            cache_dir="/tmp/test_cache",
+            cache_ttl=7200,
+            api_key="test-key",
+            api_base="https://api.example.com",
+            thinking="high",
+            prompt_caching=False,
+            seed=42,
+            extra_headers={"X-Custom": "header"},
+            extra_params={"custom_param": "value"},
+        )
+
+        # Guard: a field added to LLMConfig later must be set here too, or this
+        # test would silently stop covering it.
+        for config_field in fields(LLMConfig):
+            if config_field.default is not MISSING:
+                default = config_field.default
+            elif config_field.default_factory is not MISSING:
+                default = config_field.default_factory()
+            else:
+                continue
+            name = config_field.name
+            assert getattr(original, name) != default, f"{name} is left at its default"
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            temp_path = f.name
+
+        try:
+            original.to_yaml(temp_path)
+            loaded = LLMConfig.from_yaml(temp_path)
+            assert loaded == original
+        finally:
+            Path(temp_path).unlink()
+
 
 class TestLLMConfigTemperatureSerialization:
     """Serialization of the optional temperature (None = provider default)."""
@@ -346,3 +408,85 @@ class TestLLMConfigTemperatureSerialization:
         data = asdict(LLMConfig(model="m", temperature=0.0))
 
         assert LLMConfig(**data).temperature == 0.0
+
+
+class TestLLMConfigThinkingSerialization:
+    """YAML serialization of every ThinkingParam form."""
+
+    @pytest.mark.parametrize(
+        ("thinking", "yaml_value", "loaded_type"),
+        [
+            pytest.param("high", "high", str, id="level-string"),
+            pytest.param(32000, 32000, int, id="int-budget"),
+            # A ThinkingLevel is written as its string value and loads back as that plain
+            # string: equal to the member, same get_thinking_config().
+            pytest.param(ThinkingLevel.HIGH, "high", str, id="level-enum"),
+            pytest.param(ThinkingLevel.NONE, "none", str, id="level-enum-none"),
+            pytest.param(
+                ThinkingConfig(level=ThinkingLevel.HIGH),
+                {"level": "high", "budget_tokens": None},
+                ThinkingConfig,
+                id="config-level",
+            ),
+            pytest.param(
+                ThinkingConfig(budget_tokens=9000),
+                {"level": "medium", "budget_tokens": 9000},
+                ThinkingConfig,
+                id="config-budget",
+            ),
+            pytest.param(
+                ThinkingConfig(level="low", budget_tokens=500),
+                {"level": "low", "budget_tokens": 500},
+                ThinkingConfig,
+                id="config-level-and-budget",
+            ),
+        ],
+    )
+    def test_thinking_roundtrips_through_yaml(self, tmp_path, thinking, yaml_value, loaded_type):
+        """Each thinking form is written as plain YAML and loads back equivalent."""
+        path = tmp_path / "llm_config.yaml"
+        original = LLMConfig(model="m", thinking=thinking)
+
+        original.to_yaml(path)
+
+        assert yaml.safe_load(path.read_text(encoding="utf-8"))["thinking"] == yaml_value
+        loaded = LLMConfig.from_yaml(path)
+        assert type(loaded.thinking) is loaded_type
+        assert loaded.get_thinking_config() == original.get_thinking_config()
+        assert loaded == original
+
+    def test_from_yaml_loads_hand_written_thinking_mapping(self, tmp_path):
+        """A thinking mapping may omit fields; omitted ones take ThinkingConfig defaults."""
+        path = tmp_path / "llm_config.yaml"
+        path.write_text("model: m\nthinking:\n  budget_tokens: 32000\n", encoding="utf-8")
+
+        config = LLMConfig.from_yaml(path)
+
+        assert config.thinking == ThinkingConfig(level=ThinkingLevel.MEDIUM, budget_tokens=32000)
+
+    def test_from_yaml_rejects_unknown_thinking_mapping_key(self, tmp_path):
+        """An unknown key in the thinking mapping is a config error, not a later TypeError."""
+        path = tmp_path / "llm_config.yaml"
+        path.write_text("model: m\nthinking:\n  effort: high\n", encoding="utf-8")
+
+        with pytest.raises(ValueError, match="Invalid 'thinking' mapping"):
+            LLMConfig.from_yaml(path)
+
+    def test_to_yaml_output_unchanged_for_plain_values(self, tmp_path):
+        """Configs that serialized before enum support still produce the same bytes."""
+        path = tmp_path / "llm_config.yaml"
+        config = LLMConfig(model="m", thinking="high", cache_dir=Path("autorubric_cache"))
+
+        config.to_yaml(path)
+
+        assert path.read_text(encoding="utf-8") == (
+            "model: m\n"
+            "timeout: 60.0\n"
+            "max_retries: 3\n"
+            "retry_min_wait: 1.0\n"
+            "retry_max_wait: 60.0\n"
+            "cache_enabled: false\n"
+            "cache_dir: autorubric_cache\n"
+            "thinking: high\n"
+            "prompt_caching: true\n"
+        )
