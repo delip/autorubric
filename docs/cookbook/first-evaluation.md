@@ -79,7 +79,7 @@ from autorubric.graders import CriterionGrader
 grader = CriterionGrader(
     llm_config=LLMConfig(
         model="openai/gpt-4.1-mini",  # or "anthropic/claude-sonnet-4-5-20250929"
-        temperature=0.0,  # Deterministic for reproducibility
+        temperature=0.0,  # Low temperature for more consistent grades; omit for the provider default
     )
 )
 ```

@@ -175,7 +175,7 @@ config = LLMConfig(
     model="openai/gpt-4.1-mini",
 
     # Sampling
-    temperature=0.0,           # 0.0 = deterministic (default)
+    temperature=None,          # None (default) = provider default; e.g. 0.0 to pin it
     max_tokens=1024,           # Maximum response tokens
 
     # Rate limiting
@@ -190,6 +190,8 @@ config = LLMConfig(
     thinking="high",           # "low", "medium", "high", or token budget
 )
 ```
+
+Leaving `temperature` unset suits reasoning models, which accept only their default temperature. See [Temperature](api/llm.md#temperature) for details, including how this default changed after v1.5.3.
 
 ## Loading Rubrics from YAML
 

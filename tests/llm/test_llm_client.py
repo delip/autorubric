@@ -1,5 +1,6 @@
 """Tests for LLMClient class."""
 
+import hashlib
 import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -395,6 +396,168 @@ class TestLLMClientGenerate:
                 cache_key = client._cache_key("openai/gpt-5.2", "System", "User", None)
                 assert client._cache.get(cache_key) == "Response"
 
+            client.close()
+
+
+def _text_response(content: str = "Response") -> MagicMock:
+    """Build a minimal litellm-style completion response carrying ``content``."""
+    mock_message = MagicMock()
+    mock_message.content = content
+    mock_message.reasoning_content = None
+    mock_message.thinking_blocks = None
+    mock_message.thinking = None
+    mock_choice = MagicMock()
+    mock_choice.message = mock_message
+    mock_response = MagicMock()
+    mock_response.choices = [mock_choice]
+    return mock_response
+
+
+class TestLLMClientTemperature:
+    """Temperature is sent only when explicitly set; None means the provider default."""
+
+    @staticmethod
+    async def _sent_kwargs(config: LLMConfig, **generate_kwargs) -> dict:
+        client = LLMClient(config)
+        with patch("autorubric.llm.litellm.acompletion", new_callable=AsyncMock) as mock_completion:
+            mock_completion.return_value = _text_response()
+            await client.generate(system_prompt="System", user_prompt="User", **generate_kwargs)
+        mock_completion.assert_called_once()
+        return dict(mock_completion.call_args.kwargs)
+
+    @pytest.mark.asyncio
+    async def test_default_config_omits_temperature(self):
+        """A default config leaves temperature to the provider (key absent)."""
+        sent = await self._sent_kwargs(LLMConfig(model="openai/gpt-5.2"))
+        assert "temperature" not in sent
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("temperature", [0.0, 1.0], ids=["zero", "one"])
+    async def test_explicit_temperature_is_sent(self, temperature):
+        """An explicit temperature is sent unchanged; 0.0 is not dropped as falsy."""
+        sent = await self._sent_kwargs(LLMConfig(model="openai/gpt-5.2", temperature=temperature))
+        assert "temperature" in sent
+        assert sent["temperature"] == temperature
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("config_temperature", "call_temperature"),
+        [
+            pytest.param(None, 0.7, id="none-to-0.7"),
+            pytest.param(0.0, 1.0, id="0.0-to-1.0"),
+            pytest.param(0.5, 0.0, id="0.5-to-0.0"),
+        ],
+    )
+    async def test_per_call_override_is_sent(self, config_temperature, call_temperature):
+        """A per-call temperature overrides the config value."""
+        config = LLMConfig(model="openai/gpt-5.2", temperature=config_temperature)
+        sent = await self._sent_kwargs(config, temperature=call_temperature)
+        assert sent["temperature"] == call_temperature
+
+    @pytest.mark.asyncio
+    async def test_per_call_none_omits_temperature(self):
+        """A per-call temperature=None omits the key even when the config sets one."""
+        config = LLMConfig(model="openai/gpt-5.2", temperature=0.5)
+        sent = await self._sent_kwargs(config, temperature=None)
+        assert "temperature" not in sent
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("config_temperature", [None, 0.0], ids=["none", "zero"])
+    async def test_extra_params_temperature_still_wins(self, config_temperature):
+        """extra_params keeps its precedence over the temperature field."""
+        config = LLMConfig(
+            model="openai/gpt-5.2",
+            temperature=config_temperature,
+            extra_params={"temperature": 0.3},
+        )
+        sent = await self._sent_kwargs(config)
+        assert sent["temperature"] == 0.3
+
+    def test_cache_key_differs_between_none_and_zero(self):
+        """Provider-default and explicit 0.0 temperature never share a cache entry."""
+        args = ("openai/gpt-5.2", "System", "User", None)
+        key_none = LLMClient(LLMConfig(model="openai/gpt-5.2"))._cache_key(*args)
+        key_zero = LLMClient(LLMConfig(model="openai/gpt-5.2", temperature=0.0))._cache_key(*args)
+        assert key_none != key_zero
+
+    @pytest.mark.parametrize("temperature", [0.0, 0.7], ids=["zero", "point-seven"])
+    def test_cache_key_for_explicit_temperature_matches_legacy_format(self, temperature):
+        """Explicit temperatures keep byte-identical cache keys, so existing caches still hit."""
+        client = LLMClient(LLMConfig(model="openai/gpt-5.2", temperature=temperature))
+        legacy_content = (
+            f"openai/gpt-5.2:System:User:str:temp={temperature}"
+            ":top_p=None:max_tokens=None:thinking=none:seed=None"
+        )
+        expected = hashlib.sha256(legacy_content.encode()).hexdigest()
+        assert client._cache_key("openai/gpt-5.2", "System", "User", None) == expected
+
+    def test_cache_key_for_default_temperature_is_stable(self):
+        """The provider-default key renders temperature as None and is stable across clients."""
+        args = ("openai/gpt-5.2", "System", "User", None)
+        key1 = LLMClient(LLMConfig(model="openai/gpt-5.2"))._cache_key(*args)
+        key2 = LLMClient(LLMConfig(model="openai/gpt-5.2"))._cache_key(*args)
+        content = (
+            "openai/gpt-5.2:System:User:str:temp=None"
+            ":top_p=None:max_tokens=None:thinking=none:seed=None"
+        )
+        assert key1 == key2 == hashlib.sha256(content.encode()).hexdigest()
+
+    @pytest.mark.asyncio
+    async def test_per_call_override_does_not_reuse_config_temperature_cache(self, tmp_path):
+        """A per-call temperature gets its own cache entry instead of the config one."""
+        config = LLMConfig(
+            model="openai/gpt-5.2",
+            temperature=0.0,
+            cache_enabled=True,
+            cache_dir=tmp_path,
+        )
+        client = LLMClient(config)
+        try:
+            with patch(
+                "autorubric.llm.litellm.acompletion", new_callable=AsyncMock
+            ) as mock_completion:
+                mock_completion.side_effect = [
+                    _text_response("at config temperature"),
+                    _text_response("at override temperature"),
+                ]
+
+                first = await client.generate(system_prompt="System", user_prompt="User")
+                assert first == "at config temperature"
+                assert mock_completion.call_count == 1
+
+                overridden = await client.generate(
+                    system_prompt="System", user_prompt="User", temperature=1.0
+                )
+                assert overridden == "at override temperature"
+                assert mock_completion.call_count == 2
+                assert mock_completion.call_args.kwargs["temperature"] == 1.0
+
+                repeat = await client.generate(system_prompt="System", user_prompt="User")
+                assert repeat == "at config temperature"
+                repeat_overridden = await client.generate(
+                    system_prompt="System", user_prompt="User", temperature=1.0
+                )
+                assert repeat_overridden == "at override temperature"
+                assert mock_completion.call_count == 2
+        finally:
+            client.close()
+
+    @pytest.mark.asyncio
+    async def test_cached_call_accepts_per_call_model_override(self, tmp_path):
+        """Per-call overrides reach the cache key without clashing with its own arguments."""
+        config = LLMConfig(model="openai/gpt-5.2", cache_enabled=True, cache_dir=tmp_path)
+        client = LLMClient(config)
+        try:
+            with patch(
+                "autorubric.llm.litellm.acompletion", new_callable=AsyncMock
+            ) as mock_completion:
+                mock_completion.return_value = _text_response("ok")
+                result = await client.generate(
+                    system_prompt="System", user_prompt="User", model="openai/gpt-4.1-mini"
+                )
+                assert result == "ok"
+                assert mock_completion.call_args.kwargs["model"] == "openai/gpt-4.1-mini"
+        finally:
             client.close()
 
 

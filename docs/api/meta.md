@@ -19,7 +19,7 @@ Two evaluation modes are supported:
 from autorubric import LLMConfig, Rubric
 from autorubric.meta import evaluate_rubric_standalone, evaluate_rubric_in_context
 
-llm_config = LLMConfig(model="openai/gpt-4.1-mini", temperature=0.0)
+llm_config = LLMConfig(model="openai/gpt-4.1-mini")
 rubric = Rubric.from_file("my_rubric.json")
 
 # Standalone evaluation with terminal output. result.score is `float | None`

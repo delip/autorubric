@@ -39,6 +39,8 @@ from autorubric import LLMConfig
 config = LLMConfig.from_yaml("configs/llm/production.yaml")
 ```
 
+Setting `temperature` explicitly keeps it the same across machines and library versions; when it is omitted, the provider's default applies (see [Temperature](../api/llm.md#temperature)).
+
 !!! tip "YAML over JSON for human-edited configs"
     Prefer YAML for configuration files that team members edit by hand. YAML supports inline
     comments and reads more naturally than JSON, which matters when configs are reviewed in

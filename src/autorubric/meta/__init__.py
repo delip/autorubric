@@ -14,7 +14,7 @@ Example usage:
     from autorubric import LLMConfig, Rubric
     from autorubric.meta import evaluate_rubric_standalone, evaluate_rubric_in_context
 
-    llm_config = LLMConfig(model="gpt-4o", temperature=0.0)
+    llm_config = LLMConfig(model="gpt-4o")
     rubric = Rubric.from_file("my_rubric.json")
 
     # Standalone evaluation (terminal output)

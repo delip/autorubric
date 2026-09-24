@@ -130,6 +130,8 @@ LiteLLM translates the thinking configuration to provider-specific parameters au
 !!! tip "Provider-specific behavior"
     Not all providers implement thinking tokens the same way. Anthropic uses an explicit `budget_tokens` parameter that caps reasoning length, while OpenAI's o-series models and Gemini's thinking mode rely on level presets mapped internally. When switching providers, verify that your thinking configuration produces comparable reasoning depth by inspecting the `GenerateResult.thinking` field.
 
+    Leave `temperature` unset when thinking is enabled: Anthropic requires temperature 1 with extended thinking, and OpenAI reasoning models accept only their default temperature.
+
 ### Step 4: Grade with Extended Thinking
 
 ````python
@@ -475,7 +477,6 @@ async def main():
     grader_thinking = CriterionGrader(
         llm_config=LLMConfig(
             model="anthropic/claude-sonnet-4-5-20250929",
-            temperature=0.0,
             thinking="high",
         )
     )

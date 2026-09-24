@@ -1,6 +1,7 @@
 """Tests for LLMConfig class."""
 
 import tempfile
+from dataclasses import asdict
 from pathlib import Path
 
 import pytest
@@ -66,7 +67,7 @@ class TestLLMConfigDefaults:
         """All optional parameters have correct default values."""
         config = LLMConfig(model="test-model")
 
-        assert config.temperature == 0.0
+        assert config.temperature is None
         assert config.max_tokens is None
         assert config.top_p is None
         assert config.timeout == 60.0
@@ -315,3 +316,33 @@ class TestLLMConfigToYaml:
             assert loaded.extra_params == original.extra_params
         finally:
             Path(temp_path).unlink()
+
+
+class TestLLMConfigTemperatureSerialization:
+    """Serialization of the optional temperature (None = provider default)."""
+
+    def test_from_yaml_loads_explicit_zero_temperature(self, tmp_path):
+        """A YAML file with temperature: 0.0 loads as 0.0, not as the None default."""
+        path = tmp_path / "llm_config.yaml"
+        path.write_text("model: openai/gpt-5.2\ntemperature: 0.0\n", encoding="utf-8")
+
+        config = LLMConfig.from_yaml(path)
+
+        assert config.temperature == 0.0
+        assert config.temperature is not None
+
+    def test_default_temperature_roundtrips_through_yaml(self, tmp_path):
+        """to_yaml omits a None temperature, and from_yaml restores the None default."""
+        path = tmp_path / "llm_config.yaml"
+        LLMConfig(model="openai/gpt-5.2").to_yaml(path)
+
+        saved_data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        assert "temperature" not in saved_data
+
+        assert LLMConfig.from_yaml(path).temperature is None
+
+    def test_asdict_with_explicit_zero_temperature_reloads_as_zero(self):
+        """Previously serialized configs carrying temperature 0.0 keep it."""
+        data = asdict(LLMConfig(model="m", temperature=0.0))
+
+        assert LLMConfig(**data).temperature == 0.0
