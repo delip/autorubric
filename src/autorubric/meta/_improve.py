@@ -1249,6 +1249,61 @@ def pareto_accept(
     return True, None
 
 
+def _rubric_criteria_data(rubric: Rubric) -> list[dict[str, Any]]:
+    """The criteria as the revision prompts and the loop's artifacts record them.
+
+    Each criterion keeps its ``weight`` and ``requirement``, and its ``name`` when it has
+    one.
+    """
+    return [
+        {
+            "weight": c.weight,
+            "requirement": c.requirement,
+            **({"name": c.name} if c.name else {}),
+        }
+        for c in rubric.rubric
+    ]
+
+
+def _rubric_artifact_data(rubric: Rubric) -> list[dict[str, Any]] | dict[str, Any]:
+    """A rubric as the loop's artifacts record it, in a form ``Rubric.from_dict`` reads.
+
+    The list of criteria, as before guidelines existed, for a rubric without guidelines;
+    ``{"guidelines": ..., "criteria": [...]}`` for one with them.
+    """
+    criteria = _rubric_criteria_data(rubric)
+    if rubric.guidelines is None:
+        return criteria
+    return {"guidelines": rubric.guidelines, "criteria": criteria}
+
+
+def _with_guidelines_block(rubric: Rubric, user_prompt: str) -> str:
+    """Start a revision user prompt with the rubric's guidelines, when it has them.
+
+    The revision LLM revises criteria only, but it sees the guidelines as fixed context:
+    the issues and diagnostics it acts on come from judges that saw them, and a criterion
+    revised without them could contradict them. Without guidelines the prompt is returned
+    unchanged.
+    """
+    if rubric.guidelines is None:
+        return user_prompt
+    from autorubric.prompts import RUBRIC_REVISION_GUIDELINES_BLOCK
+
+    return RUBRIC_REVISION_GUIDELINES_BLOCK.format(guidelines=rubric.guidelines) + user_prompt
+
+
+def _revised_rubric(criteria_data: Any, rubric: Rubric) -> Rubric:
+    """Build the revised rubric from the revision LLM's criteria.
+
+    The LLM writes criteria only, so the input rubric's guidelines carry over unchanged;
+    otherwise every later iteration would grade without them.
+
+    Raises:
+        ValueError: If ``criteria_data`` is not a valid list of criteria.
+    """
+    return Rubric(Rubric.validate_and_create_criteria(criteria_data), guidelines=rubric.guidelines)
+
+
 async def revise_rubric(
     rubric: Rubric,
     task_prompt: str | None,
@@ -1262,6 +1317,10 @@ async def revise_rubric(
     _capture: dict | None = None,
 ) -> tuple[Rubric, float | None]:
     """Use an LLM to revise the rubric based on evaluation feedback and validation data.
+
+    The LLM revises the criteria only. The rubric's guidelines, when it has them, are
+    fixed: the user prompt starts with them (``RUBRIC_REVISION_GUIDELINES_BLOCK``, whatever
+    the template), and the revised rubric carries them unchanged.
 
     Args:
         rubric: Current rubric to revise.
@@ -1299,24 +1358,17 @@ async def revise_rubric(
         or RUBRIC_REVISION_USER_PROMPT_TEMPLATE
     )
 
-    original_criteria = json.dumps(
-        [
-            {
-                "weight": c.weight,
-                "requirement": c.requirement,
-                **({"name": c.name} if c.name else {}),
-            }
-            for c in rubric.rubric
-        ],
-        indent=2,
-    )
+    original_criteria = json.dumps(_rubric_criteria_data(rubric), indent=2)
 
-    user_prompt = effective_user_template.format(
-        task_prompt=task_prompt or "(No specific task — standalone evaluation)",
-        original_criteria=original_criteria,
-        issues_text=format_issues_for_prompt(issues),
-        validation_text=validation_text,
-        history_text=history_text,
+    user_prompt = _with_guidelines_block(
+        rubric,
+        effective_user_template.format(
+            task_prompt=task_prompt or "(No specific task — standalone evaluation)",
+            original_criteria=original_criteria,
+            issues_text=format_issues_for_prompt(issues),
+            validation_text=validation_text,
+            history_text=history_text,
+        ),
     )
 
     client = LLMClient(config.revision_llm)
@@ -1336,7 +1388,7 @@ async def revise_rubric(
         raise ValueError(f"Could not find JSON array in LLM response: {text[:200]}")
 
     criteria_data = json.loads(text[start:end])
-    return Rubric.from_dict(criteria_data), revision_cost
+    return _revised_rubric(criteria_data, rubric), revision_cost
 
 
 async def validate_held_out(
@@ -1660,7 +1712,9 @@ async def revise_rubric_held_out(
     """Revise rubric based on held-out grading diagnostics.
 
     Uses held-out-specific prompt templates that enforce structural constraints
-    (same number of criteria in same order).
+    (same number of criteria in same order). Guidelines are handled as in
+    ``revise_rubric``: shown to the LLM as fixed context and carried unchanged onto the
+    revised rubric.
 
     Args:
         rubric: Current rubric to revise.
@@ -1694,24 +1748,17 @@ async def revise_rubric_held_out(
         or HELD_OUT_REVISION_USER_PROMPT_TEMPLATE
     )
 
-    original_criteria = json.dumps(
-        [
-            {
-                "weight": c.weight,
-                "requirement": c.requirement,
-                **({"name": c.name} if c.name else {}),
-            }
-            for c in rubric.rubric
-        ],
-        indent=2,
-    )
+    original_criteria = json.dumps(_rubric_criteria_data(rubric), indent=2)
 
-    user_prompt = effective_user_template.format(
-        task_prompt=task_prompt or "(No specific task — standalone evaluation)",
-        original_criteria=original_criteria,
-        diagnostics_text=diagnostics_text,
-        history_text=history_text,
-        num_criteria=len(rubric.rubric),
+    user_prompt = _with_guidelines_block(
+        rubric,
+        effective_user_template.format(
+            task_prompt=task_prompt or "(No specific task — standalone evaluation)",
+            original_criteria=original_criteria,
+            diagnostics_text=diagnostics_text,
+            history_text=history_text,
+            num_criteria=len(rubric.rubric),
+        ),
     )
 
     client = LLMClient(config.revision_llm)
@@ -1731,7 +1778,7 @@ async def revise_rubric_held_out(
         raise ValueError(f"Could not find JSON array in LLM response: {text[:200]}")
 
     criteria_data = json.loads(text[start:end])
-    revised = Rubric.from_dict(criteria_data)
+    revised = _revised_rubric(criteria_data, rubric)
 
     valid, error = validate_criteria_structure(rubric, revised)
     if not valid:
@@ -1944,17 +1991,9 @@ def _check_convergence(
 
 
 def _save_rubric(rubric: Rubric, path: Path) -> None:
-    """Save rubric criteria to a JSON file."""
-    criteria = [
-        {
-            "weight": c.weight,
-            "requirement": c.requirement,
-            **({"name": c.name} if c.name else {}),
-        }
-        for c in rubric.rubric
-    ]
+    """Save a rubric to a JSON file, in the form ``_rubric_artifact_data`` gives."""
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(criteria, f, indent=2)
+        json.dump(_rubric_artifact_data(rubric), f, indent=2)
 
 
 def _serialize_iteration(iter_result: IterationResult) -> dict:
@@ -2018,14 +2057,7 @@ def _serialize_iteration(iter_result: IterationResult) -> dict:
             "total_tokens": tu.total_tokens,
         }
 
-    rubric_criteria = [
-        {
-            "weight": c.weight,
-            "requirement": c.requirement,
-            **({"name": c.name} if c.name else {}),
-        }
-        for c in iter_result.rubric.rubric
-    ]
+    rubric_criteria = _rubric_criteria_data(iter_result.rubric)
 
     result: dict = {
         "iteration": iter_result.iteration,
@@ -2449,20 +2481,9 @@ class ImprovementRunner:
 
         # --- summary.json ---
         if artifacts_dir:
-
-            def _rubric_to_criteria_list(rubric: Rubric) -> list[dict]:
-                return [
-                    {
-                        "weight": c.weight,
-                        "requirement": c.requirement,
-                        **({"name": c.name} if c.name else {}),
-                    }
-                    for c in rubric.rubric
-                ]
-
             summary = {
-                "original_rubric": _rubric_to_criteria_list(original_rubric),
-                "final_rubric": _rubric_to_criteria_list(best_rubric),
+                "original_rubric": _rubric_artifact_data(original_rubric),
+                "final_rubric": _rubric_artifact_data(best_rubric),
                 "task_prompt": self.task_prompt,
                 "convergence_reason": convergence_reason,
                 "best_iteration": best_iteration,
@@ -2785,21 +2806,10 @@ class ImprovementRunner:
 
         # --- summary.json ---
         if artifacts_dir:
-
-            def _rubric_to_criteria_list(rubric: Rubric) -> list[dict]:
-                return [
-                    {
-                        "weight": c.weight,
-                        "requirement": c.requirement,
-                        **({"name": c.name} if c.name else {}),
-                    }
-                    for c in rubric.rubric
-                ]
-
             summary = {
                 "strategy": "held_out",
-                "original_rubric": _rubric_to_criteria_list(original_rubric),
-                "final_rubric": _rubric_to_criteria_list(best_rubric),
+                "original_rubric": _rubric_artifact_data(original_rubric),
+                "final_rubric": _rubric_artifact_data(best_rubric),
                 "task_prompt": self.task_prompt,
                 "convergence_reason": convergence_reason,
                 "best_iteration": best_iteration,

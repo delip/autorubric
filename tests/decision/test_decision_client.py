@@ -1,10 +1,12 @@
 """Tests for ``DecisionModelClient``: transport wiring, event loops, cache, rate limits, cost.
 
-Every SDK client is either a recording fake (``fake_sdk``) or the real SDK client on an
-in-memory transport (``http_endpoint``); see ``conftest.py``. No test reaches the network.
+Every SDK client is either a recording fake (``fake_sdk``) or the real SDK client, answered
+in place of its transport (``http_endpoint``) or run on the whole HTTP stack over an
+in-memory network (``http_network``); see ``conftest.py``. No test reaches the network.
 """
 
 import asyncio
+import dataclasses
 import json
 import logging
 import sys
@@ -18,7 +20,7 @@ from typesafe_sdk import Choice, Noul, RetryPolicy, Score
 from typesafe_sdk.constants import DEFAULT_BASE_URL
 
 from autorubric import DecisionModelConfig, TokenUsage, classify_grading_error
-from autorubric.decision import _SYSTEM_ONE_PATH, DecisionModelClient
+from autorubric.decision import _SDK_OWNED_HEADERS, _SYSTEM_ONE_PATH, DecisionModelClient
 from autorubric.llm import LLMClient, LLMConfig
 from autorubric.rate_limit import RateLimitPool
 
@@ -331,6 +333,60 @@ class TestConstruction:
 
 
 # =============================================================================
+# The environment the HTTP client is built in: TLS trust and proxies
+# =============================================================================
+
+
+class TestHttpEnvironment:
+    """``httpx2`` reads TLS trust and proxies from the environment whenever it builds an
+    HTTP client, outside the SDK's error handling, and each event loop's SDK client gets a
+    new one. Raised inside a request, its error is no SDK error, and would give every
+    criterion of every item the conservative worst case (or, for a ``ValueError``, a
+    ``parse`` abstention), although it says nothing about any submission."""
+
+    def test_an_environment_no_http_client_can_be_built_in_fails_at_construction(
+        self, http_environment
+    ):
+        http_environment.break_()
+        with pytest.raises(Exception) as direct:
+            httpx2.AsyncClient()
+        assert not isinstance(direct.value, typesafe_sdk.TypeSafeError)
+
+        with pytest.raises(type(direct.value)) as excinfo:
+            DecisionModelClient(dm_config())
+
+        # The error httpx2 raised, with a note naming the judge and what to check.
+        assert str(excinfo.value) == str(direct.value)
+        (note,) = excinfo.value.__notes__
+        assert "'jev-latest'" in note
+        assert "SSL_CERT_FILE" in note and "HTTPS_PROXY" in note
+
+    @pytest.mark.asyncio
+    async def test_an_environment_broken_after_construction_fails_requests_as_connection_errors(
+        self, http_environment, fake_sdk
+    ):
+        """Should the environment change during a run so that a loop's HTTP client cannot be
+        built, the request is not sent and fails as an unreachable endpoint does: an
+        ``infrastructure`` failure, which abstains."""
+        client = DecisionModelClient(dm_config())
+        http_environment.break_()
+
+        with pytest.raises(typesafe_sdk.TypeSafeAPIConnectionError) as excinfo:
+            await client.system_one(STATE, QUESTIONS)
+
+        assert classify_grading_error(excinfo.value) == "infrastructure"
+        assert "not sent" in str(excinfo.value)
+        assert excinfo.value.__cause__ is not None
+        assert str(excinfo.value.__cause__) in str(excinfo.value)
+        assert fake_sdk.clients == []
+
+        # Nothing is left behind: once the environment is usable again, requests go out.
+        http_environment.clear()
+        await client.system_one(STATE, QUESTIONS)
+        assert len(fake_sdk.calls) == 1
+
+
+# =============================================================================
 # SDK wiring: what the SDK client is built with and what one request carries
 # =============================================================================
 
@@ -363,14 +419,19 @@ class TestSdkWiring:
         await client.system_one(STATE, QUESTIONS)
 
         kwargs = fake_sdk.clients[0].kwargs
+        http_client = kwargs["http_client"]
         assert kwargs == {
             "api_key": "hf-token",
             "base_url": "https://xyz.endpoints.huggingface.cloud",
             "model": "my-org/rubric-dm-7b",
             "headers": {"X-Team": "evals"},
             "retry": kwargs["retry"],
-            "timeout": 12.5,
+            "http_client": http_client,
         }
+        # The SDK times each request with its HTTP client's timeout: every HTTP operation,
+        # but not a wait for a free connection, which is not the endpoint's time.
+        assert isinstance(http_client, httpx2.AsyncClient)
+        assert http_client.timeout == httpx2.Timeout(12.5, pool=None)
         retry = kwargs["retry"]
         assert isinstance(retry, RetryPolicy)
         # max_retries counts attempts; the SDK counts retries after the first attempt.
@@ -758,7 +819,8 @@ class TestRateLimit:
         assert fake_sdk.max_in_flight == 1
 
     @pytest.mark.asyncio
-    async def test_unlimited_by_default(self, fake_sdk):
+    async def test_no_shared_limit_by_default(self, fake_sdk):
+        """Without a limit only the client's own connections bound it (``TestConnections``)."""
         fake_sdk.delay = 0.01
         client = DecisionModelClient(dm_config())
         await asyncio.gather(
@@ -766,6 +828,122 @@ class TestRateLimit:
         )
         assert fake_sdk.max_in_flight == 4
         assert RateLimitPool.get_instance().get_current_limit(client.rate_limit_key) is None
+
+
+# =============================================================================
+# Connections: a request waits for its turn before it is sent
+# =============================================================================
+
+
+def _send_all(client: DecisionModelClient, submissions: list[str]) -> list[asyncio.Task]:
+    """Start one request per submission, all at once."""
+    return [
+        asyncio.create_task(client.system_one({"submission": submission}, QUESTIONS))
+        for submission in submissions
+    ]
+
+
+def _failures(results: list[object]) -> list[BaseException]:
+    return [result for result in results if isinstance(result, BaseException)]
+
+
+class TestConnections:
+    """The real HTTP stack, connection pool included, on an in-memory network.
+
+    A request waits for its turn, a free connection of its SDK client, before the SDK sends
+    it. The wait is local, not the endpoint's time: it counts against neither ``timeout``
+    nor the retry budget, however long it lasts.
+    """
+
+    @pytest.mark.asyncio
+    async def test_without_a_limit_requests_beyond_100_wait_for_a_connection_untimed(
+        self, http_network
+    ):
+        """Without ``max_parallel_requests`` a client keeps at most 100 requests in flight
+        per event loop, the connections of its HTTP client. The others wait, here four
+        times as long as the timeout, and none fails: the endpoint failed none of them."""
+        released = asyncio.Event()
+
+        async def answer(request: bytes) -> int:
+            await released.wait()
+            return 200
+
+        http_network.answer = answer
+        client = DecisionModelClient(dm_config(timeout=0.05, max_retries=1))
+        tasks = _send_all(client, [str(i) for i in range(150)])
+
+        await http_network.wait_for_in_flight(100)
+        await asyncio.sleep(0.2)
+        assert http_network.in_flight == 100
+        released.set()
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        assert _failures(results) == []
+        assert len(http_network.requests) == 150
+        assert http_network.max_in_flight == 100
+
+    @pytest.mark.asyncio
+    async def test_a_limit_above_100_is_honoured(self, http_network):
+        """The HTTP client holds ``max_parallel_requests`` connections, so a limit above the
+        default 100 lets that many requests reach the endpoint at once."""
+        released = asyncio.Event()
+
+        async def answer(request: bytes) -> int:
+            await released.wait()
+            return 200
+
+        http_network.answer = answer
+        client = DecisionModelClient(
+            dm_config(max_parallel_requests=150, timeout=0.05, max_retries=1)
+        )
+        tasks = _send_all(client, [str(i) for i in range(200)])
+
+        await http_network.wait_for_in_flight(150)
+        await asyncio.sleep(0.2)
+        assert http_network.in_flight == 150
+        released.set()
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        assert _failures(results) == []
+        assert len(http_network.requests) == 200
+        assert http_network.max_in_flight == 150
+
+    @pytest.mark.asyncio
+    async def test_a_request_that_waited_for_its_turn_keeps_its_whole_retry_budget(
+        self, http_network, monkeypatch
+    ):
+        """The retry budget counts from the first attempt. Were a request to wait for a
+        connection inside the SDK, the wait would spend the budget, and a transient failure
+        after a long wait would go unretried. With no backoff the budget is ``max_retries *
+        timeout``, 0.5 s here; requests that waited 0.6 s behind 100 slow ones still retry
+        a 503."""
+
+        @dataclasses.dataclass(frozen=True)
+        class NoBackoff(RetryPolicy):
+            backoff_initial: float = 0.0
+            backoff_max: float = 0.0
+
+        monkeypatch.setattr(typesafe_sdk, "RetryPolicy", NoBackoff)
+        released = asyncio.Event()
+
+        async def answer(request: bytes) -> int:
+            if b"occupant" in request:
+                await released.wait()
+                return 200
+            # A late request: its first attempt fails transiently, its retry succeeds.
+            return 200 if b"x-typesafe-retry-count" in request.lower() else 503
+
+        http_network.answer = answer
+        client = DecisionModelClient(dm_config(timeout=0.25, max_retries=2))
+        occupants = _send_all(client, [f"occupant {i}" for i in range(100)])
+        await http_network.wait_for_in_flight(100)
+        late = _send_all(client, [f"late {i}" for i in range(20)])
+        await asyncio.sleep(0.6)
+        released.set()
+        results = await asyncio.gather(*occupants, *late, return_exceptions=True)
+
+        assert _failures(results) == []
+        assert len(http_network.requests) == 100 + 2 * 20
 
 
 # =============================================================================
@@ -862,10 +1040,19 @@ class TestRealSdkClient:
             "connect": 12.5,
             "read": 12.5,
             "write": 12.5,
-            "pool": 12.5,
+            "pool": None,
         }
         assert response.answers["c0"].noul == 0.91
         assert response.usage.input_tokens == 321
+
+    @pytest.mark.asyncio
+    async def test_the_http_client_closes_with_its_sdk_client(self, http_endpoint):
+        """The HTTP client given to the SDK client, and so its connections, goes with it."""
+        http_endpoint.reply(200, _OK_BODY)
+        await DecisionModelClient(dm_config()).system_one(STATE, QUESTIONS)
+
+        (kwargs,) = http_endpoint.client_kwargs
+        assert kwargs["http_client"].is_closed
 
     @pytest.mark.asyncio
     async def test_transient_failures_are_retried_up_to_max_retries_attempts(self, http_endpoint):
@@ -993,6 +1180,76 @@ class TestRealSdkClient:
         assert cached == live
         assert cached.model_dump() == live.model_dump()
         assert cached.choices["c1"].probabilities == {"formal": 0.4, "casual": 0.6}
+
+
+# =============================================================================
+# The headers the SDK sets, which extra_headers cannot
+# =============================================================================
+
+
+async def _sdk_attempts(headers: dict[str, str]) -> list[httpx2.Request]:
+    """A System One request's two attempts (a 503, then a 200) as the installed SDK sends
+    them, with ``headers`` as its additional headers."""
+    replies = [
+        httpx2.Response(503, json={"error": "busy"}, headers=_NO_WAIT),
+        httpx2.Response(200, json=_OK_BODY),
+    ]
+    sent: list[httpx2.Request] = []
+
+    def handle(request: httpx2.Request) -> httpx2.Response:
+        sent.append(request)
+        return replies.pop(0)
+
+    sdk_client = typesafe_sdk.AsyncTypeSafeClient(
+        api_key="sk-test",
+        base_url="https://dm.example.com",
+        headers=headers,
+        transport=httpx2.MockTransport(handle),
+    )
+    async with sdk_client:
+        await sdk_client.system_one(state=STATE, questions=QUESTIONS)
+    return sent
+
+
+class TestHeadersTheSdkSets:
+    """``DecisionModelConfig`` rejects, in ``extra_headers``, exactly the headers the SDK
+    sets on every request, since it replaces any value given for them. Both halves are
+    pinned against the installed SDK."""
+
+    @pytest.mark.asyncio
+    async def test_are_exactly_the_headers_the_config_rejects(self):
+        """A header the SDK sets is one a System One request carries (on its first attempt
+        or a retry) that plain ``httpx2`` would not send, or not with that value."""
+        attempts = await _sdk_attempts({})
+        plain: list[httpx2.Request] = []
+
+        def handle(request: httpx2.Request) -> httpx2.Response:
+            plain.append(request)
+            return httpx2.Response(200)
+
+        async with httpx2.AsyncClient(transport=httpx2.MockTransport(handle)) as http_client:
+            await http_client.post(attempts[0].url, content=attempts[0].content)
+        (plain_request,) = plain
+
+        set_by_sdk = {
+            name
+            for attempt in attempts
+            for name, value in attempt.headers.items()
+            if plain_request.headers.get(name) != value
+        }
+        assert set_by_sdk == _SDK_OWNED_HEADERS
+        assert "x-typesafe-retry-count" in attempts[1].headers  # set on retries only
+
+    @pytest.mark.asyncio
+    async def test_the_sdk_replaces_any_value_given_for_them(self):
+        given = {name: f"given-{name}" for name in _SDK_OWNED_HEADERS}
+        for attempt in await _sdk_attempts(given):
+            assert not [value for value in attempt.headers.values() if value.startswith("given-")]
+
+    @pytest.mark.parametrize("name", sorted(_SDK_OWNED_HEADERS))
+    def test_the_config_rejects_them(self, name):
+        with pytest.raises(ValueError, match="extra_headers"):
+            dm_config(extra_headers={name: "v"})
 
 
 # =============================================================================

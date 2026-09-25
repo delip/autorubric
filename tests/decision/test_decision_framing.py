@@ -40,6 +40,8 @@ REFERENCE_OUTPUT = (
     "its own merits, not by its resemblance to the reference."
 )
 
+GUIDELINES_CLAUSE = "Apply the `guidelines`; the criterion text governs."
+
 # The framed template of the experiments that motivated the framing, verbatim.
 EXPERIMENTS_FRAMED_TEMPLATE = (
     "Determine whether this criterion is satisfied by the `submission`. Criterion: {requirement}"
@@ -60,6 +62,25 @@ STRUCTURED_WITH_REFERENCE = {
     "thinking": "Recall the pigments.",
     "output": "Chlorophyll absorbs light.",
 }
+
+GUIDELINES = "Writers are grade 8-12 learners; 'cited' means any attribution."
+WITH_GUIDELINES = {
+    "guidelines": GUIDELINES,
+    "submission": "Chlorophyll absorbs red and blue light.",
+}
+WITH_GUIDELINES_AND_REFERENCE = {"guidelines": GUIDELINES, **WITH_REFERENCE}
+STRUCTURED_WITH_GUIDELINES = {"guidelines": GUIDELINES, **STRUCTURED}
+STRUCTURED_WITH_EVERY_FIELD = {
+    "guidelines": GUIDELINES,
+    "input": "How do plants use light?",
+    **STRUCTURED_WITH_REFERENCE,
+}
+GUIDELINES_STATES = [
+    WITH_GUIDELINES,
+    WITH_GUIDELINES_AND_REFERENCE,
+    STRUCTURED_WITH_GUIDELINES,
+    STRUCTURED_WITH_EVERY_FIELD,
+]
 
 
 def config(**overrides: Any) -> DecisionModelConfig:
@@ -486,6 +507,148 @@ class TestRubricQuestions:
 
 
 # =============================================================================
+# Rubric guidelines
+# =============================================================================
+
+
+class TestGuidelinesState:
+    def test_guidelines_are_the_first_state_field(self):
+        state = build_state("S", query="Q", reference_submission="R", guidelines="G")
+        assert list(state.items()) == [
+            ("guidelines", "G"),
+            ("input", "Q"),
+            ("reference_submission", "R"),
+            ("submission", "S"),
+        ]
+
+    def test_guidelines_come_before_a_structured_submission(self):
+        state = build_state(
+            "<thinking>T</thinking><output>O</output>",
+            query="Q",
+            reference_submission="R",
+            guidelines="G",
+        )
+        assert list(state.items()) == [
+            ("guidelines", "G"),
+            ("input", "Q"),
+            ("reference_submission", "R"),
+            ("thinking", "T"),
+            ("output", "O"),
+        ]
+
+    def test_guidelines_alone_with_the_submission(self):
+        assert build_state("S", guidelines="G") == {"guidelines": "G", "submission": "S"}
+
+    @pytest.mark.parametrize("absent", [None, "", "  \n\t"], ids=["none", "empty", "blank"])
+    def test_absent_or_blank_guidelines_are_left_out(self, absent):
+        """Blank guidelines mean none, as for ``Rubric.guidelines``."""
+        assert build_state("S", query="Q", guidelines=absent) == {"input": "Q", "submission": "S"}
+
+    def test_guidelines_are_sent_verbatim(self):
+        text = "  Leading and trailing space.\n\n{braces} and `ticks`\n"
+        assert build_state("S", guidelines=text)["guidelines"] == text
+
+    def test_non_string_guidelines_raise_type_error(self):
+        with pytest.raises(TypeError, match="guidelines"):
+            build_state("S", guidelines=3)  # a str or None only
+
+
+class TestGuidelinesFraming:
+    """Framed binary questions name the guidelines and their precedence; the bare Noul and
+    multi-choice questions see them only through the state."""
+
+    def test_noul_framed_golden(self):
+        question = build_question(binary(), config(), WITH_GUIDELINES)
+        assert wire(question) == {
+            "type": "noul",
+            "instructions": f"{TASK} {GUIDELINES_CLAUSE} Criterion: {REQ}",
+            "criteria": {"true": MET_DEF, "false": UNMET_DEF},
+        }
+
+    def test_choice_golden(self):
+        question = build_question(binary(), config(binary_framing="choice"), WITH_GUIDELINES)
+        assert wire(question) == {
+            "type": "choice",
+            "instructions": f"{TASK} {GUIDELINES_CLAUSE} Criterion: {REQ}",
+            "criteria": {"MET": MET_DEF, "UNMET": UNMET_DEF, "CANNOT_ASSESS": CA_DEF},
+        }
+
+    @pytest.mark.parametrize("framing", ["noul_framed", "choice"])
+    def test_negative_weight_keeps_its_definitions_and_gains_the_clause(self, framing):
+        question = build_question(
+            binary(NEG_REQ, weight=-4.0), config(binary_framing=framing), WITH_GUIDELINES
+        )
+        assert question.instructions == f"{TASK} {GUIDELINES_CLAUSE} Criterion: {NEG_REQ}"
+        outcomes = wire(question)["criteria"]
+        assert NEG_MET_DEF in outcomes.values() and NEG_UNMET_DEF in outcomes.values()
+
+    @pytest.mark.parametrize("framing", ["noul_framed", "choice"])
+    @pytest.mark.parametrize(
+        ("state", "instructions"),
+        [
+            (WITH_GUIDELINES, f"{TASK} {GUIDELINES_CLAUSE} Criterion: {REQ}"),
+            (
+                WITH_GUIDELINES_AND_REFERENCE,
+                f"{TASK} {GUIDELINES_CLAUSE} {REFERENCE_SUBMISSION} Criterion: {REQ}",
+            ),
+            (STRUCTURED_WITH_GUIDELINES, f"{TASK_OUTPUT} {GUIDELINES_CLAUSE} Criterion: {REQ}"),
+            (
+                STRUCTURED_WITH_EVERY_FIELD,
+                f"{TASK_OUTPUT} {GUIDELINES_CLAUSE} {REFERENCE_OUTPUT} Criterion: {REQ}",
+            ),
+        ],
+        ids=["plain", "reference", "structured", "structured-reference"],
+    )
+    def test_clauses_follow_the_state_field_order(self, framing, state, instructions):
+        """Task sentence, then one sentence per optional field in state order (guidelines
+        before the reference), then the requirement, verbatim and last."""
+        question = build_question(binary(), config(binary_framing=framing), state)
+        assert question.instructions == instructions
+
+    @pytest.mark.parametrize("state", GUIDELINES_STATES)
+    @pytest.mark.parametrize("weight", [5.0, -4.0])
+    def test_bare_noul_gets_no_clause(self, state, weight):
+        question = build_question(binary(weight=weight), config(binary_framing="noul"), state)
+        assert wire(question) == {"type": "noul", "instructions": REQ}
+
+    @pytest.mark.parametrize("state", GUIDELINES_STATES)
+    @pytest.mark.parametrize("ordinal_framing", ["choice", "score"])
+    def test_multi_choice_gets_no_clause(self, state, ordinal_framing):
+        cfg = config(ordinal_framing=ordinal_framing)
+        assert build_question(ordinal(), cfg, state) == build_question(ordinal(), cfg, PLAIN)
+        assert build_question(nominal(), cfg, state) == build_question(nominal(), cfg, PLAIN)
+
+    @pytest.mark.parametrize(
+        "requirement", ["Apply the `guidelines`; the criterion text governs.", "Criterion: x", ""]
+    )
+    def test_requirement_is_verbatim_and_last(self, requirement):
+        question = build_question(binary(requirement), config(), WITH_GUIDELINES_AND_REFERENCE)
+        assert question.instructions.endswith(" Criterion: " + requirement)
+        assert question.instructions.count(GUIDELINES_CLAUSE) == 1 + (
+            requirement == GUIDELINES_CLAUSE
+        )
+
+    def test_without_guidelines_the_questions_are_unchanged(self):
+        """A state without guidelines poses exactly the questions posed before guidelines
+        existed (the goldens above), for every framing."""
+        rubric = [binary(), binary(NEG_REQ, weight=-4.0), ordinal(na=True), nominal()]
+        for framing in ("noul", "noul_framed", "choice"):
+            for ordinal_framing in ("choice", "score"):
+                cfg = config(binary_framing=framing, ordinal_framing=ordinal_framing)
+                for plain, blank in [
+                    (build_state("S"), build_state("S", guidelines="")),
+                    (
+                        build_state("S", query="Q", reference_submission="R"),
+                        build_state("S", query="Q", reference_submission="R", guidelines=None),
+                    ),
+                ]:
+                    assert plain == blank
+                    built, _ = build_questions(rubric, cfg, plain)
+                    again, _ = build_questions(rubric, cfg, blank)
+                    assert wire_items(built) == wire_items(again)
+
+
+# =============================================================================
 # Invariants
 # =============================================================================
 
@@ -495,6 +658,10 @@ STATES = [
     build_state("S", query="Q", reference_submission="R"),
     build_state("<thinking>T</thinking><output>O</output>"),
     build_state("<output>O</output>", query="Q", reference_submission="R"),
+    build_state("S", guidelines="G"),
+    build_state("S", query="Q", reference_submission="R", guidelines="G"),
+    build_state("<thinking>T</thinking><output>O</output>", guidelines="G"),
+    build_state("<output>O</output>", query="Q", reference_submission="R", guidelines="G"),
 ]
 
 

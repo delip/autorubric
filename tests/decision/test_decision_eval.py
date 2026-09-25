@@ -43,8 +43,8 @@ from autorubric.llm import GenerateResult
 from autorubric.types import CANONICAL_NA_OPTION, CriterionJudgment, MultiChoiceJudgment
 
 API_KEY = "ts-test-key-never-persisted-2b8e"
-# A token some gateways take as a path segment: the manifest records a URL's host only.
-URL_SECRET = "url-path-token-never-persisted-91d0"
+# A segment of a base URL's path, easy to find: the manifest records a URL's host only.
+URL_PATH_SEGMENT = "url-path-segment-91d0"
 NA_LABEL = CANONICAL_NA_OPTION.label
 
 RUBRIC = Rubric(
@@ -204,7 +204,7 @@ async def test_manifest_records_judge_kinds_and_never_the_key(fake_sdk, graders,
             judges=[
                 JudgeSpec(
                     dm(
-                        api_base=f"https://DM.Example.com:8443/{URL_SECRET}/v2/",
+                        api_base=f"https://DM.Example.com:8443/{URL_PATH_SEGMENT}/v2/",
                         binary_framing="choice",
                         ordinal_framing="score",
                         decision_threshold=0.6,
@@ -246,7 +246,7 @@ async def test_manifest_records_judge_kinds_and_never_the_key(fake_sdk, graders,
     written = b"".join(p.read_bytes() for p in (tmp_path / "manifest").rglob("*") if p.is_file())
     assert written  # the manifest and the checkpoints
     assert API_KEY.encode() not in written
-    assert URL_SECRET.encode() not in written
+    assert URL_PATH_SEGMENT.encode() not in written
 
 
 @pytest.mark.asyncio
@@ -262,6 +262,35 @@ async def test_manifest_records_the_resolved_default_host(fake_sdk, graders, tmp
     assert (jev["binary_framing"], jev["ordinal_framing"]) == ("noul_framed", "choice")
     assert jev["decision_threshold"] == 0.5
     assert "temperature" not in jev  # an LLM-only setting
+
+
+@pytest.mark.asyncio
+async def test_the_base_url_is_no_secret_the_manifest_records_its_host(
+    http_endpoint, graders, tmp_path
+):
+    """The API key has its own channel; the base URL is not one. As the SDK reports a failed
+    request, its error shows the request URL, path included, and that error is recorded in
+    every report the request fails. The manifest still records only the host, and nothing
+    written ever holds the key."""
+    http_endpoint.reply(503, {"error": "busy"})
+    api_base = f"https://gw.example.com/{URL_PATH_SEGMENT}"
+    grader = CriterionGrader(judge_model_config=dm(api_base=api_base, max_retries=1))
+    graders.append(grader)
+    result = await run(grader, tmp_path, "failed-request", n_items=1)
+
+    (item,) = result.item_results
+    for cr in item.report.report:
+        vote = (cr.votes or cr.multi_choice_votes)[0]
+        assert vote.error.startswith(f"infrastructure: POST {api_base}/v1/systemone: 503")
+
+    experiment = tmp_path / "failed-request"
+    manifest = json.loads((experiment / "manifest.json").read_text(encoding="utf-8"))
+    (jev,) = manifest["grader_config"]["judges"]
+    assert jev["api_base_host"] == "gw.example.com"
+    assert URL_PATH_SEGMENT not in json.dumps(manifest)
+    written = b"".join(p.read_bytes() for p in experiment.rglob("*") if p.is_file())
+    assert URL_PATH_SEGMENT.encode() in written  # in the checkpointed reports' errors
+    assert API_KEY.encode() not in written
 
 
 class _LLMFailingItem2:
@@ -394,7 +423,7 @@ class _GraderWithoutDecisionClients:
 @pytest.mark.parametrize(
     "api_base, host",
     [
-        (f"https://DM.Example.com:8443/{URL_SECRET}/v2/", "dm.example.com:8443"),
+        (f"https://DM.Example.com:8443/{URL_PATH_SEGMENT}/v2/", "dm.example.com:8443"),
         ("https://dm.example.com:443/", "dm.example.com"),
         ("http://[::1]:9000", "[::1]:9000"),
         (None, None),
@@ -410,4 +439,4 @@ def test_manifest_host_falls_back_to_an_explicit_api_base(api_base, host):
 
     assert jev["judge_kind"] == "decision_model"
     assert jev["api_base_host"] == host
-    assert URL_SECRET not in json.dumps(jev) and API_KEY not in json.dumps(jev)
+    assert URL_PATH_SEGMENT not in json.dumps(jev) and API_KEY not in json.dumps(jev)

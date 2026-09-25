@@ -298,6 +298,20 @@ class TestConstruction:
             )
         assert "SECRET" not in str(excinfo.value)
 
+    def test_an_environment_no_http_client_can_be_built_in_fails_at_construction(
+        self, http_environment
+    ):
+        """httpx2 reads TLS and proxy settings from the environment (here a CA file that does
+        not exist, a SOCKS proxy without ``socksio``, or a proxy URL with a scheme no proxy
+        has), outside the SDK's error handling. Raised inside every request, its error would
+        give every criterion of every item the conservative worst case."""
+        http_environment.break_()
+        with pytest.raises((OSError, ImportError, ValueError)) as excinfo:
+            CriterionGrader(
+                judges=[JudgeSpec(dm(), "jev"), JudgeSpec(LLMConfig(model="test-model"), "llm")]
+            )
+        assert "'jev-latest'" in excinfo.value.__notes__[0]
+
 
 def training_data() -> RubricDataset:
     dataset = RubricDataset(prompt=QUERY, rubric=Rubric(RUBRIC), name="train")
@@ -620,6 +634,27 @@ class TestWholeRequestFailure:
             )
         llm_report = await Rubric(RUBRIC).grade(SUBMISSION, grader=llm_grader, query=QUERY)
         assert report.model_dump() == llm_report.model_dump()
+
+    @pytest.mark.asyncio
+    async def test_an_environment_broken_after_construction_abstains_never_the_worst_case(
+        self, fake_sdk, make_grader, http_environment
+    ):
+        """An environment that changes during a run so that no HTTP client can be built
+        (TLS or proxy settings) says nothing about the submission: every criterion abstains
+        (``infrastructure``), as when the endpoint is unreachable, instead of getting the
+        conservative worst case (UNMET for a positive weight, MET for a negative one)."""
+        grader = make_grader(judge_model_config=dm())
+        http_environment.break_()
+
+        report = await Rubric(RUBRIC).grade(SUBMISSION, grader=grader, query=QUERY)
+
+        assert fake_sdk.calls == []
+        light, myth, clarity = report.report
+        assert light.final_verdict == myth.final_verdict == CANNOT_ASSESS
+        assert clarity.final_multi_choice_verdict.na is True
+        for cr in report.report:
+            vote = (cr.votes or cr.multi_choice_votes)[0]
+            assert vote.error.startswith("infrastructure: ")
 
     @pytest.mark.asyncio
     async def test_an_inexpressible_criterion_keeps_its_own_error(self, fake_sdk, make_grader):

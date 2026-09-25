@@ -12,10 +12,11 @@ built or a question object is created, so ``import autorubric`` and ``DecisionMo
 never need it.
 
 A decision model grades an item with one request for the whole rubric. The helpers below
-are pure and synchronous: ``build_state`` builds the shared state, ``build_questions`` poses
-each criterion of the effective rubric as one question (id ``question_id(criterion_idx)``),
-and ``answer_to_report`` turns each answer into a ``CriterionReport`` carrying the answer's
-``probabilities`` and the ``selection_confidence`` of the selected outcome.
+are pure and synchronous: ``build_state`` builds the shared state (the rubric's guidelines
+included), ``build_questions`` poses each criterion of the effective rubric as one question
+(id ``question_id(criterion_idx)``), and ``answer_to_report`` turns each answer into a
+``CriterionReport`` carrying the answer's ``probabilities`` and the ``selection_confidence``
+of the selected outcome.
 """
 
 from __future__ import annotations
@@ -44,6 +45,7 @@ from autorubric.llm import _open_response_cache
 from autorubric.prompts import (
     CANNOT_ASSESS_DEFINITION,
     DECISION_MODEL_CRITERION_PREFIX,
+    DECISION_MODEL_GUIDELINES_INSTRUCTION,
     DECISION_MODEL_REFERENCE_INSTRUCTION,
     DECISION_MODEL_TASK_INSTRUCTION,
     DECISION_MODEL_THINKING_OUTPUT_TASK_INSTRUCTION,
@@ -61,9 +63,14 @@ from autorubric.types import (
     TokenUsage,
     _binary_worst_verdict,
 )
-from autorubric.utils import _has_thinking_output_sections, parse_thinking_output
+from autorubric.utils import (
+    _has_thinking_output_sections,
+    _normalize_guidelines,
+    parse_thinking_output,
+)
 
 if TYPE_CHECKING:
+    import httpx2
     from typesafe_sdk import (
         Answer,
         AsyncTypeSafeClient,
@@ -96,6 +103,10 @@ def _is_positive_int(value: object) -> bool:
 
 _SYSTEM_ONE_PATH = "/v1/systemone"
 """The System One endpoint's path, which the SDK appends to the base URL string."""
+
+_DEFAULT_CONNECTIONS = 100
+"""Requests a client keeps in flight per event loop when ``max_parallel_requests`` is
+``None``: the connections of httpx's default pool, the one the SDK's own HTTP client has."""
 
 
 def _shown_url(url: str) -> str:
@@ -184,6 +195,21 @@ _HTTP_FIELD_NAME = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
 # (bytes 0x80-0xFF) is left out: HTTP clients encode header values as ASCII.
 _HTTP_FIELD_VALUE = re.compile(r"(?:[\x21-\x7e]+(?:[ \t]+[\x21-\x7e]+)*)?")
 
+_SDK_OWNED_HEADERS = frozenset(
+    {
+        "accept",
+        "authorization",
+        "content-type",
+        "user-agent",
+        "x-typesafe-retry-count",
+        "x-typesafe-runtime",
+        "x-typesafe-sdk",
+    }
+)
+"""The headers (lowercased) the TypeSafe SDK sets on every System One request, replacing
+any value given for them: ``Authorization`` carries the bearer API key, and
+``X-TypeSafe-Retry-Count`` is set on retries only. Header names are case-insensitive."""
+
 
 def _url_host(url: str) -> str:
     """The host of ``url`` as a URL writes it: lowercased, with any non-default port.
@@ -214,7 +240,10 @@ class DecisionModelConfig:
     ``CriterionGrader(judge_model_config=DecisionModelConfig(model="jev-latest"))`` or
     ``JudgeSpec(DecisionModelConfig(...), "jev")`` in an ensemble. Building the grader
     builds the client, which needs the TypeSafe SDK (``pip install
-    'autorubric[typesafe]'``); constructing this config does not. Field names match
+    'autorubric[typesafe]'``); constructing this config does not. The client's HTTP
+    requests honour the environment's TLS and proxy settings (``SSL_CERT_FILE``,
+    ``HTTPS_PROXY`` and the like), and settings no HTTP client can be built with (e.g. a CA
+    file that does not exist) fail the grader's construction. Field names match
     ``LLMConfig`` wherever the concept is the same. Every field after ``model`` is
     keyword-only.
 
@@ -250,9 +279,12 @@ class DecisionModelConfig:
             is not a valid internationalized domain name, raises ``ValueError`` there. A
             base URL that no request could use thus fails when the grader is built. The
             resolved URL is part of the response cache key, and its host (with any
-            non-default port) names the rate-limit bucket.
+            non-default port) names the rate-limit bucket. The URL is not a secret: a failed
+            request's error, recorded in the reports it fails, shows it with its path, as
+            the SDK's logs do. Only its host goes into an experiment's manifest.
         timeout: Per-request timeout in seconds, applied to each HTTP operation, as in
-            ``LLMConfig``. It also sets the retry budget (see ``max_retries``).
+            ``LLMConfig``. It also sets the retry budget (see ``max_retries``). A request's
+            wait for its turn (see ``max_parallel_requests``) is not timed.
         max_retries: Total attempts per request, including the first, as in ``LLMConfig``
             (which stops after that many attempts). Rate limits (429), request timeouts
             (408), server errors (5xx), connection failures and timeouts are retried with
@@ -268,7 +300,12 @@ class DecisionModelConfig:
             ``LLMConfig``. The limit is shared by every decision-model config whose resolved
             base URL has the same host, whatever its model name; the strictest limit wins.
             The limit applies within one event loop; each ``asyncio.run`` call has its own.
-            ``None`` (default) means unlimited.
+            ``None`` (default) sets no shared limit: the judge then keeps at most 100
+            requests in flight per event loop, one per connection of its HTTP client (the
+            size of the SDK's default pool). A limit sizes the pool instead, so one above
+            100 is honoured. A request waits for its turn before it is sent, so the wait,
+            however long, counts against neither ``timeout`` nor the retry budget: those
+            measure the endpoint.
         cache_enabled: Cache responses on disk, as in ``LLMConfig``. There is one entry per
             request, keyed by the model, the resolved base URL, the state and the questions.
             A hit returns the stored response, usage included, without a request. Failed
@@ -282,7 +319,11 @@ class DecisionModelConfig:
             spaces or tabs only between characters), as RFC 9110 defines them. Anything else,
             such as a secret read from a file with its trailing newline, raises
             ``ValueError`` naming the header but never its value: the HTTP layer would
-            refuse it on every request.
+            refuse it on every request. Unlike ``LLMConfig``, a few headers cannot be set:
+            the TypeSafe SDK sets ``Authorization`` (the bearer ``api_key``), ``Accept``,
+            ``Content-Type``, ``User-Agent``, ``X-TypeSafe-SDK``, ``X-TypeSafe-Runtime`` and
+            ``X-TypeSafe-Retry-Count`` itself on every request, replacing any value given,
+            so naming one of them, in any letter case, raises ``ValueError`` too.
         binary_framing: How a binary criterion is posed. The criterion's ``requirement`` is
             always sent verbatim; only the structure around it differs.
 
@@ -361,7 +402,7 @@ class DecisionModelConfig:
             ValueError: If a field is out of range or not one of its allowed values, if
                 ``api_base`` is not an absolute http(s) URL free of whitespace and control
                 characters, query, fragment and credentials, or if ``extra_headers`` holds
-                a header name or value HTTP does not allow.
+                a header name or value HTTP does not allow or a header the SDK sets itself.
         """
         name = type(self).__name__
         if not isinstance(self.model, str) or not self.model:
@@ -439,6 +480,18 @@ class DecisionModelConfig:
                     f"{name}.extra_headers has a header name that is not an HTTP field name "
                     f"(one or more letters, digits or !#$%&'*+-.^_`|~): {header!r}"
                 )
+            # The SDK would replace the value given, so it would never be sent.
+            if header.lower() in _SDK_OWNED_HEADERS:
+                hint = (
+                    " The API key is sent as the bearer token of the Authorization header: "
+                    "set it with api_key or the TYPESAFE_API_KEY environment variable."
+                    if header.lower() == "authorization"
+                    else ""
+                )
+                raise ValueError(
+                    f"{name}.extra_headers cannot set {header!r}: the TypeSafe SDK sets that "
+                    f"header on every request, replacing any value given.{hint}"
+                )
             if not _HTTP_FIELD_VALUE.fullmatch(value):
                 raise ValueError(
                     f"The value of {name}.extra_headers[{header!r}] is not an HTTP field "
@@ -507,11 +560,25 @@ class DecisionModelClient:
     / ``TYPESAFE_BASE_URL``, then, for the URL, the SDK's default) and checked, the key by
     the SDK's own rule and the request URL by the SDK's own HTTP stack.
 
+    Each SDK client gets a new HTTP client, and ``httpx2`` reads the environment's TLS and
+    proxy settings whenever it builds one, outside the SDK's error handling. So one is also
+    built at construction, and an environment in which none can be built fails there. If the
+    environment changes later so that one cannot be built, the request is not sent and
+    raises ``TypeSafeAPIConnectionError``, which ``classify_grading_error`` routes as
+    ``infrastructure`` (an abstention), as it does an endpoint that cannot be reached.
+
     SDK clients hold connections bound to the event loop that opened them. One SDK client is
     therefore shared by all requests in flight together on a loop, and it is closed, on
     that loop, when the last of them finishes. A later request, or a request on another
     loop (e.g. successive ``asyncio.run`` calls), gets a new one. No connection outlives
     its loop.
+
+    A request is handed to the SDK only when its SDK client has a free connection: the
+    client's HTTP client holds one connection per request it may have in flight
+    (``max_parallel_requests``, else 100), and the request first waits for one of that many
+    slots. Waiting inside the SDK instead would count against the request's timeout and its
+    retry budget, both counted from the first attempt, although the endpoint is not
+    involved; a long queue would then fail requests the endpoint never saw.
     """
 
     def __init__(self, config: DecisionModelConfig) -> None:
@@ -528,6 +595,10 @@ class DecisionModelClient:
                 URL with no whitespace or control characters, query, fragment or
                 credentials, or has a host the SDK's HTTP stack cannot encode (e.g. a
                 non-ASCII name that is not a valid internationalized domain name).
+            Exception: If ``httpx2`` cannot build an HTTP client in this environment, the
+                error it raised, e.g. ``FileNotFoundError`` for an ``SSL_CERT_FILE`` that
+                names a missing file or ``ImportError`` for a SOCKS proxy without the
+                ``socksio`` package, with a note naming the model and the settings to check.
         """
         self.config = config
         self._typesafe = _import_typesafe_sdk()
@@ -562,6 +633,23 @@ class DecisionModelClient:
         _check_request_url(self._base_url, source)
         self._host = _url_host(self._base_url)
 
+        limit = config.max_parallel_requests
+        self._connections = _DEFAULT_CONNECTIONS if limit is None else limit
+        # httpx2 reads TLS and proxy settings from the environment whenever it builds an HTTP
+        # client, and each loop's SDK client gets a new one. Building one here makes an
+        # environment in which none can be built fail construction, like a missing key,
+        # instead of every request. It opens no connection, so it is simply dropped.
+        try:
+            self._new_http_client()
+        except Exception as exc:
+            exc.add_note(
+                f"Decision model {config.model!r} cannot build an HTTP client: check the TLS "
+                "and proxy settings httpx2 reads from the environment (SSL_CERT_FILE, "
+                "SSL_CERT_DIR, HTTP_PROXY, HTTPS_PROXY, ALL_PROXY and NO_PROXY, in either "
+                "letter case) and the system's proxy settings."
+            )
+            raise
+
         # max_retries counts attempts; the SDK counts retries after the first. The SDK honours
         # the endpoint's Retry-After with no cap of its own; the only bound on its waits is
         # the policy's total budget, counted from the first attempt. The budget leaves room
@@ -573,8 +661,9 @@ class DecisionModelClient:
             max_retries=config.max_retries - 1,
             timeout=config.max_retries * (config.timeout + longest_backoff),
         )
+        # Per loop: the SDK client, its connection slots, and the requests leasing them.
         self._sdk_clients: weakref.WeakKeyDictionary[
-            asyncio.AbstractEventLoop, tuple[AsyncTypeSafeClient, int]
+            asyncio.AbstractEventLoop, tuple[AsyncTypeSafeClient, asyncio.Semaphore, int]
         ] = weakref.WeakKeyDictionary()
 
         self._cache: diskcache.Cache | None = None
@@ -631,11 +720,12 @@ class DecisionModelClient:
             if cached is not None:
                 return cached
 
-        async with self._lease_sdk_client() as sdk_client:
+        async with self._lease_sdk_client() as (sdk_client, connection_slots):
             semaphore = await RateLimitPool.get_instance().get_semaphore(
                 self.rate_limit_key, self.config.max_parallel_requests
             )
-            async with semaphore if semaphore is not None else contextlib.nullcontext():
+            shared_limit = semaphore if semaphore is not None else contextlib.nullcontext()
+            async with shared_limit, connection_slots:
                 response = await sdk_client.system_one(state=state, questions=questions)
 
         if cache_key is not None:
@@ -701,32 +791,66 @@ class DecisionModelClient:
         logger.debug("Cache hit for %s...", cache_key[:8])
         return response
 
+    def _new_http_client(self) -> httpx2.AsyncClient:
+        """A new HTTP client for an SDK client, holding ``self._connections`` connections.
+
+        Its timeout times each HTTP operation but not a wait for a connection
+        (``pool=None``), which is local, not the endpoint's. Building it reads the
+        environment's TLS and proxy settings, as building any ``httpx2`` client does.
+        """
+        import httpx2
+
+        return httpx2.AsyncClient(
+            limits=httpx2.Limits(max_connections=self._connections),
+            timeout=httpx2.Timeout(self.config.timeout, pool=None),
+        )
+
     @contextlib.asynccontextmanager
-    async def _lease_sdk_client(self) -> AsyncIterator[AsyncTypeSafeClient]:
-        """Lease the running loop's SDK client, creating it for the first request in flight.
+    async def _lease_sdk_client(
+        self,
+    ) -> AsyncIterator[tuple[AsyncTypeSafeClient, asyncio.Semaphore]]:
+        """Lease the running loop's SDK client and its connection slots.
+
+        The first request in flight on a loop creates them: an SDK client whose HTTP client
+        (``_new_http_client``) holds ``max_parallel_requests`` connections
+        (``_DEFAULT_CONNECTIONS`` without a limit), and a semaphore with one slot per
+        connection. A request holding a slot thus always finds a free connection. If the
+        environment no longer lets an HTTP client be built, the request is not sent and
+        raises ``TypeSafeAPIConnectionError`` (``infrastructure``).
 
         The last request to finish on a loop closes that loop's client there, the only place
-        its connections can be closed. A failure to close is logged, not raised: the request
-        itself has already succeeded or failed on its own terms.
+        its connections can be closed; the SDK client closes the HTTP client it was given. A
+        failure to close is logged, not raised: the request itself has already succeeded or
+        failed on its own terms.
         """
         loop = asyncio.get_running_loop()
-        sdk_client, in_flight = self._sdk_clients.get(loop, (None, 0))
-        if sdk_client is None:
+        lease = self._sdk_clients.get(loop)
+        if lease is None:
+            try:
+                http_client = self._new_http_client()
+            except Exception as exc:
+                # One was built at construction, so the environment has changed since.
+                raise self._typesafe.TypeSafeAPIConnectionError(
+                    "Request not sent: no HTTP client can be built with the environment's TLS "
+                    f"and proxy settings ({type(exc).__name__}: {exc})"
+                ) from exc
             sdk_client = self._typesafe.AsyncTypeSafeClient(
                 api_key=self._api_key,
                 base_url=self._base_url,
                 model=self.config.model,
                 headers=self.config.extra_headers,
                 retry=self._retry_policy,
-                timeout=self.config.timeout,
+                http_client=http_client,  # the SDK takes its timeout from it
             )
-        self._sdk_clients[loop] = (sdk_client, in_flight + 1)
+            lease = (sdk_client, asyncio.Semaphore(self._connections), 0)
+        sdk_client, connection_slots, in_flight = lease
+        self._sdk_clients[loop] = (sdk_client, connection_slots, in_flight + 1)
         try:
-            yield sdk_client
+            yield sdk_client, connection_slots
         finally:
-            sdk_client, in_flight = self._sdk_clients[loop]
+            sdk_client, connection_slots, in_flight = self._sdk_clients[loop]
             if in_flight > 1:
-                self._sdk_clients[loop] = (sdk_client, in_flight - 1)
+                self._sdk_clients[loop] = (sdk_client, connection_slots, in_flight - 1)
             else:
                 del self._sdk_clients[loop]
                 try:
@@ -789,12 +913,16 @@ def build_state(
     *,
     query: str | None = None,
     reference_submission: str | None = None,
+    guidelines: str | None = None,
 ) -> dict[str, str]:
     """The state a decision model judges: every question of the item's request sees it.
 
     Field names mirror the XML tags of the LLM judge's user prompt. Optional fields appear
-    only when present (non-empty, the rule the LLM user prompt applies), in this order:
+    only when present (non-empty, the rule the LLM user prompt applies; for guidelines, not
+    blank, the rule of ``Rubric.guidelines``), in this order:
 
+    - ``"guidelines"``: the rubric's guidelines, verbatim. Sent once per request whatever
+      the number of criteria, and, being part of the state, part of the response cache key.
     - ``"input"``: the query that prompted the submission.
     - ``"reference_submission"``: an exemplar response, for calibration.
     - ``"submission"``: the text to grade, sent unchanged. When ``to_grade`` holds a
@@ -809,11 +937,18 @@ def build_state(
         to_grade: The submission, as ``CriterionGrader.judge`` receives it.
         query: The input that prompted the submission.
         reference_submission: An exemplar response for grading context.
+        guidelines: The rubric's guidelines.
 
     Returns:
         The state, a JSON object of strings.
+
+    Raises:
+        TypeError: If ``guidelines`` is neither a ``str`` nor ``None``.
     """
     state: dict[str, str] = {}
+    guidelines = _normalize_guidelines(guidelines)
+    if guidelines is not None:
+        state["guidelines"] = guidelines
     if query:
         state["input"] = query
     if reference_submission:
@@ -841,7 +976,8 @@ def _framed_instructions(requirement: str, state: Mapping[str, object]) -> str:
 
     The task sentence names the judged state field (``submission``, or ``output`` when the
     state splits a structured submission); each optional state field the judgment depends
-    on adds its usage sentence; the requirement comes last, verbatim, after the
+    on adds its usage sentence, in state order (``guidelines``, then
+    ``reference_submission``); the requirement comes last, verbatim, after the
     ``"Criterion: "`` label. Every sentence is a ``prompts.py`` constant.
     """
     structured = "output" in state
@@ -850,6 +986,8 @@ def _framed_instructions(requirement: str, state: Mapping[str, object]) -> str:
         if structured
         else DECISION_MODEL_TASK_INSTRUCTION
     ]
+    if "guidelines" in state:
+        sentences.append(DECISION_MODEL_GUIDELINES_INSTRUCTION)
     if "reference_submission" in state:
         judged = "output" if structured else "submission"
         sentences.append(DECISION_MODEL_REFERENCE_INSTRUCTION.format(judged=judged))
@@ -919,9 +1057,11 @@ def build_question(
 
     Framed instructions (``prompts.py`` constants) ask whether the criterion is satisfied
     by the ``submission``, or by the ``output`` with the ``thinking`` as context only when
-    ``state`` splits a structured submission; a ``reference_submission`` in ``state`` adds
-    its usage rule. The requirement ends them, after ``"Criterion: "``. Bare Noul and
-    multi-choice questions get no such text: they see those fields only through the state.
+    ``state`` splits a structured submission; ``guidelines`` in ``state`` add their
+    precedence rule ("Apply the `guidelines`; the criterion text governs."), then a
+    ``reference_submission`` its usage rule. The requirement ends them, after
+    ``"Criterion: "``. Bare Noul and multi-choice questions get no such text: they see
+    those fields only through the state.
 
     Args:
         criterion: The criterion, as evaluated (after its NA option is guaranteed).

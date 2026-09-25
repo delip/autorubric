@@ -60,6 +60,7 @@ from autorubric.types import (
     TokenUsage,
     _binary_worst_verdict,
 )
+from autorubric.utils import _normalize_guidelines
 
 if TYPE_CHECKING:
     from autorubric.dataset import RubricDataset
@@ -1056,6 +1057,8 @@ class CriterionGrader(Grader):
         to_grade: str,
         query: str | None = None,
         reference_submission: str | None = None,
+        *,
+        guidelines: str | None = None,
     ) -> CriterionResult:
         """Judge a single criterion with a single judge.
 
@@ -1066,11 +1069,25 @@ class CriterionGrader(Grader):
         # Dispatch to appropriate handler based on criterion type
         if criterion.is_multi_choice:
             return await self._judge_multi_choice_criterion(
-                client, judge, criterion, criterion_idx, to_grade, query, reference_submission
+                client,
+                judge,
+                criterion,
+                criterion_idx,
+                to_grade,
+                query,
+                reference_submission,
+                guidelines=guidelines,
             )
         else:
             return await self._judge_binary_criterion(
-                client, judge, criterion, criterion_idx, to_grade, query, reference_submission
+                client,
+                judge,
+                criterion,
+                criterion_idx,
+                to_grade,
+                query,
+                reference_submission,
+                guidelines=guidelines,
             )
 
     async def _judge_binary_criterion(
@@ -1082,6 +1099,8 @@ class CriterionGrader(Grader):
         to_grade: str,
         query: str | None = None,
         reference_submission: str | None = None,
+        *,
+        guidelines: str | None = None,
     ) -> CriterionResult:
         """Judge a binary (MET/UNMET) criterion."""
         examples = self._criterion_examples.get((criterion_idx, judge.judge_id), [])
@@ -1095,9 +1114,12 @@ class CriterionGrader(Grader):
                 query=query,
                 include_reason=self._few_shot_config.include_reason,
                 reference_submission=reference_submission,
+                guidelines=guidelines,
             )
         else:
-            user_prompt = build_user_prompt(criterion, to_grade, query, reference_submission)
+            user_prompt = build_user_prompt(
+                criterion, to_grade, query, reference_submission, guidelines=guidelines
+            )
 
         try:
             result: GenerateResult = await client.generate(
@@ -1144,6 +1166,8 @@ class CriterionGrader(Grader):
         to_grade: str,
         query: str | None = None,
         reference_submission: str | None = None,
+        *,
+        guidelines: str | None = None,
     ) -> CriterionResult:
         """Judge a multi-choice criterion.
 
@@ -1199,10 +1223,11 @@ class CriterionGrader(Grader):
                 query=query,
                 include_reason=self._few_shot_config.include_reason,
                 reference_submission=reference_submission,
+                guidelines=guidelines,
             )
         else:
             user_prompt = build_multi_choice_user_prompt(
-                prompt_criterion, to_grade, query, reference_submission
+                prompt_criterion, to_grade, query, reference_submission, guidelines=guidelines
             )
 
         try:
@@ -1271,21 +1296,30 @@ class CriterionGrader(Grader):
         to_grade: str,
         query: str | None = None,
         reference_submission: str | None = None,
+        *,
+        guidelines: str | None = None,
     ) -> JudgeCriterionResults:
         """Evaluate all criteria for a single judge, one result per criterion, in order.
 
-        An LLM judge is asked about each criterion in its own call, all in parallel. A
+        An LLM judge is asked about each criterion in its own call, all in parallel, each
+        user prompt starting with the rubric's guidelines when there are any. A
         decision-model judge is asked about the whole rubric in one request
-        (``_judge_all_criteria_with_decision_model``).
+        (``_judge_all_criteria_with_decision_model``), the guidelines in its state.
         """
         if isinstance(judge.llm_config, DecisionModelConfig):
             results = await self._judge_all_criteria_with_decision_model(
-                judge, rubric, to_grade, query, reference_submission
+                judge, rubric, to_grade, query, reference_submission, guidelines=guidelines
             )
         else:
             tasks = [
                 self._judge_single_criterion(
-                    judge, criterion, idx, to_grade, query, reference_submission
+                    judge,
+                    criterion,
+                    idx,
+                    to_grade,
+                    query,
+                    reference_submission,
+                    guidelines=guidelines,
                 )
                 for idx, criterion in enumerate(rubric)
             ]
@@ -1303,11 +1337,14 @@ class CriterionGrader(Grader):
         to_grade: str,
         query: str | None = None,
         reference_submission: str | None = None,
+        *,
+        guidelines: str | None = None,
     ) -> list[CriterionResult]:
         """Judge every criterion with a decision-model judge in one request.
 
         The state is built once from the submission (a ``<thinking>``/``<output>``
-        submission is sent as its two parts), and every criterion of the effective rubric
+        submission is sent as its two parts) and its context, the rubric's guidelines first
+        when there are any, and every criterion of the effective rubric
         that a question can express is posed under the id ``c{criterion_idx}``. Exactly one
         request is made, and none when no criterion can be expressed. Its answers map back
         to one result per criterion, in rubric order.
@@ -1331,13 +1368,19 @@ class CriterionGrader(Grader):
             to_grade: The submission, as ``judge`` receives it.
             query: The input that prompted the submission.
             reference_submission: An exemplar response for grading context.
+            guidelines: The rubric's guidelines.
 
         Returns:
             One ``CriterionResult`` per criterion of ``rubric``, in order.
         """
         client = self._decision_clients[judge.judge_id]
         config = client.config
-        state = build_state(to_grade, query=query, reference_submission=reference_submission)
+        state = build_state(
+            to_grade,
+            query=query,
+            reference_submission=reference_submission,
+            guidelines=guidelines,
+        )
         questions, unposed = build_questions(rubric, config, state)
 
         response = None
@@ -1396,15 +1439,42 @@ class CriterionGrader(Grader):
         rubric: list[Criterion],
         query: str | None = None,
         reference_submission: str | None = None,
+        *,
+        guidelines: str | None = None,
     ) -> list[JudgeCriterionResults]:
-        """Judge all criteria with all judges (parallel across judges)."""
+        """Judge all criteria with all judges (parallel across judges).
+
+        Args:
+            to_grade: The submission, as ``Grader.grade`` passes it.
+            rubric: The criteria.
+            query: Optional input/query that prompted the submission.
+            reference_submission: Optional exemplar response for grading context.
+            guidelines: Optional rubric guidelines (``Grader.grade`` passes them when the
+                rubric has any; blank text means none). Every judge sees them: each LLM user
+                prompt starts with ``GUIDELINES_BLOCK``, and a decision model's state holds
+                them as its first field, with the framed binary questions naming them. With
+                none, every prompt and request is exactly what it is without guidelines.
+
+        Returns:
+            One ``JudgeCriterionResults`` per judge, in judge order.
+
+        Raises:
+            TypeError: If ``guidelines`` is neither a ``str`` nor ``None``.
+        """
+        # Checked before any judge runs; blank guidelines become None.
+        guidelines = _normalize_guidelines(guidelines)
         # Normalize once to the effective rubric (abstain channel guaranteed for
         # multi-choice under auto_na_option). Same length/order, so criterion_idx — and
         # thus the shuffle RNG key — stays aligned; the user's rubric is never mutated.
         effective_rubric = [self._effective_criterion(c) for c in rubric]
         tasks = [
             self._judge_all_criteria_for_judge(
-                judge, effective_rubric, to_grade, query, reference_submission
+                judge,
+                effective_rubric,
+                to_grade,
+                query,
+                reference_submission,
+                guidelines=guidelines,
             )
             for judge in self._judges
         ]

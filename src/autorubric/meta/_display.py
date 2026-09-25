@@ -827,7 +827,14 @@ def render_improvement_report_html(
 
     # Final rubric panel
     parts.append('<div class="final-panel">\n')
-    parts.append("<h2>Final Rubric</h2>\n<table>\n<thead><tr>")
+    parts.append("<h2>Final Rubric</h2>\n")
+    # The loop carries guidelines unchanged, so they are shown once, with the final rubric.
+    if final_rubric.guidelines is not None:
+        parts.append(
+            "<h4>Guidelines</h4>\n"
+            f"<p style='white-space: pre-wrap;'>{_escape_html(final_rubric.guidelines)}</p>\n"
+        )
+    parts.append("<table>\n<thead><tr>")
     parts.append("<th>#</th><th>Weight</th><th>Requirement</th>")
     parts.append("</tr></thead>\n<tbody>\n")
     for i, c in enumerate(final_rubric.rubric, 1):

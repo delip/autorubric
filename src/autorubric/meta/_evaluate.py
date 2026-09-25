@@ -3,7 +3,7 @@
 import json
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import Field
 
@@ -26,6 +26,53 @@ _CRITERIA_REF_INSTRUCTION = (
     "When evaluating, identify which specific criteria (by index) "
     "are relevant to your assessment.\n\n"
 )
+
+# Follows _CRITERIA_REF_INSTRUCTION only for a rubric with guidelines, so the meta-judge
+# prompts for a rubric without them are unchanged. It states the rule the judges grading
+# with the rubric are given: the criterion text governs, the guidelines clarify it.
+_GUIDELINES_REF_INSTRUCTION = (
+    'The rubric also has guidelines (the "guidelines" field): free text that applies to '
+    "every criterion when grading. The criterion text governs; the guidelines clarify how "
+    "to apply it. Assess each criterion as a rater would apply it, together with the "
+    "guidelines.\n\n"
+)
+
+
+def _meta_judge_instruction(rubric: Rubric) -> str:
+    """The instruction that precedes the rubric in the meta-judge's submission."""
+    if rubric.guidelines is None:
+        return _CRITERIA_REF_INSTRUCTION
+    return _CRITERIA_REF_INSTRUCTION + _GUIDELINES_REF_INSTRUCTION
+
+
+def _rubric_for_meta_judge(rubric: Rubric) -> dict[str, Any]:
+    """The rubric under review as the meta-judge sees it.
+
+    Its criteria carry a 1-based ``index`` for ``affected_criteria``. The guidelines, when
+    the rubric has them, come first, as in the rubric's on-disk dict form; without them
+    the data is exactly what it was before guidelines existed.
+    """
+    criteria = [
+        {
+            "index": i + 1,
+            "name": c.name,
+            "weight": c.weight,
+            "requirement": c.requirement,
+            **({"options": [o.model_dump() for o in c.options]} if c.options else {}),
+        }
+        for i, c in enumerate(rubric.rubric)
+    ]
+    if rubric.guidelines is None:
+        return {"criteria": criteria}
+    return {"guidelines": rubric.guidelines, "criteria": criteria}
+
+
+def _rubric_summary(rubric: Rubric) -> str:
+    """The display line naming what the meta-judge evaluated."""
+    summary = f"Evaluating rubric with {len(rubric.rubric)} criteria"
+    if rubric.guidelines is not None:
+        summary += " and guidelines"
+    return summary
 
 
 def _not_an_llm(what: str) -> ValueError:
@@ -120,7 +167,8 @@ async def evaluate_rubric_standalone(
     anti-patterns.
 
     Args:
-        rubric: The rubric to evaluate.
+        rubric: The rubric to evaluate. Its guidelines, when it has them, are shown to
+            the meta-judge as part of the rubric under review.
         llm_config: LLM configuration for the evaluation. The meta-judge must be an LLM:
             meta-rubric evaluation works from its explanations, which a decision model
             (``DecisionModelConfig``) does not produce.
@@ -147,24 +195,14 @@ async def evaluate_rubric_standalone(
         multi_choice_response_format=MultiChoiceMetaJudgment,
     )
 
-    rubric_data = {
-        "criteria": [
-            {
-                "index": i + 1,
-                "name": c.name,
-                "weight": c.weight,
-                "requirement": c.requirement,
-                **({"options": [o.model_dump() for o in c.options]} if c.options else {}),
-            }
-            for i, c in enumerate(rubric.rubric)
-        ]
-    }
-    submission = _CRITERIA_REF_INSTRUCTION + json.dumps(rubric_data, indent=2)
+    submission = _meta_judge_instruction(rubric) + json.dumps(
+        _rubric_for_meta_judge(rubric), indent=2
+    )
 
     result = await meta_rubric.grade(to_grade=submission, grader=grader)
 
     if display is not None:
-        rubric_summary = f"Evaluating rubric with {len(rubric.rubric)} criteria"
+        rubric_summary = _rubric_summary(rubric)
         display_meta_rubric_result(
             result,
             _STANDALONE_META_RUBRIC_PATH,
@@ -192,7 +230,8 @@ async def evaluate_rubric_in_context(
     coverage of key aspects, and task-specific anti-patterns.
 
     Args:
-        rubric: The rubric to evaluate.
+        rubric: The rubric to evaluate. Its guidelines, when it has them, are shown to
+            the meta-judge as part of the rubric under review.
         task_prompt: The task prompt the rubric is designed to evaluate.
         llm_config: LLM configuration for the evaluation. The meta-judge must be an LLM:
             meta-rubric evaluation works from its explanations, which a decision model
@@ -220,22 +259,10 @@ async def evaluate_rubric_in_context(
         multi_choice_response_format=MultiChoiceMetaJudgment,
     )
 
-    rubric_data = {
-        "criteria": [
-            {
-                "index": i + 1,
-                "name": c.name,
-                "weight": c.weight,
-                "requirement": c.requirement,
-                **({"options": [o.model_dump() for o in c.options]} if c.options else {}),
-            }
-            for i, c in enumerate(rubric.rubric)
-        ]
-    }
-    submission = _CRITERIA_REF_INSTRUCTION + json.dumps(
+    submission = _meta_judge_instruction(rubric) + json.dumps(
         {
             "task_prompt": task_prompt,
-            "rubric": rubric_data,
+            "rubric": _rubric_for_meta_judge(rubric),
         },
         indent=2,
     )
@@ -244,9 +271,7 @@ async def evaluate_rubric_in_context(
 
     if display is not None:
         prompt_preview = task_prompt[:100] + "..." if len(task_prompt) > 100 else task_prompt
-        rubric_summary = (
-            f"Evaluating rubric with {len(rubric.rubric)} criteria\nTask: {prompt_preview}"
-        )
+        rubric_summary = f"{_rubric_summary(rubric)}\nTask: {prompt_preview}"
         display_meta_rubric_result(
             result,
             _IN_CONTEXT_META_RUBRIC_PATH,

@@ -132,6 +132,26 @@ def normalize_to_grade_input(to_grade: ToGradeInput) -> ThinkingOutputDict:
     return ThinkingOutputDict(thinking=thinking, output=output)
 
 
+def _normalize_guidelines(guidelines: str | None) -> str | None:
+    """Return rubric guidelines in their stored form: the text, or ``None`` for none.
+
+    Blank text (empty or whitespace only) carries nothing to apply, so it means "no
+    guidelines", like an empty query or reference submission; it becomes ``None``, the
+    single "absent" value every consumer checks. Any other text is kept verbatim, never
+    stripped or rewritten. ``Rubric.guidelines`` stores guidelines in this form, and every
+    function that takes guidelines (``Grader.grade``, the LLM user-prompt builders, the
+    decision-model state) reads them through it, so blank guidelines mean none everywhere.
+
+    Raises:
+        TypeError: If ``guidelines`` is neither a ``str`` nor ``None``.
+    """
+    if guidelines is None:
+        return None
+    if not isinstance(guidelines, str):
+        raise TypeError(f"Rubric guidelines must be a str or None, got {type(guidelines).__name__}")
+    return guidelines if guidelines.strip() else None
+
+
 def compute_length_penalty(text: str | ThinkingOutputDict, config: LengthPenalty) -> float:
     """Compute the length penalty for the given text based on the config.
 

@@ -357,6 +357,32 @@ class TestValidation:
             DecisionModelConfig(model="m", extra_headers={name: "SECRET"})
         assert "SECRET" not in str(excinfo.value)
 
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "Authorization",
+            "accept",
+            "CONTENT-TYPE",
+            "User-Agent",
+            "X-TypeSafe-SDK",
+            "x-typesafe-runtime",
+            "X-TypeSafe-Retry-Count",
+        ],
+    )
+    def test_headers_the_sdk_sets_are_rejected(self, name):
+        """The SDK sets these on every request, replacing any value given, so the value would
+        never be sent (a gateway expecting it would refuse every request): the config is
+        rejected instead, in any letter case. The message names the header, never its
+        value."""
+        with pytest.raises(ValueError, match="extra_headers") as excinfo:
+            DecisionModelConfig(model="m", extra_headers={"X-Org": "evals", name: "SECRET"})
+        assert repr(name) in str(excinfo.value)
+        assert "SECRET" not in str(excinfo.value)
+
+    def test_an_authorization_header_points_to_api_key(self):
+        with pytest.raises(ValueError, match="api_key"):
+            DecisionModelConfig(model="m", extra_headers={"Authorization": "Basic Zm9vOmJhcg=="})
+
 
 class TestExport:
     def test_exported_from_the_package(self):

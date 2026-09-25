@@ -95,8 +95,9 @@ def _serialize_grader_config(grader: Grader) -> dict[str, Any]:
     ``"decision_model"``), ``model``, ``weight`` and ``max_parallel_requests``. An LLM judge
     adds ``temperature`` (None when the provider default is used). A decision-model judge
     adds ``binary_framing``, ``ordinal_framing``, ``decision_threshold`` and
-    ``api_base_host``, the host of the endpoint it was built against; never its API key or
-    full URL, whose path may carry a token. Gracefully handles mocks and missing attributes.
+    ``api_base_host``, the host of the endpoint it was built against; the rest of its base
+    URL, its API key and its ``extra_headers`` are not recorded. Gracefully handles mocks and
+    missing attributes.
     """
     config: dict[str, Any] = {
         "grader_class": grader.__class__.__name__,
@@ -219,8 +220,8 @@ def _decision_model_judge_entry(
     ``api_base_host`` is the host (with any non-default port) of the base URL the judge's
     client resolved at construction (``api_base``, else ``TYPESAFE_BASE_URL``, else the
     SDK default); without such a client, the host of an explicit ``api_base``, else None.
-    The URL's path (and credentials, which a base URL cannot hold) and the API key are never
-    recorded.
+    The rest of the URL (its path; a base URL cannot hold credentials), the API key and
+    ``extra_headers`` are never recorded.
     """
     clients = getattr(grader, "_decision_clients", None)
     client = clients.get(judge_id) if isinstance(clients, dict) else None
