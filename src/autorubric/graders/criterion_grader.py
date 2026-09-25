@@ -8,9 +8,10 @@ import hashlib
 import logging
 import math
 import random
+import warnings
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, overload
 
 from pydantic import BaseModel
 
@@ -98,7 +99,20 @@ def _aggregate_error(votes: Sequence[JudgeVote | MultiChoiceJudgeVote]) -> str |
     return _combine_errors([v.error for v in votes])
 
 
-def _inject_affected_criteria(reason: str, judgment: object) -> str:
+def _join_vote_reasons(votes: Sequence[JudgeVote | MultiChoiceJudgeVote]) -> str | None:
+    """Ensemble ``final_reason`` for a list of votes: ``"judge_id: reason"`` per vote,
+    joined with ``" | "``.
+
+    Votes whose ``reason`` is ``None`` (the judge gives no explanation) are skipped by an
+    identity check, not a truthiness check, so an LLM vote with an empty explanation still
+    renders as ``"judge_id: "``. ``None`` when no vote carried a reason. Single source for
+    both the binary and multi-choice aggregation paths.
+    """
+    reasons = [f"{v.judge_id}: {v.reason}" for v in votes if v.reason is not None]
+    return " | ".join(reasons) if reasons else None
+
+
+def _inject_affected_criteria(reason: str | None, judgment: object) -> str | None:
     """Append an [Affects: #i, #j] tag when the judgment carries non-empty affected_criteria.
 
     Shared by the binary and multi-choice success paths so the structured-output
@@ -109,6 +123,32 @@ def _inject_affected_criteria(reason: str, judgment: object) -> str:
     if affected:
         tag = ", ".join(f"#{i}" for i in affected)
         reason = f"{reason} [Affects: {tag}]"
+    return reason
+
+
+def _require_llm_reason(reason: str | None) -> str:
+    """Return an LLM judgment's tagged reason, rejecting a null one.
+
+    ``reason`` is the judgment's ``explanation`` after ``_inject_affected_criteria``. An
+    LLM judge always explains its verdict, so its reason is a string, possibly empty;
+    ``reason is None`` is reserved for judges that return probabilities instead of text.
+    A null explanation (possible only with a custom response format that makes the field
+    optional) is therefore a malformed judgment. It raises ``ValueError``, which
+    ``classify_grading_error`` routes as ``parse``, exactly as the report's own validation
+    did while ``reason`` was a plain ``str``. Like that validation, the check applies to
+    the reason as stored, after tagging: a tagged null explanation is the string
+    ``"None [Affects: ...]"`` and is accepted, as it always was.
+
+    Shared by the binary and multi-choice success paths. Each calls it only after reading
+    the judgment's required fields (its verdict field and ``explanation``), so a judgment
+    that lacks one of them still fails on the missing field (an ``unknown`` error), as it
+    did when the report's own validation made this check.
+
+    Raises:
+        ValueError: If ``reason`` is ``None``.
+    """
+    if reason is None:
+        raise ValueError("LLM judgment has no explanation (explanation is null)")
     return reason
 
 
@@ -137,15 +177,95 @@ def _top_tied_keys(scores: Mapping[int, float]) -> list[int]:
 class JudgeSpec:
     """Specification for a single judge in an ensemble.
 
+    ``judge_model_config`` is the preferred keyword for the judge's configuration, and the
+    positional form is unchanged. ``llm_config=`` keeps working without a warning: it is
+    the name of the stored dataclass field, which is deliberately not renamed so that
+    ``dataclasses.fields``/``asdict``/``replace``, the ``repr``, equality and pickles stay
+    exactly as they were. ``dataclasses.replace`` therefore takes ``llm_config=``, and
+    passing both ``judge_model_config=`` and ``llm_config=`` raises ``ValueError``.
+
     Attributes:
-        llm_config: Configuration for this judge's LLM.
+        llm_config: The judge's model configuration (the stored field; also readable and
+            writable as the ``judge_model_config`` property).
         judge_id: Unique identifier for this judge (e.g., "gpt-4", "claude-sonnet").
         weight: Voting weight for weighted aggregation (default 1.0).
+
+    Example:
+        >>> gemini = LLMConfig(model="gemini/gemini-3-flash-preview")
+        >>> JudgeSpec(judge_model_config=gemini, judge_id="gemini")
+        >>> JudgeSpec(gemini, "gemini", weight=2.0)  # positional form
     """
 
     llm_config: LLMConfig
     judge_id: str
     weight: float = 1.0
+
+    # ``@dataclass`` keeps an ``__init__`` defined in the class body instead of generating
+    # one, while ``fields()``, ``repr``, ``__eq__``, ``__match_args__`` and ``replace()``
+    # are still derived from the three fields above. The overloads are the two accepted
+    # call shapes; the sentinel defaults tell a missing argument from an explicit ``None``.
+    @overload
+    def __init__(self, llm_config: LLMConfig, judge_id: str, weight: float = 1.0) -> None: ...
+
+    @overload
+    def __init__(
+        self, *, judge_model_config: LLMConfig, judge_id: str, weight: float = 1.0
+    ) -> None: ...
+
+    def __init__(
+        self,
+        llm_config: Any = dataclasses.MISSING,
+        judge_id: Any = dataclasses.MISSING,
+        weight: float = 1.0,
+        *,
+        judge_model_config: Any = dataclasses.MISSING,
+    ) -> None:
+        """Initialize from ``judge_model_config`` (or its stored-field name ``llm_config``).
+
+        Args:
+            llm_config: The judge's model configuration, positionally or by the stored
+                field name. Mutually exclusive with ``judge_model_config``.
+            judge_id: Unique identifier for this judge.
+            weight: Voting weight for weighted aggregation (default 1.0).
+            judge_model_config: The judge's model configuration (preferred keyword).
+
+        Raises:
+            ValueError: If both ``judge_model_config`` and ``llm_config`` are passed.
+            TypeError: If the configuration or ``judge_id`` is missing.
+        """
+        if judge_model_config is not dataclasses.MISSING:
+            if llm_config is not dataclasses.MISSING:
+                raise ValueError(
+                    "Pass only one of judge_model_config and llm_config "
+                    "(llm_config is the stored field name of judge_model_config)"
+                )
+            llm_config = judge_model_config
+        missing = []
+        if llm_config is dataclasses.MISSING:
+            missing.append("'judge_model_config' (or its alias 'llm_config')")
+        if judge_id is dataclasses.MISSING:
+            missing.append("'judge_id'")
+        if missing:
+            # Mirror Python's own wording; a lone judge_id is exactly the positional
+            # argument the generated dataclass __init__ used to report.
+            kind = "positional argument" if missing == ["'judge_id'"] else "argument"
+            plural = "s" if len(missing) > 1 else ""
+            raise TypeError(
+                f"JudgeSpec.__init__() missing {len(missing)} required {kind}{plural}: "
+                + " and ".join(missing)
+            )
+        self.llm_config = llm_config
+        self.judge_id = judge_id
+        self.weight = weight
+
+    @property
+    def judge_model_config(self) -> LLMConfig:
+        """The judge's model configuration (read/write alias of the ``llm_config`` field)."""
+        return self.llm_config
+
+    @judge_model_config.setter
+    def judge_model_config(self, value: LLMConfig) -> None:
+        self.llm_config = value
 
 
 @dataclass
@@ -184,14 +304,14 @@ class CriterionGrader(Grader):
     """Unified criterion-based grader with compositional few-shot and ensemble support.
 
     This grader evaluates each criterion independently and supports:
-    - Single LLM mode (via llm_config)
+    - Single-judge mode (via judge_model_config)
     - Ensemble mode with multiple judges (via judges)
     - Few-shot prompting (via training_data + few_shot_config)
 
-    All combinations work: single LLM, single + few-shot, ensemble, ensemble + few-shot.
+    All combinations work: single judge, single + few-shot, ensemble, ensemble + few-shot.
 
     Parameters are orthogonal:
-    - llm_config OR judges: Choose single-LLM or ensemble mode
+    - judge_model_config OR judges: Choose single-judge or ensemble mode
     - training_data + few_shot_config: Enable few-shot prompting (applies to all judges)
 
     Example:
@@ -199,12 +319,14 @@ class CriterionGrader(Grader):
         >>> from autorubric.graders import CriterionGrader, JudgeSpec
         >>>
         >>> # Single LLM
-        >>> grader = CriterionGrader(llm_config=LLMConfig(model="gemini/gemini-3-flash-preview"))
+        >>> grader = CriterionGrader(
+        ...     judge_model_config=LLMConfig(model="gemini/gemini-3-flash-preview")
+        ... )
         >>>
         >>> # Single LLM + few-shot
         >>> train, test = dataset.split_train_test(n_train=100)
         >>> grader = CriterionGrader(
-        ...     llm_config=LLMConfig(model="gemini/gemini-3-flash-preview"),
+        ...     judge_model_config=LLMConfig(model="gemini/gemini-3-flash-preview"),
         ...     training_data=train,
         ...     few_shot_config=FewShotConfig(n_examples=3),
         ... )
@@ -230,9 +352,9 @@ class CriterionGrader(Grader):
     def __init__(
         self,
         *,
-        # Single LLM mode
-        llm_config: LLMConfig | None = None,
-        # Ensemble mode (overrides llm_config)
+        # Single-judge mode
+        judge_model_config: LLMConfig | None = None,
+        # Ensemble mode (mutually exclusive with judge_model_config)
         judges: list[JudgeSpec] | None = None,
         aggregation: AggregationStrategy = "majority",
         # Multi-choice aggregation strategies
@@ -257,12 +379,17 @@ class CriterionGrader(Grader):
         binary_response_format: type[BaseModel] | None = None,
         # Structured output override for multi-choice criteria
         multi_choice_response_format: type[BaseModel] | None = None,
+        # Deprecated alias of judge_model_config (every parameter is keyword-only, so
+        # its position at the end changes no call)
+        llm_config: LLMConfig | None = None,
     ):
         """Initialize the criterion grader.
 
         Args:
-            llm_config: Configuration for single-LLM mode. Mutually exclusive with judges.
-            judges: List of JudgeSpec for ensemble mode. Mutually exclusive with llm_config.
+            judge_model_config: Configuration of the single judge (single-judge mode), which
+                is given ``judge_id="default"``. Mutually exclusive with judges.
+            judges: List of JudgeSpec for ensemble mode. Mutually exclusive with
+                judge_model_config.
             aggregation: Strategy for aggregating votes in ensemble mode (binary criteria).
             ordinal_aggregation: Strategy for aggregating ordinal multi-choice votes.
                 Central tendency: "mean", "median", "weighted_mean", "mode". Conservative/
@@ -303,25 +430,45 @@ class CriterionGrader(Grader):
                 ``affected_criteria`` field (list[int]), matching indices are injected as
                 an ``[Affects: ...]`` tag into the reason string (same convention as
                 binary_response_format). Defaults to MultiChoiceJudgment.
+            llm_config: Deprecated alias of ``judge_model_config``; builds the same single
+                judge and emits a ``DeprecationWarning``.
 
         Raises:
-            ValueError: If neither llm_config nor judges is provided, or both are provided.
+            ValueError: If neither judge_model_config nor judges is provided, if both are
+                provided, or if both judge_model_config and its deprecated alias
+                llm_config are provided.
         """
+        if llm_config is not None:
+            if judge_model_config is not None:
+                raise ValueError(
+                    "Pass only one of judge_model_config and llm_config "
+                    "(llm_config is a deprecated alias of judge_model_config)"
+                )
+            warnings.warn(
+                "llm_config is deprecated; use judge_model_config",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            judge_model_config = llm_config
+
         super().__init__(length_penalty=length_penalty, normalize=normalize)
 
-        # Validate: must have either llm_config or judges, not both, not neither
-        if llm_config is None and judges is None:
-            raise ValueError("Must provide either llm_config or judges")
-        if llm_config is not None and judges is not None:
-            raise ValueError("Cannot provide both llm_config and judges")
+        # Validate: must have either judge_model_config or judges, not both, not neither
+        if judge_model_config is None and judges is None:
+            raise ValueError("Must provide either judge_model_config or judges")
+        if judge_model_config is not None and judges is not None:
+            raise ValueError("Cannot provide both judge_model_config and judges")
 
-        # Normalize to ensemble representation (single LLM = ensemble of 1).
-        # The validation above guarantees exactly one of llm_config/judges is set, so by
-        # this point `judges` in the else branch is a non-None list[JudgeSpec]; the explicit
-        # attribute annotation lets the type checker see that without a suppression comment.
+        # Normalize to ensemble representation (single judge = ensemble of 1).
+        # The validation above guarantees exactly one of judge_model_config/judges is set,
+        # so by this point `judges` in the else branch is a non-None list[JudgeSpec]; the
+        # explicit attribute annotation lets the type checker see that without a
+        # suppression comment.
         self._judges: list[JudgeSpec]
-        if llm_config is not None:
-            self._judges = [JudgeSpec(llm_config=llm_config, judge_id="default", weight=1.0)]
+        if judge_model_config is not None:
+            self._judges = [
+                JudgeSpec(judge_model_config=judge_model_config, judge_id="default", weight=1.0)
+            ]
         else:
             assert judges is not None
             self._judges = judges
@@ -666,12 +813,16 @@ class CriterionGrader(Grader):
             )
 
             judgment = result.parsed
-            reason = judgment.explanation
-            reason = _inject_affected_criteria(reason, judgment)
+            # Read explanation, then criterion_status, then check for a null explanation:
+            # a judgment missing a field fails on the first one read, and a null
+            # explanation is a parse failure only when the verdict is readable.
+            reason = _inject_affected_criteria(judgment.explanation, judgment)
+            verdict = judgment.criterion_status
+            reason = _require_llm_reason(reason)
 
             report = CriterionReport(
                 requirement=criterion.requirement,
-                verdict=judgment.criterion_status,
+                verdict=verdict,
                 reason=reason,
                 # Preserve the extended-thinking deliberation trace. getattr
                 # guards custom binary_response_format models that lack the field.
@@ -814,8 +965,7 @@ class CriterionGrader(Grader):
                 na=selected_option.na,
             )
 
-            reason = judgment.explanation
-            reason = _inject_affected_criteria(reason, judgment)
+            reason = _require_llm_reason(_inject_affected_criteria(judgment.explanation, judgment))
 
             report = CriterionReport(
                 requirement=criterion.requirement,
@@ -1007,6 +1157,8 @@ class CriterionGrader(Grader):
                                 shuffle_order=cr.report.shuffle_order,
                                 error=cr.report.error,
                                 reasoning=cr.report.reasoning,
+                                probabilities=cr.report.probabilities,
+                                confidence=cr.report.confidence,
                             )
                         )
 
@@ -1046,6 +1198,8 @@ class CriterionGrader(Grader):
                             weight=judge_result.weight,
                             error=cr.report.error,
                             reasoning=cr.report.reasoning,
+                            probabilities=cr.report.probabilities,
+                            confidence=cr.report.confidence,
                         )
                     )
 
@@ -1066,7 +1220,7 @@ class CriterionGrader(Grader):
                 )
 
         # Calculate per-judge scores
-        judge_scores = {}
+        judge_scores: dict[str, float | None] = {}
         for judge_result in judge_results:
             score = self._calculate_score_from_reports(judge_result.reports, normalize)
             judge_scores[judge_result.judge_id] = score
@@ -1141,7 +1295,7 @@ class CriterionGrader(Grader):
 
     def _aggregate_votes(
         self, votes: list[JudgeVote], weight: float
-    ) -> tuple[CriterionVerdict, str]:
+    ) -> tuple[CriterionVerdict, str | None]:
         """Aggregate votes from multiple judges into a single verdict.
 
         ``weight`` is the criterion weight (not a judge weight); it is used only to break
@@ -1175,11 +1329,7 @@ class CriterionGrader(Grader):
         else:
             verdict = self._decide_binary(met_weight, unmet_weight, weight)
 
-        # Combine reasons
-        reasons = [f"{v.judge_id}: {v.reason}" for v in votes]
-        combined_reason = " | ".join(reasons)
-
-        return verdict, combined_reason
+        return verdict, _join_vote_reasons(votes)
 
     @staticmethod
     def _decide_binary(met: float, unmet: float, weight: float) -> CriterionVerdict:
@@ -1196,7 +1346,7 @@ class CriterionGrader(Grader):
         self,
         votes: list[MultiChoiceJudgeVote],
         criterion: CriterionReport,
-    ) -> tuple[AggregatedMultiChoiceVerdict, str]:
+    ) -> tuple[AggregatedMultiChoiceVerdict, str | None]:
         """Aggregate multi-choice votes from multiple judges.
 
         Uses ordinal_aggregation for ordinal scale criteria and
@@ -1207,7 +1357,8 @@ class CriterionGrader(Grader):
             criterion: The criterion report (to access options and scale_type).
 
         Returns:
-            Tuple of (aggregated verdict, combined reason).
+            Tuple of (aggregated verdict, combined reason). The reason is ``None`` when no
+            vote carried one (see ``_join_vote_reasons``).
         """
         if not votes:
             # Return NA verdict if no votes
@@ -1261,7 +1412,6 @@ class CriterionGrader(Grader):
             # exists (the default auto_na_option case); fall back to a clean None-abstain
             # only when every NA vote is itself a no-NA-option error-abstain.
             na_vote = next((v for v in votes if v.selected_index is not None), votes[0])
-            reasons = [f"{v.judge_id}: {v.reason}" for v in votes]
             return (
                 AggregatedMultiChoiceVerdict(
                     selected_index=na_vote.selected_index,
@@ -1270,7 +1420,7 @@ class CriterionGrader(Grader):
                     na=True,
                     aggregated_value=na_vote.value,
                 ),
-                " | ".join(reasons),
+                _join_vote_reasons(votes),
             )
 
         # Check for per-criterion aggregation override
@@ -1285,11 +1435,7 @@ class CriterionGrader(Grader):
             agg = agg_strategy or self._nominal_aggregation
             result = self._aggregate_nominal_votes(assessable_votes, criterion, agg)
 
-        # Combine reasons
-        reasons = [f"{v.judge_id}: {v.reason}" for v in votes]
-        combined_reason = " | ".join(reasons)
-
-        return result, combined_reason
+        return result, _join_vote_reasons(votes)
 
     def _aggregate_ordinal_votes(
         self,

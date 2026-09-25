@@ -34,6 +34,7 @@ from ._helpers import (
     resolve_ground_truth,
 )
 from ._types import (
+    BiasResult,
     BootstrapResults,
     CannotAssessMode,
     CannotAssessStats,
@@ -1073,7 +1074,7 @@ def _build_coverage_stats(
 
 def _compute_judge_metrics(
     judge_id: str,
-    judge_scores: list[float],
+    judge_scores: list[float | None],
     true_scores: list[float],
     judge_verdicts: list[list[CriterionVerdict]],
     judge_mc_preds: list[list[int | None]],
@@ -1093,6 +1094,18 @@ def _compute_judge_metrics(
     multi-choice criteria contribute exact-match accuracy and (weighted/unweighted) kappa
     exactly as the aggregate does (reusing the same per-criterion functions). Only cells
     with a genuine (error-free) judge vote and a correctly-typed ground truth are included.
+
+    ``judge_scores`` is item-aligned with ``true_scores``. A ``None`` entry means the
+    judge's whole-rubric score is undefined for its role (a judge consulted only on some
+    criteria is ``None`` on every item, even an item where it judged every criterion).
+    Score-level metrics are undefined for a judge with no defined score, so all of its
+    score fields (``score_rmse``, ``score_mae``, ``score_spearman``, ``score_kendall``,
+    ``score_pearson``, ``bias``) are ``None``. Otherwise they are computed over the items
+    whose score is defined: a ``None`` on only some items (e.g. in a hand-built report) is
+    left out of the pairs, as the aggregate leaves out score-less items, never filled in.
+    A judge absent from some items' ``judge_scores`` (a judge set that changed between
+    items) has no entry there, not a ``None`` entry; ``compute_metrics`` rejects that case
+    before calling this function.
     """
     n_criteria = len(criterion_types)
 
@@ -1162,16 +1175,29 @@ def _compute_judge_metrics(
     # cannot_assess filtering would otherwise hide. None when the judge had no binary data.
     judge_confusion_matrix = _build_binary_judge_confusion_matrix(pj_pred, pj_true, criterion_types)
 
-    # Score-level metrics (unchanged)
-    score_rmse = float(np.sqrt(mean_squared_error(true_scores, judge_scores)))
-    score_mae = float(mean_absolute_error(true_scores, judge_scores))
-
-    score_spearman = _compute_correlation(judge_scores, true_scores, "spearman")
-    score_kendall = _compute_correlation(judge_scores, true_scores, "kendall")
-    score_pearson = _compute_correlation(judge_scores, true_scores, "pearson")
-
-    # Bias
-    bias = systematic_bias(judge_scores, true_scores)
+    # Score-level metrics over the items whose judge score is defined; an undefined (None)
+    # score is left out, never filled in. With every score defined these are all items, as
+    # before. With none defined, every score-level metric is undefined (None).
+    scored_pairs = [
+        (pred, true)
+        for pred, true in zip(judge_scores, true_scores, strict=True)
+        if pred is not None
+    ]
+    score_rmse: float | None = None
+    score_mae: float | None = None
+    score_spearman: CorrelationResult | None = None
+    score_kendall: CorrelationResult | None = None
+    score_pearson: CorrelationResult | None = None
+    bias: BiasResult | None = None
+    if scored_pairs:
+        pred_scores = [pred for pred, _ in scored_pairs]
+        true_scored = [true for _, true in scored_pairs]
+        score_rmse = float(np.sqrt(mean_squared_error(true_scored, pred_scores)))
+        score_mae = float(mean_absolute_error(true_scored, pred_scores))
+        score_spearman = _compute_correlation(pred_scores, true_scored, "spearman")
+        score_kendall = _compute_correlation(pred_scores, true_scored, "kendall")
+        score_pearson = _compute_correlation(pred_scores, true_scored, "pearson")
+        bias = systematic_bias(pred_scores, true_scored)
 
     return JudgeMetrics(
         judge_id=judge_id,
@@ -1436,7 +1462,8 @@ def compute_metrics(
             ``kappa_ci``←``mean_kappa`` (ordinal quadratic-weighted), ``rmse_ci``←``score_rmse``.
             Each CI is ``None`` when undefined (empty/degenerate axis).
         n_bootstrap: Number of bootstrap samples if bootstrap=True.
-        per_judge: If True and ensemble, compute per-judge metrics.
+        per_judge: If True and ensemble, compute per-judge metrics. Every scored item must
+            have been graded by the same judges (see Raises).
         cannot_assess: How to handle CANNOT_ASSESS verdicts (binary criteria):
             - "exclude": Skip pairs where either is CANNOT_ASSESS (default)
             - "as_unmet": Treat CANNOT_ASSESS as UNMET
@@ -1477,6 +1504,9 @@ def compute_metrics(
 
     Raises:
         ValueError: If no common items between eval_result and dataset.
+        ValueError: If ``per_judge`` is True and a judge is in the ``judge_scores`` of only
+            some scored items (the judge set changed between items). A ``None`` entry is
+            present, not absent, and is supported.
 
     Example:
         >>> result = await evaluate(dataset, grader)
@@ -1567,8 +1597,9 @@ def compute_metrics(
     all_pred_scores: list[float] = []
     all_true_scores: list[float] = []
 
-    # For ensemble: per-judge data (binary verdicts + multi-choice option indices).
-    judge_scores: dict[str, list[float]] = {}
+    # For ensemble: per-judge data (binary verdicts + multi-choice option indices). A judge
+    # score is None when that judge's whole-rubric score is undefined for its role.
+    judge_scores: dict[str, list[float | None]] = {}
     judge_verdicts: dict[str, list[list[CriterionVerdict]]] = {}
     # Per-judge multi-choice predictions (items x criteria); binary cells are a None
     # placeholder. A multi-choice cell may transiently be None (genuine error-abstain);
@@ -2184,6 +2215,17 @@ def compute_metrics(
             jv = judge_verdicts.get(jid, [])
             if not jv:
                 continue
+            # A judge's scores are item-aligned only when it is in every scored item's
+            # judge_scores (a None entry counts: it is present, with an undefined score). A
+            # judge absent from some items has no entry to align, so its per-judge metrics
+            # are not supported; say which judge, rather than failing on the length mismatch.
+            if len(judge_scores[jid]) != len(all_true_scores):
+                raise ValueError(
+                    "per_judge=True needs every scored item graded by the same judges, but "
+                    f"judge {jid!r} is in the judge_scores of {len(judge_scores[jid])} of "
+                    f"{len(all_true_scores)} scored items (did the judge set change between "
+                    "items, e.g. on a resumed run?). Use per_judge=False for the other metrics."
+                )
 
             per_judge_metrics[jid] = _compute_judge_metrics(
                 judge_id=jid,

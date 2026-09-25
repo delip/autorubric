@@ -103,7 +103,7 @@ from autorubric.graders import CriterionGrader
 # Strategy 1: SKIP - Exclude from scoring (default)
 # Use when: Missing data shouldn't penalize the response
 grader_skip = CriterionGrader(
-    llm_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
     cannot_assess_config=CannotAssessConfig(
         strategy=CannotAssessStrategy.SKIP
     )
@@ -112,7 +112,7 @@ grader_skip = CriterionGrader(
 # Strategy 2: ZERO - Treat as UNMET (0 contribution)
 # Use when: Burden of proof is on the response
 grader_zero = CriterionGrader(
-    llm_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
     cannot_assess_config=CannotAssessConfig(
         strategy=CannotAssessStrategy.ZERO
     )
@@ -121,7 +121,7 @@ grader_zero = CriterionGrader(
 # Strategy 3: PARTIAL - Give partial credit
 # Use when: You want a middle ground
 grader_partial = CriterionGrader(
-    llm_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
     cannot_assess_config=CannotAssessConfig(
         strategy=CannotAssessStrategy.PARTIAL,
         partial_credit=0.5  # Award 50% of weight
@@ -131,7 +131,7 @@ grader_partial = CriterionGrader(
 # Strategy 4: FAIL - Treat as worst case
 # Use when: Conservative scoring is critical (safety-critical)
 grader_fail = CriterionGrader(
-    llm_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
     cannot_assess_config=CannotAssessConfig(
         strategy=CannotAssessStrategy.FAIL
     )
@@ -170,13 +170,13 @@ from autorubric.graders import CriterionGrader
 
 # Default: every multi-choice criterion is guaranteed an NA / abstain option.
 grader_with_na = CriterionGrader(
-    llm_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
     auto_na_option=True,  # default
 )
 
 # Forced-choice grading: the judge must pick a scored option (no NA injected).
 grader_forced_choice = CriterionGrader(
-    llm_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
     auto_na_option=False,
 )
 ```
@@ -222,7 +222,7 @@ async def compare_strategies():
         )
 
         grader = CriterionGrader(
-            llm_config=LLMConfig(model="openai/gpt-4.1-mini"),
+            judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
             cannot_assess_config=config
         )
 
@@ -438,7 +438,7 @@ async def main():
 
         for name, strategy in strategies:
             grader = CriterionGrader(
-                llm_config=LLMConfig(model="openai/gpt-4.1-mini", temperature=0.0),
+                judge_model_config=LLMConfig(model="openai/gpt-4.1-mini", temperature=0.0),
                 cannot_assess_config=CannotAssessConfig(
                     strategy=strategy,
                     partial_credit=0.5
@@ -476,7 +476,7 @@ async def main():
     target = RAG_RESPONSES[3]  # The fabricated citation one
 
     grader = CriterionGrader(
-        llm_config=LLMConfig(model="openai/gpt-4.1-mini", temperature=0.0),
+        judge_model_config=LLMConfig(model="openai/gpt-4.1-mini", temperature=0.0),
         cannot_assess_config=CannotAssessConfig(strategy=CannotAssessStrategy.SKIP)
     )
 

@@ -1,0 +1,16 @@
+<criterion_type>
+positive
+</criterion_type>
+
+<criterion>
+States the boiling point of water at sea level
+</criterion>
+
+<reference_submission>
+At sea level, water boils at 100 °C (212 °F).
+</reference_submission>
+
+<submission>
+<thinking>Recall the standard value at one atmosphere.</thinking>
+<output>Water boils at 100 °C at sea level.</output>
+</submission>

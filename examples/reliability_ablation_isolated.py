@@ -42,7 +42,7 @@ def build_judges() -> list[JudgeSpec]:
     """Build the 3-judge ensemble panel."""
     return [
         JudgeSpec(
-            llm_config=LLMConfig(
+            judge_model_config=LLMConfig(
                 model="gemini/gemini-2.5-flash",
                 temperature=0.0,
                 cache_enabled=True,
@@ -52,7 +52,7 @@ def build_judges() -> list[JudgeSpec]:
             judge_id="gemini-flash",
         ),
         JudgeSpec(
-            llm_config=LLMConfig(
+            judge_model_config=LLMConfig(
                 model="anthropic/claude-sonnet-4-5-20250929",
                 temperature=0.0,
                 cache_enabled=True,
@@ -62,7 +62,7 @@ def build_judges() -> list[JudgeSpec]:
             judge_id="claude-sonnet",
         ),
         JudgeSpec(
-            llm_config=LLMConfig(
+            judge_model_config=LLMConfig(
                 model="openai/gpt-5.2",
                 temperature=0.0,
                 cache_enabled=True,
@@ -83,7 +83,7 @@ def build_configurations(
 
     return {
         "Baseline": CriterionGrader(
-            llm_config=baseline_llm,
+            judge_model_config=baseline_llm,
             shuffle_options=False,
         ),
         "+Ensemble only": CriterionGrader(
@@ -92,11 +92,11 @@ def build_configurations(
             shuffle_options=False,
         ),
         "+Shuffle only": CriterionGrader(
-            llm_config=baseline_llm,
+            judge_model_config=baseline_llm,
             shuffle_options=True,
         ),
         "+Few-shot only": CriterionGrader(
-            llm_config=baseline_llm,
+            judge_model_config=baseline_llm,
             shuffle_options=False,
             training_data=train_ds,
             few_shot_config=FewShotConfig(

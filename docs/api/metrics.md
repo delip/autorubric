@@ -29,7 +29,7 @@ from autorubric import RubricDataset, LLMConfig, evaluate
 from autorubric.graders import CriterionGrader
 
 dataset = RubricDataset.from_file("data_with_ground_truth.json")
-grader = CriterionGrader(llm_config=LLMConfig(model="openai/gpt-4.1-mini"))
+grader = CriterionGrader(judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"))
 
 result = await evaluate(dataset, grader, show_progress=True)
 

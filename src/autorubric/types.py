@@ -611,7 +611,9 @@ class MultiChoiceJudgeVote(BaseModel):
             same no-option-selected abstain case as ``selected_index``.
         value: Score value of selected option.
         reason: Judge's brief justification for the selection (the conclusion distilled
-            from ``reasoning`` when thinking is enabled).
+            from ``reasoning`` when thinking is enabled). ``None`` means the judge gives no
+            explanation (a judge that returns probabilities instead of text); an LLM judge
+            always sets a string, possibly empty.
         weight: Judge's voting weight (default 1.0).
         na: True if selected option is NA.
         shuffle_order: Permutation used when presenting options to the judge.
@@ -621,6 +623,19 @@ class MultiChoiceJudgeVote(BaseModel):
         reasoning: The judge's verbose extended-thinking deliberation trace (populated
             only when thinking is enabled; None otherwise). ``reason`` is the conclusion
             distilled from it. Mirrors ``JudgeVote.reasoning`` for multi-choice criteria.
+        probabilities: The judge's probability for each option it was offered, when the
+            judge returns a distribution (a decision model); ``None`` for LLM judges. Keys
+            are ``str(i)`` for option index ``i`` in the rubric's original option order
+            (never a shuffled order); an option the judge was not offered is absent, not
+            ``0.0``. Same scheme as ``CriterionReport.probabilities``.
+        confidence: The judge's support for the option it selected, in [0, 1]:
+            ``clamp((K * p - 1) / (K - 1), 0, 1)``, where ``K`` is the number of options
+            offered and ``p`` is the selected option's probability. ``0.0`` means no support
+            beyond chance, ``1.0`` certainty. ``None`` for LLM judges.
+        superseded: True when this vote was recorded but not aggregated: a vote judged
+            insufficient (e.g. a decision model's low-confidence vote on a criterion that
+            was escalated to other judges) whose criterion's final verdict comes from the
+            other votes. It is kept for diagnostics and excluded from ``agreement``.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -629,12 +644,15 @@ class MultiChoiceJudgeVote(BaseModel):
     selected_index: int | None
     selected_label: str | None
     value: float
-    reason: str
+    reason: str | None
     weight: float = 1.0
     na: bool = False
     shuffle_order: list[int] | None = None
     error: str | None = None
     reasoning: str | None = None
+    probabilities: dict[str, float] | None = None
+    confidence: float | None = None
+    superseded: bool = False
 
     @property
     def is_error(self) -> bool:
@@ -658,7 +676,13 @@ class CriterionReport(Criterion):
         reason: The judge's brief, final justification for the verdict. When thinking is
             enabled this is the concise conclusion the judge *distilled from* its
             ``reasoning`` deliberation trace below; when thinking is disabled ``reasoning``
-            is None and ``reason`` stands alone.
+            is None and ``reason`` stands alone. ``None`` means the judge gives no
+            explanation (a judge that returns probabilities instead of text); an LLM judge
+            always sets a string, possibly empty. An LLM judgment whose explanation is
+            null is a ``parse`` failure, not a verdict, unless the judgment also carries
+            ``affected_criteria``: the appended ``[Affects: ...]`` tag then makes the
+            stored reason the string ``"None [Affects: ...]"`` and the verdict stands, as
+            it always has.
         shuffle_order: Permutation used when presenting multi-choice options to the LLM.
             Maps shuffled position → original index. None for binary criteria or when
             shuffle_options is disabled.
@@ -670,14 +694,27 @@ class CriterionReport(Criterion):
             chain of thought produced before settling on ``verdict``/``reason`` (the
             provider's ``reasoning_content`` channel). Populated only when thinking is
             enabled; None otherwise. ``reason`` is the conclusion distilled from this.
+        probabilities: The judge's probability for each outcome it was offered, when the
+            judge returns a distribution (a decision model); ``None`` for LLM judges. Keys
+            are strings so the report persists as JSON: for binary criteria the verdict
+            values (``"MET"``, ``"UNMET"``, and ``"CANNOT_ASSESS"`` when that outcome was
+            offered); for multi-choice criteria ``str(i)`` for option index ``i`` in the
+            rubric's original option order (never a shuffled order). An outcome the judge
+            was not offered is absent, not ``0.0``.
+        confidence: The judge's support for the outcome it selected, in [0, 1]:
+            ``clamp((K * p - 1) / (K - 1), 0, 1)``, where ``K`` is the number of outcomes
+            offered and ``p`` is the selected outcome's probability. ``0.0`` means no
+            support beyond chance, ``1.0`` certainty. ``None`` for LLM judges.
     """
 
     verdict: CriterionVerdict | None = None
     multi_choice_verdict: MultiChoiceVerdict | AggregatedMultiChoiceVerdict | None = None
-    reason: str
+    reason: str | None
     shuffle_order: list[int] | None = None
     error: str | None = None
     reasoning: str | None = None
+    probabilities: dict[str, float] | None = None
+    confidence: float | None = None
 
     @property
     def score_value(self) -> float:
@@ -863,23 +900,40 @@ class JudgeVote(BaseModel):
         judge_id: Identifier for the judge (e.g., "gpt-4", "claude-sonnet").
         verdict: The judge's verdict (MET/UNMET).
         reason: The judge's brief justification for the verdict (the conclusion distilled
-            from ``reasoning`` when thinking is enabled).
+            from ``reasoning`` when thinking is enabled). ``None`` means the judge gives no
+            explanation (a judge that returns probabilities instead of text); an LLM judge
+            always sets a string, possibly empty.
         weight: Judge's voting weight (default 1.0).
         error: Set (with a category prefix) when this vote's verdict was synthesized
             because the judge call failed. None for genuine votes.
         reasoning: The judge's verbose extended-thinking deliberation trace (populated
             only when thinking is enabled; None otherwise). ``reason`` is the conclusion
             distilled from it. Carried from this judge's ``CriterionReport.reasoning``.
+        probabilities: The judge's probability for each verdict it was offered, keyed by
+            verdict value (``"MET"``, ``"UNMET"``, and ``"CANNOT_ASSESS"`` when offered),
+            when the judge returns a distribution (a decision model); ``None`` for LLM
+            judges. Same scheme as ``CriterionReport.probabilities``.
+        confidence: The judge's support for the verdict it selected, in [0, 1]:
+            ``clamp((K * p - 1) / (K - 1), 0, 1)``, where ``K`` is the number of verdicts
+            offered and ``p`` is the selected verdict's probability. ``None`` for LLM
+            judges.
+        superseded: True when this vote was recorded but not aggregated: a vote judged
+            insufficient (e.g. a decision model's low-confidence vote on a criterion that
+            was escalated to other judges) whose criterion's final verdict comes from the
+            other votes. It is kept for diagnostics and excluded from ``agreement``.
     """
 
     model_config = ConfigDict(frozen=True)
 
     judge_id: str
     verdict: CriterionVerdict
-    reason: str
+    reason: str | None
     weight: float = 1.0
     error: str | None = None
     reasoning: str | None = None
+    probabilities: dict[str, float] | None = None
+    confidence: float | None = None
+    superseded: bool = False
 
     @property
     def is_error(self) -> bool:
@@ -901,52 +955,68 @@ class EnsembleCriterionReport(BaseModel):
     Attributes:
         criterion: The criterion being evaluated.
         final_verdict: Aggregated binary verdict from all judges. None for multi-choice.
-        final_reason: Combined reasoning from judges.
+        final_reason: Combined reasoning from judges: each vote's reason rendered as
+            ``"judge_id: reason"``, joined with ``" | "``. Votes whose ``reason`` is
+            ``None`` (the judge gives no explanation) are skipped. ``None`` only when no
+            vote carried a reason. The fixed reasons are kept whatever the votes' reasons:
+            ``"No votes"`` (an empty vote list) and, for binary criteria, ``"All judges
+            could not assess"`` (every vote ``CANNOT_ASSESS``).
         votes: Individual binary votes from each judge. Empty for multi-choice.
-        agreement: Proportion of judges agreeing with final verdict (0-1).
+        agreement: Proportion of the aggregated (non-``superseded``) votes agreeing with
+            the final verdict (0-1).
         final_multi_choice_verdict: Aggregated multi-choice verdict. None for binary.
         multi_choice_votes: Individual multi-choice votes. Empty for binary.
         error: Set (with a category prefix) when the final verdict was driven entirely by
             judge-call failures (every contributing vote errored). None when at least one
             genuine judgment was available. See ``is_error``.
+        escalated: True when this criterion was escalated: the vote first cast on it (a
+            decision model's) was judged insufficient because it errored, abstained, or its
+            ``confidence`` fell below the escalation threshold. That vote stays in the vote
+            list with ``superseded=True`` and the final verdict is aggregated from the
+            escalation judges' votes. False otherwise, including every report of a grader
+            that does not escalate.
     """
 
     model_config = ConfigDict(frozen=True)
 
     criterion: Criterion
     final_verdict: CriterionVerdict | None
-    final_reason: str
+    final_reason: str | None
     votes: list[JudgeVote] = Field(default_factory=list)
     agreement: float = 0.0
     # Multi-choice support
     final_multi_choice_verdict: AggregatedMultiChoiceVerdict | None = None
     multi_choice_votes: list[MultiChoiceJudgeVote] = Field(default_factory=list)
     error: str | None = None
+    escalated: bool = False
 
     @model_validator(mode="after")
     def _compute_agreement(self) -> "EnsembleCriterionReport":
         """Compute ``agreement`` from the votes when it was not supplied (default 0.0).
+
+        Only aggregated votes count: ``superseded`` votes are recorded but did not produce
+        the final verdict, so they are excluded.
 
         Frozen model, so the assignment goes through ``object.__setattr__``. Idempotent:
         a genuine 0.0 (total disagreement) recomputes to 0.0, and a supplied non-zero
         value is left untouched — preserving the prior ``__post_init__`` semantics.
         """
         if self.agreement == 0.0:
-            if self.votes:
-                agreeing = sum(1 for v in self.votes if v.verdict == self.final_verdict)
-                object.__setattr__(self, "agreement", agreeing / len(self.votes))
-            elif self.multi_choice_votes and self.final_multi_choice_verdict:
+            votes = [v for v in self.votes if not v.superseded]
+            mc_votes = [v for v in self.multi_choice_votes if not v.superseded]
+            if votes:
+                agreeing = sum(1 for v in votes if v.verdict == self.final_verdict)
+                object.__setattr__(self, "agreement", agreeing / len(votes))
+            elif mc_votes and self.final_multi_choice_verdict:
                 # For multi-choice, count votes matching the final selected index.
                 final_idx = self.final_multi_choice_verdict.selected_index
                 if final_idx is None:
                     # Genuine abstain with no option selected (forced-choice error, no NA
                     # option): agreement is the fraction of votes that likewise abstained.
-                    agreeing = sum(1 for v in self.multi_choice_votes if v.selected_index is None)
+                    agreeing = sum(1 for v in mc_votes if v.selected_index is None)
                 else:
-                    agreeing = sum(
-                        1 for v in self.multi_choice_votes if v.selected_index == final_idx
-                    )
-                object.__setattr__(self, "agreement", agreeing / len(self.multi_choice_votes))
+                    agreeing = sum(1 for v in mc_votes if v.selected_index == final_idx)
+                object.__setattr__(self, "agreement", agreeing / len(mc_votes))
         return self
 
     @property
@@ -985,7 +1055,11 @@ class EnsembleEvaluationReport(BaseModel):
         raw_score: The unnormalized weighted sum. ``None`` only on a failed/empty report.
         llm_raw_score: Same as raw_score (for compatibility with EvaluationReport).
         report: Per-criterion breakdown with ensemble voting details.
-        judge_scores: Individual scores from each judge.
+        judge_scores: Each judge's own score over the whole rubric (from its own verdicts),
+            keyed by ``judge_id``. ``None`` when that judge's whole-rubric score is
+            undefined for its role: a judge consulted only on some criteria (e.g. an
+            escalation judge) is ``None`` on every item, even an item where it happened to
+            judge every criterion, so the entry's meaning never depends on the item.
         mean_agreement: Average agreement across all criteria, or None when there
             are no criteria to agree on (empty rubric) / agreement was not measured.
         cannot_assess_count: Number of criteria with CANNOT_ASSESS final verdict.
@@ -1000,7 +1074,7 @@ class EnsembleEvaluationReport(BaseModel):
     raw_score: float | None = None
     llm_raw_score: float | None = None
     report: list[EnsembleCriterionReport] | None = None
-    judge_scores: dict[str, float] = Field(default_factory=dict)
+    judge_scores: dict[str, float | None] = Field(default_factory=dict)
     mean_agreement: float | None = None
     cannot_assess_count: int = 0
     token_usage: TokenUsage | None = None

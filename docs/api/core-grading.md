@@ -27,7 +27,7 @@ rubric = Rubric.from_dict([
 rubric = Rubric.from_file("rubric.yaml")
 
 # Grade
-grader = CriterionGrader(llm_config=LLMConfig(model="openai/gpt-4.1-mini"))
+grader = CriterionGrader(judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"))
 result = await rubric.grade(to_grade="...", grader=grader)
 
 # result.score is `float | None` (None if the grade failed); guard before formatting.

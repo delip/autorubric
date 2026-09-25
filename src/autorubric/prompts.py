@@ -9,15 +9,33 @@ from autorubric.types import Criterion, CriterionOption
 if TYPE_CHECKING:
     from autorubric.types import FewShotExample
 
-GRADER_SYSTEM_PROMPT_DEFAULT = """\
+# ============================================================================
+# Binary Verdict Definitions
+# ============================================================================
+# One source for what each binary verdict means. GRADER_SYSTEM_PROMPT_DEFAULT states them
+# at its verdict lines, and any other framing of a binary criterion reuses these exact
+# texts, so the LLM prompt and other judge framings cannot drift apart.
+
+MET_DEFINITION = "The thing described in the criterion IS present in the submission"
+UNMET_DEFINITION = "The thing described in the criterion IS NOT present in the submission"
+CANNOT_ASSESS_DEFINITION = "Insufficient evidence to determine either way (use rarely)"
+
+# For a negative criterion (one describing an active error), MET means the error is made.
+NEGATIVE_MET_DEFINITION = "The submission advocates, states, or recommends the problematic thing"
+NEGATIVE_UNMET_DEFINITION = (
+    "The submission does NOT make this error, OR mentions it only to warn against it"
+)
+
+GRADER_SYSTEM_PROMPT_DEFAULT = (
+    f"""\
 You are an expert evaluation judge. Your task is to determine whether a single criterion is \
 satisfied by a given submission. Be precise, evidence-based, and consistent.
 
 You will receive a <criterion_type> (positive or negative), a <criterion>, and a <submission> to \
 evaluate. Your verdict must be one of:
-- "MET": The thing described in the criterion IS present in the submission
-- "UNMET": The thing described in the criterion IS NOT present in the submission
-- "CANNOT_ASSESS": Insufficient evidence to determine either way (use rarely)
+- "MET": {MET_DEFINITION}
+- "UNMET": {UNMET_DEFINITION}
+- "CANNOT_ASSESS": {CANNOT_ASSESS_DEFINITION}
 
 Evaluate this criterion independently. Do not let overall submission quality influence your \
 judgment — a well-written submission can fail a criterion, and a poorly-written one can satisfy it.
@@ -32,8 +50,8 @@ POSITIVE CRITERIA describe desired traits, requirements, or content that should 
 - UNMET: The submission does not contain or satisfy the requirement
 
 NEGATIVE CRITERIA describe active errors or mistakes.
-- MET: The submission advocates, states, or recommends the problematic thing
-- UNMET: The submission does NOT make this error, OR mentions it only to warn against it
+- MET: {NEGATIVE_MET_DEFINITION}
+- UNMET: {NEGATIVE_UNMET_DEFINITION}
 
 What does NOT count as MET for negative criteria:
 - "Option A is often confused with B, but it's actually B" -> NOT stating it's A (UNMET)
@@ -100,7 +118,10 @@ Use this as context to calibrate your expectations, but evaluate the actual <sub
 its own merits against the criterion requirements. The reference is for context, not strict \
 comparison.
 
-RESPONSE FORMAT:
+"""
+    # The response format and examples hold literal JSON braces, so this part is a plain
+    # string rather than part of the f-string above.
+    """RESPONSE FORMAT:
 Respond with valid JSON:
 {"criterion_status": "MET" or "UNMET" or "CANNOT_ASSESS", "explanation": "..."}
 
@@ -138,6 +159,7 @@ Submission: "The sample shows some crystalline features, possibly igneous, but i
 {"criterion_status": "UNMET", "explanation": "The submission does not commit to a classification, hedging between igneous and metamorphic without making a definitive determination."}
 
 Return only raw JSON starting with {, no back-ticks, no 'json' prefix."""
+)
 
 
 def build_user_prompt(

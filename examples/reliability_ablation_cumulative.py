@@ -42,7 +42,7 @@ def build_judges() -> list[JudgeSpec]:
     """Build the 3-judge ensemble panel."""
     return [
         JudgeSpec(
-            llm_config=LLMConfig(
+            judge_model_config=LLMConfig(
                 model="groq/openai/gpt-oss-120b",
                 temperature=0.0,
                 max_parallel_requests=1,
@@ -52,7 +52,7 @@ def build_judges() -> list[JudgeSpec]:
             judge_id="gpt-oss-120b",
         ),
         JudgeSpec(
-            llm_config=LLMConfig(
+            judge_model_config=LLMConfig(
                 model="groq/moonshotai/kimi-k2-instruct-0905",
                 temperature=0.0,
                 max_parallel_requests=2,
@@ -62,7 +62,7 @@ def build_judges() -> list[JudgeSpec]:
             judge_id="kimi-k2-instruct",
         ),
         JudgeSpec(
-            llm_config=LLMConfig(
+            judge_model_config=LLMConfig(
                 model="gemini/gemini-3-flash-preview",
                 temperature=0.0,
                 max_parallel_requests=10,
@@ -83,15 +83,15 @@ def build_configurations(
 
     return {
         "Baseline": CriterionGrader(
-            llm_config=baseline_llm,
+            judge_model_config=baseline_llm,
             shuffle_options=False,
         ),
         "+Shuffling": CriterionGrader(
-            llm_config=baseline_llm,
+            judge_model_config=baseline_llm,
             shuffle_options=True,
         ),
         "+Few-shot": CriterionGrader(
-            llm_config=baseline_llm,
+            judge_model_config=baseline_llm,
             shuffle_options=True,
             training_data=train_ds,
             few_shot_config=FewShotConfig(

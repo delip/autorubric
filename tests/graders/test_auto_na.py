@@ -147,7 +147,7 @@ async def test_judge_can_select_injected_na_option(mock_llm_config):
         "autorubric.graders.criterion_grader.LLMClient",
         return_value=_mc_client(selected_option=4),  # the injected NA option
     ):
-        grader = CriterionGrader(llm_config=mock_llm_config, shuffle_options=False)
+        grader = CriterionGrader(judge_model_config=mock_llm_config, shuffle_options=False)
         report = await rubric.grade("submission", grader=grader)
 
     cr = report.report[0]
@@ -172,7 +172,7 @@ async def test_auto_na_off_does_not_inject(mock_llm_config):
         return_value=_mc_client(selected_option=1),  # "Bad"
     ):
         grader = CriterionGrader(
-            llm_config=mock_llm_config, shuffle_options=False, auto_na_option=False
+            judge_model_config=mock_llm_config, shuffle_options=False, auto_na_option=False
         )
         report = await rubric.grade("submission", grader=grader)
 
@@ -193,7 +193,7 @@ async def test_author_na_not_stripped_when_auto_off(mock_llm_config):
         return_value=_mc_client(selected_option=1),
     ):
         grader = CriterionGrader(
-            llm_config=mock_llm_config, shuffle_options=False, auto_na_option=False
+            judge_model_config=mock_llm_config, shuffle_options=False, auto_na_option=False
         )
         report = await rubric.grade("submission", grader=grader)
 
@@ -210,7 +210,7 @@ async def test_author_na_not_duplicated_when_auto_on(mock_llm_config):
         "autorubric.graders.criterion_grader.LLMClient",
         return_value=_mc_client(selected_option=1),
     ):
-        grader = CriterionGrader(llm_config=mock_llm_config, shuffle_options=False)
+        grader = CriterionGrader(judge_model_config=mock_llm_config, shuffle_options=False)
         report = await rubric.grade("submission", grader=grader)
 
     cr = report.report[0]
@@ -231,7 +231,7 @@ async def test_infra_failure_points_at_genuine_injected_na(mock_llm_config):
         "autorubric.graders.criterion_grader.LLMClient",
         return_value=_client_raising(litellm.Timeout("timed out", model="m", llm_provider="p")),
     ):
-        grader = CriterionGrader(llm_config=mock_llm_config, shuffle_options=False)
+        grader = CriterionGrader(judge_model_config=mock_llm_config, shuffle_options=False)
         report = await rubric.grade("submission", grader=grader)
 
     cr = report.report[0]
@@ -263,7 +263,7 @@ async def test_injected_na_excluded_under_skip_like_binary(mock_llm_config):
         # Multi-choice → injected NA (option 4); binary → MET.
         return_value=_routing_client(mc_selected_option=4, binary_verdict=CriterionVerdict.MET),
     ):
-        grader = CriterionGrader(llm_config=mock_llm_config, shuffle_options=False)
+        grader = CriterionGrader(judge_model_config=mock_llm_config, shuffle_options=False)
         report = await rubric.grade("submission", grader=grader)
 
     mc_cr = report.report[1]
@@ -288,7 +288,7 @@ async def test_forced_choice_infra_error_is_genuine_abstain(mock_llm_config):
         return_value=_client_raising(litellm.Timeout("timed out", model="m", llm_provider="p")),
     ):
         grader = CriterionGrader(
-            llm_config=mock_llm_config, shuffle_options=False, auto_na_option=False
+            judge_model_config=mock_llm_config, shuffle_options=False, auto_na_option=False
         )
         report = await rubric.grade("submission", grader=grader)
 
@@ -329,7 +329,7 @@ async def test_forced_choice_infra_error_excluded_under_skip(mock_llm_config):
         ),
     ):
         grader = CriterionGrader(
-            llm_config=mock_llm_config, shuffle_options=False, auto_na_option=False
+            judge_model_config=mock_llm_config, shuffle_options=False, auto_na_option=False
         )
         report = await rubric.grade("submission", grader=grader)
 

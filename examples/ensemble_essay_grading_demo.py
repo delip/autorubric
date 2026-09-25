@@ -54,7 +54,7 @@ async def main():
     # Configure ensemble judges with rate limiting
     judges = [
         JudgeSpec(
-            llm_config=LLMConfig(
+            judge_model_config=LLMConfig(
                 model="gemini/gemini-2.5-flash",
                 temperature=0.0,
                 max_parallel_requests=10,
@@ -63,7 +63,7 @@ async def main():
             weight=1.0,
         ),
         JudgeSpec(
-            llm_config=LLMConfig(
+            judge_model_config=LLMConfig(
                 model="anthropic/claude-sonnet-4-5-20250929",
                 temperature=0.0,
                 max_parallel_requests=10,
@@ -72,7 +72,7 @@ async def main():
             weight=1.0,
         ),
         JudgeSpec(
-            llm_config=LLMConfig(
+            judge_model_config=LLMConfig(
                 model="openai/gpt-5.2",
                 temperature=0.0,
                 max_parallel_requests=10,

@@ -62,7 +62,7 @@ eval_config = LLMConfig(
 )
 
 agent_client = LLMClient(agent_config)
-eval_grader = CriterionGrader(llm_config=eval_config, normalize=True)
+eval_grader = CriterionGrader(judge_model_config=eval_config, normalize=True)
 ```
 
 The generate-and-grade helper:
@@ -630,7 +630,7 @@ async def main():
         max_parallel_requests=5,
     ))
     eval_grader = CriterionGrader(
-        llm_config=LLMConfig(
+        judge_model_config=LLMConfig(
             model="gemini/gemini-3-flash-preview",
             temperature=1.0,
             thinking="medium",

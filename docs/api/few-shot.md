@@ -24,7 +24,7 @@ train_data, test_data = dataset.split_train_test(n_train=100, stratify=True, see
 
 # Configure few-shot grader
 grader = CriterionGrader(
-    llm_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
     training_data=train_data,
     few_shot_config=FewShotConfig(
         n_examples=3,

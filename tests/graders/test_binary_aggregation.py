@@ -25,7 +25,9 @@ CANNOT_ASSESS = CriterionVerdict.CANNOT_ASSESS
 
 
 def _grader(aggregation: AggregationStrategy) -> CriterionGrader:
-    return CriterionGrader(llm_config=LLMConfig(model="test-model"), aggregation=aggregation)
+    return CriterionGrader(
+        judge_model_config=LLMConfig(model="test-model"), aggregation=aggregation
+    )
 
 
 def _votes(*specs: tuple[CriterionVerdict, float]) -> list[JudgeVote]:

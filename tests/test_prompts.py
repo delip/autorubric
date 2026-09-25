@@ -157,3 +157,50 @@ def test_contradictory_submission_instruction_is_scale_aware():
 def test_nominal_contradictory_submission_example_maps_to_na():
     """A worked nominal contradictory example demonstrates ambiguous -> NA."""
     assert "no single category applies" in MULTI_CHOICE_SYSTEM_PROMPT
+
+
+# ---------------------------------------------------------------------------
+# Shared verdict definitions (one source for LLM and decision-model framings)
+# ---------------------------------------------------------------------------
+
+
+def test_verdict_definitions_are_single_line_strings():
+    """The shared definitions are plain one-line texts, usable verbatim as option
+    descriptions outside the LLM system prompt."""
+    from autorubric import prompts
+
+    for name in (
+        "MET_DEFINITION",
+        "UNMET_DEFINITION",
+        "CANNOT_ASSESS_DEFINITION",
+        "NEGATIVE_MET_DEFINITION",
+        "NEGATIVE_UNMET_DEFINITION",
+    ):
+        value = getattr(prompts, name)
+        assert isinstance(value, str) and value, name
+        assert "\n" not in value and value == value.strip(), name
+
+
+def test_binary_system_prompt_is_built_from_the_verdict_definitions():
+    """GRADER_SYSTEM_PROMPT_DEFAULT states each definition at its verdict line, so the
+    LLM prompt and any other framing that reuses the constants cannot drift apart."""
+    from autorubric.prompts import (
+        CANNOT_ASSESS_DEFINITION,
+        GRADER_SYSTEM_PROMPT_DEFAULT,
+        MET_DEFINITION,
+        NEGATIVE_MET_DEFINITION,
+        NEGATIVE_UNMET_DEFINITION,
+        UNMET_DEFINITION,
+    )
+
+    assert (
+        "Your verdict must be one of:\n"
+        f'- "MET": {MET_DEFINITION}\n'
+        f'- "UNMET": {UNMET_DEFINITION}\n'
+        f'- "CANNOT_ASSESS": {CANNOT_ASSESS_DEFINITION}\n'
+    ) in GRADER_SYSTEM_PROMPT_DEFAULT
+    assert (
+        "NEGATIVE CRITERIA describe active errors or mistakes.\n"
+        f"- MET: {NEGATIVE_MET_DEFINITION}\n"
+        f"- UNMET: {NEGATIVE_UNMET_DEFINITION}\n"
+    ) in GRADER_SYSTEM_PROMPT_DEFAULT

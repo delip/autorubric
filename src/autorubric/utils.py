@@ -355,7 +355,7 @@ async def fill_ground_truth(
         >>> from autorubric.utils import fill_ground_truth
         >>>
         >>> dataset = RubricDataset.from_file("unlabeled.json")
-        >>> grader = CriterionGrader(llm_config=LLMConfig(model="openai/gpt-4o"))
+        >>> grader = CriterionGrader(judge_model_config=LLMConfig(model="openai/gpt-4o"))
         >>> labeled = await fill_ground_truth(dataset, grader)
         >>> labeled.to_file("labeled.json")
     """

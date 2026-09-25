@@ -697,7 +697,9 @@ def extract_issues(report: EnsembleEvaluationReport) -> list[IssueDetail]:
                     requirement=criterion_report.criterion.requirement,
                     weight=weight,
                     is_antipattern=weight < 0,
-                    feedback=criterion_report.final_reason,
+                    # final_reason is None only when no judge gave an explanation, which
+                    # never happens for LLM meta-judges; feedback stays a plain string.
+                    feedback=criterion_report.final_reason or "",
                 )
             )
 
@@ -935,7 +937,12 @@ def _format_error_criteria(
             sign = "+" if weight > 0 else ""
             verdict_str = verdict.value
             name = ecr.criterion.name or ecr.criterion.requirement[:40]
-            lines.append(f"    [w={sign}{weight}, {verdict_str}] {name}: {ecr.final_reason}")
+            line = f"    [w={sign}{weight}, {verdict_str}] {name}"
+            # A criterion whose judges gave no explanation has final_reason None: omit
+            # the ": reason" suffix instead of rendering "None".
+            if ecr.final_reason is not None:
+                line += f": {ecr.final_reason}"
+            lines.append(line)
 
     return lines
 
@@ -2040,7 +2047,7 @@ class ImprovementRunner:
             if isinstance(config.eval_llm, list):
                 validation_grader = CriterionGrader(judges=config.eval_llm)
             else:
-                validation_grader = CriterionGrader(llm_config=config.eval_llm)
+                validation_grader = CriterionGrader(judge_model_config=config.eval_llm)
             n_validation_items = len(config.validation_data.items)
 
         # Set up progress display
@@ -2495,7 +2502,7 @@ class ImprovementRunner:
         if isinstance(config.eval_llm, list):
             validation_grader = CriterionGrader(judges=config.eval_llm)
         else:
-            validation_grader = CriterionGrader(llm_config=config.eval_llm)
+            validation_grader = CriterionGrader(judge_model_config=config.eval_llm)
 
         n_items = len(config.validation_data.items)
 

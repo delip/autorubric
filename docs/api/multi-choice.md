@@ -87,13 +87,13 @@ LLM judges exhibit position bias in multi-choice settings. AutoRubric shuffles o
 
 ```python
 # Default: shuffling enabled, seed auto-generated
-grader = CriterionGrader(llm_config=config)
+grader = CriterionGrader(judge_model_config=config)
 
 # Pin the seed for reproducible shuffles
-grader = CriterionGrader(llm_config=config, seed=42)
+grader = CriterionGrader(judge_model_config=config, seed=42)
 
 # Disable shuffling entirely
-grader = CriterionGrader(llm_config=config, shuffle_options=False)
+grader = CriterionGrader(judge_model_config=config, shuffle_options=False)
 ```
 
 The shuffle order for each criterion is recorded in `CriterionReport.shuffle_order` and persisted in experiment checkpoints.

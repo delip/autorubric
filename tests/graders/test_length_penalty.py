@@ -121,7 +121,7 @@ class TestLengthPenaltyWithNormalize:
             return_value=mock_client,
         ):
             grader = CriterionGrader(
-                llm_config=mock_llm_config,
+                judge_model_config=mock_llm_config,
                 normalize=True,
                 length_penalty=LengthPenalty(
                     free_budget=10,
@@ -146,7 +146,7 @@ class TestLengthPenaltyWithNormalize:
             return_value=mock_client,
         ):
             grader = CriterionGrader(
-                llm_config=mock_llm_config,
+                judge_model_config=mock_llm_config,
                 normalize=True,
                 length_penalty=LengthPenalty(
                     free_budget=5,
@@ -172,7 +172,7 @@ class TestLengthPenaltyWithoutNormalize:
             return_value=mock_client,
         ):
             grader = CriterionGrader(
-                llm_config=mock_llm_config,
+                judge_model_config=mock_llm_config,
                 normalize=False,
             )
 
@@ -189,7 +189,7 @@ class TestLengthPenaltyWithoutNormalize:
             return_value=mock_client,
         ):
             grader = CriterionGrader(
-                llm_config=mock_llm_config,
+                judge_model_config=mock_llm_config,
                 normalize=False,
                 length_penalty=LengthPenalty(
                     free_budget=100,
@@ -212,7 +212,7 @@ class TestLengthPenaltyWithoutNormalize:
             return_value=mock_client,
         ):
             grader = CriterionGrader(
-                llm_config=mock_llm_config,
+                judge_model_config=mock_llm_config,
                 normalize=False,
                 length_penalty=LengthPenalty(
                     free_budget=5,
@@ -235,7 +235,7 @@ class TestLengthPenaltyWithoutNormalize:
             return_value=mock_client,
         ):
             grader = CriterionGrader(
-                llm_config=mock_llm_config,
+                judge_model_config=mock_llm_config,
                 normalize=False,
                 length_penalty=LengthPenalty(
                     free_budget=5,
@@ -266,7 +266,7 @@ class TestLengthPenaltyWithoutNormalize:
             return_value=mock_client,
         ):
             grader = CriterionGrader(
-                llm_config=mock_llm_config,
+                judge_model_config=mock_llm_config,
                 normalize=False,
                 length_penalty=LengthPenalty(
                     free_budget=5,
@@ -329,7 +329,7 @@ class TestLengthPenaltyWithNegativeCriteria:
             return_value=mock_client,
         ):
             grader = CriterionGrader(
-                llm_config=mock_llm_config,
+                judge_model_config=mock_llm_config,
                 normalize=False,
             )
 
@@ -383,7 +383,7 @@ class TestLengthPenaltyWithNegativeCriteria:
             return_value=mock_client,
         ):
             grader = CriterionGrader(
-                llm_config=mock_llm_config,
+                judge_model_config=mock_llm_config,
                 normalize=False,
                 length_penalty=LengthPenalty(
                     free_budget=5,

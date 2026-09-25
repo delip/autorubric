@@ -97,7 +97,7 @@ async def evaluate_rubric_standalone(
 
     meta_rubric = get_standalone_meta_rubric()
     grader = CriterionGrader(
-        llm_config=llm_config,
+        judge_model_config=llm_config,
         binary_response_format=MetaCriterionJudgment,
         multi_choice_response_format=MultiChoiceMetaJudgment,
     )
@@ -165,7 +165,7 @@ async def evaluate_rubric_in_context(
 
     meta_rubric = get_in_context_meta_rubric()
     grader = CriterionGrader(
-        llm_config=llm_config,
+        judge_model_config=llm_config,
         binary_response_format=MetaCriterionJudgment,
         multi_choice_response_format=MultiChoiceMetaJudgment,
     )

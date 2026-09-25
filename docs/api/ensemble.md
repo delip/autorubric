@@ -45,6 +45,23 @@ for cr in result.report:
         print(f"  {vote.judge_id}: {vote.verdict} ({vote.reason[:50]}...)")
 ```
 
+## Keyword Form
+
+`JudgeSpec` takes the judge's config, its `judge_id`, and an optional `weight`, in that order. When
+you pass the config by keyword, call it `judge_model_config`:
+
+```python
+spec = JudgeSpec(
+    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    judge_id="gpt",
+    weight=1.0,
+)
+spec.judge_model_config  # read/write; the same object as spec.llm_config
+```
+
+The underlying dataclass field is still named `llm_config`, so `JudgeSpec(llm_config=...)` and
+`spec.llm_config` keep working without a warning. Passing both keywords raises `ValueError`.
+
 ## Aggregation Strategies
 
 | Strategy | Description |

@@ -47,7 +47,7 @@ from autorubric import Rubric, LLMConfig
 from autorubric.graders import CriterionGrader
 
 async def main():
-    grader = CriterionGrader(llm_config=LLMConfig(model="openai/gpt-5.1-mini"))
+    grader = CriterionGrader(judge_model_config=LLMConfig(model="openai/gpt-5.1-mini"))
 
     rubric = Rubric.from_dict([
         {"weight": 10.0, "requirement": "States NMC cell-level energy density in the 250-300 Wh/kg range"},

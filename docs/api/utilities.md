@@ -66,7 +66,7 @@ async def generate_labels():
 
     # Use strong model for ground truth
     grader = CriterionGrader(
-        llm_config=LLMConfig(
+        judge_model_config=LLMConfig(
             model="anthropic/claude-sonnet-4-5-20250929",
             max_parallel_requests=10,
         )

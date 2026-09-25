@@ -103,7 +103,7 @@ from autorubric.graders import CriterionGrader
 
 # Use a powerful model for ground truth generation
 strong_grader = CriterionGrader(
-    llm_config=LLMConfig(
+    judge_model_config=LLMConfig(
         model="openai/gpt-4.1",  # or "anthropic/claude-sonnet-4-5-20250929"
         temperature=0.0,
     )
@@ -183,7 +183,7 @@ from autorubric import evaluate
 
 # Production model (cheaper, faster)
 production_grader = CriterionGrader(
-    llm_config=LLMConfig(
+    judge_model_config=LLMConfig(
         model="openai/gpt-4.1-mini",  # or "gemini/gemini-2.0-flash"
         temperature=0.0,
     )
@@ -493,7 +493,7 @@ async def main():
 
     # Strong model for ground truth generation
     strong_grader = CriterionGrader(
-        llm_config=LLMConfig(
+        judge_model_config=LLMConfig(
             model="openai/gpt-4.1",
             temperature=0.0,
         )
@@ -519,7 +519,7 @@ async def main():
 
     # Production model for comparison
     production_grader = CriterionGrader(
-        llm_config=LLMConfig(
+        judge_model_config=LLMConfig(
             model="openai/gpt-4.1-mini",
             temperature=0.0,
         )

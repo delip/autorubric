@@ -45,7 +45,7 @@ def test_create_error_report_score_is_none(mock_llm_config):
         rubric=Rubric([Criterion(weight=1.0, requirement="r")]),
         items=[DataItem(submission="s", description="d")],
     )
-    runner = EvalRunner(dataset=dataset, grader=CriterionGrader(llm_config=mock_llm_config))
+    runner = EvalRunner(dataset=dataset, grader=CriterionGrader(judge_model_config=mock_llm_config))
 
     report = runner._create_error_report("boom")
 
@@ -57,7 +57,7 @@ def test_create_error_report_score_is_none(mock_llm_config):
 @pytest.mark.asyncio
 async def test_no_judge_results_report_score_is_none(mock_llm_config):
     """The 'No judge results to aggregate' empty-path report has None scores."""
-    grader = CriterionGrader(llm_config=mock_llm_config)
+    grader = CriterionGrader(judge_model_config=mock_llm_config)
     report = await grader.aggregate([])
 
     assert isinstance(report, EnsembleEvaluationReport)

@@ -13,6 +13,23 @@ from autorubric.types import CriterionJudgment
 CriterionList = list[Criterion]
 
 
+def pytest_configure(config: pytest.Config) -> None:
+    """Make every ``DeprecationWarning`` attributed to an ``autorubric`` module an error.
+
+    The library must never trigger its own deprecations (it calls ``CriterionGrader`` with
+    ``judge_model_config=``, never the deprecated ``llm_config=``), so this guards every
+    path the suite runs. In an ini filter the module field is a regular expression matched
+    at the start of the module name, so it covers all ``autorubric.*`` modules. A caller's
+    own deprecated call is unaffected: ``stacklevel=2`` attributes it to the caller (a
+    test module), and ``pytest.warns`` still captures it. pytest applies a run's own ``-W``
+    options after ini filters, so they take precedence (``-W always::DeprecationWarning``
+    lifts the guard for that run); ``TestSuiteWideDeprecationGuard`` in
+    ``tests/graders/test_judge_model_config.py`` checks this configuration independently of
+    the run's filters.
+    """
+    config.addinivalue_line("filterwarnings", "error::DeprecationWarning:autorubric")
+
+
 @pytest.fixture
 def mock_llm_config() -> LLMConfig:
     """Create a mock LLMConfig for testing."""

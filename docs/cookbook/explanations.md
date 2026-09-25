@@ -43,7 +43,7 @@ rubric = Rubric.from_dict([
 ])
 
 grader = CriterionGrader(
-    llm_config=LLMConfig(model="openai/gpt-4.1-mini", temperature=0.0)
+    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini", temperature=0.0)
 )
 
 async def main():
@@ -229,7 +229,7 @@ async def main():
     dataset = RubricDataset.from_file(DATASET_PATH)
 
     grader = CriterionGrader(
-        llm_config=LLMConfig(model="openai/gpt-4.1-mini", temperature=0.0)
+        judge_model_config=LLMConfig(model="openai/gpt-4.1-mini", temperature=0.0)
     )
 
     item = dataset.items[0]

@@ -175,6 +175,12 @@ class CorrelationResult(BaseModel):
         return f"{strength} {direction}"
 
 
+def _coefficient(result: CorrelationResult | None) -> float | None:
+    """The coefficient of an optional correlation result: ``None`` when the correlation
+    itself is undefined (``result is None``) or its coefficient is."""
+    return result.coefficient if result is not None else None
+
+
 class BiasResult(BaseModel):
     """Result from systematic bias analysis.
 
@@ -972,12 +978,18 @@ class JudgeMetrics(BaseModel):
         confusion_matrix: This judge's confusion matrix, aggregated across criteria from the
             raw pre-filter codes (binary MET/UNMET with an abstain ``CANNOT_ASSESS`` class
             last → 3×3). ``None`` when there is no data.
-        score_rmse: RMSE of cumulative scores.
-        score_mae: MAE of cumulative scores.
-        score_spearman: Spearman correlation result.
-        score_kendall: Kendall tau correlation result.
-        score_pearson: Pearson correlation result.
-        bias: Systematic bias analysis result.
+        score_rmse: RMSE of this judge's cumulative scores (its
+            ``EnsembleEvaluationReport.judge_scores`` entries) against the ground-truth
+            scores. ``None`` when the judge's score is undefined on every item (a judge
+            consulted only on some criteria has a ``None`` entry by role), and likewise
+            for every other score field below. An item whose entry is ``None`` while
+            others are defined is left out of the judge's score pairs, as the aggregate
+            leaves out score-less items.
+        score_mae: MAE of cumulative scores, over the same items as ``score_rmse``.
+        score_spearman: Spearman correlation result (same items as ``score_rmse``).
+        score_kendall: Kendall tau correlation result (same items as ``score_rmse``).
+        score_pearson: Pearson correlation result (same items as ``score_rmse``).
+        bias: Systematic bias analysis result (same items as ``score_rmse``).
     """
 
     model_config = ConfigDict(frozen=True)
@@ -990,12 +1002,12 @@ class JudgeMetrics(BaseModel):
     mean_kappa: float | None
     phi: float | None = None
     confusion_matrix: ConfusionMatrix | None = None
-    score_rmse: float
-    score_mae: float
-    score_spearman: CorrelationResult
-    score_kendall: CorrelationResult
-    score_pearson: CorrelationResult
-    bias: BiasResult
+    score_rmse: float | None
+    score_mae: float | None
+    score_spearman: CorrelationResult | None
+    score_kendall: CorrelationResult | None
+    score_pearson: CorrelationResult | None
+    bias: BiasResult | None
 
 
 class MetricsResult(BaseModel):
@@ -1283,9 +1295,9 @@ class MetricsResult(BaseModel):
                 )
                 if verbose:
                     lines.append(
-                        f"      RMSE={jm.score_rmse:.4f}, "
-                        f"Spearman={_fmt_opt(jm.score_spearman.coefficient, '.4f')}, "
-                        f"MAE={jm.score_mae:.4f}"
+                        f"      RMSE={_fmt_opt(jm.score_rmse, '.4f')}, "
+                        f"Spearman={_fmt_opt(_coefficient(jm.score_spearman), '.4f')}, "
+                        f"MAE={_fmt_opt(jm.score_mae, '.4f')}"
                     )
                     if jm.confusion_matrix is not None:
                         lines.append(
@@ -1654,10 +1666,10 @@ class MetricsResult(BaseModel):
                         "n_samples": None,
                         "rmse": jm.score_rmse,
                         "mae": jm.score_mae,
-                        "spearman": jm.score_spearman.coefficient,
-                        "kendall": jm.score_kendall.coefficient,
-                        "pearson": jm.score_pearson.coefficient,
-                        "bias": jm.bias.mean_bias,
+                        "spearman": _coefficient(jm.score_spearman),
+                        "kendall": _coefficient(jm.score_kendall),
+                        "pearson": _coefficient(jm.score_pearson),
+                        "bias": jm.bias.mean_bias if jm.bias is not None else None,
                         "adjacent_accuracy": None,
                         "weighted_kappa": None,
                         "phi": jm.phi,
