@@ -128,6 +128,11 @@ def test_partially_undefined_scores_use_the_defined_items_only():
     assert jb.score_spearman is not None and jb.score_spearman.n_samples == 3
     assert jb.score_kendall is not None and jb.score_kendall.n_samples == 3
     assert jb.score_pearson is not None and jb.score_pearson.n_samples == 3
+    # A score undefined on only some items does not make the judge a cascade escalation
+    # judge (whose every entry is None): its coverage stays full.
+    assert jb.coverage == "full" and jb.n_pairs is None
+    assert "(escalated subset" not in partial.summary()
+    assert "judge_coverage" not in partial.to_dataframe().columns
 
 
 def test_summary_renders_undefined_score_metrics_as_na():

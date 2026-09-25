@@ -3,29 +3,33 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import dataclasses
 import functools
 import hashlib
 import inspect
+import itertools
 import logging
 import math
 import random
 import warnings
-from collections.abc import Callable, Mapping, Sequence
+from collections import Counter
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, TypeVar, cast, overload
+from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast, overload
 
 from pydantic import BaseModel
 
 from autorubric.decision import (
     DecisionModelClient,
     DecisionModelConfig,
+    _is_real_number,
     answer_to_report,
     build_questions,
     build_state,
 )
-from autorubric.graders.base import Grader
+from autorubric.graders.base import Grader, _caller_stacklevel
 from autorubric.llm import GenerateResult, LLMClient, LLMConfig, classify_grading_error
 from autorubric.prompts import (
     FEW_SHOT_SYSTEM_PROMPT_ADDITION,
@@ -92,6 +96,55 @@ FEW_SHOT_DOMAIN = "few_shot"
 
 _PASSED_KEYWORDS: ContextVar[frozenset[str]] = ContextVar("_PASSED_KEYWORDS", default=frozenset())
 """Names of the keyword arguments passed to the ``__init__`` call running in this context."""
+
+_ESCALATION_NAMES_CHECKED: ContextVar[bool] = ContextVar("_ESCALATION_NAMES_CHECKED", default=False)
+"""True while a batch (``EvalRunner.run``, ``fill_ground_truth``) grades a dataset's items.
+The batch checked the cascade's ``EscalationConfig.per_criterion`` names against the union
+of its items' rubrics before grading (``_escalation_names_checked``), so
+``CriterionGrader.judge`` skips its per-rubric check: with per-item rubrics a name absent
+from one item's rubric may be in another's."""
+
+
+def _escalation_names_checked(
+    grader: Grader, dataset: RubricDataset
+) -> contextlib.AbstractContextManager[None]:
+    """Check a cascade's ``per_criterion`` names once for a batch grading ``dataset``'s items.
+
+    Thresholds are looked up by criterion name, and with per-item rubrics a name absent from
+    one item's rubric can be in another's, so a batch checks the names once, against every
+    item's rubric (``get_item_rubric``), and warns about the names no item's rubric has.
+    Wrap the batch's grading in ``with _escalation_names_checked(grader, dataset):``. The
+    check runs when this is called, so that its warning names the code that asked for
+    grading (a ``contextlib`` frame is not autorubric's); the context returned sets
+    ``_ESCALATION_NAMES_CHECKED`` for the grading inside it, tasks started there included,
+    so that ``CriterionGrader.judge`` skips its per-rubric check. A grader that is not a
+    ``CriterionGrader`` is neither checked nor flagged.
+
+    Args:
+        grader: The batch's grader.
+        dataset: The dataset whose items the batch grades.
+
+    Returns:
+        The context to grade the items in.
+    """
+    if not isinstance(grader, CriterionGrader):
+        return contextlib.nullcontext()
+    grader._check_escalation_names(
+        (dataset.get_item_rubric(idx).rubric for idx in range(len(dataset))),
+        "any item's rubric",
+    )
+    return _escalation_names_marked_checked()
+
+
+@contextlib.contextmanager
+def _escalation_names_marked_checked() -> Iterator[None]:
+    """Set ``_ESCALATION_NAMES_CHECKED`` for the body of the ``with`` statement."""
+    token = _ESCALATION_NAMES_CHECKED.set(True)
+    try:
+        yield
+    finally:
+        _ESCALATION_NAMES_CHECKED.reset(token)
+
 
 _InitT = TypeVar("_InitT", bound=Callable[..., None])
 
@@ -326,6 +379,143 @@ class JudgeSpec:
         self.llm_config = value
 
 
+@dataclass(frozen=True)
+class EscalationConfig:
+    """Configuration of a confidence cascade: which LLM judges take over, and when.
+
+    Passed as ``CriterionGrader(escalation=...)`` to a grader whose one judge is a decision
+    model. The decision model answers every criterion of an item, in its one request per
+    item; a criterion is **escalated** when its vote errored, abstained (``CANNOT_ASSESS``
+    or an NA option), or has a ``confidence`` below the criterion's threshold
+    (``threshold_for``). Only escalated criteria go to the escalation judges, and only
+    their votes decide such a criterion's verdict (aggregated with the grader's
+    ``aggregation`` / ``ordinal_aggregation`` / ``nominal_aggregation``); the decision
+    model's vote is kept with ``superseded=True`` and never used as a fallback.
+
+    Validated at construction (``dataclasses.replace`` validates again) and frozen: its
+    fields cannot be reassigned. The ``judges`` list and the ``per_criterion`` dict can
+    still be changed in place, so a grader validates and keeps its own copy
+    (``dataclasses.replace``) when it is built; later changes to the config do not reach
+    it.
+
+    Attributes:
+        judges: The escalation judges, LLM judges only, in order. A bare ``LLMConfig``
+            given to the constructor becomes ``[JudgeSpec(config, "escalation")]``. To
+            compare a cascade with a separate LLM run judge for judge (the same option
+            shuffles and few-shot examples), give that run's judge the same ``judge_id``
+            and both graders the same ``seed``.
+        threshold: A criterion is escalated when the decision model's confidence is below
+            it, in [0, 1]. ``0.0`` escalates only errors and abstentions; ``1.0`` everything
+            short of certainty.
+        per_criterion: Thresholds for particular criteria, keyed by criterion name (each
+            in [0, 1]); other criteria, and unnamed ones, use ``threshold``. A grader
+            checks the names against the rubrics it grades and warns about names that
+            match no criterion.
+
+    Example:
+        >>> jev = DecisionModelConfig(model="jev-latest")
+        >>> grader = CriterionGrader(
+        ...     judge_model_config=jev,
+        ...     escalation=EscalationConfig(
+        ...         judges=LLMConfig(model="gemini/gemini-3-flash-preview"),
+        ...         threshold=0.72,
+        ...         per_criterion={"factuality": 0.95},
+        ...     ),
+        ... )
+    """
+
+    judges: list[JudgeSpec]
+    threshold: float
+    per_criterion: Mapping[str, float] | None = None
+
+    # ``@dataclass`` keeps an ``__init__`` defined in the class body; ``fields()``, ``repr``,
+    # ``__eq__`` and ``replace()`` still come from the three fields above. The constructor
+    # takes ``judges`` in a wider form than the stored field, which always holds the list.
+    def __init__(
+        self,
+        judges: LLMConfig | Sequence[JudgeSpec],
+        threshold: float,
+        per_criterion: Mapping[str, float] | None = None,
+    ) -> None:
+        """Validate and store the configuration.
+
+        Args:
+            judges: One LLM judge as a bare ``LLMConfig`` (its ``judge_id`` is
+                ``"escalation"``), or a non-empty list of ``JudgeSpec`` of LLM judges.
+            threshold: The confidence threshold, in [0, 1].
+            per_criterion: Thresholds by criterion name, each in [0, 1]. Copied.
+
+        Raises:
+            ValueError: If ``judges`` is empty, holds anything but ``JudgeSpec``, or names
+                a decision model; if ``threshold`` or a ``per_criterion`` threshold is not a
+                number in [0, 1]; or if ``per_criterion`` is not a mapping from criterion
+                names (strings).
+        """
+        name = type(self).__name__
+        if isinstance(judges, LLMConfig):
+            specs = [JudgeSpec(judge_model_config=judges, judge_id="escalation")]
+        elif isinstance(judges, DecisionModelConfig):
+            raise ValueError(
+                f"{name}.judges must be LLM judges, not a decision model "
+                "(DecisionModelConfig): they judge the criteria the decision model escalates"
+            )
+        elif isinstance(judges, (list, tuple)):
+            specs = list(judges)
+        else:
+            raise ValueError(
+                f"{name}.judges must be an LLMConfig or a list of JudgeSpec; "
+                f"got {type(judges).__name__}"
+            )
+        if not specs:
+            raise ValueError(f"{name}.judges must name at least one judge")
+        for i, spec in enumerate(specs):
+            if not isinstance(spec, JudgeSpec):
+                raise ValueError(
+                    f"{name}.judges[{i}] must be a JudgeSpec; got {type(spec).__name__} "
+                    "(a single judge can be passed as a bare LLMConfig, not in a list)"
+                )
+        ids = [s.judge_id for s in specs if isinstance(s.llm_config, DecisionModelConfig)]
+        if ids:
+            raise ValueError(
+                f"{name}.judges must be LLM judges, not decision models: "
+                f"{', '.join(map(repr, ids))} {'is a' if len(ids) == 1 else 'are'} "
+                "DecisionModelConfig; escalation judges judge the criteria the decision model "
+                "escalates"
+            )
+        if not (_is_real_number(threshold) and 0 <= threshold <= 1):
+            raise ValueError(f"{name}.threshold must be a number in [0, 1]; got {threshold!r}")
+        if per_criterion is not None:
+            if not isinstance(per_criterion, Mapping):
+                raise ValueError(
+                    f"{name}.per_criterion must map criterion names to thresholds; "
+                    f"got {type(per_criterion).__name__}"
+                )
+            for key, value in per_criterion.items():
+                if not isinstance(key, str):
+                    raise ValueError(
+                        f"{name}.per_criterion keys are criterion names (str); got {key!r}"
+                    )
+                if not (_is_real_number(value) and 0 <= value <= 1):
+                    raise ValueError(
+                        f"{name}.per_criterion[{key!r}] must be a number in [0, 1]; got {value!r}"
+                    )
+            per_criterion = dict(per_criterion)
+        # Frozen: the generated __setattr__ refuses assignment, so store past it.
+        object.__setattr__(self, "judges", specs)
+        object.__setattr__(self, "threshold", threshold)
+        object.__setattr__(self, "per_criterion", per_criterion)
+
+    def threshold_for(self, criterion: Criterion) -> float:
+        """The confidence threshold below which ``criterion`` is escalated.
+
+        Its ``per_criterion`` threshold, looked up by the criterion's name, else
+        ``threshold``; an unnamed criterion always gets ``threshold``.
+        """
+        if self.per_criterion is not None and criterion.name is not None:
+            return self.per_criterion.get(criterion.name, self.threshold)
+        return self.threshold
+
+
 @dataclass
 class CriterionResult:
     """Result from evaluating a single criterion by a single judge.
@@ -344,25 +534,50 @@ class CriterionResult:
 
 @dataclass
 class JudgeCriterionResults:
-    """All criterion results from a single judge."""
+    """All criterion results from a single judge, one entry per criterion, in rubric order.
+
+    ``role`` is the judge's part in grading the item. A ``"primary"`` judge (every judge of
+    a grader without a cascade, and a cascade's decision model) judges every criterion, so
+    each entry is a result. An ``"escalation"`` judge of a cascade judges only the criteria
+    the decision model escalated and holds ``None`` at the others; its list is full-length
+    all the same, so every judge's entries line up by criterion index. ``reports``,
+    ``total_usage`` and ``total_cost`` cover the criteria the judge judged.
+    """
 
     judge_id: str
     weight: float
-    criterion_results: list[CriterionResult] = field(default_factory=list)
+    criterion_results: list[CriterionResult | None] = field(default_factory=list)
+    role: Literal["primary", "escalation"] = "primary"
 
     @property
     def reports(self) -> list[CriterionReport]:
-        return [r.report for r in self.criterion_results]
+        return [r.report for r in self.criterion_results if r is not None]
 
     @property
     def total_usage(self) -> TokenUsage | None:
-        usages = [r.usage for r in self.criterion_results if r.usage is not None]
+        usages = [r.usage for r in self.criterion_results if r is not None and r.usage is not None]
         return sum(usages, TokenUsage()) if usages else None
 
     @property
     def total_cost(self) -> float | None:
-        costs = [r.cost for r in self.criterion_results if r.cost is not None]
+        costs = [r.cost for r in self.criterion_results if r is not None and r.cost is not None]
         return sum(costs) if costs else None
+
+
+def _escalates(report: CriterionReport, threshold: float) -> bool:
+    """Whether a cascade escalates the criterion its decision model judged in ``report``.
+
+    It does when the judgment failed (any ``error`` category), when the decision model
+    abstained (``CANNOT_ASSESS``, or an NA option), and when its ``confidence`` is below
+    ``threshold``. A failed judgment has no confidence; nor, therefore, can it clear the
+    threshold.
+    """
+    return (
+        report.is_error
+        or report.is_na
+        or report.confidence is None
+        or report.confidence < threshold
+    )
 
 
 def _failed_judgment_result(
@@ -499,12 +714,25 @@ class CriterionGrader(Grader):
     ``None``). In a mixed ensemble every judge votes on every criterion, and the votes
     aggregate exactly as an all-LLM ensemble's do.
 
+    A confidence cascade (``escalation=EscalationConfig(...)``) puts one decision model
+    first and LLM judges behind it. The decision model judges every criterion in its one
+    request per item; a criterion it errored or abstained on, or answered with a
+    ``confidence`` below the criterion's threshold, is escalated: each escalation judge
+    judges it (and only the escalated criteria), with the same prompt it would get in a
+    grader without the cascade with the same ``seed`` and ``judge_id``. An escalated
+    criterion's report is marked ``escalated=True``, keeps the decision model's vote with
+    ``superseded=True``, and takes its verdict from the escalation judges' votes alone,
+    aggregated as any ensemble's; it never falls back to the decision model's vote. The
+    decision model's ``judge_scores`` entry is its own score over every criterion; an
+    escalation judge's is ``None``, as it never judges a whole rubric.
+
     Some settings exist for LLM judges only. Few-shot examples, the system prompts and
-    ``shuffle_options`` apply to the LLM judges of a mixed ensemble and never reach a
-    decision model. A grader whose judges are all decision models rejects few-shot examples
-    and warns when a system prompt or ``shuffle_options`` is passed, since it has no judge
-    to apply them to. A custom response format describes a generated judgment, which only
-    an LLM judge produces, so it cannot be combined with any decision-model judge.
+    ``shuffle_options`` apply to the LLM judges of a mixed ensemble or a cascade and never
+    reach a decision model. A grader whose judges are all decision models rejects few-shot
+    examples and warns when a system prompt or ``shuffle_options`` is passed, since it has
+    no judge to apply them to. A custom response format describes a generated judgment,
+    which only an LLM judge produces, so it cannot be combined with any decision-model
+    judge.
 
     Example:
         >>> from autorubric import DecisionModelConfig, LLMConfig, FewShotConfig, RubricDataset
@@ -550,7 +778,22 @@ class CriterionGrader(Grader):
         ...         JudgeSpec(LLMConfig(model="gemini/gemini-3-flash-preview"), "gemini"),
         ...     ],
         ... )
+        >>>
+        >>> # Cascade: the decision model first, an LLM for what it is unsure of
+        >>> grader = CriterionGrader(
+        ...     judge_model_config=DecisionModelConfig(model="jev-latest"),
+        ...     escalation=EscalationConfig(
+        ...         judges=LLMConfig(model="gemini/gemini-3-flash-preview"), threshold=0.72
+        ...     ),
+        ... )
     """
+
+    # Class-level defaults of the cascade state: a grader whose ``__init__`` never ran (a
+    # subclass that skips it, or one unpickled from a version without the cascade) has no
+    # cascade, and a grader has not warned about unknown ``per_criterion`` names until
+    # ``judge`` does.
+    _escalation: EscalationConfig | None = None
+    _escalation_names_warned: bool = False
 
     @_records_passed_keywords
     def __init__(
@@ -583,6 +826,8 @@ class CriterionGrader(Grader):
         binary_response_format: type[BaseModel] | None = None,
         # Structured output override for multi-choice criteria
         multi_choice_response_format: type[BaseModel] | None = None,
+        # Confidence cascade: LLM judges behind a decision model
+        escalation: EscalationConfig | None = None,
         # Deprecated alias of judge_model_config (every parameter is keyword-only, so
         # its position at the end changes no call)
         llm_config: LLMConfig | DecisionModelConfig | None = None,
@@ -647,23 +892,37 @@ class CriterionGrader(Grader):
                 an ``[Affects: ...]`` tag into the reason string (same convention as
                 binary_response_format). Defaults to MultiChoiceJudgment. LLM judges only,
                 like binary_response_format.
+            escalation: Makes the grader a confidence cascade (see the class docstring):
+                the escalation judges, all LLMs, judge the criteria the decision model
+                errored or abstained on or answered with a confidence below the
+                criterion's threshold. The grader's one judge (``judge_model_config``, or a
+                single ``JudgeSpec`` in ``judges``) must then be a decision model. The
+                escalation judges count as judges for the LLM-only settings: few-shot
+                examples, the system prompts and ``shuffle_options`` apply to them. The
+                grader validates and keeps its own copy of the config (``dataclasses.replace``),
+                so changing the config's lists in place later does not affect it.
             llm_config: Deprecated alias of ``judge_model_config``; builds the same single
                 judge and emits a ``DeprecationWarning``.
 
         Raises:
             ValueError: If neither judge_model_config nor judges is provided, if both are
                 provided, or if both judge_model_config and its deprecated alias
-                llm_config are provided; if few_shot_config or training_data is given
-                while every judge is a decision model (few-shot examples apply to LLM
-                judges only); if binary_response_format or multi_choice_response_format is
-                given while any judge is a decision model; or if a decision-model judge has
-                no API key, has a key the SDK would reject (anything but printable ASCII
-                without whitespace), or has a resolved base URL (``api_base`` or the
-                ``TYPESAFE_BASE_URL`` environment variable) that is not an absolute http(s)
-                URL free of whitespace and control characters, query, fragment and
-                credentials, or whose host the SDK's HTTP stack cannot encode (e.g. a
-                non-ASCII name that is not a valid internationalized domain name). Such a
-                judge fails here, never as an abstention or a worst case on every item.
+                llm_config are provided; if escalation is given while the grader's judges
+                are not exactly one decision model, with a ``judge_id`` that repeats among
+                the decision model and the escalation judges, or with a config that no
+                longer validates (its ``judges`` list or ``per_criterion`` dict changed in
+                place since it was built, e.g. emptied); if few_shot_config or
+                training_data is given while every judge is a decision model (few-shot
+                examples apply to LLM judges only); if binary_response_format or
+                multi_choice_response_format is given while any judge is a decision model;
+                or if a decision-model judge has no API key, has a key the SDK would reject
+                (anything but printable ASCII without whitespace), or has a resolved base
+                URL (``api_base`` or the ``TYPESAFE_BASE_URL`` environment variable) that is
+                not an absolute http(s) URL free of whitespace and control characters,
+                query, fragment and credentials, or whose host the SDK's HTTP stack cannot
+                encode (e.g. a non-ASCII name that is not a valid internationalized domain
+                name). Such a judge fails here, never as an abstention or a worst case on
+                every item.
             ImportError: If a judge is a decision model and the TypeSafe SDK is not
                 installed (``pip install 'autorubric[typesafe]'``).
 
@@ -708,12 +967,44 @@ class CriterionGrader(Grader):
             assert judges is not None
             self._judges = judges
 
+        # The grader's own copy of the cascade config, validated again: the config's list and
+        # dict can have been changed in place since it was built, and can be again later.
+        # Everything the cascade does reads this copy. Its escalation judges
+        # (``_escalation_judges``) are kept apart from ``_judges``, which judge every
+        # criterion: they judge only the criteria the decision model escalates. Every other
+        # per-judge concern (clients, few-shot examples, the LLM-only settings, the
+        # manifest, ``judge_ids``) covers both lists.
+        self._escalation = dataclasses.replace(escalation) if escalation is not None else None
+        if self._escalation is not None:
+            primary = self._judges
+            if len(primary) != 1 or not isinstance(primary[0].llm_config, DecisionModelConfig):
+                described = [
+                    f"{j.judge_id!r} (a decision model)"
+                    if isinstance(j.llm_config, DecisionModelConfig)
+                    else f"{j.judge_id!r} (an LLM)"
+                    for j in primary
+                ]
+                raise ValueError(
+                    "escalation needs exactly one primary judge, a decision model "
+                    "(judge_model_config=DecisionModelConfig(...), or judges=[JudgeSpec("
+                    "DecisionModelConfig(...), ...)]), which judges every criterion and "
+                    f"escalates the ones it is unsure of; got {', '.join(described)}"
+                )
+            judge_ids = Counter(j.judge_id for j in (*primary, *self._escalation_judges))
+            repeated = sorted(judge_id for judge_id, count in judge_ids.items() if count > 1)
+            if repeated:
+                raise ValueError(
+                    "judge_ids must be unique across the decision model and the escalation "
+                    f"judges; repeated: {', '.join(repr(judge_id) for judge_id in repeated)}"
+                )
+        all_judges = [*self._judges, *self._escalation_judges]
+
         # Settings a decision-model judge cannot use, checked before any client is built so
         # that a configuration error is reported as one.
         decision_model_ids = [
-            j.judge_id for j in self._judges if isinstance(j.llm_config, DecisionModelConfig)
+            j.judge_id for j in all_judges if isinstance(j.llm_config, DecisionModelConfig)
         ]
-        every_judge_is_decision_model = 0 < len(decision_model_ids) == len(self._judges)
+        every_judge_is_decision_model = 0 < len(decision_model_ids) == len(all_judges)
         if every_judge_is_decision_model and (
             few_shot_config is not None or training_data is not None
         ):
@@ -791,7 +1082,7 @@ class CriterionGrader(Grader):
         # SDK or API key fails here rather than on every item.
         self._clients: dict[str, LLMClient] = {}
         self._decision_clients: dict[str, DecisionModelClient] = {}
-        for judge in self._judges:
+        for judge in all_judges:
             config = judge.llm_config
             if isinstance(config, DecisionModelConfig):
                 self._decision_clients[judge.judge_id] = DecisionModelClient(config)
@@ -807,8 +1098,24 @@ class CriterionGrader(Grader):
 
     @property
     def is_ensemble(self) -> bool:
-        """Whether this grader uses multiple judges."""
+        """Whether this grader has several judges that each judge every criterion.
+
+        A cascade is not an ensemble: its escalation judges judge only the criteria its
+        decision model escalates.
+        """
         return len(self._judges) > 1
+
+    @property
+    def _escalation_judges(self) -> list[JudgeSpec]:
+        """A cascade's escalation judges (its ``EscalationConfig.judges``); none without one."""
+        return self._escalation.judges if self._escalation is not None else []
+
+    @property
+    def judge_ids(self) -> list[str]:
+        """The ``judge_id`` of every judge, in order: the judges that judge every criterion
+        (``judges``, or the single ``"default"`` judge), then a cascade's escalation judges.
+        """
+        return [j.judge_id for j in (*self._judges, *self._escalation_judges)]
 
     @property
     def has_few_shot(self) -> bool:
@@ -827,9 +1134,11 @@ class CriterionGrader(Grader):
     def _prepare_examples(self) -> None:
         """Pre-compute few-shot examples for each criterion and each LLM judge.
 
-        Decision-model judges get none: few-shot examples apply to LLM judges only. Each
-        judge's selection is keyed on its own ``judge_id``, so leaving decision models out
-        changes no LLM judge's examples.
+        The LLM judges include a cascade's escalation judges. Decision-model judges get
+        none: few-shot examples apply to LLM judges only. Each judge's selection is keyed on
+        its own ``judge_id``, so leaving decision models out changes no LLM judge's
+        examples, and an escalation judge gets the examples it would get in a grader without
+        the cascade with the same ``judge_id``.
         """
         training_data = self._training_data
         if training_data is None:
@@ -837,7 +1146,11 @@ class CriterionGrader(Grader):
 
         n_criteria = training_data.num_criteria
         rubric_criteria = training_data.rubric.rubric if training_data.rubric else []
-        llm_judges = [j for j in self._judges if not isinstance(j.llm_config, DecisionModelConfig)]
+        llm_judges = [
+            j
+            for j in (*self._judges, *self._escalation_judges)
+            if not isinstance(j.llm_config, DecisionModelConfig)
+        ]
 
         for criterion_idx in range(n_criteria):
             criterion = (
@@ -1444,6 +1757,11 @@ class CriterionGrader(Grader):
     ) -> list[JudgeCriterionResults]:
         """Judge all criteria with all judges (parallel across judges).
 
+        In a cascade the decision model judges every criterion first; then every escalation
+        judge judges the escalated criteria (``_escalates``: an error, an abstention, or a
+        confidence below ``EscalationConfig.threshold_for`` the criterion), all at once, and
+        none when nothing is escalated.
+
         Args:
             to_grade: The submission, as ``Grader.grade`` passes it.
             rubric: The criteria.
@@ -1456,13 +1774,26 @@ class CriterionGrader(Grader):
                 none, every prompt and request is exactly what it is without guidelines.
 
         Returns:
-            One ``JudgeCriterionResults`` per judge, in judge order.
+            One ``JudgeCriterionResults`` per judge, in judge order: in a cascade, the
+            decision model's (``role="primary"``), then each escalation judge's
+            (``role="escalation"``, ``None`` at the criteria not escalated).
 
         Raises:
             TypeError: If ``guidelines`` is neither a ``str`` nor ``None``.
+
+        Warns:
+            UserWarning: Once per grader, when an ``EscalationConfig.per_criterion`` name
+                matches no criterion of ``rubric`` (not while ``EvalRunner`` or
+                ``fill_ground_truth`` grades a dataset, which checks the names against
+                every item's rubric instead).
         """
         # Checked before any judge runs; blank guidelines become None.
         guidelines = _normalize_guidelines(guidelines)
+        if not self._escalation_names_warned and not _ESCALATION_NAMES_CHECKED.get():
+            # The flag is set only once the warning is issued, so under a
+            # warnings-as-errors filter it raises on every call instead of only once.
+            if self._check_escalation_names([rubric], "the rubric being graded"):
+                self._escalation_names_warned = True
         # Normalize once to the effective rubric (abstain channel guaranteed for
         # multi-choice under auto_na_option). Same length/order, so criterion_idx — and
         # thus the shuffle RNG key — stays aligned; the user's rubric is never mutated.
@@ -1478,7 +1809,120 @@ class CriterionGrader(Grader):
             )
             for judge in self._judges
         ]
-        return list(await asyncio.gather(*tasks))
+        results = list(await asyncio.gather(*tasks))
+        escalation = self._escalation
+        if escalation is None:
+            return results
+
+        # A cascade: ``_judges`` is its one decision model, which judged every criterion.
+        (primary,) = results
+        escalated = [
+            criterion_idx
+            for criterion_idx, (criterion, report) in enumerate(
+                zip(effective_rubric, primary.reports, strict=True)
+            )
+            if _escalates(report, escalation.threshold_for(criterion))
+        ]
+        escalation_results = await asyncio.gather(
+            *(
+                self._judge_escalated_criteria(
+                    judge,
+                    effective_rubric,
+                    escalated,
+                    to_grade,
+                    query,
+                    reference_submission,
+                    guidelines=guidelines,
+                )
+                for judge in self._escalation_judges
+            )
+        )
+        return [primary, *escalation_results]
+
+    async def _judge_escalated_criteria(
+        self,
+        judge: JudgeSpec,
+        rubric: list[Criterion],
+        escalated: list[int],
+        to_grade: str,
+        query: str | None = None,
+        reference_submission: str | None = None,
+        *,
+        guidelines: str | None = None,
+    ) -> JudgeCriterionResults:
+        """Judge a cascade's escalated criteria with one escalation judge, all in parallel.
+
+        Each goes through ``_judge_single_criterion`` under its index in the effective
+        rubric, the index that keys option shuffling and few-shot selection, so the judge's
+        prompt for it is the one it would get in a grader without the cascade with the same
+        ``seed`` and ``judge_id``.
+
+        Args:
+            judge: The escalation judge (an LLM).
+            rubric: The effective rubric.
+            escalated: The indices of the escalated criteria, in rubric order.
+            to_grade: The submission, as ``judge`` receives it.
+            query: The input that prompted the submission.
+            reference_submission: An exemplar response for grading context.
+            guidelines: The rubric's guidelines.
+
+        Returns:
+            The judge's full-length results (``role="escalation"``): a result at each
+            escalated criterion, ``None`` at the others.
+        """
+        results = await asyncio.gather(
+            *(
+                self._judge_single_criterion(
+                    judge,
+                    rubric[criterion_idx],
+                    criterion_idx,
+                    to_grade,
+                    query,
+                    reference_submission,
+                    guidelines=guidelines,
+                )
+                for criterion_idx in escalated
+            )
+        )
+        criterion_results: list[CriterionResult | None] = [None] * len(rubric)
+        for criterion_idx, result in zip(escalated, results, strict=True):
+            criterion_results[criterion_idx] = result
+        return JudgeCriterionResults(
+            judge_id=judge.judge_id,
+            weight=judge.weight,
+            criterion_results=criterion_results,
+            role="escalation",
+        )
+
+    def _check_escalation_names(self, rubrics: Iterable[Iterable[Criterion]], where: str) -> bool:
+        """Warn about ``EscalationConfig.per_criterion`` names that match no criterion.
+
+        A name that no criterion of any of ``rubrics`` has sets no threshold (thresholds
+        are looked up by criterion name), which is most likely a typo or a stale name. The
+        warning is a ``UserWarning`` attributed to the code that asked for grading.
+
+        Args:
+            rubrics: The criteria the names are checked against, as one or more rubrics.
+            where: What ``rubrics`` are, for the message (e.g. "the rubric being graded").
+
+        Returns:
+            Whether it warned. It never does for a grader without per-criterion thresholds.
+        """
+        per_criterion = self._escalation.per_criterion if self._escalation is not None else None
+        if not per_criterion:
+            return False
+        names = {criterion.name for criterion in itertools.chain.from_iterable(rubrics)}
+        unknown = [name for name in per_criterion if name not in names]
+        if not unknown:
+            return False
+        warnings.warn(
+            f"EscalationConfig.per_criterion names {', '.join(map(repr, unknown))} match no "
+            f"criterion of {where}; thresholds are looked up by criterion name, so these "
+            "have no effect",
+            UserWarning,
+            stacklevel=_caller_stacklevel(),
+        )
+        return True
 
     async def aggregate(
         self, judge_results: list[JudgeCriterionResults], *, normalize: bool = True
@@ -1488,6 +1932,14 @@ class CriterionGrader(Grader):
         Handles both binary and multi-choice criteria:
         - Binary: Uses JudgeVote and _aggregate_votes()
         - Multi-choice: Uses MultiChoiceJudgeVote and _aggregate_multi_choice_votes()
+
+        In a cascade the escalated criteria are the ones the escalation judges judged
+        (their results are ``None`` everywhere else). On those, the primary judge's vote is
+        marked ``superseded=True`` and the final verdict, reason and error come from the
+        votes that are not superseded, which are the escalation judges'; the report is
+        marked ``escalated=True``. ``judge_scores`` holds each primary judge's score over its
+        own verdicts (superseded ones included) and ``None`` for each escalation judge,
+        which never judges a whole rubric.
         """
         if not judge_results:
             # Empty/failed aggregation has no score: emit None, not a fabricated 0.0
@@ -1500,13 +1952,29 @@ class CriterionGrader(Grader):
             )
 
         n_criteria = len(judge_results[0].criterion_results)
+        # A cascade's escalated criteria: an escalation judge has a result at each of them,
+        # and only there (none at all without a cascade).
+        escalated = {
+            criterion_idx
+            for judge_result in judge_results
+            if judge_result.role == "escalation"
+            for criterion_idx, cr in enumerate(judge_result.criterion_results)
+            if cr is not None
+        }
 
         # Build ensemble criterion reports
         ensemble_reports: list[EnsembleCriterionReport] = []
         for criterion_idx in range(n_criteria):
-            # Get criterion from first judge's result
-            first_cr = judge_results[0].criterion_results[criterion_idx]
-            criterion_report = first_cr.report
+            is_escalated = criterion_idx in escalated
+            # Each judge's result on this criterion, in judge order; an escalation judge
+            # has one only where the criterion was escalated.
+            judged: list[tuple[JudgeCriterionResults, CriterionResult]] = [
+                (judge_result, cr)
+                for judge_result in judge_results
+                if (cr := judge_result.criterion_results[criterion_idx]) is not None
+            ]
+            # Get criterion from the first judge's result
+            criterion_report = judged[0][1].report
 
             if criterion_report.is_multi_choice:
                 # Multi-choice: build MultiChoiceJudgeVote list
@@ -1515,8 +1983,7 @@ class CriterionGrader(Grader):
                 # so the ensemble error is derived from the votes via _aggregate_error,
                 # mirroring the binary path. Every judge call synthesizes a verdict, so the
                 # `mcv is not None` guard below never drops an errored vote.
-                for judge_result in judge_results:
-                    cr = judge_result.criterion_results[criterion_idx]
+                for judge_result, cr in judged:
                     mcv = cr.report.multi_choice_verdict
                     if mcv is not None:
                         mc_votes.append(
@@ -1533,12 +2000,14 @@ class CriterionGrader(Grader):
                                 reasoning=cr.report.reasoning,
                                 probabilities=cr.report.probabilities,
                                 confidence=cr.report.confidence,
+                                superseded=is_escalated and judge_result.role == "primary",
                             )
                         )
+                aggregated_mc_votes = [v for v in mc_votes if not v.superseded]
 
                 # Aggregate multi-choice votes
                 final_mc_verdict, final_reason = self._aggregate_multi_choice_votes(
-                    mc_votes, criterion_report
+                    aggregated_mc_votes, criterion_report
                 )
 
                 ensemble_reports.append(
@@ -1556,14 +2025,14 @@ class CriterionGrader(Grader):
                         votes=[],  # Binary votes empty for multi-choice
                         final_multi_choice_verdict=final_mc_verdict,
                         multi_choice_votes=mc_votes,
-                        error=_aggregate_error(mc_votes),
+                        error=_aggregate_error(aggregated_mc_votes),
+                        escalated=is_escalated,
                     )
                 )
             else:
                 # Binary: build JudgeVote list
                 votes: list[JudgeVote] = []
-                for judge_result in judge_results:
-                    cr = judge_result.criterion_results[criterion_idx]
+                for judge_result, cr in judged:
                     votes.append(
                         JudgeVote(
                             judge_id=judge_result.judge_id,
@@ -1574,10 +2043,14 @@ class CriterionGrader(Grader):
                             reasoning=cr.report.reasoning,
                             probabilities=cr.report.probabilities,
                             confidence=cr.report.confidence,
+                            superseded=is_escalated and judge_result.role == "primary",
                         )
                     )
+                aggregated_votes = [v for v in votes if not v.superseded]
 
-                final_verdict, final_reason = self._aggregate_votes(votes, criterion_report.weight)
+                final_verdict, final_reason = self._aggregate_votes(
+                    aggregated_votes, criterion_report.weight
+                )
 
                 ensemble_reports.append(
                     EnsembleCriterionReport(
@@ -1589,15 +2062,20 @@ class CriterionGrader(Grader):
                         final_verdict=final_verdict,
                         final_reason=final_reason,
                         votes=votes,
-                        error=_aggregate_error(votes),
+                        error=_aggregate_error(aggregated_votes),
+                        escalated=is_escalated,
                     )
                 )
 
-        # Calculate per-judge scores
+        # Calculate per-judge scores: a primary judge's over its own verdicts on every
+        # criterion; an escalation judge's is undefined, None by role on every item.
         judge_scores: dict[str, float | None] = {}
         for judge_result in judge_results:
-            score = self._calculate_score_from_reports(judge_result.reports, normalize)
-            judge_scores[judge_result.judge_id] = score
+            judge_scores[judge_result.judge_id] = (
+                self._calculate_score_from_reports(judge_result.reports, normalize)
+                if judge_result.role == "primary"
+                else None
+            )
 
         # Calculate final score from aggregated verdicts
         final_reports = []
@@ -1833,8 +2311,6 @@ class CriterionGrader(Grader):
         (lowest value for weight ≥ 0, highest for weight < 0; lowest index on a value
         tie). ``min``/``max`` already resolve value ties to the lowest index.
         """
-        from collections import Counter
-
         options = criterion.options or []
         values = [v.value for v in votes]
         weights = [v.weight for v in votes]
@@ -1928,8 +2404,6 @@ class CriterionGrader(Grader):
         (lowest value for weight ≥ 0, highest for weight < 0; lowest index on a value
         tie) — deterministic, independent of judge order.
         """
-        from collections import Counter
-
         options = criterion.options or []
         # Assessable votes always carry a concrete index (None is reserved for the
         # error-abstain, filtered out before aggregation). The guard makes that contract

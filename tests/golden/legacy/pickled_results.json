@@ -1,0 +1,568 @@
+{
+  "frame_columns": [
+    "level",
+    "name",
+    "criterion_type",
+    "accuracy_micro",
+    "accuracy_macro",
+    "precision_micro",
+    "recall_micro",
+    "f1_micro",
+    "mean_kappa_macro",
+    "kappa_micro",
+    "phi_micro",
+    "mean_krippendorff_alpha",
+    "cannot_assess_mode",
+    "na_mode",
+    "n_samples",
+    "rmse",
+    "mae",
+    "spearman",
+    "kendall",
+    "pearson",
+    "bias",
+    "adjacent_accuracy",
+    "weighted_kappa",
+    "phi",
+    "fpr",
+    "fnr",
+    "is_degenerate",
+    "krippendorff_alpha",
+    "fleiss_kappa",
+    "coverage",
+    "judge_abstain_rate",
+    "gt_abstain_rate",
+    "union_exclusion_rate",
+    "n_errored",
+    "error_rate"
+  ],
+  "metrics_dump": {
+    "bias": {
+      "ci": {
+        "confidence": 0.95,
+        "lower": -1.191433713011536,
+        "method": "t",
+        "upper": 0.3789337130115359
+      },
+      "direction": "negative",
+      "effect_size": -0.8232906452954606,
+      "is_significant": false,
+      "mean_bias": -0.40625,
+      "n_samples": 4,
+      "p_value": 0.19819843857196331,
+      "std_bias": 0.4934466367636255
+    },
+    "bootstrap": null,
+    "cannot_assess_mode": "exclude",
+    "cannot_assess_stats": {
+      "ca_count_pred": 0,
+      "ca_count_true": 0,
+      "ca_false_negative": 0,
+      "ca_false_positive": 0,
+      "ca_kappa": null,
+      "ca_kappa_interpretation": null
+    },
+    "coverage_stats": {
+      "coverage": 0.9375,
+      "error_rate": 0.0,
+      "gt_abstain_rate": 0.0625,
+      "judge_abstain_rate": 0.0625,
+      "n_covered": 15,
+      "n_errored": 0,
+      "n_total": 16,
+      "union_exclusion_rate": 0.0625
+    },
+    "criterion_accuracy": 0.375,
+    "criterion_f1": 0.2857142857142857,
+    "criterion_phi": -0.2581988897471611,
+    "criterion_precision": 0.25,
+    "criterion_recall": 0.3333333333333333,
+    "macro_accuracy": 0.3958333333333333,
+    "mean_kappa": 0.04807692307692307,
+    "mean_krippendorff_alpha": -0.6527777777777778,
+    "micro_kappa": -0.25,
+    "n_binary_criteria": 2,
+    "n_criteria": 4,
+    "n_items": 4,
+    "n_nominal_criteria": 1,
+    "n_ordinal_criteria": 1,
+    "n_samples": 15,
+    "na_mode": "exclude",
+    "na_stats": {
+      "na_count_pred": 1,
+      "na_count_true": 1,
+      "na_false_negative": 0,
+      "na_false_positive": 0,
+      "na_kappa": 1.0,
+      "na_kappa_interpretation": "almost perfect"
+    },
+    "per_criterion": [
+      {
+        "accuracy": 0.5,
+        "confusion_matrix": {
+          "labels": [
+            "MET",
+            "UNMET"
+          ],
+          "matrix": [
+            [
+              0,
+              2
+            ],
+            [
+              0,
+              2
+            ]
+          ]
+        },
+        "coverage_stats": {
+          "coverage": 1.0,
+          "error_rate": 0.0,
+          "gt_abstain_rate": 0.0,
+          "judge_abstain_rate": 0.0,
+          "n_covered": 4,
+          "n_errored": 0,
+          "n_total": 4,
+          "union_exclusion_rate": 0.0
+        },
+        "criterion_type": "binary",
+        "f1": 0.0,
+        "fleiss_kappa": -1.0,
+        "fnr": 1.0,
+        "fpr": 0.0,
+        "index": 0,
+        "is_degenerate": false,
+        "kappa": 0.0,
+        "kappa_interpretation": "slight",
+        "krippendorff_alpha": -0.75,
+        "n_samples": 4,
+        "name": "boiling_point",
+        "phi": null,
+        "precision": 0.0,
+        "recall": 0.0,
+        "support_pred": 0,
+        "support_true": 2
+      },
+      {
+        "accuracy": 0.25,
+        "confusion_matrix": {
+          "labels": [
+            "MET",
+            "UNMET"
+          ],
+          "matrix": [
+            [
+              1,
+              0
+            ],
+            [
+              3,
+              0
+            ]
+          ]
+        },
+        "coverage_stats": {
+          "coverage": 1.0,
+          "error_rate": 0.0,
+          "gt_abstain_rate": 0.0,
+          "judge_abstain_rate": 0.0,
+          "n_covered": 4,
+          "n_errored": 0,
+          "n_total": 4,
+          "union_exclusion_rate": 0.0
+        },
+        "criterion_type": "binary",
+        "f1": 0.4,
+        "fleiss_kappa": -1.0,
+        "fnr": 0.0,
+        "fpr": 1.0,
+        "index": 1,
+        "is_degenerate": false,
+        "kappa": 0.0,
+        "kappa_interpretation": "slight",
+        "krippendorff_alpha": -0.75,
+        "n_samples": 4,
+        "name": "unsafe_advice",
+        "phi": null,
+        "precision": 0.25,
+        "recall": 1.0,
+        "support_pred": 4,
+        "support_true": 1
+      },
+      {
+        "adjacent_accuracy": 1.0,
+        "confusion_matrix": {
+          "labels": [
+            "Very unclear",
+            "Somewhat clear",
+            "Very clear",
+            "Cannot assess / not applicable"
+          ],
+          "matrix": [
+            [
+              1,
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              0,
+              0,
+              0
+            ],
+            [
+              0,
+              1,
+              1,
+              0
+            ],
+            [
+              0,
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "coverage_stats": {
+          "coverage": 1.0,
+          "error_rate": 0.0,
+          "gt_abstain_rate": 0.0,
+          "judge_abstain_rate": 0.0,
+          "n_covered": 4,
+          "n_errored": 0,
+          "n_total": 4,
+          "union_exclusion_rate": 0.0
+        },
+        "criterion_type": "ordinal",
+        "exact_accuracy": 0.5,
+        "fleiss_kappa": null,
+        "index": 2,
+        "is_degenerate": false,
+        "kappa_interpretation": "substantial",
+        "kendall": {
+          "ci": null,
+          "coefficient": 0.7999999999999999,
+          "interpretation": "strong positive",
+          "method": "kendall",
+          "n_samples": 4,
+          "p_value": 0.1259711630772311
+        },
+        "krippendorff_alpha": -0.4583333333333335,
+        "mae": 0.25,
+        "n_options": 4,
+        "n_samples": 4,
+        "name": "clarity",
+        "per_option": [
+          {
+            "f1": 0.6666666666666666,
+            "index": 0,
+            "label": "Very unclear",
+            "precision": 0.5,
+            "recall": 1.0,
+            "support_pred": 2,
+            "support_true": 1
+          },
+          {
+            "f1": 0.0,
+            "index": 1,
+            "label": "Somewhat clear",
+            "precision": 0.0,
+            "recall": 0.0,
+            "support_pred": 1,
+            "support_true": 1
+          },
+          {
+            "f1": 0.6666666666666666,
+            "index": 2,
+            "label": "Very clear",
+            "precision": 1.0,
+            "recall": 0.5,
+            "support_pred": 1,
+            "support_true": 2
+          },
+          {
+            "f1": 0.0,
+            "index": 3,
+            "label": "Cannot assess / not applicable",
+            "precision": 0.0,
+            "recall": 0.0,
+            "support_pred": 0,
+            "support_true": 0
+          }
+        ],
+        "rmse": 0.3535533905932738,
+        "spearman": {
+          "ci": null,
+          "coefficient": 0.888888888888889,
+          "interpretation": "strong positive",
+          "method": "spearman",
+          "n_samples": 4,
+          "p_value": 0.11111111111111104
+        },
+        "weighted_kappa": 0.6923076923076923
+      },
+      {
+        "confusion_matrix": {
+          "labels": [
+            "Formal",
+            "Slang",
+            "N/A"
+          ],
+          "matrix": [
+            [
+              1,
+              1,
+              0
+            ],
+            [
+              1,
+              0,
+              0
+            ],
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "coverage_stats": {
+          "coverage": 0.75,
+          "error_rate": 0.0,
+          "gt_abstain_rate": 0.25,
+          "judge_abstain_rate": 0.25,
+          "n_covered": 3,
+          "n_errored": 0,
+          "n_total": 4,
+          "union_exclusion_rate": 0.25
+        },
+        "criterion_type": "nominal",
+        "exact_accuracy": 0.3333333333333333,
+        "fleiss_kappa": null,
+        "index": 3,
+        "is_degenerate": false,
+        "kappa": -0.5,
+        "kappa_interpretation": "poor (worse than chance)",
+        "krippendorff_alpha": null,
+        "n_options": 3,
+        "n_samples": 3,
+        "name": "register",
+        "per_option": [
+          {
+            "f1": 0.5,
+            "index": 0,
+            "label": "Formal",
+            "precision": 0.5,
+            "recall": 0.5,
+            "support_pred": 2,
+            "support_true": 2
+          },
+          {
+            "f1": 0.0,
+            "index": 1,
+            "label": "Slang",
+            "precision": 0.0,
+            "recall": 0.0,
+            "support_pred": 1,
+            "support_true": 1
+          },
+          {
+            "f1": 0.0,
+            "index": 2,
+            "label": "N/A",
+            "precision": 0.0,
+            "recall": 0.0,
+            "support_pred": 0,
+            "support_true": 0
+          }
+        ]
+      }
+    ],
+    "per_judge": {
+      "alpha": {
+        "bias": {
+          "ci": {
+            "confidence": 0.95,
+            "lower": -1.1314427254870087,
+            "method": "t",
+            "upper": 0.7356093921536753
+          },
+          "direction": "negative",
+          "effect_size": -0.33735489150850667,
+          "is_significant": false,
+          "mean_bias": -0.19791666666666669,
+          "n_samples": 4,
+          "p_value": 0.5482031301497458,
+          "std_bias": 0.5866719933470301
+        },
+        "confusion_matrix": {
+          "labels": [
+            "MET",
+            "UNMET",
+            "CANNOT_ASSESS"
+          ],
+          "matrix": [
+            [
+              3,
+              0,
+              0
+            ],
+            [
+              5,
+              0,
+              0
+            ],
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "criterion_accuracy": 0.375,
+        "criterion_f1": 0.5454545454545454,
+        "criterion_precision": 0.375,
+        "criterion_recall": 1.0,
+        "judge_id": "alpha",
+        "mean_kappa": -0.125,
+        "phi": null,
+        "score_kendall": {
+          "ci": null,
+          "coefficient": 0.0,
+          "interpretation": "very weak positive",
+          "method": "kendall",
+          "n_samples": 4,
+          "p_value": 1.0
+        },
+        "score_mae": 0.4895833333333333,
+        "score_pearson": {
+          "ci": null,
+          "coefficient": 0.07647191129018728,
+          "interpretation": "very weak positive",
+          "method": "pearson",
+          "n_samples": 4,
+          "p_value": 0.9235280887098127
+        },
+        "score_rmse": 0.5452605136792668,
+        "score_spearman": {
+          "ci": null,
+          "coefficient": 0.0,
+          "interpretation": "very weak positive",
+          "method": "spearman",
+          "n_samples": 4,
+          "p_value": 1.0
+        }
+      },
+      "beta": {
+        "bias": {
+          "ci": {
+            "confidence": 0.95,
+            "lower": -0.6080113352222312,
+            "method": "t",
+            "upper": 0.17943990665080256
+          },
+          "direction": "negative",
+          "effect_size": -0.8660254037844386,
+          "is_significant": false,
+          "mean_bias": -0.2142857142857143,
+          "n_samples": 4,
+          "p_value": 0.18169011381620936,
+          "std_bias": 0.24743582965269678
+        },
+        "confusion_matrix": {
+          "labels": [
+            "MET",
+            "UNMET",
+            "CANNOT_ASSESS"
+          ],
+          "matrix": [
+            [
+              0,
+              3,
+              0
+            ],
+            [
+              0,
+              5,
+              0
+            ],
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "criterion_accuracy": 0.625,
+        "criterion_f1": 0.0,
+        "criterion_precision": 0.0,
+        "criterion_recall": 0.0,
+        "judge_id": "beta",
+        "mean_kappa": 0.3333333333333333,
+        "phi": null,
+        "score_kendall": {
+          "ci": null,
+          "coefficient": 1.0,
+          "interpretation": "very strong positive",
+          "method": "kendall",
+          "n_samples": 4,
+          "p_value": 0.08326451666355043
+        },
+        "score_mae": 0.2142857142857143,
+        "score_pearson": {
+          "ci": null,
+          "coefficient": 1.0,
+          "interpretation": "very strong positive",
+          "method": "pearson",
+          "n_samples": 4,
+          "p_value": 0.0
+        },
+        "score_rmse": 0.30304576336566325,
+        "score_spearman": {
+          "ci": null,
+          "coefficient": 1.0,
+          "interpretation": "very strong positive",
+          "method": "spearman",
+          "n_samples": 4,
+          "p_value": 0.0
+        }
+      }
+    },
+    "pooled_by_scale": null,
+    "score_kendall": {
+      "ci": null,
+      "coefficient": 0.5773502691896258,
+      "interpretation": "moderate positive",
+      "method": "kendall",
+      "n_samples": 4,
+      "p_value": 0.31731050786291415
+    },
+    "score_mae": 0.40625,
+    "score_pearson": {
+      "ci": null,
+      "coefficient": 0.5773502691896257,
+      "interpretation": "moderate positive",
+      "method": "pearson",
+      "n_samples": 4,
+      "p_value": 0.42264973081037427
+    },
+    "score_rmse": 0.5896238207535377,
+    "score_spearman": {
+      "ci": null,
+      "coefficient": 0.5773502691896257,
+      "interpretation": "moderate positive",
+      "method": "spearman",
+      "n_samples": 4,
+      "p_value": 0.4226497308103743
+    },
+    "warnings": [
+      "Ground-truth scores take <=2 distinct values; score-level correlations (Spearman/Kendall/Pearson) are uninformative on a collapsed score range."
+    ]
+  },
+  "pickle_b64": "gASVFlAAAAAAAAB9lCiMC2V2YWxfcmVzdWx0lIwPYXV0b3J1YnJpYy5ldmFslIwKRXZhbFJlc3VsdJSTlCmBlH2UKIwMaXRlbV9yZXN1bHRzlF2UKGgCjApJdGVtUmVzdWx0lJOUKYGUfZQojAhpdGVtX2lkeJRLAIwEaXRlbZSMEmF1dG9ydWJyaWMuZGF0YXNldJSMCERhdGFJdGVtlJOUKYGUfZQojApzdWJtaXNzaW9ulIwwV2F0ZXIgYm9pbHMgYXQgMTAwIGRlZ3JlZXMgQ2Vsc2l1cyBhdCBzZWEgbGV2ZWwulIwLZGVzY3JpcHRpb26UjBZsZWdhY3kgY2hlY2twb2ludCBpdGVtlIwMZ3JvdW5kX3RydXRolF2UKIwQYXV0b3J1YnJpYy50eXBlc5SMEENyaXRlcmlvblZlcmRpY3SUk5SMA01FVJSFlFKUaByMBVVOTUVUlIWUUpSMClZlcnkgY2xlYXKUjAZGb3JtYWyUZYwGcnVicmljlE6MFHJlZmVyZW5jZV9zdWJtaXNzaW9ulE6MBnByb21wdJROdWKMBnJlcG9ydJRoGowYRW5zZW1ibGVFdmFsdWF0aW9uUmVwb3J0lJOUKYGUfZQojAhfX2RpY3RfX5R9lCiMBXNjb3JllEc/2AAAAAAAAIwJcmF3X3Njb3JllEdACAAAAAAAAIwNbGxtX3Jhd19zY29yZZRHQAgAAAAAAABoKF2UKGgajBdFbnNlbWJsZUNyaXRlcmlvblJlcG9ydJSTlCmBlH2UKGgtfZQojAljcml0ZXJpb26UaBqMCUNyaXRlcmlvbpSTlCmBlH2UKGgtfZQojAZ3ZWlnaHSUR0AIAAAAAAAAjAtyZXF1aXJlbWVudJSMGFN0YXRlcyB0aGUgYm9pbGluZyBwb2ludJSMBG5hbWWUjA1ib2lsaW5nX3BvaW50lIwHb3B0aW9uc5ROjApzY2FsZV90eXBllIwHb3JkaW5hbJSMC2FnZ3JlZ2F0aW9ulE51jBJfX3B5ZGFudGljX2V4dHJhX1+UTowXX19weWRhbnRpY19maWVsZHNfc2V0X1+Uj5QoaD5oP2hBkIwUX19weWRhbnRpY19wcml2YXRlX1+UTnVijA1maW5hbF92ZXJkaWN0lGgijAxmaW5hbF9yZWFzb26UjC1hbHBoYTogYWxwaGEgc2F5cyBNRVQgfCBiZXRhOiBiZXRhIHNheXMgVU5NRVSUjAV2b3Rlc5RdlChoGowJSnVkZ2VWb3RllJOUKYGUfZQoaC19lCiMCGp1ZGdlX2lklIwFYWxwaGGUjAd2ZXJkaWN0lGgfjAZyZWFzb26UjA5hbHBoYSBzYXlzIE1FVJRoPkc/8AAAAAAAAIwFZXJyb3KUTowJcmVhc29uaW5nlIwZc3RlcC1ieS1zdGVwIGRlbGliZXJhdGlvbpR1aEdOaEiPlChoW2hVaD5oWGhXaFqQaEpOdWJoUSmBlH2UKGgtfZQoaFWMBGJldGGUaFdoImhYjA9iZXRhIHNheXMgVU5NRVSUaD5HQAAAAAAAAABoWk5oW051aEdOaEiPlChoW2hVaD5oWGhXaFqQaEpOdWJljAlhZ3JlZW1lbnSURz/gAAAAAAAAjBpmaW5hbF9tdWx0aV9jaG9pY2VfdmVyZGljdJROjBJtdWx0aV9jaG9pY2Vfdm90ZXOUXZRoWk51aEdOaEiPlChoTGhLaE5oOGhakGhKTnViaDQpgZR9lChoLX2UKGg4aDopgZR9lChoLX2UKGg+R8AAAAAAAAAAaD+MGlJlY29tbWVuZHMgdW50cmVhdGVkIHdhdGVylGhBjA11bnNhZmVfYWR2aWNllGhDTmhEaEVoRk51aEdOaEiPlChoPmg/aEGQaEpOdWJoS2gfaEyMLWFscGhhOiBhbHBoYSBzYXlzIE1FVCB8IGJldGE6IGJldGEgc2F5cyBVTk1FVJRoTl2UKGhRKYGUfZQoaC19lChoVWhWaFdoH2hYjA5hbHBoYSBzYXlzIE1FVJRoPkc/8AAAAAAAAGhaTmhbaFx1aEdOaEiPlChoW2hVaD5oWGhXaFqQaEpOdWJoUSmBlH2UKGgtfZQoaFVoYWhXaCJoWIwPYmV0YSBzYXlzIFVOTUVUlGg+R0AAAAAAAAAAaFpOaFtOdWhHTmhIj5QoaFtoVWg+aFhoV2hakGhKTnViZWhkRz/gAAAAAAAAaGVOaGZdlGhaTnVoR05oSI+UKGhMaEtoTmg4aFqQaEpOdWJoNCmBlH2UKGgtfZQoaDhoOimBlH2UKGgtfZQoaD5HQBAAAAAAAABoP4wdSG93IGNsZWFyIGlzIHRoZSBleHBsYW5hdGlvbj+UaEGMB2NsYXJpdHmUaENdlChoGowPQ3JpdGVyaW9u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TnVoR05oSI+UKGhMaEtoZmhOaGVoOGhakGhKTnViZYwManVkZ2Vfc2NvcmVzlH2UKGhWRz/gAAAAAAAAaGFHP+JJJJJJJJJ1jA5tZWFuX2FncmVlbWVudJRHP+AAAAAAAACME2Nhbm5vdF9hc3Nlc3NfY291bnSUSwCMC3Rva2VuX3VzYWdllGgajApUb2tlblVzYWdllJOUKYGUfZQojA1wcm9tcHRfdG9rZW5zlEtGjBFjb21wbGV0aW9uX3Rva2Vuc5RLI4wMdG90YWxfdG9rZW5zlEtpjBtjYWNoZV9jcmVhdGlvbl9pbnB1dF90b2tlbnOUSwCMF2NhY2hlX3JlYWRfaW5wdXRfdG9rZW5zlEsAdWKMD2NvbXBsZXRpb25fY29zdJRHP3ysCDEm6XloWk51aEdOaEiPlCho7mgxaPBo7Gj6aDBoKGgvaO+QaEpOdWKMEGR1cmF0aW9uX3NlY29uZHOURz/wAAAAAAAAaFpOdWJoCimBlH2UKGgNSwFoDmgRKYGUfZQoaBSMQEJvaWwgaXQgdW50aWwgaXQgYnViYmxlcywgb3IganVzdCBkcmluayBzdHJhaWdodCBmcm9tIHRoZSByaXZlci6UaBZoF2gYXZQoaCJoH2iWaM5laCVOaCZOaCdOdWJoKGgqKYGUfZQoaC19lChoL0cAAAAAAAAAAGgwR7/wAAAAAAAAaDFHv/AAAAAAAABoKF2UKGg0KYGUfZQoaC19lChoOGg6KYGUfZQoaC19lChoPkdACAAAAAAAAGg/aEBoQWhCaENOaERoRWhGTnVoR05oSI+UKGg+aD9oQZBoSk51YmhLaCJoTIwtYWxwaGE6IGFscGhhIHNheXMgTUVUIHwgYmV0YTogYmV0YSBzYXlzIFVOTUVUlGhOXZQoaFEpgZR9lChoLX2UKGhVaFZoV2gfaFiMDmFscGhhIHNheXMgTUVUlGg+Rz/wAAAAAAAAaFpOaFtoXHVoR05oSI+UKGhbaFVoPmhYaFdoWpBoSk51YmhRKYGUfZQoaC19lChoVWhhaFdoImhYjA9iZXRhIHNheXMgVU5NRVSUaD5HQAAAAAAAAABoWk5oW051aEdOaEiPlChoW2hVaD5oWGhXaFqQaEpOdWJlaGRHP+AAAAAAAABoZU5oZl2UaFpOdWhHTmhIj5QoaExoS2hOaDhoWpBoSk51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AAAAAGhaTnViZYwLdG90YWxfaXRlbXOUSwSMEHN1Y2Nlc3NmdWxfaXRlbXOUSwSMDGZhaWxlZF9pdGVtc5RLAIwRdG90YWxfdG9rZW5fdXNhZ2WUTowVdG90YWxfY29tcGxldGlvbl9jb3N0lE6MDHRpbWluZ19zdGF0c5RoAowPRXZhbFRpbWluZ1N0YXRzlJOUKYGUfZQojBZ0b3RhbF9kdXJhdGlvbl9zZWNvbmRzlEdAEAAAAAAAAIwabWVhbl9pdGVtX2R1cmF0aW9uX3NlY29uZHOURz/wAAAAAAAAjBltaW5faXRlbV9kdXJhdGlvbl9zZWNvbmRzlEc/8AAAAAAAAIwZbWF4X2l0ZW1fZHVyYXRpb25fc2Vjb25kc5RHP/AAAAAAAACMGXA1MF9pdGVtX2R1cmF0aW9uX3NlY29uZHOURz/wAAAAAAAAjBlwOTVfaXRlbV9kdXJhdGlvbl9zZWNvbmRzlEc/8AAAAAAAAIwQaXRlbXNfcGVyX3NlY29uZJRHP/AAAAAAAAB1YowKc3RhcnRlZF9hdJSMCGRhdGV0aW1llIwIZGF0ZXRpbWWUk5RDCgfqCQEAAAAAAACUamICAACMCHRpbWV6b25llJOUamICAACMCXRpbWVkZWx0YZSTlEsASwBLAIeUUpSFlFKUhpRSlIwMY29tcGxldGVkX2F0lGpkAgAAQwoH6gkBAAAEAAAAlGptAgAAhpRSlIwGZXJyb3JzlF2UjA9leHBlcmltZW50X25hbWWUTowOZXhwZXJpbWVudF9kaXKUTnVijAdkYXRhc2V0lGgPjA1SdWJyaWNEYXRhc2V0lJOUKYGUfZQoaCeMFEF0IHdoYXQgdGVtcGVyYXR1cmU/lGgljBFhdXRvcnVicmljLnJ1YnJpY5SMBlJ1YnJpY5STlCmBlH2UaCVdlChoOimBlH2UKGgtfZQoaD5HQAgAAAAAAABoP2hAaEFoQmhDTmhEaEVoRk51aEdOaEiPlChoPmg/aEGQaEpOdWJoOimBlH2UKGgtfZQoaD5HwAAAAAAAAABoP2hvaEFocGhDTmhEaEVoRk51aEdOaEiPlChoPmg/aEGQaEpOdWJoOimBlH2UKGgtfZQoaD5HQBAAAAAAAABoP2iGaEFoh2hDXZQoaItok2iYZWhEaEVoRk51aEdOaEiPlChoRGhDaD9oQWg+kGhKTnViaDopgZR9lChoLX2UKGg+Rz/wAAAAAAAAaD9oxGhBaMVoQ12UKGjHaMto0GVoRGjVaEZOdWhHTmhIj5QoaERoQ2g/aEFoPpBoSk51YmVzYowFaXRlbXOUXZQoaBJo/2pwAQAAauEBAABlaEGMBmxlZ2FjeZRoJk51YowHbWV0cmljc5SMGWF1dG9ydWJyaWMubWV0cmljcy5fdHlwZXOUjA1NZXRyaWNzUmVzdWx0lJOUKYGUfZQoaC19lCiMEmNyaXRlcmlvbl9hY2N1cmFjeZRHP9gAAAAAAACME2NyaXRlcmlvbl9wcmVjaXNpb26URz/QAAAAAAAAjBBjcml0ZXJpb25fcmVjYWxslEc/1VVVVVVVVYwMY3JpdGVyaW9uX2YxlEc/0kkkkkkkkowKbWVhbl9rYXBwYZRHP6ididididiMDXBlcl9jcml0ZXJpb26UXZQoapoCAACMEENyaXRlcmlvbk1ldHJpY3OUk5QpgZR9lChoLX2UKGhBaEKMBWluZGV4lEsAjA5jcml0ZXJpb25fdHlwZZSMBmJpbmFyeZSMCW5fc2FtcGxlc5RLBIwIYWNjdXJhY3mURz/gAAAAAAAAjAlwcmVjaXNpb26URwAAAAAAAAAAjAZyZWNhbGyURwAAAAAAAAAAjAJmMZRHAAAAAAAAAACMBWthcHBhlEcAAAAAAAAAAIwUa2FwcGFfaW50ZXJwcmV0YXRpb26UjAZzbGlnaHSUjBJrcmlwcGVuZG9yZmZfYWxwaGGUR7/oAAAAAAAAjAxmbGVpc3Nfa2FwcGGUR7/wAAAAAAAAjAxzdXBwb3J0X3RydWWUSwKMDHN1cHBvcnRfcHJlZJRLAIwQY29uZnVzaW9uX21hdHJpeJRqmgIAAIwPQ29uZnVzaW9uTWF0cml4lJOUKYGUfZQoaC19lCiMBm1hdHJpeJRdlChdlChLAEsCZV2UKEsASwJlZYwGbGFiZWxzlF2UKGgdaCBldWhHTmhIj5QoasECAABqxQIAAJBoSk51YowDZnBylEcAAAAAAAAAAIwDZm5ylEc/8AAAAAAAAIwDcGhplE6MDWlzX2RlZ2VuZXJhdGWUiYwOY292ZXJhZ2Vfc3RhdHOUapoCAACMDUNvdmVyYWdlU3RhdHOUk5QpgZR9lChoLX2UKIwHbl90b3RhbJRLBIwJbl9jb3Zl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TkFTdGF0c5STlCmBlH2UKGgtfZQojA1uYV9jb3VudF90cnVllEsBjA1uYV9jb3VudF9wcmVklEsBjAhuYV9rYXBwYZRHP/AAAAAAAACMF25hX2thcHBhX2ludGVycHJldGF0aW9ulIwOYWxtb3N0IHBlcmZlY3SUjBFuYV9mYWxzZV9wb3NpdGl2ZZRLAIwRbmFfZmFsc2VfbmVnYXRpdmWUSwB1aEdOaEiPlChq1AMAAGraAwAAatUDAABq1wMAAGrWAwAAatkDAACQaEpOdWKME2Nhbm5vdF9hc3Nlc3Nfc3RhdHOUapoCAACMEUNhbm5vdEFzc2Vzc1N0YXRzlJOUKYGUfZQoaC19lCiMDWNhX2NvdW50X3RydWWUSwCMDWNhX2NvdW50X3ByZWSUSwCMCGNhX2thcHBhlE6MF2NhX2thcHBhX2ludGVycHJldGF0aW9ulE6MEWNhX2ZhbHNlX3Bvc2l0aXZllEsAjBFjYV9mYWxzZV9uZWdhdGl2ZZRLAHVoR05oSI+UKGrlAwAAauMDAABq5wMAAGrmAwAAauQDAABq4gMAAJBoSk51YowSY2Fubm90X2Fzc2Vzc19tb2RllIwHZXhjbHVkZZSMB25hX21vZGWUauoDAABqrwIAAEsPjBdtZWFuX2tyaXBwZW5kb3JmZl9hbHBoYZRHv+TjjjjjjjmMDWNyaXRlcmlvbl9waGmUR7/QhlSi1PbajA5tYWNyb19hY2N1cmFjeZRHP9lVVVVVVVWMC21pY3JvX2thcHBhlEe/0AAAAAAAAGrMAgAAas4CAAApgZR9lChoLX2UKGrSAgAASxBq0wIAAEsPatQCAABHP+4AAAAAAABq1QIAAEc/sAAAAAAAAGrWAgAARz+wAAAAAAAAatcCAABHP7AAAAAAAABq2AIAAEsAatkCAABHAAAAAAAAAAB1aEdOaEiPlChq0gIAAGrTAgAAatgCAABq1QIAAGrZAgAAatYCAABq1AIAAGrXAgAAkGhKTnVijA9wb29sZWRfYnlfc2NhbGWUTowId2FybmluZ3OUXZSMj0dyb3VuZC10cnV0aCBzY29yZXMgdGFrZSA8PTIgZGlzdGluY3QgdmFsdWVzOyBzY29yZS1sZXZlbCBjb3JyZWxhdGlvbnMgKFNwZWFybWFuL0tlbmRhbGwvUGVhcnNvbikgYXJlIHVuaW5mb3JtYXRpdmUgb24gYSBjb2xsYXBzZWQgc2NvcmUgcmFuZ2UulGF1aEdOaEiPlChqogIAAGqgAgAAaswDAABqVwMAAGrNAwAAak8DAABq9QMAAGrKAwAAaqMCAABqywMAAGpdAwAAalADAABq7gMAAGp7AwAAalEDAABqyQMAAGqvAgAAamQDAABq7QMAAGrMAgAAauwDAABqfAMAAGrcAwAAas4DAABq6wMAAGqhAgAAau8DAABqpAIAAGqlAgAAaukDAACQaEpOdWKMDXNpbmdsZV9yZXBvcnSUaBqMEEV2YWx1YXRpb25SZXBvcnSUk5QpgZR9lChoLX2UKGgvRz/oAAAAAAAAaDBHQAgAAAAAAABoMUdACAAAAAAAAGgoXZQoaBqMD0NyaXRlcmlvblJlcG9ydJSTlCmBlH2UKGgtfZQoaD5HQAgAAAAAAABoP2hAaEFoQmhDTmhEaEVoRk5oV2gfjBRtdWx0aV9jaG9pY2VfdmVyZGljdJROaFiMDVN0YXRlcyAxMDAgQy6UaLROaFpOaFuMFGNvbnNpZGVyZWQgdGhlIHZhbHVllHVoR05oSI+UKGg/aEFoPmhXaFhoW5BoSk51YmoBBAAAKYGUfZQoaC19lChoPkfAAAAAAAAAAGg/aG9oQWhwaENOaERoRWhGTmhXaBxqiwMAAIWUUpRqBQQAAE5oWIwrSnVkZ2UgY2FsbCBmYWlsZWQgKGluZnJhc3RydWN0dXJlKTogdGltZW91dJRotE5oWowXaW5mcmFzdHJ1Y3R1cmU6IHRpbWVvdXSUaFtOdWhHTmhIj5QoaD9oQWg+aFdoWGhakGhKTnViZWjvSwBoWk5o8GjyKYGUfZQoaPVLFGj2Swpo90seaPhLAGj5SwB1Ymj6Rz9gYk3S8an8dWhHTmhIj5QoaPBoMWj6aDBoKGgvkGhKTnVidS4=",
+  "pickle_protocol": 4,
+  "summary": "============================================================\nMETRICS SUMMARY\n============================================================\nItems: 4, Criteria: 4 (2 binary, 1 ordinal, 1 nominal)\nHandling modes: CANNOT_ASSESS=exclude, NA=exclude\n\nWarnings (1):\n  - Ground-truth scores take <=2 distinct values; score-level correlations (Spearman/Kendall/Pearson) are uninformative on a collapsed score range.\n\nCriterion-Level Metrics:\n  Accuracy (micro):       37.5%\n  Accuracy (macro):       39.6%\n  Precision (micro):      0.25\n  Recall (micro):         0.33\n  F1 (micro):             0.29\n  Mean Kappa (macro):     0.048\n  Kappa (micro):          -0.250\n  Phi (micro):            -0.258\n    (phi = Pearson = Spearman = Kendall = MCC on binary data; the Kappa - Phi gap is the judge's positive-rate drift, not extra evidence)\n  Mean Kripp-\u03b1 (macro):   -0.653\n  Coverage:               93.8%\n    judge-abstain=6.2%, gt-abstain=6.2%, errored=0\n\nScore-Level Metrics (continuous per-item weighted score):\n  RMSE:     0.5896\n  MAE:      0.4062\n  Spearman: 0.5774 (moderate positive)\n  Kendall:  0.5774 (moderate positive)\n  Pearson:  0.5774 (moderate positive)\n\nBias Analysis:\n  Mean Bias:   -0.4062 (negative)\n  Significant: No\n\nNA Handling:\n  NA in Ground Truth: 1\n  NA in Predictions:  1\n  NA Kappa:           1.000 (almost perfect)\n\nCANNOT_ASSESS Handling:\n  CA in Ground Truth: 0\n  CA in Predictions:  0\n\nPer-Judge Metrics:\n  alpha: Acc=37.5%, Mean Kappa=-0.125, Phi=n/a\n  beta: Acc=62.5%, Mean Kappa=0.333, Phi=n/a\n\nPer-Criterion Breakdown:\n\nBinary Criteria:\nCriterion                 Acc     Prec      Rec       F1    Kappa      Phi    FP    FN     FPR     FNR   Kripp-\u03b1\n----------------------------------------------------------------------------------------------------------------\nboiling_point           50.0%     0.00     0.00     0.00    0.000      n/a     0     2    0.00    1.00    -0.750\nunsafe_advice           25.0%     0.25     1.00     0.40    0.000      n/a     3     0    1.00    0.00    -0.750\n\nOrdinal Criteria:\nCriterion               Exact      Adj   WKappa   Spearman     RMSE   Kripp-\u03b1   Fleiss\n--------------------------------------------------------------------------------------\nclarity                 50.0%   100.0%    0.692     0.8889   0.3536    -0.458      n/a\n\nNominal Criteria:\nCriterion              Accuracy    Kappa Interpretation      \n-------------------------------------------------------------\nregister                  33.3%   -0.500 poor (worse than chance)\n  Note: on binary/nominal data Krippendorff's nominal \u03b1 equals Fleiss' \u03ba up to a finite-sample correction (1 - \u03ba_F)/(N\u00b7R) \u2014 one statistic, not corroborating evidence; \u03b1 is reported as primary (bare Fleiss omitted).",
+  "summary_verbose": "============================================================\nMETRICS SUMMARY\n============================================================\nItems: 4, Criteria: 4 (2 binary, 1 ordinal, 1 nominal)\nHandling modes: CANNOT_ASSESS=exclude, NA=exclude\n\nWarnings (1):\n  - Ground-truth scores take <=2 distinct values; score-level correlations (Spearman/Kendall/Pearson) are uninformative on a collapsed score range.\n\nCriterion-Level Metrics:\n  Accuracy (micro):       37.5%\n  Accuracy (macro):       39.6%\n  Precision (micro):      0.25\n  Recall (micro):         0.33\n  F1 (micro):             0.29\n  Mean Kappa (macro):     0.048\n  Kappa (micro):          -0.250\n  Phi (micro):            -0.258\n    (phi = Pearson = Spearman = Kendall = MCC on binary data; the Kappa - Phi gap is the judge's positive-rate drift, not extra evidence)\n  Mean Kripp-\u03b1 (macro):   -0.653\n  Coverage:               93.8%\n    judge-abstain=6.2%, gt-abstain=6.2%, errored=0\n\nScore-Level Metrics (continuous per-item weighted score):\n  RMSE:     0.5896\n  MAE:      0.4062\n  Spearman: 0.5774 (moderate positive)\n  Kendall:  0.5774 (moderate positive)\n  Pearson:  0.5774 (moderate positive)\n\nBias Analysis:\n  Mean Bias:   -0.4062 (negative)\n  Significant: No\n\nNA Handling:\n  NA in Ground Truth: 1\n  NA in Predictions:  1\n  NA Kappa:           1.000 (almost perfect)\n\nCANNOT_ASSESS Handling:\n  CA in Ground Truth: 0\n  CA in Predictions:  0\n\nPer-Judge Metrics:\n  alpha: Acc=37.5%, Mean Kappa=-0.125, Phi=n/a\n      RMSE=0.5453, Spearman=0.0000, MAE=0.4896\n      Confusion (MET, UNMET, CANNOT_ASSESS):\n        MET            [3, 0, 0]\n        UNMET          [5, 0, 0]\n        CANNOT_ASSESS  [0, 0, 0]\n  beta: Acc=62.5%, Mean Kappa=0.333, Phi=n/a\n      RMSE=0.3030, Spearman=1.0000, MAE=0.2143\n      Confusion (MET, UNMET, CANNOT_ASSESS):\n        MET            [0, 3, 0]\n        UNMET          [0, 5, 0]\n        CANNOT_ASSESS  [0, 0, 0]\n\nPer-Criterion Breakdown:\n\nBinary Criteria:\nCriterion                 Acc     Prec      Rec       F1    Kappa      Phi    FP    FN     FPR     FNR   Kripp-\u03b1\n----------------------------------------------------------------------------------------------------------------\nboiling_point           50.0%     0.00     0.00     0.00    0.000      n/a     0     2    0.00    1.00    -0.750\nunsafe_advice           25.0%     0.25     1.00     0.40    0.000      n/a     3     0    1.00    0.00    -0.750\n\nOrdinal Criteria:\nCriterion               Exact      Adj   WKappa   Spearman     RMSE   Kripp-\u03b1   Fleiss\n--------------------------------------------------------------------------------------\nclarity                 50.0%   100.0%    0.692     0.8889   0.3536    -0.458      n/a\n\nNominal Criteria:\nCriterion              Accuracy    Kappa Interpretation      \n-------------------------------------------------------------\nregister                  33.3%   -0.500 poor (worse than chance)\n  Note: on binary/nominal data Krippendorff's nominal \u03b1 equals Fleiss' \u03ba up to a finite-sample correction (1 - \u03ba_F)/(N\u00b7R) \u2014 one statistic, not corroborating evidence; \u03b1 is reported as primary (bare Fleiss omitted)."
+}

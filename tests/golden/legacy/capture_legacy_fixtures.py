@@ -10,11 +10,17 @@ version still work unchanged:
 - ``checkpoint_items.json``: ``ItemResult.to_dict()`` checkpoint records for an ensemble
   report produced by ``CriterionGrader`` with mocked judges (binary and multi-choice
   criteria, a failed judge call, an extended-thinking trace) and for a single report.
+- ``pickled_results.json``: a pickled (base64) evaluation run of that ensemble grader over
+  a dataset with ground truth (``EvalResult`` and ``RubricDataset``), the run's
+  ``compute_metrics(per_judge=True)`` result and a single ``EvaluationReport``, beside what
+  that library read back from the metrics (``model_dump``, both ``summary()`` texts and the
+  ``to_dataframe()`` columns).
 
 Only APIs present in every version are used here. Regenerate (only when deliberately
-re-baselining) with::
+re-baselining) with the command below; the fixed ``PYTHONHASHSEED`` makes the pickle's
+sets (pydantic's ``__pydantic_fields_set__``) come out in the same order on every capture::
 
-    PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=<checkout>/src \\
+    PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 PYTHONPATH=<checkout>/src \\
         uv run --frozen python tests/golden/legacy/capture_legacy_fixtures.py
 """
 
@@ -25,14 +31,18 @@ import base64
 import dataclasses
 import json
 import pickle
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import autorubric
 from autorubric import Criterion, CriterionOption, CriterionVerdict, DataItem, TokenUsage
-from autorubric.eval import ItemResult
+from autorubric.dataset import RubricDataset
+from autorubric.eval import EvalResult, EvalTimingStats, ItemResult
 from autorubric.graders import CriterionGrader, JudgeSpec
 from autorubric.llm import GenerateResult, LLMConfig
+from autorubric.metrics import compute_metrics
+from autorubric.rubric import Rubric
 from autorubric.types import (
     CriterionReport,
     EvaluationReport,
@@ -127,7 +137,7 @@ class _MockJudgeClient:
         return GenerateResult(content="{}", usage=usage, cost=0.001, parsed=parsed)
 
 
-async def _ensemble_record() -> dict[str, Any]:
+def _ensemble_grader() -> CriterionGrader:
     grader = CriterionGrader(
         judges=[
             JudgeSpec(LLMConfig(model="golden-model"), "alpha"),
@@ -137,13 +147,17 @@ async def _ensemble_record() -> dict[str, Any]:
     )
     for judge_id in list(grader._clients):
         grader._clients[judge_id] = _MockJudgeClient(judge_id)
-    report = await grader.grade(SUBMISSION, RUBRIC, query="At what temperature?")
+    return grader
+
+
+async def _ensemble_record() -> dict[str, Any]:
+    report = await _ensemble_grader().grade(SUBMISSION, RUBRIC, query="At what temperature?")
     item = DataItem(submission=SUBMISSION, description=DESCRIPTION)
     return ItemResult(item_idx=0, item=item, report=report, duration_seconds=1.25).to_dict()
 
 
-def _single_record() -> dict[str, Any]:
-    report = EvaluationReport(
+def _single_report() -> EvaluationReport:
+    return EvaluationReport(
         score=0.75,
         raw_score=3.0,
         llm_raw_score=3.0,
@@ -168,8 +182,78 @@ def _single_record() -> dict[str, Any]:
         token_usage=TokenUsage(prompt_tokens=20, completion_tokens=10, total_tokens=30),
         completion_cost=0.002,
     )
+
+
+def _single_record() -> dict[str, Any]:
     item = DataItem(submission=SUBMISSION, description=DESCRIPTION)
-    return ItemResult(item_idx=1, item=item, report=report, duration_seconds=0.5).to_dict()
+    return ItemResult(
+        item_idx=1, item=item, report=_single_report(), duration_seconds=0.5
+    ).to_dict()
+
+
+# Submissions of the pickled run, with their ground truth (binary verdicts, option labels).
+PICKLED_ITEMS: list[tuple[str, list[CriterionVerdict | str]]] = [
+    (SUBMISSION, [CriterionVerdict.MET, CriterionVerdict.UNMET, "Very clear", "Formal"]),
+    (
+        "Boil it until it bubbles, or just drink straight from the river.",
+        [CriterionVerdict.UNMET, CriterionVerdict.MET, "Somewhat clear", "Slang"],
+    ),
+    (
+        "Water boils at 100 C at sea level and at a lower temperature at altitude.",
+        [CriterionVerdict.MET, CriterionVerdict.UNMET, "Very clear", "Formal"],
+    ),
+    ("It depends.", [CriterionVerdict.UNMET, CriterionVerdict.UNMET, "Very unclear", "N/A"]),
+]
+
+
+async def _graded_run() -> tuple[EvalResult, RubricDataset]:
+    """The ensemble grader's run over a dataset, built without ``EvalRunner`` (whose
+    timestamps and experiment files would make the pickle differ between captures)."""
+    dataset = RubricDataset(prompt="At what temperature?", rubric=Rubric(RUBRIC), name="legacy")
+    for submission, ground_truth in PICKLED_ITEMS:
+        dataset.add_item(submission=submission, description=DESCRIPTION, ground_truth=ground_truth)
+    grader = _ensemble_grader()
+    item_results = [
+        ItemResult(
+            item_idx=idx,
+            item=item,
+            report=await grader.grade(item.submission, RUBRIC, query=dataset.prompt),
+            duration_seconds=1.0,
+        )
+        for idx, item in enumerate(dataset.items)
+    ]
+    n_items = len(item_results)
+    eval_result = EvalResult(
+        item_results=item_results,
+        total_items=n_items,
+        successful_items=n_items,
+        failed_items=0,
+        total_token_usage=None,
+        total_completion_cost=None,
+        timing_stats=EvalTimingStats.from_durations([1.0] * n_items, float(n_items)),
+        started_at=datetime(2026, 9, 1, tzinfo=UTC),
+        completed_at=datetime(2026, 9, 1, 0, 0, n_items, tzinfo=UTC),
+    )
+    return eval_result, dataset
+
+
+def _pickled_results_fixture() -> dict[str, Any]:
+    eval_result, dataset = asyncio.run(_graded_run())
+    metrics = compute_metrics(eval_result, dataset, per_judge=True)
+    objects = {
+        "eval_result": eval_result,
+        "dataset": dataset,
+        "metrics": metrics,
+        "single_report": _single_report(),
+    }
+    return {
+        "pickle_protocol": 4,
+        "pickle_b64": base64.b64encode(pickle.dumps(objects, protocol=4)).decode("ascii"),
+        "metrics_dump": metrics.model_dump(mode="json"),
+        "summary": metrics.summary(),
+        "summary_verbose": metrics.summary(verbose=True),
+        "frame_columns": list(metrics.to_dataframe().columns),
+    }
 
 
 def main() -> None:
@@ -187,6 +271,11 @@ def main() -> None:
     }
     (HERE / "checkpoint_items.json").write_text(
         json.dumps(records, indent=2) + "\n", encoding="utf-8", newline="\n"
+    )
+    (HERE / "pickled_results.json").write_text(
+        json.dumps(_pickled_results_fixture(), indent=2, sort_keys=True, allow_nan=False) + "\n",
+        encoding="utf-8",
+        newline="\n",
     )
 
 

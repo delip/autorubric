@@ -384,6 +384,12 @@ async def fill_ground_truth(
     Raises:
         ValueError: If dataset has no items.
 
+    Warns:
+        UserWarning: Once, before grading, when ``grader`` is a confidence cascade whose
+            ``EscalationConfig.per_criterion`` names a criterion no item's rubric has (as
+            ``evaluate`` does; with per-item rubrics a name may be in only some items'
+            rubrics).
+
     Example:
         >>> from autorubric import RubricDataset, LLMConfig
         >>> from autorubric.graders import CriterionGrader
@@ -395,6 +401,7 @@ async def fill_ground_truth(
         >>> labeled.to_file("labeled.json")
     """
     from autorubric.dataset import DataItem, RubricDataset
+    from autorubric.graders.criterion_grader import _escalation_names_checked
 
     if len(dataset) == 0:
         raise ValueError("Dataset has no items")
@@ -438,58 +445,63 @@ async def fill_ground_truth(
             except Exception as e:
                 return (idx, None, str(e))
 
-        # Create tasks with optional concurrency limit
-        if max_concurrent_items:
-            semaphore = asyncio.Semaphore(max_concurrent_items)
+        # A cascade's per-criterion escalation thresholds are keyed by criterion name, and
+        # with per-item rubrics a name absent from one item's rubric can be in another's:
+        # the names are checked once, here, against every item's rubric, and not again
+        # against each item's own rubric as it is graded.
+        with _escalation_names_checked(grader, dataset):
+            # Create tasks with optional concurrency limit
+            if max_concurrent_items:
+                semaphore = asyncio.Semaphore(max_concurrent_items)
 
-            async def limited_grade(
-                idx: int, item: DataItem
-            ) -> tuple[int, DataItem | None, str | None]:
-                async with semaphore:
-                    return await grade_item(idx, item)
+                async def limited_grade(
+                    idx: int, item: DataItem
+                ) -> tuple[int, DataItem | None, str | None]:
+                    async with semaphore:
+                        return await grade_item(idx, item)
 
-            tasks = [limited_grade(idx, item) for idx, item in items_to_grade]
-        else:
-            tasks = [grade_item(idx, item) for idx, item in items_to_grade]
+                tasks = [limited_grade(idx, item) for idx, item in items_to_grade]
+            else:
+                tasks = [grade_item(idx, item) for idx, item in items_to_grade]
 
-        # Execute with optional progress
-        if show_progress:
-            try:
-                from rich.console import Console
-                from rich.progress import (
-                    BarColumn,
-                    MofNCompleteColumn,
-                    Progress,
-                    SpinnerColumn,
-                    TextColumn,
-                )
+            # Execute with optional progress
+            if show_progress:
+                try:
+                    from rich.console import Console
+                    from rich.progress import (
+                        BarColumn,
+                        MofNCompleteColumn,
+                        Progress,
+                        SpinnerColumn,
+                        TextColumn,
+                    )
 
-                progress = Progress(
-                    SpinnerColumn(),
-                    TextColumn("[bold blue]Filling ground truth"),
-                    BarColumn(bar_width=40),
-                    MofNCompleteColumn(),
-                    console=Console(stderr=True),
-                )
+                    progress = Progress(
+                        SpinnerColumn(),
+                        TextColumn("[bold blue]Filling ground truth"),
+                        BarColumn(bar_width=40),
+                        MofNCompleteColumn(),
+                        console=Console(stderr=True),
+                    )
 
-                with progress:
-                    task_id = progress.add_task("Grading", total=len(tasks))
-                    for coro in asyncio.as_completed(tasks):
-                        idx, new_item, error = await coro
+                    with progress:
+                        task_id = progress.add_task("Grading", total=len(tasks))
+                        for coro in asyncio.as_completed(tasks):
+                            idx, new_item, error = await coro
+                            if new_item is not None:
+                                graded_items[idx] = new_item
+                            progress.update(task_id, advance=1)
+                except ImportError:
+                    # Fall back to no progress if rich is not available
+                    results = await asyncio.gather(*tasks)
+                    for idx, new_item, error in results:
                         if new_item is not None:
                             graded_items[idx] = new_item
-                        progress.update(task_id, advance=1)
-            except ImportError:
-                # Fall back to no progress if rich is not available
+            else:
                 results = await asyncio.gather(*tasks)
                 for idx, new_item, error in results:
                     if new_item is not None:
                         graded_items[idx] = new_item
-        else:
-            results = await asyncio.gather(*tasks)
-            for idx, new_item, error in results:
-                if new_item is not None:
-                    graded_items[idx] = new_item
 
     # Combine preserved and graded items, maintaining order
     all_items: dict[int, DataItem] = {**preserved_items, **graded_items}

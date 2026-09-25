@@ -3,11 +3,32 @@
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from enum import Enum
-from typing import Literal, TypedDict
+from typing import Any, Literal, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 CountFn = Callable[[str], int]
+
+
+def _setstate_with_field_defaults(self: BaseModel, state: dict[Any, Any]) -> None:
+    """``__setstate__`` of a model that has gained defaulted fields since an earlier release.
+
+    Pydantic restores a pickle's field values exactly as they were stored, so an object
+    pickled before a field existed would have no value for it and reading the field would
+    raise ``AttributeError``. This gives each defaulted field the pickle lacks its default,
+    as validation does: the field reads its default, is not in ``model_fields_set``, and the
+    object equals the same object validated today. A model that gains a defaulted field
+    sets ``__setstate__ = _setstate_with_field_defaults``.
+    """
+    values = state.get("__dict__", {})
+    absent = {
+        name: field.get_default(call_default_factory=True)
+        for name, field in type(self).model_fields.items()
+        if name not in values and not field.is_required()
+    }
+    if absent:
+        state = {**state, "__dict__": {**values, **absent}}
+    BaseModel.__setstate__(self, state)
 
 
 # ============================================================================
@@ -666,6 +687,9 @@ class MultiChoiceJudgeVote(BaseModel):
     confidence: float | None = None
     superseded: bool = False
 
+    # A vote pickled before its newer fields existed restores them at their defaults.
+    __setstate__ = _setstate_with_field_defaults
+
     @property
     def is_error(self) -> bool:
         """Whether this vote's verdict was synthesized due to a judge-call failure.
@@ -727,6 +751,9 @@ class CriterionReport(Criterion):
     reasoning: str | None = None
     probabilities: dict[str, float] | None = None
     confidence: float | None = None
+
+    # A report pickled before its newer fields existed restores them at their defaults.
+    __setstate__ = _setstate_with_field_defaults
 
     @property
     def score_value(self) -> float:
@@ -947,6 +974,9 @@ class JudgeVote(BaseModel):
     confidence: float | None = None
     superseded: bool = False
 
+    # A vote pickled before its newer fields existed restores them at their defaults.
+    __setstate__ = _setstate_with_field_defaults
+
     @property
     def is_error(self) -> bool:
         """Whether this vote's verdict was synthesized due to a judge-call failure.
@@ -967,26 +997,28 @@ class EnsembleCriterionReport(BaseModel):
     Attributes:
         criterion: The criterion being evaluated.
         final_verdict: Aggregated binary verdict from all judges. None for multi-choice.
-        final_reason: Combined reasoning from judges: each vote's reason rendered as
-            ``"judge_id: reason"``, joined with ``" | "``. Votes whose ``reason`` is
-            ``None`` (the judge gives no explanation) are skipped. ``None`` only when no
-            vote carried a reason. The fixed reasons are kept whatever the votes' reasons:
-            ``"No votes"`` (an empty vote list) and, for binary criteria, ``"All judges
-            could not assess"`` (every vote ``CANNOT_ASSESS``).
+        final_reason: Combined reasoning from judges: each aggregated (non-``superseded``)
+            vote's reason rendered as ``"judge_id: reason"``, joined with ``" | "``, so an
+            escalated criterion's comes from the escalation judges alone. Votes whose
+            ``reason`` is ``None`` (the judge gives no explanation) are skipped. ``None``
+            only when no aggregated vote carried a reason. The fixed reasons are kept
+            whatever the votes' reasons: ``"No votes"`` (an empty vote list) and, for binary
+            criteria, ``"All judges could not assess"`` (every aggregated vote
+            ``CANNOT_ASSESS``).
         votes: Individual binary votes from each judge. Empty for multi-choice.
         agreement: Proportion of the aggregated (non-``superseded``) votes agreeing with
             the final verdict (0-1).
         final_multi_choice_verdict: Aggregated multi-choice verdict. None for binary.
         multi_choice_votes: Individual multi-choice votes. Empty for binary.
         error: Set (with a category prefix) when the final verdict was driven entirely by
-            judge-call failures (every contributing vote errored). None when at least one
-            genuine judgment was available. See ``is_error``.
+            judge-call failures (every aggregated, non-``superseded`` vote errored). None
+            when at least one genuine judgment was aggregated. See ``is_error``.
         escalated: True when this criterion was escalated: the vote first cast on it (a
             decision model's) was judged insufficient because it errored, abstained, or its
             ``confidence`` fell below the escalation threshold. That vote stays in the vote
             list with ``superseded=True`` and the final verdict is aggregated from the
-            escalation judges' votes. False otherwise, including every report of a grader
-            that does not escalate.
+            escalation judges' votes alone, even when every one of them failed. False
+            otherwise, including every report of a grader that does not escalate.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -1001,6 +1033,9 @@ class EnsembleCriterionReport(BaseModel):
     multi_choice_votes: list[MultiChoiceJudgeVote] = Field(default_factory=list)
     error: str | None = None
     escalated: bool = False
+
+    # A report pickled before its newer fields existed restores them at their defaults.
+    __setstate__ = _setstate_with_field_defaults
 
     @model_validator(mode="after")
     def _compute_agreement(self) -> "EnsembleCriterionReport":

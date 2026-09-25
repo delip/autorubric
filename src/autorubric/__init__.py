@@ -11,6 +11,7 @@ from autorubric.eval import (
     ItemResult,
     evaluate,
 )
+from autorubric.graders import EscalationConfig
 from autorubric.llm import (
     ErrorCategory,
     GenerateResult,
@@ -130,6 +131,7 @@ __all__ = [
     "generate",
     # Decision-model judges
     "DecisionModelConfig",
+    "EscalationConfig",
     # Core types
     "AggregationStrategy",
     "CannotAssessConfig",
