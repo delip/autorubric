@@ -1,6 +1,7 @@
 from importlib.metadata import PackageNotFoundError, version
 
 from autorubric.dataset import DataItem, RubricDataset
+from autorubric.decision import DecisionModelConfig
 from autorubric.eval import (
     EvalConfig,
     EvalResult,
@@ -127,6 +128,8 @@ __all__ = [
     "ThinkingParam",
     "classify_grading_error",
     "generate",
+    # Decision-model judges
+    "DecisionModelConfig",
     # Core types
     "AggregationStrategy",
     "CannotAssessConfig",

@@ -36,6 +36,7 @@ from rich.progress import (
 )
 
 from autorubric.dataset import DataItem, RubricDataset
+from autorubric.decision import DecisionModelConfig, _url_host
 from autorubric.types import (
     CriterionReport,
     EnsembleCriterionReport,
@@ -90,9 +91,12 @@ def _serialize_grader_config(grader: Grader) -> dict[str, Any]:
     """Serialize grader configuration for manifest storage.
 
     Captures key configuration for reproducibility without storing sensitive data.
-    For each judge this records ``judge_id``, ``model``, ``temperature`` (None when the
-    provider default is used), ``weight``, and ``max_parallel_requests``.
-    Gracefully handles mocks and missing attributes.
+    For each judge this records ``judge_id``, ``judge_kind`` (``"llm"`` or
+    ``"decision_model"``), ``model``, ``weight`` and ``max_parallel_requests``. An LLM judge
+    adds ``temperature`` (None when the provider default is used). A decision-model judge
+    adds ``binary_framing``, ``ordinal_framing``, ``decision_threshold`` and
+    ``api_base_host``, the host of the endpoint it was built against; never its API key or
+    full URL, whose path may carry a token. Gracefully handles mocks and missing attributes.
     """
     config: dict[str, Any] = {
         "grader_class": grader.__class__.__name__,
@@ -121,6 +125,11 @@ def _serialize_grader_config(grader: Grader) -> dict[str, Any]:
                         if isinstance(jid, str) and jcfg is not None:
                             jmodel = getattr(jcfg, "model", None)
                             if isinstance(jmodel, str):
+                                if isinstance(jcfg, DecisionModelConfig):
+                                    config["judges"].append(
+                                        _decision_model_judge_entry(grader, j, jid, jcfg)
+                                    )
+                                    continue
                                 weight = getattr(j, "weight", 1.0)
                                 mpr = getattr(jcfg, "max_parallel_requests", None)
                                 temp = getattr(jcfg, "temperature", None)
@@ -130,6 +139,7 @@ def _serialize_grader_config(grader: Grader) -> dict[str, Any]:
                                 config["judges"].append(
                                     {
                                         "judge_id": jid,
+                                        "judge_kind": "llm",
                                         "model": jmodel,
                                         # None = provider default (temperature not sent).
                                         "temperature": temp if is_number else None,
@@ -199,6 +209,36 @@ def _serialize_grader_config(grader: Grader) -> dict[str, Any]:
         pass
 
     return config
+
+
+def _decision_model_judge_entry(
+    grader: Grader, judge: Any, judge_id: str, config: DecisionModelConfig
+) -> dict[str, Any]:
+    """Manifest entry of a decision-model judge (see ``_serialize_grader_config``).
+
+    ``api_base_host`` is the host (with any non-default port) of the base URL the judge's
+    client resolved at construction (``api_base``, else ``TYPESAFE_BASE_URL``, else the
+    SDK default); without such a client, the host of an explicit ``api_base``, else None.
+    The URL's path (and credentials, which a base URL cannot hold) and the API key are never
+    recorded.
+    """
+    clients = getattr(grader, "_decision_clients", None)
+    client = clients.get(judge_id) if isinstance(clients, dict) else None
+    host = getattr(client, "host", None)
+    if not isinstance(host, str):
+        host = _url_host(config.api_base) if config.api_base is not None else None
+    weight = getattr(judge, "weight", 1.0)
+    return {
+        "judge_id": judge_id,
+        "judge_kind": "decision_model",
+        "model": config.model,
+        "weight": weight if isinstance(weight, (int, float)) else 1.0,
+        "max_parallel_requests": config.max_parallel_requests,
+        "binary_framing": config.binary_framing,
+        "ordinal_framing": config.ordinal_framing,
+        "decision_threshold": config.decision_threshold,
+        "api_base_host": host,
+    }
 
 
 def _serialize_eval_config(config: EvalConfig) -> dict[str, Any]:

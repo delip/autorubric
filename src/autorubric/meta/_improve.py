@@ -50,6 +50,7 @@ from rich.table import Table
 from rich.text import Text
 
 from autorubric.dataset import RubricDataset
+from autorubric.decision import DecisionModelConfig
 from autorubric.graders import CriterionGrader
 from autorubric.graders.criterion_grader import JudgeSpec
 from autorubric.llm import LLMClient, LLMConfig
@@ -62,7 +63,12 @@ from autorubric.types import (
     TokenUsage,
 )
 
-from ._evaluate import evaluate_rubric_in_context, evaluate_rubric_standalone
+from ._evaluate import (
+    _not_an_llm,
+    _reject_decision_model_judges,
+    evaluate_rubric_in_context,
+    evaluate_rubric_standalone,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -223,6 +229,43 @@ class ImprovementResult:
     total_completion_cost: float | None
 
 
+def _check_eval_llm(eval_llm: object) -> None:
+    """Reject an ``ImprovementConfig.eval_llm`` that is, or includes, a decision model.
+
+    Raises:
+        ValueError: If ``eval_llm`` is a ``DecisionModelConfig`` or a list holding a
+            ``JudgeSpec`` of one (the message names that judge).
+    """
+    if isinstance(eval_llm, list):
+        _reject_decision_model_judges(eval_llm, "ImprovementConfig.eval_llm judge")
+    elif isinstance(eval_llm, DecisionModelConfig):
+        raise _not_an_llm("ImprovementConfig.eval_llm")
+
+
+def _check_revision_llm(revision_llm: object) -> None:
+    """Reject an ``ImprovementConfig.revision_llm`` that is a decision model.
+
+    Raises:
+        ValueError: If ``revision_llm`` is a ``DecisionModelConfig``.
+    """
+    if isinstance(revision_llm, DecisionModelConfig):
+        raise _not_an_llm("ImprovementConfig.revision_llm")
+
+
+def _reject_decision_model_grader(grader: object) -> None:
+    """Reject a grader with a decision-model judge: validation judges must be LLMs.
+
+    The judges are read as ``_serialize_grader_config`` reads them, from the ``_judges``
+    list a ``CriterionGrader`` keeps; a grader without one is left as it is.
+
+    Raises:
+        ValueError: If a judge of ``grader`` is a decision model.
+    """
+    judges = getattr(grader, "_judges", None)
+    if isinstance(judges, list):
+        _reject_decision_model_judges(judges, "the grader's judge")
+
+
 @dataclass
 class ImprovementConfig:
     """Configuration for the rubric improvement process.
@@ -233,7 +276,13 @@ class ImprovementConfig:
               meta-rubric evaluation).
             - ``list[JudgeSpec]``: ensemble (required for multi-judge mode;
               meta-rubric evaluation uses the first judge's config).
-        revision_llm: LLM configuration for rubric revision.
+            Every judge must be an LLM: meta-rubric evaluation and rubric revision
+            work from the judges' written explanations, which a decision model
+            (``DecisionModelConfig``) does not produce, so a decision-model judge
+            raises ``ValueError`` at construction.
+        revision_llm: LLM configuration for rubric revision. It writes the revised
+            rubric, so it must be an LLM; a decision model raises ``ValueError`` at
+            construction.
         mode: Evaluation mode - "standalone" or "in_context".
         strategy: Improvement strategy - "meta_rubric" (default) optimizes
             against structural meta-rubric quality; "held_out" optimizes
@@ -304,6 +353,24 @@ class ImprovementConfig:
     convergence_fn: ConvergenceFn | None = None
     revision_system_prompt: str | None = None
     revision_user_prompt_template: str | None = None
+
+    def __post_init__(self) -> None:
+        """Reject decision models, which can fill none of the loop's roles.
+
+        Raises:
+            ValueError: If ``eval_llm`` is, or includes, a decision model, or
+                ``revision_llm`` is one.
+        """
+        self._reject_decision_models()
+
+    def _reject_decision_models(self) -> None:
+        """Raise ``ValueError`` if ``eval_llm`` or ``revision_llm`` holds a decision model.
+
+        Run at construction (so also by ``dataclasses.replace``) and again when an
+        ``ImprovementRunner`` starts, because a field can be reassigned in between.
+        """
+        _check_eval_llm(self.eval_llm)
+        _check_revision_llm(self.revision_llm)
 
 
 # ============================================================================
@@ -813,7 +880,12 @@ async def validate_ground_truth(
     Returns:
         Tuple of (correlation_metric, per_item_pairs, total_cost) where
         per_item_pairs is a list of (rubric_score, expected_score) tuples.
+
+    Raises:
+        ValueError: If a judge of ``grader`` is a decision model: the improvement loop's
+            evaluation judges must be LLMs (checked before any call).
     """
+    _reject_decision_model_grader(grader)
     from scipy.stats import spearmanr
 
     rubric_scores: list[float] = []
@@ -1092,7 +1164,12 @@ async def validate_agreement(
         Tuple of (mean_agreement, per_criterion_agreement, total_cost). The mean
         is None when there was nothing to measure (no sample yielded a usable
         ensemble report with a measured agreement) -- never a fabricated 0.0.
+
+    Raises:
+        ValueError: If a judge is a decision model: the improvement loop's evaluation
+            judges must be LLMs (checked before any call).
     """
+    _reject_decision_model_judges(judges, "judge")
     grader = CriterionGrader(judges=judges, aggregation="majority")
 
     all_agreements: list[float] = []
@@ -1202,7 +1279,12 @@ async def revise_rubric(
 
     Returns:
         Tuple of (revised Rubric, completion cost or None).
+
+    Raises:
+        ValueError: If ``config.revision_llm`` is a decision model, which cannot write a
+            revised rubric (checked before any call).
     """
+    _check_revision_llm(config.revision_llm)
     from autorubric.prompts import (
         RUBRIC_REVISION_SYSTEM_PROMPT,
         RUBRIC_REVISION_USER_PROMPT_TEMPLATE,
@@ -1287,7 +1369,12 @@ async def validate_held_out(
 
     Returns:
         HeldOutValidationResult with per-criterion error analysis.
+
+    Raises:
+        ValueError: If a judge of ``grader`` is a decision model: the improvement loop's
+            evaluation judges must be LLMs (checked before any call).
     """
+    _reject_decision_model_grader(grader)
     from autorubric.metrics._compute import _kappa_or_none, _mean_or_none
     from autorubric.metrics._helpers import extract_verdicts_from_report, filter_cannot_assess
 
@@ -1587,7 +1674,12 @@ async def revise_rubric_held_out(
 
     Returns:
         Tuple of (revised Rubric, completion cost or None).
+
+    Raises:
+        ValueError: If ``config.revision_llm`` is a decision model, which cannot write a
+            revised rubric (checked before any call).
     """
+    _check_revision_llm(config.revision_llm)
     from autorubric.prompts import (
         HELD_OUT_REVISION_SYSTEM_PROMPT,
         HELD_OUT_REVISION_USER_PROMPT_TEMPLATE,
@@ -1754,10 +1846,16 @@ def _match_issue_to_criteria(issue: IssueDetail, rubric: Rubric) -> list[int]:
 
 
 def _get_eval_llm_config(eval_llm: LLMConfig | list[JudgeSpec]) -> LLMConfig:
-    """Extract a single LLMConfig from eval_llm for meta-rubric evaluation."""
-    if isinstance(eval_llm, list):
-        return eval_llm[0].llm_config
-    return eval_llm
+    """Extract a single LLMConfig from eval_llm for meta-rubric evaluation.
+
+    Raises:
+        ValueError: If ``eval_llm`` is, or includes, a decision model (``ImprovementConfig``
+            rejects one at construction; this guards an ``eval_llm`` reassigned afterwards).
+    """
+    _check_eval_llm(eval_llm)
+    config = eval_llm[0].llm_config if isinstance(eval_llm, list) else eval_llm
+    assert not isinstance(config, DecisionModelConfig)  # rejected just above
+    return config
 
 
 async def _evaluate_quality(
@@ -2000,8 +2098,12 @@ class ImprovementRunner:
             plus all iteration details.
 
         Raises:
-            ValueError: If task_prompt is required but not provided.
+            ValueError: If task_prompt is required but not provided, or if the config's
+                ``eval_llm`` or ``revision_llm`` holds a decision model (checked again
+                here, before any call, as a field may have been reassigned since the
+                config was built).
         """
+        self.config._reject_decision_models()
         if self.config.strategy == "held_out":
             return await self._run_held_out()
         return await self._run_meta_rubric()

@@ -480,6 +480,18 @@ class CriterionVerdict(str, Enum):
     CANNOT_ASSESS = "CANNOT_ASSESS"
 
 
+def _binary_worst_verdict(weight: float) -> CriterionVerdict:
+    """The score-minimizing binary verdict for a criterion of the given weight.
+
+    Positive (or zero) weight → UNMET (earns 0 instead of the weight); negative weight →
+    MET (subtracts the full penalty). Single source of the "binary worst case" — shared by
+    the grader's ``unknown``-error synthesis path, majority/weighted tie-breaking, and a
+    decision model's answer exactly at its ``decision_threshold``. Binary analog of
+    ``Criterion.worst_scored_option`` / ``worst_option_among``.
+    """
+    return CriterionVerdict.MET if weight < 0 else CriterionVerdict.UNMET
+
+
 class CannotAssessStrategy(str, Enum):
     """Strategy for handling CANNOT_ASSESS (binary) / NA (multi-choice) in scoring.
 

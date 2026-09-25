@@ -92,7 +92,7 @@ class TestCriterionGraderKeyword:
         warning = deprecations[0]
         assert warning.category is DeprecationWarning
         assert str(warning.message) == DEPRECATION_MESSAGE
-        # stacklevel=2: attributed to this test's call site, not to the library.
+        # The stack level skips the library's frames: attributed to this call, not the library.
         assert Path(warning.filename).resolve() == Path(__file__).resolve()
         assert warning.lineno == call_line
         assert grader._judges == [JudgeSpec(config, "default", 1.0)]
@@ -389,7 +389,7 @@ class TestLibraryNeverTriggersItsOwnDeprecation:
 
     def test_detector_attributes_a_callers_deprecation_to_the_caller(self, config):
         """Control: a deprecated call from *outside* the package is not flagged as internal,
-        so an internal call (attributed by stacklevel=2 to its library call site) would be."""
+        so an internal call (attributed by the stack level to its library call site) would be."""
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             CriterionGrader(llm_config=config)
@@ -521,7 +521,7 @@ class TestSuiteWideDeprecationGuard:
         assert [str(w.message) for w in caught] == ["caller probe"]
 
     def test_callers_deprecated_keyword_only_warns(self, pytestconfig, config):
-        """``stacklevel=2`` attributes the warning to this test module, not the library,
+        """The stack level attributes the warning to this test module, not the library,
         so the guard leaves it a warning."""
         with _suite_configured_filters(pytestconfig) as caught:
             CriterionGrader(llm_config=config)

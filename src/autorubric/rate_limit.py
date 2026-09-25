@@ -7,6 +7,7 @@ semaphores for rate limiting concurrent API requests.
 from __future__ import annotations
 
 import asyncio
+import weakref
 from threading import Lock
 from typing import ClassVar
 
@@ -36,6 +37,15 @@ class RateLimitPool:
         If the same provider is used with different max_parallel values,
         the pool uses the MINIMUM value to ensure the strictest limit is
         respected across all usages.
+
+        An asyncio semaphore belongs to one event loop: it binds to the loop on which it
+        first makes a task wait, and waiting on it from another loop raises
+        ``RuntimeError``. The pool therefore keeps one semaphore per provider **per event
+        loop**, so successive ``asyncio.run`` calls (one per dataset, one per notebook
+        cell) each get their own, while the provider's limit is shared. The limit applies
+        within a loop; requests on different loops never wait for each other. The pool
+        never keeps a loop alive: a closed loop's semaphore is dropped at the provider's
+        next request, and a semaphore that never made a task wait goes with its loop.
     """
 
     _instance: ClassVar[RateLimitPool | None] = None
@@ -46,9 +56,14 @@ class RateLimitPool:
 
         This should not be called directly - use get_instance() instead.
         """
-        self._semaphores: dict[str, asyncio.Semaphore] = {}
+        # provider -> event loop -> that loop's semaphore for the provider.
+        self._semaphores: dict[
+            str, weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore]
+        ] = {}
         self._limits: dict[str, int] = {}
-        self._async_lock = asyncio.Lock()
+        # Guards the two maps. The critical section never awaits, so a thread lock (which
+        # also covers loops running in different threads) never blocks a loop for long.
+        self._maps_lock = Lock()
 
     @classmethod
     def get_instance(cls) -> RateLimitPool:
@@ -70,7 +85,10 @@ class RateLimitPool:
         model: str,
         max_parallel: int | None,
     ) -> asyncio.Semaphore | None:
-        """Get or create a semaphore for the given model's provider.
+        """Get or create the running loop's semaphore for the given model's provider.
+
+        Must be awaited on the event loop whose tasks will acquire the semaphore; each loop
+        gets its own semaphore for a provider (see the class note).
 
         Args:
             model: Model identifier (e.g., "openai/gpt-4", "anthropic/claude-sonnet-4-5-20250929").
@@ -82,27 +100,32 @@ class RateLimitPool:
         Note:
             If called multiple times with different max_parallel values for
             the same provider, the semaphore uses the MINIMUM value to ensure
-            the strictest limit is respected.
+            the strictest limit is respected. A stricter limit replaces the provider's
+            semaphores on every loop; requests already holding a replaced semaphore
+            finish under it.
         """
         if max_parallel is None:
             return None
 
-        async with self._async_lock:
-            # Normalize to provider level for shared rate limits
-            provider_key = self._normalize_to_provider(model)
-
-            if provider_key in self._semaphores:
-                # Update to stricter limit if needed
-                current_limit = self._limits[provider_key]
-                if max_parallel < current_limit:
-                    # Create new stricter semaphore
-                    self._semaphores[provider_key] = asyncio.Semaphore(max_parallel)
-                    self._limits[provider_key] = max_parallel
-            else:
-                self._semaphores[provider_key] = asyncio.Semaphore(max_parallel)
+        loop = asyncio.get_running_loop()
+        # Normalize to provider level for shared rate limits
+        provider_key = self._normalize_to_provider(model)
+        with self._maps_lock:
+            current_limit = self._limits.get(provider_key)
+            if current_limit is None or max_parallel < current_limit:
+                # A new provider, or a stricter limit: every loop's semaphore is replaced.
                 self._limits[provider_key] = max_parallel
-
-            return self._semaphores[provider_key]
+                self._semaphores[provider_key] = weakref.WeakKeyDictionary()
+            per_loop = self._semaphores[provider_key]
+            # Loops are weak keys, but a semaphore that made a task wait references its
+            # loop, which would keep the entry alive: drop closed loops explicitly.
+            for closed in [other for other in per_loop if other.is_closed()]:
+                del per_loop[closed]
+            semaphore = per_loop.get(loop)
+            if semaphore is None:
+                semaphore = asyncio.Semaphore(self._limits[provider_key])
+                per_loop[loop] = semaphore
+            return semaphore
 
     def _normalize_to_provider(self, model: str) -> str:
         """Normalize model name to provider for rate limiting.

@@ -1,0 +1,2373 @@
+{
+ "about": "Derived from recorded runs of TypeSafe's Jev (model jev-1.13.0) through the experiments' reference grader, which kept every raw answer. 'questions': the exact questions that grader built for two rubrics under every framing (its state was {'input', 'submission'}; the values do not affect questions). 'answers': raw answers with the criterion they answered and the verdict (binary) or selected option index (multi-choice) the grader recorded. The recorded grader broke one tie differently: P(yes) exactly at the threshold was MET. It snapped an expected Score to a level with Python's round (half to even), as the library does. Those two rubrics (binary criteria, and ordinal criteria that carry their NA option) and that state are where the grader and the library build identical requests. Elsewhere its requests differed: under ordinal_framing='score' it posed a nominal criterion as a Score too (the library always poses one as a Choice); it sent a criterion's options as given, where the library adds the NA option under auto_na_option=True; its framed instructions had no reference-submission sentence; and it sent a structured submission flattened into 'submission' (the library sends 'thinking' and 'output' and judges the output).",
+ "state": {
+  "input": "<input>",
+  "submission": "<submission>"
+ },
+ "jev_state": {
+  "input": "<input>",
+  "submission": "<submission>"
+ },
+ "rubrics": {
+  "ricechem_q1": [
+   {
+    "weight": 1.0057,
+    "requirement": "correctly cites decreased electron electron repulsion",
+    "name": "decreased_repulsion"
+   },
+   {
+    "weight": 1.0278,
+    "requirement": "relates decreased electron electron repulsion to decreased potential energy",
+    "name": "repulsion_potential_energy"
+   },
+   {
+    "weight": 0.9585,
+    "requirement": "3rd and 4th electrons ionized feel same core charge",
+    "name": "same_core_charge"
+   },
+   {
+    "weight": 1.0043,
+    "requirement": "3rd and 4th electrons ionized from n=3 shell and have same radius",
+    "name": "same_shell_radius"
+   },
+   {
+    "weight": 0.9504,
+    "requirement": "5th electron ionized from n=2 shell and feels higher core charge",
+    "name": "higher_core_charge"
+   },
+   {
+    "weight": 0.9764,
+    "requirement": "5th electron ionized from n=2 shell and has smaller radius",
+    "name": "smaller_radius"
+   },
+   {
+    "weight": 1.9688,
+    "requirement": "correctly explains relationship of potential energy to ionization energy",
+    "name": "full_pe_ie_explanation"
+   },
+   {
+    "weight": 0.9902,
+    "requirement": "partially explains relationship between potential energy and ionization energy",
+    "name": "partial_pe_ie_explanation"
+   }
+  ],
+  "fed_turn": [
+   {
+    "requirement": "To the average person, the response is interesting.",
+    "name": "interesting",
+    "options": [
+     {
+      "label": "No.",
+      "value": 0.0
+     },
+     {
+      "label": "Somewhat.",
+      "value": 0.5
+     },
+     {
+      "label": "Yes.",
+      "value": 1.0
+     },
+     {
+      "label": "Cannot assess / not applicable",
+      "value": 0.0,
+      "na": true
+     }
+    ]
+   },
+   {
+    "requirement": "The response is engaging.",
+    "name": "engaging",
+    "options": [
+     {
+      "label": "No.",
+      "value": 0.0
+     },
+     {
+      "label": "Somewhat.",
+      "value": 0.5
+     },
+     {
+      "label": "Yes.",
+      "value": 1.0
+     },
+     {
+      "label": "Cannot assess / not applicable",
+      "value": 0.0,
+      "na": true
+     }
+    ]
+   },
+   {
+    "requirement": "The response is specific to the conversation rather than generic.",
+    "name": "specific",
+    "options": [
+     {
+      "label": "No.",
+      "value": 0.0
+     },
+     {
+      "label": "Somewhat.",
+      "value": 0.5
+     },
+     {
+      "label": "Yes.",
+      "value": 1.0
+     },
+     {
+      "label": "Cannot assess / not applicable",
+      "value": 0.0,
+      "na": true
+     }
+    ]
+   },
+   {
+    "requirement": "The response is relevant to the conversation.",
+    "name": "relevant",
+    "options": [
+     {
+      "label": "No.",
+      "value": 0.0
+     },
+     {
+      "label": "Somewhat.",
+      "value": 0.5
+     },
+     {
+      "label": "Yes.",
+      "value": 1.0
+     },
+     {
+      "label": "Cannot assess / not applicable",
+      "value": 0.0,
+      "na": true
+     }
+    ]
+   },
+   {
+    "requirement": "The response is correct; it does not reflect a misunderstanding of the conversation.",
+    "name": "correct",
+    "options": [
+     {
+      "label": "No.",
+      "value": 0.0
+     },
+     {
+      "label": "Somewhat.",
+      "value": 0.5
+     },
+     {
+      "label": "Yes.",
+      "value": 1.0
+     },
+     {
+      "label": "Cannot assess / not applicable",
+      "value": 0.0,
+      "na": true
+     }
+    ]
+   },
+   {
+    "requirement": "The response is semantically appropriate.",
+    "name": "semantically_appropriate",
+    "options": [
+     {
+      "label": "No.",
+      "value": 0.0
+     },
+     {
+      "label": "Somewhat.",
+      "value": 0.5
+     },
+     {
+      "label": "Yes.",
+      "value": 1.0
+     },
+     {
+      "label": "Cannot assess / not applicable",
+      "value": 0.0,
+      "na": true
+     }
+    ]
+   },
+   {
+    "requirement": "The response is fluently written.",
+    "name": "fluent",
+    "options": [
+     {
+      "label": "No.",
+      "value": 0.0
+     },
+     {
+      "label": "Somewhat.",
+      "value": 0.5
+     },
+     {
+      "label": "Yes.",
+      "value": 1.0
+     },
+     {
+      "label": "Cannot assess / not applicable",
+      "value": 0.0,
+      "na": true
+     }
+    ]
+   },
+   {
+    "requirement": "The response is understandable.",
+    "name": "understandable"
+   }
+  ]
+ },
+ "questions": [
+  {
+   "rubric": "ricechem_q1",
+   "binary_framing": "noul",
+   "ordinal_framing": "choice",
+   "questions": [
+    [
+     "c0",
+     {
+      "type": "noul",
+      "instructions": "correctly cites decreased electron electron repulsion"
+     }
+    ],
+    [
+     "c1",
+     {
+      "type": "noul",
+      "instructions": "relates decreased electron electron repulsion to decreased potential energy"
+     }
+    ],
+    [
+     "c2",
+     {
+      "type": "noul",
+      "instructions": "3rd and 4th electrons ionized feel same core charge"
+     }
+    ],
+    [
+     "c3",
+     {
+      "type": "noul",
+      "instructions": "3rd and 4th electrons ionized from n=3 shell and have same radius"
+     }
+    ],
+    [
+     "c4",
+     {
+      "type": "noul",
+      "instructions": "5th electron ionized from n=2 shell and feels higher core charge"
+     }
+    ],
+    [
+     "c5",
+     {
+      "type": "noul",
+      "instructions": "5th electron ionized from n=2 shell and has smaller radius"
+     }
+    ],
+    [
+     "c6",
+     {
+      "type": "noul",
+      "instructions": "correctly explains relationship of potential energy to ionization energy"
+     }
+    ],
+    [
+     "c7",
+     {
+      "type": "noul",
+      "instructions": "partially explains relationship between potential energy and ionization energy"
+     }
+    ]
+   ]
+  },
+  {
+   "rubric": "ricechem_q1",
+   "binary_framing": "noul",
+   "ordinal_framing": "score",
+   "questions": [
+    [
+     "c0",
+     {
+      "type": "noul",
+      "instructions": "correctly cites decreased electron electron repulsion"
+     }
+    ],
+    [
+     "c1",
+     {
+      "type": "noul",
+      "instructions": "relates decreased electron electron repulsion to decreased potential energy"
+     }
+    ],
+    [
+     "c2",
+     {
+      "type": "noul",
+      "instructions": "3rd and 4th electrons ionized feel same core charge"
+     }
+    ],
+    [
+     "c3",
+     {
+      "type": "noul",
+      "instructions": "3rd and 4th electrons ionized from n=3 shell and have same radius"
+     }
+    ],
+    [
+     "c4",
+     {
+      "type": "noul",
+      "instructions": "5th electron ionized from n=2 shell and feels higher core charge"
+     }
+    ],
+    [
+     "c5",
+     {
+      "type": "noul",
+      "instructions": "5th electron ionized from n=2 shell and has smaller radius"
+     }
+    ],
+    [
+     "c6",
+     {
+      "type": "noul",
+      "instructions": "correctly explains relationship of potential energy to ionization energy"
+     }
+    ],
+    [
+     "c7",
+     {
+      "type": "noul",
+      "instructions": "partially explains relationship between potential energy and ionization energy"
+     }
+    ]
+   ]
+  },
+  {
+   "rubric": "ricechem_q1",
+   "binary_framing": "noul_framed",
+   "ordinal_framing": "choice",
+   "questions": [
+    [
+     "c0",
+     {
+      "type": "noul",
+      "instructions": "Determine whether this criterion is satisfied by the `submission`. Criterion: correctly cites decreased electron electron repulsion",
+      "criteria": {
+       "true": "The thing described in the criterion IS present in the submission",
+       "false": "The thing described in the criterion IS NOT present in the submission"
+      }
+     }
+    ],
+    [
+     "c1",
+     {
+      "type": "noul",
+      "instructions": "Determine whether this criterion is satisfied by the `submission`. Criterion: relates decreased electron electron repulsion to decreased potential energy",
+      "criteria": {
+       "true": "The thing described in the criterion IS present in the submission",
+       "false": "The thing described in the criterion IS NOT present in the submission"
+      }
+     }
+    ],
+    [
+     "c2",
+     {
+      "type": "noul",
+      "instructions": "Determine whether this criterion is satisfied by the `submission`. Criterion: 3rd and 4th electrons ionized feel same core charge",
+      "criteria": {
+       "true": "The thing described in the criterion IS present in the submission",
+       "false": "The thing described in the criterion IS NOT present in the submission"
+      }
+     }
+    ],
+    [
+     "c3",
+     {
+      "type": "noul",
+      "instructions": "Determine whether this criterion is satisfied by the `submission`. Criterion: 3rd and 4th electrons ionized from n=3 shell and have same radius",
+      "criteria": {
+       "true": "The thing described in the criterion IS present in the submission",
+       "false": "The thing described in the criterion IS NOT present in the submission"
+      }
+     }
+    ],
+    [
+     "c4",
+     {
+      "type": "noul",
+      "instructions": "Determine whether this criterion is satisfied by the `submission`. Criterion: 5th electron ionized from n=2 shell and feels higher core charge",
+      "criteria": {
+       "true": "The thing described in the criterion IS present in the submission",
+       "false": "The thing described in the criterion IS NOT present in the submission"
+      }
+     }
+    ],
+    [
+     "c5",
+     {
+      "type": "noul",
+      "instructions": "Determine whether this criterion is satisfied by the `submission`. Criterion: 5th electron ionized from n=2 shell and has smaller radius",
+      "criteria": {
+       "true": "The thing described in the criterion IS present in the submission",
+       "false": "The thing described in the criterion IS NOT present in the submission"
+      }
+     }
+    ],
+    [
+     "c6",
+     {
+      "type": "noul",
+      "instructions": "Determine whether this criterion is satisfied by the `submission`. Criterion: correctly explains relationship of potential energy to ionization energy",
+      "criteria": {
+       "true": "The thing described in the criterion IS present in the submission",
+       "false": "The thing described in the criterion IS NOT present in the submission"
+      }
+     }
+    ],
+    [
+     "c7",
+     {
+      "type": "noul",
+      "instructions": "Determine whether this criterion is satisfied by the `submission`. Criterion: partially explains relationship between potential energy and ionization energy",
+      "criteria": {
+       "true": "The thing described in the criterion IS present in the submission",
+       "false": "The thing described in the criterion IS NOT present in the submission"
+      }
+     }
+    ]
+   ]
+  },
+  {
+   "rubric": "ricechem_q1",
+   "binary_framing": "noul_framed",
+   "ordinal_framing": "score",
+   "questions": [
+    [
+     "c0",
+     {
+      "type": "noul",
+      "instructions": "Determine whether this criterion is satisfied by the `submission`. Criterion: correctly cites decreased electron electron repulsion",
+      "criteria": {
+       "true": "The thing described in the criterion IS present in the submission",
+       "false": "The thing described in the criterion IS NOT present in the submission"
+      }
+     }
+    ],
+    [
+     "c1",
+     {
+      "type": "noul",
+      "instructions": "Determine whether this criterion is satisfied by the `submission`. Criterion: relates decreased electron electron repulsion to decreased potential energy",
+      "criteria": {
+       "true": "The thing described in the criterion IS present in the submission",
+       "false": "The thing described in the criterion IS NOT present in the submission"
+      }
+     }
+    ],
+    [
+     "c2",
+     {
+      "type": "noul",
+      "instructions": "Determine whether this criterion is satisfied by the `submission`. Criterion: 3rd and 4th electrons ionized feel same core charge",
+      "criteria": {
+       "true": "The thing described in the criterion IS present in the submission",
+       "false": "The thing described in the criterion IS NOT present in the submission"
+      }
+     }
+    ],
+    [
+     "c3",
+     {
+      "type": "noul",
+      "instructions": "Determine whether this criterion is satisfied by the `submission`. Criterion: 3rd and 4th electrons ionized from n=3 shell and have same radius",
+      "criteria": {
+       "true": "The thing described in the criterion IS present in the submission",
+       "false": "The thing described in the criterion IS NOT present in the submission"
+      }
+     }
+    ],
+    [
+     "c4",
+     {
+      "type": "noul",
+      "instructions": "Determine whether this criterion is satisfied by the `submission`. Criterion: 5th electron ionized from n=2 shell and feels higher core charge",
+      "criteria": {
+       "true": "The thing described in the criterion IS present in the submission",
+       "false": "The thing described in the criterion IS NOT present in the submission"
+      }
+     }
+    ],
+    [
+     "c5",
+     {
+      "type": "noul",
+      "instructions": "Determine whether this criterion is satisfied by the `submission`. Criterion: 5th electron ionized from n=2 shell and has smaller radius",
+      "criteria": {
+       "true": "The thing described in the criterion IS present in the submission",
+       "false": "The thing described in the criterion IS NOT present in the submission"
+      }
+     }
+    ],
+    [
+     "c6",
+     {
+      "type": "noul",
+      "instructions": "Determine whether this criterion is satisfied by the `submission`. Criterion: correctly explains relationship of potential energy to ionization energy",
+      "criteria": {
+       "true": "The thing described in the criterion IS present in the submission",
+       "false": "The thing described in the criterion IS NOT present in the submission"
+      }
+     }
+    ],
+    [
+     "c7",
+     {
+      "type": "noul",
+      "instructions": "Determine whether this criterion is satisfied by the `submission`. Criterion: partially explains relationship between potential energy and ionization energy",
+      "criteria": {
+       "true": "The thing described in the criterion IS present in the submission",
+       "false": "The thing described in the criterion IS NOT present in the submission"
+      }
+     }
+    ]
+   ]
+  },
+  {
+   "rubric": "ricechem_q1",
+   "binary_framing": "choice",
+   "ordinal_framing": "choice",
+   "questions": [
+    [
+     "c0",
+     {
+      "type": "choice",
+      "instructions": "Determine whether this criterion is satisfied by the `submission`. Criterion: correctly cites decreased electron electron repulsion",
+      "criteria": {
+       "MET": "The thing described in the criterion IS present in the submission",
+       "UNMET": "The thing described in the criterion IS NOT present in the submission",
+       "CANNOT_ASSESS": "Insufficient evidence to determine either way (use rarely)"
+      }
+     }
+    ],
+    [
+     "c1",
+     {
+      "type": "choice",
+      "instructions": "Determine whether this criterion is satisfied by the `submission`. Criterion: relates decreased electron electron repulsion to decreased potential energy",
+      "criteria": {
+       "MET": "The thing described in the criterion IS present in the submission",
+       "UNMET": "The thing described in the criterion IS NOT present in the submission",
+       "CANNOT_ASSESS": "Insufficient evidence to determine either way (use rarely)"
+      }
+     }
+    ],
+    [
+     "c2",
+     {
+      "type": "choice",
+      "instructions": "Determine whether this criterion is satisfied by the `submission`. Criterion: 3rd and 4th electrons ionized feel same core charge",
+      "criteria": {
+       "MET": "The thing described in the criterion IS present in the submission",
+       "UNMET": "The thing described in the criterion IS NOT present in the submission",
+       "CANNOT_ASSESS": "Insufficient evidence to determine either way (use rarely)"
+      }
+     }
+    ],
+    [
+     "c3",
+     {
+      "type": "choice",
+      "instructions": "Determine whether this criterion is satisfied by the `submission`. Criterion: 3rd and 4th electrons ionized from n=3 shell and have same radius",
+      "criteria": {
+       "MET": "The thing described in the criterion IS present in the submission",
+       "UNMET": "The thing described in the criterion IS NOT present in the submission",
+       "CANNOT_ASSESS": "Insufficient evidence to determine either way (use rarely)"
+      }
+     }
+    ],
+    [
+     "c4",
+     {
+      "type": "choice",
+      "instructions": "Determine whether this criterion is satisfied by the `submission`. Criterion: 5th electron ionized from n=2 shell and feels higher core charge",
+      "criteria": {
+       "MET": "The thing described in the criterion IS present in the submission",
+       "UNMET": "The thing described in the criterion IS NOT present in the submission",
+       "CANNOT_ASSESS": "Insufficient evidence to determine either way (use rarely)"
+      }
+     }
+    ],
+    [
+     "c5",
+     {
+      "type": "choice",
+      "instructions": "Determine whether this criterion is satisfied by the `submission`. Criterion: 5th electron ionized from n=2 shell and has smaller radius",
+      "criteria": {
+       "MET": "The thing described in the criterion IS present in the submission",
+       "UNMET": "The thing described in the criterion IS NOT present in the submission",
+       "CANNOT_ASSESS": "Insufficient evidence to determine either way (use rarely)"
+      }
+     }
+    ],
+    [
+     "c6",
+     {
+      "type": "choice",
+      "instructions": "Determine whether this criterion is satisfied by the `submission`. Criterion: correctly explains relationship of potential energy to ionization energy",
+      "criteria": {
+       "MET": "The thing described in the criterion IS present in the submission",
+       "UNMET": "The thing described in the criterion IS NOT present in the submission",
+       "CANNOT_ASSESS": "Insufficient evidence to determine either way (use rarely)"
+      }
+     }
+    ],
+    [
+     "c7",
+     {
+      "type": "choice",
+      "instructions": "Determine whether this criterion is satisfied by the `submission`. Criterion: partially explains relationship between potential energy and ionization energy",
+      "criteria": {
+       "MET": "The thing described in the criterion IS present in the submission",
+       "UNMET": "The thing described in the criterion IS NOT present in the submission",
+       "CANNOT_ASSESS": "Insufficient evidence to determine either way (use rarely)"
+      }
+     }
+    ]
+   ]
+  },
+  {
+   "rubric": "ricechem_q1",
+   "binary_framing": "choice",
+   "ordinal_framing": "score",
+   "questions": [
+    [
+     "c0",
+     {
+      "type": "choice",
+      "instructions": "Determine whether this criterion is satisfied by the `submission`. Criterion: correctly cites decreased electron electron repulsion",
+      "criteria": {
+       "MET": "The thing described in the criterion IS present in the submission",
+       "UNMET": "The thing described in the criterion IS NOT present in the submission",
+       "CANNOT_ASSESS": "Insufficient evidence to determine either way (use rarely)"
+      }
+     }
+    ],
+    [
+     "c1",
+     {
+      "type": "choice",
+      "instructions": "Determine whether this criterion is satisfied by the `submission`. Criterion: relates decreased electron electron repulsion to decreased potential energy",
+      "criteria": {
+       "MET": "The thing described in the criterion IS present in the submission",
+       "UNMET": "The thing described in the criterion IS NOT present in the submission",
+       "CANNOT_ASSESS": "Insufficient evidence to determine either way (use rarely)"
+      }
+     }
+    ],
+    [
+     "c2",
+     {
+      "type": "choice",
+      "instructions": "Determine whether this criterion is satisfied by the `submission`. Criterion: 3rd and 4th electrons ionized feel same core charge",
+      "criteria": {
+       "MET": "The thing described in the criterion IS present in the submission",
+       "UNMET": "The thing described in the criterion IS NOT present in the submission",
+       "CANNOT_ASSESS": "Insufficient evidence to determine either way (use rarely)"
+      }
+     }
+    ],
+    [
+     "c3",
+     {
+      "type": "choice",
+      "instructions": "Determine whether this criterion is satisfied by the `submission`. Criterion: 3rd and 4th electrons ionized from n=3 shell and have same radius",
+      "criteria": {
+       "MET": "The thing described in the criterion IS present in the submission",
+       "UNMET": "The thing described in the criterion IS NOT present in the submission",
+       "CANNOT_ASSESS": "Insufficient evidence to determine either way (use rarely)"
+      }
+     }
+    ],
+    [
+     "c4",
+     {
+      "type": "choice",
+      "instructions": "Determine whether this criterion is satisfied by the `submission`. Criterion: 5th electron ionized from n=2 shell and feels higher core charge",
+      "criteria": {
+       "MET": "The thing described in the criterion IS present in the submission",
+       "UNMET": "The thing described in the criterion IS NOT present in the submission",
+       "CANNOT_ASSESS": "Insufficient evidence to determine either way (use rarely)"
+      }
+     }
+    ],
+    [
+     "c5",
+     {
+      "type": "choice",
+      "instructions": "Determine whether this criterion is satisfied by the `submission`. Criterion: 5th electron ionized from n=2 shell and has smaller radius",
+      "criteria": {
+       "MET": "The thing described in the criterion IS present in the submission",
+       "UNMET": "The thing described in the criterion IS NOT present in the submission",
+       "CANNOT_ASSESS": "Insufficient evidence to determine either way (use rarely)"
+      }
+     }
+    ],
+    [
+     "c6",
+     {
+      "type": "choice",
+      "instructions": "Determine whether this criterion is satisfied by the `submission`. Criterion: correctly explains relationship of potential energy to ionization energy",
+      "criteria": {
+       "MET": "The thing described in the criterion IS present in the submission",
+       "UNMET": "The thing described in the criterion IS NOT present in the submission",
+       "CANNOT_ASSESS": "Insufficient evidence to determine either way (use rarely)"
+      }
+     }
+    ],
+    [
+     "c7",
+     {
+      "type": "choice",
+      "instructions": "Determine whether this criterion is satisfied by the `submission`. Criterion: partially explains relationship between potential energy and ionization energy",
+      "criteria": {
+       "MET": "The thing described in the criterion IS present in the submission",
+       "UNMET": "The thing described in the criterion IS NOT present in the submission",
+       "CANNOT_ASSESS": "Insufficient evidence to determine either way (use rarely)"
+      }
+     }
+    ]
+   ]
+  },
+  {
+   "rubric": "fed_turn",
+   "binary_framing": "noul",
+   "ordinal_framing": "choice",
+   "questions": [
+    [
+     "c0",
+     {
+      "type": "choice",
+      "instructions": "To the average person, the response is interesting.",
+      "criteria": {
+       "No.": null,
+       "Somewhat.": null,
+       "Yes.": null,
+       "Cannot assess / not applicable": null
+      }
+     }
+    ],
+    [
+     "c1",
+     {
+      "type": "choice",
+      "instructions": "The response is engaging.",
+      "criteria": {
+       "No.": null,
+       "Somewhat.": null,
+       "Yes.": null,
+       "Cannot assess / not applicable": null
+      }
+     }
+    ],
+    [
+     "c2",
+     {
+      "type": "choice",
+      "instructions": "The response is specific to the conversation rather than generic.",
+      "criteria": {
+       "No.": null,
+       "Somewhat.": null,
+       "Yes.": null,
+       "Cannot assess / not applicable": null
+      }
+     }
+    ],
+    [
+     "c3",
+     {
+      "type": "choice",
+      "instructions": "The response is relevant to the conversation.",
+      "criteria": {
+       "No.": null,
+       "Somewhat.": null,
+       "Yes.": null,
+       "Cannot assess / not applicable": null
+      }
+     }
+    ],
+    [
+     "c4",
+     {
+      "type": "choice",
+      "instructions": "The response is correct; it does not reflect a misunderstanding of the conversation.",
+      "criteria": {
+       "No.": null,
+       "Somewhat.": null,
+       "Yes.": null,
+       "Cannot assess / not applicable": null
+      }
+     }
+    ],
+    [
+     "c5",
+     {
+      "type": "choice",
+      "instructions": "The response is semantically appropriate.",
+      "criteria": {
+       "No.": null,
+       "Somewhat.": null,
+       "Yes.": null,
+       "Cannot assess / not applicable": null
+      }
+     }
+    ],
+    [
+     "c6",
+     {
+      "type": "choice",
+      "instructions": "The response is fluently written.",
+      "criteria": {
+       "No.": null,
+       "Somewhat.": null,
+       "Yes.": null,
+       "Cannot assess / not applicable": null
+      }
+     }
+    ],
+    [
+     "c7",
+     {
+      "type": "noul",
+      "instructions": "The response is understandable."
+     }
+    ]
+   ]
+  },
+  {
+   "rubric": "fed_turn",
+   "binary_framing": "noul",
+   "ordinal_framing": "score",
+   "questions": [
+    [
+     "c0",
+     {
+      "type": "score",
+      "instructions": "To the average person, the response is interesting.",
+      "criteria": [
+       "No.",
+       "Somewhat.",
+       "Yes."
+      ]
+     }
+    ],
+    [
+     "c1",
+     {
+      "type": "score",
+      "instructions": "The response is engaging.",
+      "criteria": [
+       "No.",
+       "Somewhat.",
+       "Yes."
+      ]
+     }
+    ],
+    [
+     "c2",
+     {
+      "type": "score",
+      "instructions": "The response is specific to the conversation rather than generic.",
+      "criteria": [
+       "No.",
+       "Somewhat.",
+       "Yes."
+      ]
+     }
+    ],
+    [
+     "c3",
+     {
+      "type": "score",
+      "instructions": "The response is relevant to the conversation.",
+      "criteria": [
+       "No.",
+       "Somewhat.",
+       "Yes."
+      ]
+     }
+    ],
+    [
+     "c4",
+     {
+      "type": "score",
+      "instructions": "The response is correct; it does not reflect a misunderstanding of the conversation.",
+      "criteria": [
+       "No.",
+       "Somewhat.",
+       "Yes."
+      ]
+     }
+    ],
+    [
+     "c5",
+     {
+      "type": "score",
+      "instructions": "The response is semantically appropriate.",
+      "criteria": [
+       "No.",
+       "Somewhat.",
+       "Yes."
+      ]
+     }
+    ],
+    [
+     "c6",
+     {
+      "type": "score",
+      "instructions": "The response is fluently written.",
+      "criteria": [
+       "No.",
+       "Somewhat.",
+       "Yes."
+      ]
+     }
+    ],
+    [
+     "c7",
+     {
+      "type": "noul",
+      "instructions": "The response is understandable."
+     }
+    ]
+   ]
+  },
+  {
+   "rubric": "fed_turn",
+   "binary_framing": "noul_framed",
+   "ordinal_framing": "choice",
+   "questions": [
+    [
+     "c0",
+     {
+      "type": "choice",
+      "instructions": "To the average person, the response is interesting.",
+      "criteria": {
+       "No.": null,
+       "Somewhat.": null,
+       "Yes.": null,
+       "Cannot assess / not applicable": null
+      }
+     }
+    ],
+    [
+     "c1",
+     {
+      "type": "choice",
+      "instructions": "The response is engaging.",
+      "criteria": {
+       "No.": null,
+       "Somewhat.": null,
+       "Yes.": null,
+       "Cannot assess / not applicable": null
+      }
+     }
+    ],
+    [
+     "c2",
+     {
+      "type": "choice",
+      "instructions": "The response is specific to the conversation rather than generic.",
+      "criteria": {
+       "No.": null,
+       "Somewhat.": null,
+       "Yes.": null,
+       "Cannot assess / not applicable": null
+      }
+     }
+    ],
+    [
+     "c3",
+     {
+      "type": "choice",
+      "instructions": "The response is relevant to the conversation.",
+      "criteria": {
+       "No.": null,
+       "Somewhat.": null,
+       "Yes.": null,
+       "Cannot assess / not applicable": null
+      }
+     }
+    ],
+    [
+     "c4",
+     {
+      "type": "choice",
+      "instructions": "The response is correct; it does not reflect a misunderstanding of the conversation.",
+      "criteria": {
+       "No.": null,
+       "Somewhat.": null,
+       "Yes.": null,
+       "Cannot assess / not applicable": null
+      }
+     }
+    ],
+    [
+     "c5",
+     {
+      "type": "choice",
+      "instructions": "The response is semantically appropriate.",
+      "criteria": {
+       "No.": null,
+       "Somewhat.": null,
+       "Yes.": null,
+       "Cannot assess / not applicable": null
+      }
+     }
+    ],
+    [
+     "c6",
+     {
+      "type": "choice",
+      "instructions": "The response is fluently written.",
+      "criteria": {
+       "No.": null,
+       "Somewhat.": null,
+       "Yes.": null,
+       "Cannot assess / not applicable": null
+      }
+     }
+    ],
+    [
+     "c7",
+     {
+      "type": "noul",
+      "instructions": "Determine whether this criterion is satisfied by the `submission`. Criterion: The response is understandable.",
+      "criteria": {
+       "true": "The thing described in the criterion IS present in the submission",
+       "false": "The thing described in the criterion IS NOT present in the submission"
+      }
+     }
+    ]
+   ]
+  },
+  {
+   "rubric": "fed_turn",
+   "binary_framing": "noul_framed",
+   "ordinal_framing": "score",
+   "questions": [
+    [
+     "c0",
+     {
+      "type": "score",
+      "instructions": "To the average person, the response is interesting.",
+      "criteria": [
+       "No.",
+       "Somewhat.",
+       "Yes."
+      ]
+     }
+    ],
+    [
+     "c1",
+     {
+      "type": "score",
+      "instructions": "The response is engaging.",
+      "criteria": [
+       "No.",
+       "Somewhat.",
+       "Yes."
+      ]
+     }
+    ],
+    [
+     "c2",
+     {
+      "type": "score",
+      "instructions": "The response is specific to the conversation rather than generic.",
+      "criteria": [
+       "No.",
+       "Somewhat.",
+       "Yes."
+      ]
+     }
+    ],
+    [
+     "c3",
+     {
+      "type": "score",
+      "instructions": "The response is relevant to the conversation.",
+      "criteria": [
+       "No.",
+       "Somewhat.",
+       "Yes."
+      ]
+     }
+    ],
+    [
+     "c4",
+     {
+      "type": "score",
+      "instructions": "The response is correct; it does not reflect a misunderstanding of the conversation.",
+      "criteria": [
+       "No.",
+       "Somewhat.",
+       "Yes."
+      ]
+     }
+    ],
+    [
+     "c5",
+     {
+      "type": "score",
+      "instructions": "The response is semantically appropriate.",
+      "criteria": [
+       "No.",
+       "Somewhat.",
+       "Yes."
+      ]
+     }
+    ],
+    [
+     "c6",
+     {
+      "type": "score",
+      "instructions": "The response is fluently written.",
+      "criteria": [
+       "No.",
+       "Somewhat.",
+       "Yes."
+      ]
+     }
+    ],
+    [
+     "c7",
+     {
+      "type": "noul",
+      "instructions": "Determine whether this criterion is satisfied by the `submission`. Criterion: The response is understandable.",
+      "criteria": {
+       "true": "The thing described in the criterion IS present in the submission",
+       "false": "The thing described in the criterion IS NOT present in the submission"
+      }
+     }
+    ]
+   ]
+  },
+  {
+   "rubric": "fed_turn",
+   "binary_framing": "choice",
+   "ordinal_framing": "choice",
+   "questions": [
+    [
+     "c0",
+     {
+      "type": "choice",
+      "instructions": "To the average person, the response is interesting.",
+      "criteria": {
+       "No.": null,
+       "Somewhat.": null,
+       "Yes.": null,
+       "Cannot assess / not applicable": null
+      }
+     }
+    ],
+    [
+     "c1",
+     {
+      "type": "choice",
+      "instructions": "The response is engaging.",
+      "criteria": {
+       "No.": null,
+       "Somewhat.": null,
+       "Yes.": null,
+       "Cannot assess / not applicable": null
+      }
+     }
+    ],
+    [
+     "c2",
+     {
+      "type": "choice",
+      "instructions": "The response is specific to the conversation rather than generic.",
+      "criteria": {
+       "No.": null,
+       "Somewhat.": null,
+       "Yes.": null,
+       "Cannot assess / not applicable": null
+      }
+     }
+    ],
+    [
+     "c3",
+     {
+      "type": "choice",
+      "instructions": "The response is relevant to the conversation.",
+      "criteria": {
+       "No.": null,
+       "Somewhat.": null,
+       "Yes.": null,
+       "Cannot assess / not applicable": null
+      }
+     }
+    ],
+    [
+     "c4",
+     {
+      "type": "choice",
+      "instructions": "The response is correct; it does not reflect a misunderstanding of the conversation.",
+      "criteria": {
+       "No.": null,
+       "Somewhat.": null,
+       "Yes.": null,
+       "Cannot assess / not applicable": null
+      }
+     }
+    ],
+    [
+     "c5",
+     {
+      "type": "choice",
+      "instructions": "The response is semantically appropriate.",
+      "criteria": {
+       "No.": null,
+       "Somewhat.": null,
+       "Yes.": null,
+       "Cannot assess / not applicable": null
+      }
+     }
+    ],
+    [
+     "c6",
+     {
+      "type": "choice",
+      "instructions": "The response is fluently written.",
+      "criteria": {
+       "No.": null,
+       "Somewhat.": null,
+       "Yes.": null,
+       "Cannot assess / not applicable": null
+      }
+     }
+    ],
+    [
+     "c7",
+     {
+      "type": "choice",
+      "instructions": "Determine whether this criterion is satisfied by the `submission`. Criterion: The response is understandable.",
+      "criteria": {
+       "MET": "The thing described in the criterion IS present in the submission",
+       "UNMET": "The thing described in the criterion IS NOT present in the submission",
+       "CANNOT_ASSESS": "Insufficient evidence to determine either way (use rarely)"
+      }
+     }
+    ]
+   ]
+  },
+  {
+   "rubric": "fed_turn",
+   "binary_framing": "choice",
+   "ordinal_framing": "score",
+   "questions": [
+    [
+     "c0",
+     {
+      "type": "score",
+      "instructions": "To the average person, the response is interesting.",
+      "criteria": [
+       "No.",
+       "Somewhat.",
+       "Yes."
+      ]
+     }
+    ],
+    [
+     "c1",
+     {
+      "type": "score",
+      "instructions": "The response is engaging.",
+      "criteria": [
+       "No.",
+       "Somewhat.",
+       "Yes."
+      ]
+     }
+    ],
+    [
+     "c2",
+     {
+      "type": "score",
+      "instructions": "The response is specific to the conversation rather than generic.",
+      "criteria": [
+       "No.",
+       "Somewhat.",
+       "Yes."
+      ]
+     }
+    ],
+    [
+     "c3",
+     {
+      "type": "score",
+      "instructions": "The response is relevant to the conversation.",
+      "criteria": [
+       "No.",
+       "Somewhat.",
+       "Yes."
+      ]
+     }
+    ],
+    [
+     "c4",
+     {
+      "type": "score",
+      "instructions": "The response is correct; it does not reflect a misunderstanding of the conversation.",
+      "criteria": [
+       "No.",
+       "Somewhat.",
+       "Yes."
+      ]
+     }
+    ],
+    [
+     "c5",
+     {
+      "type": "score",
+      "instructions": "The response is semantically appropriate.",
+      "criteria": [
+       "No.",
+       "Somewhat.",
+       "Yes."
+      ]
+     }
+    ],
+    [
+     "c6",
+     {
+      "type": "score",
+      "instructions": "The response is fluently written.",
+      "criteria": [
+       "No.",
+       "Somewhat.",
+       "Yes."
+      ]
+     }
+    ],
+    [
+     "c7",
+     {
+      "type": "choice",
+      "instructions": "Determine whether this criterion is satisfied by the `submission`. Criterion: The response is understandable.",
+      "criteria": {
+       "MET": "The thing described in the criterion IS present in the submission",
+       "UNMET": "The thing described in the criterion IS NOT present in the submission",
+       "CANNOT_ASSESS": "Insufficient evidence to determine either way (use rarely)"
+      }
+     }
+    ]
+   ]
+  }
+ ],
+ "answers": [
+  {
+   "id": "ricechem_q1-noul-decreased_repulsion-1",
+   "binary_framing": "noul",
+   "ordinal_framing": "choice",
+   "criterion": {
+    "weight": 1.0057,
+    "requirement": "correctly cites decreased electron electron repulsion",
+    "name": "decreased_repulsion",
+    "options": null,
+    "scale_type": "ordinal",
+    "aggregation": null
+   },
+   "answer": {
+    "type": "noul",
+    "noul": 0.92
+   },
+   "recorded": "MET"
+  },
+  {
+   "id": "ricechem_q1-noul-decreased_repulsion-2",
+   "binary_framing": "noul",
+   "ordinal_framing": "choice",
+   "criterion": {
+    "weight": 1.0057,
+    "requirement": "correctly cites decreased electron electron repulsion",
+    "name": "decreased_repulsion",
+    "options": null,
+    "scale_type": "ordinal",
+    "aggregation": null
+   },
+   "answer": {
+    "type": "noul",
+    "noul": 0.07
+   },
+   "recorded": "UNMET"
+  },
+  {
+   "id": "ricechem_q1-noul-repulsion_potential_energy-1",
+   "binary_framing": "noul",
+   "ordinal_framing": "choice",
+   "criterion": {
+    "weight": 1.0278,
+    "requirement": "relates decreased electron electron repulsion to decreased potential energy",
+    "name": "repulsion_potential_energy",
+    "options": null,
+    "scale_type": "ordinal",
+    "aggregation": null
+   },
+   "answer": {
+    "type": "noul",
+    "noul": 0.51
+   },
+   "recorded": "MET"
+  },
+  {
+   "id": "ricechem_q1-noul-full_pe_ie_explanation-1",
+   "binary_framing": "noul",
+   "ordinal_framing": "choice",
+   "criterion": {
+    "weight": 1.9688,
+    "requirement": "correctly explains relationship of potential energy to ionization energy",
+    "name": "full_pe_ie_explanation",
+    "options": null,
+    "scale_type": "ordinal",
+    "aggregation": null
+   },
+   "answer": {
+    "type": "noul",
+    "noul": 0.49
+   },
+   "recorded": "UNMET"
+  },
+  {
+   "id": "ricechem_q1-noul-full_pe_ie_explanation-2",
+   "binary_framing": "noul",
+   "ordinal_framing": "choice",
+   "criterion": {
+    "weight": 1.9688,
+    "requirement": "correctly explains relationship of potential energy to ionization energy",
+    "name": "full_pe_ie_explanation",
+    "options": null,
+    "scale_type": "ordinal",
+    "aggregation": null
+   },
+   "answer": {
+    "type": "noul",
+    "noul": 0.5
+   },
+   "recorded": "MET"
+  },
+  {
+   "id": "ricechem_q1-noul-full_pe_ie_explanation-3",
+   "binary_framing": "noul",
+   "ordinal_framing": "choice",
+   "criterion": {
+    "weight": 1.9688,
+    "requirement": "correctly explains relationship of potential energy to ionization energy",
+    "name": "full_pe_ie_explanation",
+    "options": null,
+    "scale_type": "ordinal",
+    "aggregation": null
+   },
+   "answer": {
+    "type": "noul",
+    "noul": 0.5
+   },
+   "recorded": "MET"
+  },
+  {
+   "id": "ricechem_q1-noul_framed-decreased_repulsion-1",
+   "binary_framing": "noul_framed",
+   "ordinal_framing": "choice",
+   "criterion": {
+    "weight": 1.0057,
+    "requirement": "correctly cites decreased electron electron repulsion",
+    "name": "decreased_repulsion",
+    "options": null,
+    "scale_type": "ordinal",
+    "aggregation": null
+   },
+   "answer": {
+    "type": "noul",
+    "noul": 0.97
+   },
+   "recorded": "MET"
+  },
+  {
+   "id": "ricechem_q1-noul_framed-decreased_repulsion-2",
+   "binary_framing": "noul_framed",
+   "ordinal_framing": "choice",
+   "criterion": {
+    "weight": 1.0057,
+    "requirement": "correctly cites decreased electron electron repulsion",
+    "name": "decreased_repulsion",
+    "options": null,
+    "scale_type": "ordinal",
+    "aggregation": null
+   },
+   "answer": {
+    "type": "noul",
+    "noul": 0.08
+   },
+   "recorded": "UNMET"
+  },
+  {
+   "id": "ricechem_q1-noul_framed-higher_core_charge-1",
+   "binary_framing": "noul_framed",
+   "ordinal_framing": "choice",
+   "criterion": {
+    "weight": 0.9504,
+    "requirement": "5th electron ionized from n=2 shell and feels higher core charge",
+    "name": "higher_core_charge",
+    "options": null,
+    "scale_type": "ordinal",
+    "aggregation": null
+   },
+   "answer": {
+    "type": "noul",
+    "noul": 0.55
+   },
+   "recorded": "MET"
+  },
+  {
+   "id": "ricechem_q1-noul_framed-partial_pe_ie_explanation-1",
+   "binary_framing": "noul_framed",
+   "ordinal_framing": "choice",
+   "criterion": {
+    "weight": 0.9902,
+    "requirement": "partially explains relationship between potential energy and ionization energy",
+    "name": "partial_pe_ie_explanation",
+    "options": null,
+    "scale_type": "ordinal",
+    "aggregation": null
+   },
+   "answer": {
+    "type": "noul",
+    "noul": 0.46
+   },
+   "recorded": "UNMET"
+  },
+  {
+   "id": "ricechem_q1-noul_framed-repulsion_potential_energy-1",
+   "binary_framing": "noul_framed",
+   "ordinal_framing": "choice",
+   "criterion": {
+    "weight": 1.0278,
+    "requirement": "relates decreased electron electron repulsion to decreased potential energy",
+    "name": "repulsion_potential_energy",
+    "options": null,
+    "scale_type": "ordinal",
+    "aggregation": null
+   },
+   "answer": {
+    "type": "noul",
+    "noul": 0.5
+   },
+   "recorded": "MET"
+  },
+  {
+   "id": "ricechem_q1-noul_framed-full_pe_ie_explanation-1",
+   "binary_framing": "noul_framed",
+   "ordinal_framing": "choice",
+   "criterion": {
+    "weight": 1.9688,
+    "requirement": "correctly explains relationship of potential energy to ionization energy",
+    "name": "full_pe_ie_explanation",
+    "options": null,
+    "scale_type": "ordinal",
+    "aggregation": null
+   },
+   "answer": {
+    "type": "noul",
+    "noul": 0.5
+   },
+   "recorded": "MET"
+  },
+  {
+   "id": "ricechem_q1-choice-decreased_repulsion-1",
+   "binary_framing": "choice",
+   "ordinal_framing": "choice",
+   "criterion": {
+    "weight": 1.0057,
+    "requirement": "correctly cites decreased electron electron repulsion",
+    "name": "decreased_repulsion",
+    "options": null,
+    "scale_type": "ordinal",
+    "aggregation": null
+   },
+   "answer": {
+    "type": "choice",
+    "choice": "MET",
+    "confidence": 0.98,
+    "probabilities": {
+     "MET": 0.99,
+     "CANNOT_ASSESS": 0.0,
+     "UNMET": 0.01
+    }
+   },
+   "recorded": "MET"
+  },
+  {
+   "id": "ricechem_q1-choice-same_core_charge-1",
+   "binary_framing": "choice",
+   "ordinal_framing": "choice",
+   "criterion": {
+    "weight": 0.9585,
+    "requirement": "3rd and 4th electrons ionized feel same core charge",
+    "name": "same_core_charge",
+    "options": null,
+    "scale_type": "ordinal",
+    "aggregation": null
+   },
+   "answer": {
+    "type": "choice",
+    "choice": "MET",
+    "confidence": 0.97,
+    "probabilities": {
+     "MET": 0.98,
+     "CANNOT_ASSESS": 0.0,
+     "UNMET": 0.02
+    }
+   },
+   "recorded": "MET"
+  },
+  {
+   "id": "ricechem_q1-choice-repulsion_potential_energy-1",
+   "binary_framing": "choice",
+   "ordinal_framing": "choice",
+   "criterion": {
+    "weight": 1.0278,
+    "requirement": "relates decreased electron electron repulsion to decreased potential energy",
+    "name": "repulsion_potential_energy",
+    "options": null,
+    "scale_type": "ordinal",
+    "aggregation": null
+   },
+   "answer": {
+    "type": "choice",
+    "choice": "UNMET",
+    "confidence": 0.94,
+    "probabilities": {
+     "MET": 0.04,
+     "CANNOT_ASSESS": 0.0,
+     "UNMET": 0.96
+    }
+   },
+   "recorded": "UNMET"
+  },
+  {
+   "id": "ricechem_q1-choice-repulsion_potential_energy-2",
+   "binary_framing": "choice",
+   "ordinal_framing": "choice",
+   "criterion": {
+    "weight": 1.0278,
+    "requirement": "relates decreased electron electron repulsion to decreased potential energy",
+    "name": "repulsion_potential_energy",
+    "options": null,
+    "scale_type": "ordinal",
+    "aggregation": null
+   },
+   "answer": {
+    "type": "choice",
+    "choice": "UNMET",
+    "confidence": 0.85,
+    "probabilities": {
+     "CANNOT_ASSESS": 0.01,
+     "UNMET": 0.9,
+     "MET": 0.09
+    }
+   },
+   "recorded": "UNMET"
+  },
+  {
+   "id": "ricechem_q2-choice-energy_levels_quantized-1",
+   "binary_framing": "choice",
+   "ordinal_framing": "choice",
+   "criterion": {
+    "weight": 0.9619,
+    "requirement": "Explaining sentence 1: energy levels of an electron in an atom are quantized",
+    "name": "energy_levels_quantized",
+    "options": null,
+    "scale_type": "ordinal",
+    "aggregation": null
+   },
+   "answer": {
+    "type": "choice",
+    "choice": "MET",
+    "confidence": 0.24,
+    "probabilities": {
+     "MET": 0.49,
+     "CANNOT_ASSESS": 0.01,
+     "UNMET": 0.5
+    }
+   },
+   "recorded": "MET"
+  },
+  {
+   "id": "fed_turn-noul_framed-understandable-1",
+   "binary_framing": "noul_framed",
+   "ordinal_framing": "choice",
+   "criterion": {
+    "weight": 10.0,
+    "requirement": "The response is understandable.",
+    "name": "understandable",
+    "options": null,
+    "scale_type": "ordinal",
+    "aggregation": null
+   },
+   "answer": {
+    "type": "noul",
+    "noul": 0.96
+   },
+   "recorded": "MET"
+  },
+  {
+   "id": "fed_turn-noul_framed-understandable-2",
+   "binary_framing": "noul_framed",
+   "ordinal_framing": "choice",
+   "criterion": {
+    "weight": 10.0,
+    "requirement": "The response is understandable.",
+    "name": "understandable",
+    "options": null,
+    "scale_type": "ordinal",
+    "aggregation": null
+   },
+   "answer": {
+    "type": "noul",
+    "noul": 0.98
+   },
+   "recorded": "MET"
+  },
+  {
+   "id": "fed_dialogue-choice-error_recovery-1",
+   "binary_framing": "noul_framed",
+   "ordinal_framing": "choice",
+   "criterion": {
+    "weight": 10.0,
+    "requirement": "The system is able to recover from errors that it makes.",
+    "name": "error_recovery",
+    "options": [
+     {
+      "label": "No.",
+      "value": 0.0,
+      "na": false
+     },
+     {
+      "label": "Somewhat.",
+      "value": 0.5,
+      "na": false
+     },
+     {
+      "label": "Yes.",
+      "value": 1.0,
+      "na": false
+     },
+     {
+      "label": "Cannot assess / not applicable",
+      "value": 0.0,
+      "na": true
+     }
+    ],
+    "scale_type": "ordinal",
+    "aggregation": null
+   },
+   "answer": {
+    "type": "choice",
+    "choice": "Cannot assess / not applicable",
+    "confidence": 0.71,
+    "probabilities": {
+     "Cannot assess / not applicable": 0.79,
+     "No.": 0.15,
+     "Somewhat.": 0.01,
+     "Yes.": 0.05
+    }
+   },
+   "recorded": 3
+  },
+  {
+   "id": "fed_dialogue-choice-error_recovery-2",
+   "binary_framing": "noul_framed",
+   "ordinal_framing": "choice",
+   "criterion": {
+    "weight": 10.0,
+    "requirement": "The system is able to recover from errors that it makes.",
+    "name": "error_recovery",
+    "options": [
+     {
+      "label": "No.",
+      "value": 0.0,
+      "na": false
+     },
+     {
+      "label": "Somewhat.",
+      "value": 0.5,
+      "na": false
+     },
+     {
+      "label": "Yes.",
+      "value": 1.0,
+      "na": false
+     },
+     {
+      "label": "Cannot assess / not applicable",
+      "value": 0.0,
+      "na": true
+     }
+    ],
+    "scale_type": "ordinal",
+    "aggregation": null
+   },
+   "answer": {
+    "type": "choice",
+    "choice": "Cannot assess / not applicable",
+    "confidence": 0.8,
+    "probabilities": {
+     "Yes.": 0.03,
+     "Somewhat.": 0.0,
+     "No.": 0.12,
+     "Cannot assess / not applicable": 0.85
+    }
+   },
+   "recorded": 3
+  },
+  {
+   "id": "fed_dialogue-choice-coherent-1",
+   "binary_framing": "noul_framed",
+   "ordinal_framing": "choice",
+   "criterion": {
+    "weight": 10.0,
+    "requirement": "Throughout the dialogue, the system is coherent and maintains a good conversation flow.",
+    "name": "coherent",
+    "options": [
+     {
+      "label": "No.",
+      "value": 0.0,
+      "na": false
+     },
+     {
+      "label": "Somewhat.",
+      "value": 0.5,
+      "na": false
+     },
+     {
+      "label": "Yes.",
+      "value": 1.0,
+      "na": false
+     },
+     {
+      "label": "Cannot assess / not applicable",
+      "value": 0.0,
+      "na": true
+     }
+    ],
+    "scale_type": "ordinal",
+    "aggregation": null
+   },
+   "answer": {
+    "type": "choice",
+    "choice": "No.",
+    "confidence": 0.66,
+    "probabilities": {
+     "Yes.": 0.02,
+     "Somewhat.": 0.23,
+     "No.": 0.75,
+     "Cannot assess / not applicable": 0.0
+    }
+   },
+   "recorded": 0
+  },
+  {
+   "id": "fed_dialogue-choice-understanding-1",
+   "binary_framing": "noul_framed",
+   "ordinal_framing": "choice",
+   "criterion": {
+    "weight": 10.0,
+    "requirement": "The system seems to understand the user.",
+    "name": "understanding",
+    "options": [
+     {
+      "label": "No.",
+      "value": 0.0,
+      "na": false
+     },
+     {
+      "label": "Somewhat.",
+      "value": 0.5,
+      "na": false
+     },
+     {
+      "label": "Yes.",
+      "value": 1.0,
+      "na": false
+     },
+     {
+      "label": "Cannot assess / not applicable",
+      "value": 0.0,
+      "na": true
+     }
+    ],
+    "scale_type": "ordinal",
+    "aggregation": null
+   },
+   "answer": {
+    "type": "choice",
+    "choice": "Somewhat.",
+    "confidence": 0.51,
+    "probabilities": {
+     "Yes.": 0.09,
+     "Somewhat.": 0.64,
+     "No.": 0.27,
+     "Cannot assess / not applicable": 0.0
+    }
+   },
+   "recorded": 1
+  },
+  {
+   "id": "fed_dialogue-choice-diverse-1",
+   "binary_framing": "noul_framed",
+   "ordinal_framing": "choice",
+   "criterion": {
+    "weight": 10.0,
+    "requirement": "There is diversity in the system's responses.",
+    "name": "diverse",
+    "options": [
+     {
+      "label": "No.",
+      "value": 0.0,
+      "na": false
+     },
+     {
+      "label": "Somewhat.",
+      "value": 0.5,
+      "na": false
+     },
+     {
+      "label": "Yes.",
+      "value": 1.0,
+      "na": false
+     },
+     {
+      "label": "Cannot assess / not applicable",
+      "value": 0.0,
+      "na": true
+     }
+    ],
+    "scale_type": "ordinal",
+    "aggregation": null
+   },
+   "answer": {
+    "type": "choice",
+    "choice": "Yes.",
+    "confidence": 0.45,
+    "probabilities": {
+     "Somewhat.": 0.28,
+     "Yes.": 0.59,
+     "No.": 0.11,
+     "Cannot assess / not applicable": 0.02
+    }
+   },
+   "recorded": 2
+  },
+  {
+   "id": "fed_turn-choice-specific-1",
+   "binary_framing": "noul_framed",
+   "ordinal_framing": "choice",
+   "criterion": {
+    "weight": 10.0,
+    "requirement": "The response is specific to the conversation rather than generic.",
+    "name": "specific",
+    "options": [
+     {
+      "label": "No.",
+      "value": 0.0,
+      "na": false
+     },
+     {
+      "label": "Somewhat.",
+      "value": 0.5,
+      "na": false
+     },
+     {
+      "label": "Yes.",
+      "value": 1.0,
+      "na": false
+     },
+     {
+      "label": "Cannot assess / not applicable",
+      "value": 0.0,
+      "na": true
+     }
+    ],
+    "scale_type": "ordinal",
+    "aggregation": null
+   },
+   "answer": {
+    "type": "choice",
+    "choice": "Somewhat.",
+    "confidence": 0.19,
+    "probabilities": {
+     "No.": 0.39,
+     "Cannot assess / not applicable": 0.01,
+     "Yes.": 0.22,
+     "Somewhat.": 0.38
+    }
+   },
+   "recorded": 1
+  },
+  {
+   "id": "fed_dialogue-score-depth-1",
+   "binary_framing": "noul_framed",
+   "ordinal_framing": "score",
+   "criterion": {
+    "weight": 10.0,
+    "requirement": "The system discusses topics in depth.",
+    "name": "depth",
+    "options": [
+     {
+      "label": "No.",
+      "value": 0.0,
+      "na": false
+     },
+     {
+      "label": "Somewhat.",
+      "value": 0.5,
+      "na": false
+     },
+     {
+      "label": "Yes.",
+      "value": 1.0,
+      "na": false
+     },
+     {
+      "label": "Cannot assess / not applicable",
+      "value": 0.0,
+      "na": true
+     }
+    ],
+    "scale_type": "ordinal",
+    "aggregation": null
+   },
+   "answer": {
+    "type": "score",
+    "score": 0.31,
+    "confidence": 0.54,
+    "legend": {
+     "0": "No.",
+     "1": "Somewhat.",
+     "2": "Yes."
+    },
+    "probabilities": {
+     "0": 0.71,
+     "1": 0.27,
+     "2": 0.02
+    }
+   },
+   "recorded": 0
+  },
+  {
+   "id": "fed_dialogue-score-error_recovery-1",
+   "binary_framing": "noul_framed",
+   "ordinal_framing": "score",
+   "criterion": {
+    "weight": 10.0,
+    "requirement": "The system is able to recover from errors that it makes.",
+    "name": "error_recovery",
+    "options": [
+     {
+      "label": "No.",
+      "value": 0.0,
+      "na": false
+     },
+     {
+      "label": "Somewhat.",
+      "value": 0.5,
+      "na": false
+     },
+     {
+      "label": "Yes.",
+      "value": 1.0,
+      "na": false
+     },
+     {
+      "label": "Cannot assess / not applicable",
+      "value": 0.0,
+      "na": true
+     }
+    ],
+    "scale_type": "ordinal",
+    "aggregation": null
+   },
+   "answer": {
+    "type": "score",
+    "score": 0.57,
+    "confidence": 0.15,
+    "legend": {
+     "0": "No.",
+     "1": "Somewhat.",
+     "2": "Yes."
+    },
+    "probabilities": {
+     "0": 0.67,
+     "1": 0.09,
+     "2": 0.24
+    }
+   },
+   "recorded": 1
+  },
+  {
+   "id": "fed_dialogue-score-coherent-1",
+   "binary_framing": "noul_framed",
+   "ordinal_framing": "score",
+   "criterion": {
+    "weight": 10.0,
+    "requirement": "Throughout the dialogue, the system is coherent and maintains a good conversation flow.",
+    "name": "coherent",
+    "options": [
+     {
+      "label": "No.",
+      "value": 0.0,
+      "na": false
+     },
+     {
+      "label": "Somewhat.",
+      "value": 0.5,
+      "na": false
+     },
+     {
+      "label": "Yes.",
+      "value": 1.0,
+      "na": false
+     },
+     {
+      "label": "Cannot assess / not applicable",
+      "value": 0.0,
+      "na": true
+     }
+    ],
+    "scale_type": "ordinal",
+    "aggregation": null
+   },
+   "answer": {
+    "type": "score",
+    "score": 1.87,
+    "confidence": 0.81,
+    "legend": {
+     "0": "No.",
+     "1": "Somewhat.",
+     "2": "Yes."
+    },
+    "probabilities": {
+     "0": 0.02,
+     "1": 0.09,
+     "2": 0.89
+    }
+   },
+   "recorded": 2
+  },
+  {
+   "id": "fed_dialogue-score-likeable-1",
+   "binary_framing": "noul_framed",
+   "ordinal_framing": "score",
+   "criterion": {
+    "weight": 10.0,
+    "requirement": "The system displays a likeable personality.",
+    "name": "likeable",
+    "options": [
+     {
+      "label": "No.",
+      "value": 0.0,
+      "na": false
+     },
+     {
+      "label": "Somewhat.",
+      "value": 0.5,
+      "na": false
+     },
+     {
+      "label": "Yes.",
+      "value": 1.0,
+      "na": false
+     },
+     {
+      "label": "Cannot assess / not applicable",
+      "value": 0.0,
+      "na": true
+     }
+    ],
+    "scale_type": "ordinal",
+    "aggregation": null
+   },
+   "answer": {
+    "type": "score",
+    "score": 1.5,
+    "confidence": 0.25,
+    "legend": {
+     "0": "No.",
+     "1": "Somewhat.",
+     "2": "Yes."
+    },
+    "probabilities": {
+     "0": 0.03,
+     "1": 0.43,
+     "2": 0.54
+    }
+   },
+   "recorded": 2
+  },
+  {
+   "id": "fed_turn-score-interesting-1",
+   "binary_framing": "noul_framed",
+   "ordinal_framing": "score",
+   "criterion": {
+    "weight": 10.0,
+    "requirement": "To the average person, the response is interesting.",
+    "name": "interesting",
+    "options": [
+     {
+      "label": "No.",
+      "value": 0.0,
+      "na": false
+     },
+     {
+      "label": "Somewhat.",
+      "value": 0.5,
+      "na": false
+     },
+     {
+      "label": "Yes.",
+      "value": 1.0,
+      "na": false
+     },
+     {
+      "label": "Cannot assess / not applicable",
+      "value": 0.0,
+      "na": true
+     }
+    ],
+    "scale_type": "ordinal",
+    "aggregation": null
+   },
+   "answer": {
+    "type": "score",
+    "score": 1.5,
+    "confidence": 0.25,
+    "legend": {
+     "0": "No.",
+     "1": "Somewhat.",
+     "2": "Yes."
+    },
+    "probabilities": {
+     "0": 0.04,
+     "1": 0.42,
+     "2": 0.54
+    }
+   },
+   "recorded": 2
+  },
+  {
+   "id": "fed_dialogue-score-inquisitive-1",
+   "binary_framing": "noul_framed",
+   "ordinal_framing": "score",
+   "criterion": {
+    "weight": 10.0,
+    "requirement": "The system is inquisitive throughout the conversation.",
+    "name": "inquisitive",
+    "options": [
+     {
+      "label": "No.",
+      "value": 0.0,
+      "na": false
+     },
+     {
+      "label": "Somewhat.",
+      "value": 0.5,
+      "na": false
+     },
+     {
+      "label": "Yes.",
+      "value": 1.0,
+      "na": false
+     },
+     {
+      "label": "Cannot assess / not applicable",
+      "value": 0.0,
+      "na": true
+     }
+    ],
+    "scale_type": "ordinal",
+    "aggregation": null
+   },
+   "answer": {
+    "type": "score",
+    "score": 0.5,
+    "confidence": 0.24,
+    "legend": {
+     "0": "No.",
+     "1": "Somewhat.",
+     "2": "Yes."
+    },
+    "probabilities": {
+     "0": 0.52,
+     "1": 0.45,
+     "2": 0.03
+    }
+   },
+   "recorded": 0
+  },
+  {
+   "id": "fed_turn-score-specific-1",
+   "binary_framing": "noul_framed",
+   "ordinal_framing": "score",
+   "criterion": {
+    "weight": 10.0,
+    "requirement": "The response is specific to the conversation rather than generic.",
+    "name": "specific",
+    "options": [
+     {
+      "label": "No.",
+      "value": 0.0,
+      "na": false
+     },
+     {
+      "label": "Somewhat.",
+      "value": 0.5,
+      "na": false
+     },
+     {
+      "label": "Yes.",
+      "value": 1.0,
+      "na": false
+     },
+     {
+      "label": "Cannot assess / not applicable",
+      "value": 0.0,
+      "na": true
+     }
+    ],
+    "scale_type": "ordinal",
+    "aggregation": null
+   },
+   "answer": {
+    "type": "score",
+    "score": 0.5,
+    "confidence": 0.25,
+    "legend": {
+     "0": "No.",
+     "1": "Somewhat.",
+     "2": "Yes."
+    },
+    "probabilities": {
+     "0": 0.64,
+     "1": 0.23,
+     "2": 0.13
+    }
+   },
+   "recorded": 0
+  }
+ ]
+}

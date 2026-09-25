@@ -586,6 +586,42 @@ Apply consistent standards across the examples and the submission you are evalua
 
 
 # ============================================================================
+# Decision-Model Framing
+# ============================================================================
+# The fixed text a decision model receives around a binary criterion under the framed
+# binary framings ("noul_framed", "choice"); the verdicts it offers carry the binary verdict
+# definitions above. Framed instructions are a task sentence, then a context sentence for
+# each optional state field the judgment depends on, then DECISION_MODEL_CRITERION_PREFIX
+# followed by the criterion requirement, verbatim and last, so no fixed text can be read as
+# part of it. With no optional field this is "Determine whether this criterion is satisfied
+# by the `submission`. Criterion: <requirement>". Backticked names are keys of the
+# decision-model state.
+
+# Task sentence when the state holds the whole submission.
+DECISION_MODEL_TASK_INSTRUCTION = (
+    "Determine whether this criterion is satisfied by the `submission`."
+)
+
+# Task sentence when the state splits a structured submission into `thinking` and `output`:
+# only the output is judged, the thinking is context. This approximates the LLM judge's
+# rule, which evaluates only <output> unless a criterion is about the reasoning itself.
+DECISION_MODEL_THINKING_OUTPUT_TASK_INSTRUCTION = (
+    "Determine whether this criterion is satisfied by the `output`; the `thinking` is context only."
+)
+
+# Context sentence when the state holds a reference submission; the same usage rule the LLM
+# judge's REFERENCE SUBMISSION section states. ``{judged}`` is the judged state field:
+# "submission", or "output" for a structured submission.
+DECISION_MODEL_REFERENCE_INSTRUCTION = (
+    "Use the `reference_submission` only to calibrate expectations; judge the `{judged}` on "
+    "its own merits, not by its resemblance to the reference."
+)
+
+# Label before the verbatim criterion requirement, which always ends the instructions.
+DECISION_MODEL_CRITERION_PREFIX = "Criterion: "
+
+
+# ============================================================================
 # Rubric Revision Prompts
 # ============================================================================
 

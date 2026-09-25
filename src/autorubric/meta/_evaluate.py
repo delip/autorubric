@@ -1,11 +1,13 @@
 """Meta-rubric evaluation functions for assessing rubric quality."""
 
 import json
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Literal
 
 from pydantic import Field
 
+from autorubric.decision import DecisionModelConfig
 from autorubric.graders import CriterionGrader
 from autorubric.llm import LLMConfig
 from autorubric.rubric import Rubric
@@ -24,6 +26,44 @@ _CRITERIA_REF_INSTRUCTION = (
     "When evaluating, identify which specific criteria (by index) "
     "are relevant to your assessment.\n\n"
 )
+
+
+def _not_an_llm(what: str) -> ValueError:
+    """The error for a decision model given where meta-rubric work needs an LLM.
+
+    Meta-rubric evaluation and rubric improvement work from generated text: the
+    meta-judge's explanations, the evaluation judges' explanations of their verdicts and
+    the revised rubric. A decision model (``DecisionModelConfig``) returns probabilities,
+    not text, so it can fill none of these roles. Every such entry point raises this
+    error, before it builds a client or makes a call.
+
+    Args:
+        what: The argument at fault, as the message names it (e.g. ``"llm_config"``).
+
+    Returns:
+        The ``ValueError`` to raise.
+    """
+    return ValueError(
+        f"{what} must be an LLM, not a decision model (DecisionModelConfig): meta-rubric "
+        "evaluation and rubric improvement work from generated text (judges' explanations, "
+        "revised rubrics), which a decision model does not produce"
+    )
+
+
+def _reject_decision_model_judges(judges: Iterable[object], what: str) -> None:
+    """Raise ``_not_an_llm`` for the first judge that is a decision model.
+
+    Args:
+        judges: ``JudgeSpec``s; one whose ``llm_config`` is a ``DecisionModelConfig`` is
+            rejected.
+        what: How the message names a judge; its ``judge_id`` follows.
+
+    Raises:
+        ValueError: If a judge is a decision model.
+    """
+    for judge in judges:
+        if isinstance(getattr(judge, "llm_config", None), DecisionModelConfig):
+            raise _not_an_llm(f"{what} {getattr(judge, 'judge_id', None)!r}")
 
 
 class MetaCriterionJudgment(CriterionJudgment):
@@ -81,7 +121,9 @@ async def evaluate_rubric_standalone(
 
     Args:
         rubric: The rubric to evaluate.
-        llm_config: LLM configuration for the evaluation.
+        llm_config: LLM configuration for the evaluation. The meta-judge must be an LLM:
+            meta-rubric evaluation works from its explanations, which a decision model
+            (``DecisionModelConfig``) does not produce.
         display: Output format - None for no display, "stdout" for terminal,
             "html" for HTML file.
         output_html_path: Path for HTML output (required when display="html").
@@ -90,8 +132,11 @@ async def evaluate_rubric_standalone(
         EnsembleEvaluationReport with score, raw_score, and per-criterion verdicts.
 
     Raises:
-        ValueError: If display="html" but output_html_path is not provided.
+        ValueError: If llm_config is a decision model, or if display="html" but
+            output_html_path is not provided.
     """
+    if isinstance(llm_config, DecisionModelConfig):
+        raise _not_an_llm("llm_config")
     if display == "html" and output_html_path is None:
         raise ValueError("output_html_path is required when display='html'")
 
@@ -149,7 +194,9 @@ async def evaluate_rubric_in_context(
     Args:
         rubric: The rubric to evaluate.
         task_prompt: The task prompt the rubric is designed to evaluate.
-        llm_config: LLM configuration for the evaluation.
+        llm_config: LLM configuration for the evaluation. The meta-judge must be an LLM:
+            meta-rubric evaluation works from its explanations, which a decision model
+            (``DecisionModelConfig``) does not produce.
         display: Output format - None for no display, "stdout" for terminal,
             "html" for HTML file.
         output_html_path: Path for HTML output (required when display="html").
@@ -158,8 +205,11 @@ async def evaluate_rubric_in_context(
         EnsembleEvaluationReport with score, raw_score, and per-criterion verdicts.
 
     Raises:
-        ValueError: If display="html" but output_html_path is not provided.
+        ValueError: If llm_config is a decision model, or if display="html" but
+            output_html_path is not provided.
     """
+    if isinstance(llm_config, DecisionModelConfig):
+        raise _not_an_llm("llm_config")
     if display == "html" and output_html_path is None:
         raise ValueError("output_html_path is required when display='html'")
 

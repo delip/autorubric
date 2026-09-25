@@ -4,17 +4,27 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import functools
 import hashlib
+import inspect
 import logging
 import math
 import random
 import warnings
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from contextvars import ContextVar
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, overload
+from typing import TYPE_CHECKING, Any, TypeVar, cast, overload
 
 from pydantic import BaseModel
 
+from autorubric.decision import (
+    DecisionModelClient,
+    DecisionModelConfig,
+    answer_to_report,
+    build_questions,
+    build_state,
+)
 from autorubric.graders.base import Grader
 from autorubric.llm import GenerateResult, LLMClient, LLMConfig, classify_grading_error
 from autorubric.prompts import (
@@ -48,6 +58,7 @@ from autorubric.types import (
     NominalAggregation,
     OrdinalAggregation,
     TokenUsage,
+    _binary_worst_verdict,
 )
 
 if TYPE_CHECKING:
@@ -76,6 +87,47 @@ def _derive_shuffle_rng(
 # selection. Few-shot examples are a fixed property of (criterion, judge), not of the
 # item being graded, so the per-call item content is intentionally not part of the key.
 FEW_SHOT_DOMAIN = "few_shot"
+
+
+_PASSED_KEYWORDS: ContextVar[frozenset[str]] = ContextVar("_PASSED_KEYWORDS", default=frozenset())
+"""Names of the keyword arguments passed to the ``__init__`` call running in this context."""
+
+_InitT = TypeVar("_InitT", bound=Callable[..., None])
+
+# A warning issued in an ``__init__`` wrapped by ``_records_passed_keywords`` is attributed to
+# the caller's line with this stacklevel: ``__init__`` <- the wrapper <- the caller.
+_INIT_CALLER_STACKLEVEL = 3
+
+
+def _records_passed_keywords(init: _InitT) -> _InitT:
+    """Let a keyword-only ``__init__`` know which of its arguments the caller passed.
+
+    Python does not tell a function whether an argument was passed or left at its default,
+    and a sentinel default would replace the documented default wherever the signature is
+    read (``inspect.signature``, ``__kwdefaults__``, the rendered API reference, tools that
+    log or serialize defaults). Instead, while ``init`` runs, ``_PASSED_KEYWORDS`` holds the
+    names of the keyword arguments of the call; every parameter of ``init`` is keyword-only,
+    so they are exactly the arguments passed. The wrapper reads as ``init`` to every
+    introspection tool: ``functools.update_wrapper`` copies its metadata (and sets the
+    ``__wrapped__`` that ``inspect.signature`` follows), ``__kwdefaults__`` is ``init``'s,
+    and ``__signature__`` is ``init``'s signature, which ``inspect.getfullargspec`` reads
+    because it does not follow ``__wrapped__``. Only the code object (``__code__``) is the
+    wrapper's own. Positional arguments go through to ``init``, which rejects them with its
+    own error. The wrapper adds a frame: a warning issued in ``init`` uses
+    ``_INIT_CALLER_STACKLEVEL`` to name the caller's line.
+    """
+
+    def wrapper(self: Any, *args: Any, **kwargs: Any) -> None:
+        token = _PASSED_KEYWORDS.set(frozenset(kwargs))
+        try:
+            init(self, *args, **kwargs)
+        finally:
+            _PASSED_KEYWORDS.reset(token)
+
+    wrapper.__kwdefaults__ = init.__kwdefaults__
+    # A function attribute that type checkers do not model; inspect reads it by name.
+    setattr(wrapper, "__signature__", inspect.signature(init))
+    return cast(_InitT, functools.update_wrapper(wrapper, init))
 
 
 def _combine_errors(errors: list[str | None]) -> str | None:
@@ -152,17 +204,6 @@ def _require_llm_reason(reason: str | None) -> str:
     return reason
 
 
-def _binary_worst_verdict(weight: float) -> CriterionVerdict:
-    """The score-minimizing binary verdict for a criterion of the given weight.
-
-    Positive (or zero) weight → UNMET (earns 0 instead of the weight); negative weight →
-    MET (subtracts the full penalty). Single source of the "binary worst case" — shared by
-    the ``unknown``-error synthesis path and majority/weighted tie-breaking. Binary analog
-    of ``Criterion.worst_scored_option`` / ``worst_option_among``.
-    """
-    return CriterionVerdict.MET if weight < 0 else CriterionVerdict.UNMET
-
-
 def _top_tied_keys(scores: Mapping[int, float]) -> list[int]:
     """Option indices tied for the maximum score (vote count or summed judge weight).
 
@@ -184,9 +225,15 @@ class JudgeSpec:
     exactly as they were. ``dataclasses.replace`` therefore takes ``llm_config=``, and
     passing both ``judge_model_config=`` and ``llm_config=`` raises ``ValueError``.
 
+    The configuration decides the judge's kind: an ``LLMConfig`` makes an LLM judge, which
+    is asked about each criterion in its own call, and a ``DecisionModelConfig`` makes a
+    decision-model judge, which is asked about every criterion of an item in one request.
+    Both kinds mix freely in one ensemble.
+
     Attributes:
-        llm_config: The judge's model configuration (the stored field; also readable and
-            writable as the ``judge_model_config`` property).
+        llm_config: The judge's model configuration, an ``LLMConfig`` or a
+            ``DecisionModelConfig`` (the stored field; also readable and writable as the
+            ``judge_model_config`` property).
         judge_id: Unique identifier for this judge (e.g., "gpt-4", "claude-sonnet").
         weight: Voting weight for weighted aggregation (default 1.0).
 
@@ -194,9 +241,10 @@ class JudgeSpec:
         >>> gemini = LLMConfig(model="gemini/gemini-3-flash-preview")
         >>> JudgeSpec(judge_model_config=gemini, judge_id="gemini")
         >>> JudgeSpec(gemini, "gemini", weight=2.0)  # positional form
+        >>> JudgeSpec(DecisionModelConfig(model="jev-latest"), "jev")  # a decision model
     """
 
-    llm_config: LLMConfig
+    llm_config: LLMConfig | DecisionModelConfig
     judge_id: str
     weight: float = 1.0
 
@@ -205,11 +253,20 @@ class JudgeSpec:
     # are still derived from the three fields above. The overloads are the two accepted
     # call shapes; the sentinel defaults tell a missing argument from an explicit ``None``.
     @overload
-    def __init__(self, llm_config: LLMConfig, judge_id: str, weight: float = 1.0) -> None: ...
+    def __init__(
+        self,
+        llm_config: LLMConfig | DecisionModelConfig,
+        judge_id: str,
+        weight: float = 1.0,
+    ) -> None: ...
 
     @overload
     def __init__(
-        self, *, judge_model_config: LLMConfig, judge_id: str, weight: float = 1.0
+        self,
+        *,
+        judge_model_config: LLMConfig | DecisionModelConfig,
+        judge_id: str,
+        weight: float = 1.0,
     ) -> None: ...
 
     def __init__(
@@ -259,18 +316,25 @@ class JudgeSpec:
         self.weight = weight
 
     @property
-    def judge_model_config(self) -> LLMConfig:
+    def judge_model_config(self) -> LLMConfig | DecisionModelConfig:
         """The judge's model configuration (read/write alias of the ``llm_config`` field)."""
         return self.llm_config
 
     @judge_model_config.setter
-    def judge_model_config(self, value: LLMConfig) -> None:
+    def judge_model_config(self, value: LLMConfig | DecisionModelConfig) -> None:
         self.llm_config = value
 
 
 @dataclass
 class CriterionResult:
-    """Result from evaluating a single criterion by a single judge."""
+    """Result from evaluating a single criterion by a single judge.
+
+    ``usage`` and ``cost`` belong to the call that produced the result. An LLM judge makes
+    one call per criterion, so each result carries its own. A decision-model judge makes
+    one request per item, whose usage and cost ride on the item's first result (the other
+    results carry ``None``), so ``JudgeCriterionResults.total_usage``/``total_cost`` are the
+    per-item totals for either kind. ``cost`` is ``None`` when it is unknown.
+    """
 
     report: CriterionReport
     usage: TokenUsage | None = None
@@ -300,6 +364,116 @@ class JudgeCriterionResults:
         return sum(costs) if costs else None
 
 
+def _failed_judgment_result(
+    criterion: Criterion,
+    judge_id: str,
+    error: Exception,
+    *,
+    shuffle_order: list[int] | None = None,
+) -> CriterionResult:
+    """The result a judge gets for ``criterion`` when judging it failed with ``error``.
+
+    The single source of failure reports for every judge kind: an LLM judge's failed call,
+    a decision model's failed request (once for each criterion posed in it), an answer
+    that cannot be used, and a criterion a decision model cannot be asked about. The
+    failure is classified by ``classify_grading_error`` and logged with the judge's id.
+    Infrastructure (API/network) and parse/validation failures are not the submission's
+    fault, so they abstain: ``CANNOT_ASSESS`` (binary) or ``na=True`` (multi-choice), which
+    the default ``CannotAssessStrategy.SKIP`` excludes from scoring, instead of a
+    score-affecting worst-case verdict. Only truly unknown errors keep the conservative
+    worst case. The report surfaces the failure structurally (``error``, prefixed with the
+    category; see ``is_error``) and in ``reason``, and carries no usage or cost.
+
+    Args:
+        criterion: The criterion as evaluated (after its NA option is guaranteed).
+        judge_id: The judge whose judgment failed.
+        error: The exception the failure raised.
+        shuffle_order: The option permutation the judge was shown for a multi-choice
+            criterion, if any, recorded on the report.
+
+    Returns:
+        The failure's ``CriterionResult``.
+    """
+    category = classify_grading_error(error)
+    # The outcome fields each criterion kind's report has always been built with, so the
+    # report is the same pydantic object field for field (fields set included).
+    outcome: dict[str, Any]
+    if criterion.options is None:
+        if category == "unknown":
+            verdict = _binary_worst_verdict(criterion.weight)
+        else:
+            verdict = CriterionVerdict.CANNOT_ASSESS
+        logger.warning(
+            f"Error evaluating criterion '{criterion.requirement[:50]}...' "
+            f"with judge '{judge_id}' [{category}]: {error}"
+        )
+        outcome = {"verdict": verdict}
+    else:
+        logger.warning(
+            f"Error evaluating multi-choice criterion '{criterion.requirement[:50]}...' "
+            f"with judge '{judge_id}' [{category}]: {error}"
+        )
+
+        options = criterion.options
+        if category == "unknown":
+            # Conservative worst case, weight-sign-aware, among scored (non-NA)
+            # options only — mirrors the binary worst case (MET if weight < 0 else
+            # UNMET). Never auto-select an NA option for an unknown error; NA/skip
+            # is reserved for infrastructure/parse failures. Ties resolve to the
+            # first such option in declaration order (deterministic). The shared
+            # helper is also used by the metrics layer's na_mode="as_unmet" remap
+            # so the two layers cannot drift.
+            worst_idx, worst_option = criterion.worst_scored_option()
+            multi_choice_verdict = MultiChoiceVerdict(
+                selected_index=worst_idx,
+                selected_label=worst_option.label,
+                value=worst_option.value,
+                na=False,
+            )
+        else:
+            # Infrastructure/parse: abstain (excluded under SKIP). Prefer a genuine
+            # NA option — guaranteed when auto_na_option is on — so the abstain verdict
+            # points at a real na=True option (resolves the contradiction for the
+            # default case). With no NA option (forced-choice + no author NA) emit a
+            # GENUINE abstain that selects no option (selected_index/label=None), rather
+            # than forcing na=True onto a scored option (the old contradiction). It
+            # stays na=True → excluded under SKIP, so infra/parse never penalizes.
+            na_idx = criterion.na_option_index
+            if na_idx is not None:
+                na_option = options[na_idx]
+                multi_choice_verdict = MultiChoiceVerdict(
+                    selected_index=na_idx,
+                    selected_label=na_option.label,
+                    value=na_option.value,
+                    na=True,
+                )
+            else:
+                multi_choice_verdict = MultiChoiceVerdict(
+                    selected_index=None,
+                    selected_label=None,
+                    value=0.0,
+                    na=True,
+                )
+        outcome = {
+            "verdict": None,
+            "multi_choice_verdict": multi_choice_verdict,
+            "shuffle_order": shuffle_order,
+        }
+
+    report = CriterionReport(
+        requirement=criterion.requirement,
+        **outcome,
+        reason=f"Judge call failed ({category}): {str(error)}",
+        error=f"{category}: {str(error)}",
+        weight=criterion.weight,
+        name=criterion.name,
+        options=criterion.options,
+        scale_type=criterion.scale_type,
+        aggregation=criterion.aggregation,
+    )
+    return CriterionResult(report=report, usage=None, cost=None)
+
+
 class CriterionGrader(Grader):
     """Unified criterion-based grader with compositional few-shot and ensemble support.
 
@@ -312,10 +486,27 @@ class CriterionGrader(Grader):
 
     Parameters are orthogonal:
     - judge_model_config OR judges: Choose single-judge or ensemble mode
-    - training_data + few_shot_config: Enable few-shot prompting (applies to all judges)
+    - training_data + few_shot_config: Enable few-shot prompting (applies to every LLM judge)
+
+    A judge is an LLM (``LLMConfig``) or a decision model (``DecisionModelConfig``), alone
+    or mixed in one ensemble. An LLM judge is asked about each criterion in its own call. A
+    decision-model judge is asked about the whole rubric in **one request per item**: the
+    submission goes once as shared state and every criterion it can express becomes one
+    question; a criterion it cannot express fails alone, and a failed request fails every
+    criterion posed in it, through the same failure routing as an LLM judge's failed call.
+    Its votes carry ``probabilities`` and ``confidence`` and no explanation (``reason`` is
+    ``None``). In a mixed ensemble every judge votes on every criterion, and the votes
+    aggregate exactly as an all-LLM ensemble's do.
+
+    Some settings exist for LLM judges only. Few-shot examples, the system prompts and
+    ``shuffle_options`` apply to the LLM judges of a mixed ensemble and never reach a
+    decision model. A grader whose judges are all decision models rejects few-shot examples
+    and warns when a system prompt or ``shuffle_options`` is passed, since it has no judge
+    to apply them to. A custom response format describes a generated judgment, which only
+    an LLM judge produces, so it cannot be combined with any decision-model judge.
 
     Example:
-        >>> from autorubric import LLMConfig, FewShotConfig, RubricDataset
+        >>> from autorubric import DecisionModelConfig, LLMConfig, FewShotConfig, RubricDataset
         >>> from autorubric.graders import CriterionGrader, JudgeSpec
         >>>
         >>> # Single LLM
@@ -347,20 +538,32 @@ class CriterionGrader(Grader):
         ...     training_data=train,
         ...     few_shot_config=FewShotConfig(n_examples=3),
         ... )
+        >>>
+        >>> # Decision model: one request per item for the whole rubric
+        >>> grader = CriterionGrader(judge_model_config=DecisionModelConfig(model="jev-latest"))
+        >>>
+        >>> # Mixed ensemble of a decision model and an LLM
+        >>> grader = CriterionGrader(
+        ...     judges=[
+        ...         JudgeSpec(DecisionModelConfig(model="jev-latest"), "jev"),
+        ...         JudgeSpec(LLMConfig(model="gemini/gemini-3-flash-preview"), "gemini"),
+        ...     ],
+        ... )
     """
 
+    @_records_passed_keywords
     def __init__(
         self,
         *,
         # Single-judge mode
-        judge_model_config: LLMConfig | None = None,
+        judge_model_config: LLMConfig | DecisionModelConfig | None = None,
         # Ensemble mode (mutually exclusive with judge_model_config)
         judges: list[JudgeSpec] | None = None,
         aggregation: AggregationStrategy = "majority",
         # Multi-choice aggregation strategies
         ordinal_aggregation: OrdinalAggregation = "mean",
         nominal_aggregation: NominalAggregation = "mode",
-        # Few-shot mode (orthogonal - applies to all judges)
+        # Few-shot mode (orthogonal - applies to every LLM judge)
         training_data: RubricDataset | None = None,
         few_shot_config: FewShotConfig | None = None,
         # Common parameters
@@ -381,15 +584,17 @@ class CriterionGrader(Grader):
         multi_choice_response_format: type[BaseModel] | None = None,
         # Deprecated alias of judge_model_config (every parameter is keyword-only, so
         # its position at the end changes no call)
-        llm_config: LLMConfig | None = None,
+        llm_config: LLMConfig | DecisionModelConfig | None = None,
     ):
         """Initialize the criterion grader.
 
         Args:
             judge_model_config: Configuration of the single judge (single-judge mode), which
-                is given ``judge_id="default"``. Mutually exclusive with judges.
-            judges: List of JudgeSpec for ensemble mode. Mutually exclusive with
-                judge_model_config.
+                is given ``judge_id="default"``: an ``LLMConfig`` for an LLM judge or a
+                ``DecisionModelConfig`` for a decision-model judge. Mutually exclusive with
+                judges.
+            judges: List of JudgeSpec for ensemble mode, each an LLM or a decision model.
+                Mutually exclusive with judge_model_config.
             aggregation: Strategy for aggregating votes in ensemble mode (binary criteria).
             ordinal_aggregation: Strategy for aggregating ordinal multi-choice votes.
                 Central tendency: "mean", "median", "weighted_mean", "mode". Conservative/
@@ -399,17 +604,25 @@ class CriterionGrader(Grader):
                 Options: "mode", "weighted_mode", "unanimous". "unanimous" abstains via the
                 NA option on disagreement, or falls back to mode + warns if there is no NA
                 option.
-            training_data: Dataset for few-shot examples. If provided, enables few-shot prompting.
-            few_shot_config: Configuration for few-shot example selection.
-            system_prompt: Custom system prompt for binary criteria.
-            multi_choice_system_prompt: Custom system prompt for multi-choice criteria.
+            training_data: Dataset for few-shot examples. If provided, enables few-shot
+                prompting for the LLM judges; examples are selected for, and sent to, LLM
+                judges only, never to a decision-model judge, whose request is exactly what
+                it would be without them.
+            few_shot_config: Configuration for few-shot example selection (LLM judges only).
+            system_prompt: Custom system prompt for binary criteria. Applies to LLM judges
+                only (a decision model's request has no system prompt); in a mixed ensemble
+                the LLM judges use it.
+            multi_choice_system_prompt: Custom system prompt for multi-choice criteria. Applies
+                to LLM judges only, like ``system_prompt``.
             length_penalty: Optional length penalty configuration.
             normalize: If True, normalize score to [0, 1]. If False, return raw sum.
             cannot_assess_config: Configuration for handling CANNOT_ASSESS verdicts.
             shuffle_options: If True (default), randomize the order of multi-choice options
                 presented to the LLM to mitigate position bias. Each judge/call sees a
                 different random order, and responses are mapped back to original indices.
-                Disable for deterministic behavior in tests.
+                Disable for deterministic behavior in tests. Applies to LLM judges only: a
+                decision model's question offers the options in the rubric's order, and in a
+                mixed ensemble the LLM judges shuffle as set here.
             auto_na_option: If True (default), auto-inject a canonical NA / "cannot assess"
                 option into any multi-choice criterion that lacks one, giving the judge a
                 first-class abstain channel analogous to binary CANNOT_ASSESS. The injected
@@ -423,20 +636,41 @@ class CriterionGrader(Grader):
                 for binary criterion judgments. Must be a subclass of (or compatible with)
                 CriterionJudgment. If the model includes an ``affected_criteria`` field
                 (list[int]), matching indices are injected as an ``[Affects: ...]`` tag
-                into the reason string. Defaults to CriterionJudgment.
+                into the reason string. Defaults to CriterionJudgment. LLM judges only: it
+                describes a generated judgment, which a decision model does not produce, so
+                it cannot be combined with any decision-model judge.
             multi_choice_response_format: Pydantic model to use as the structured output
                 schema for multi-choice criterion judgments. Must be a subclass of (or
                 compatible with) MultiChoiceJudgment. If the model includes an
                 ``affected_criteria`` field (list[int]), matching indices are injected as
                 an ``[Affects: ...]`` tag into the reason string (same convention as
-                binary_response_format). Defaults to MultiChoiceJudgment.
+                binary_response_format). Defaults to MultiChoiceJudgment. LLM judges only,
+                like binary_response_format.
             llm_config: Deprecated alias of ``judge_model_config``; builds the same single
                 judge and emits a ``DeprecationWarning``.
 
         Raises:
             ValueError: If neither judge_model_config nor judges is provided, if both are
                 provided, or if both judge_model_config and its deprecated alias
-                llm_config are provided.
+                llm_config are provided; if few_shot_config or training_data is given
+                while every judge is a decision model (few-shot examples apply to LLM
+                judges only); if binary_response_format or multi_choice_response_format is
+                given while any judge is a decision model; or if a decision-model judge has
+                no API key, has a key the SDK would reject (anything but printable ASCII
+                without whitespace), or has a resolved base URL (``api_base`` or the
+                ``TYPESAFE_BASE_URL`` environment variable) that is not an absolute http(s)
+                URL free of whitespace and control characters, query, fragment and
+                credentials, or whose host the SDK's HTTP stack cannot encode (e.g. a
+                non-ASCII name that is not a valid internationalized domain name). Such a
+                judge fails here, never as an abstention or a worst case on every item.
+            ImportError: If a judge is a decision model and the TypeSafe SDK is not
+                installed (``pip install 'autorubric[typesafe]'``).
+
+        Warns:
+            UserWarning: If system_prompt, multi_choice_system_prompt or shuffle_options is
+                passed while every judge is a decision model: these settings apply to LLM
+                judges only, so they have no effect. One warning per setting passed; the
+                defaults (None, None and True) never warn.
         """
         if llm_config is not None:
             if judge_model_config is not None:
@@ -447,7 +681,7 @@ class CriterionGrader(Grader):
             warnings.warn(
                 "llm_config is deprecated; use judge_model_config",
                 DeprecationWarning,
-                stacklevel=2,
+                stacklevel=_INIT_CALLER_STACKLEVEL,
             )
             judge_model_config = llm_config
 
@@ -472,6 +706,52 @@ class CriterionGrader(Grader):
         else:
             assert judges is not None
             self._judges = judges
+
+        # Settings a decision-model judge cannot use, checked before any client is built so
+        # that a configuration error is reported as one.
+        decision_model_ids = [
+            j.judge_id for j in self._judges if isinstance(j.llm_config, DecisionModelConfig)
+        ]
+        every_judge_is_decision_model = 0 < len(decision_model_ids) == len(self._judges)
+        if every_judge_is_decision_model and (
+            few_shot_config is not None or training_data is not None
+        ):
+            raise ValueError(
+                "few-shot examples apply to LLM judges only, and every judge of this "
+                "grader is a decision model: remove few_shot_config and training_data, "
+                "or add an LLM judge"
+            )
+        response_formats = [
+            name
+            for name, value in (
+                ("binary_response_format", binary_response_format),
+                ("multi_choice_response_format", multi_choice_response_format),
+            )
+            if value is not None
+        ]
+        if response_formats and decision_model_ids:
+            raise ValueError(
+                f"{' and '.join(response_formats)} cannot be combined with decision-model "
+                f"judges ({', '.join(repr(judge_id) for judge_id in decision_model_ids)}): "
+                "a response format describes a generated judgment, which only an LLM judge "
+                "produces"
+            )
+        if every_judge_is_decision_model:
+            # A prompt counts as passed when one is given (None is "no prompt"); a
+            # shuffle_options value, True included, when the caller passed it.
+            passed = (
+                ("system_prompt", system_prompt is not None),
+                ("multi_choice_system_prompt", multi_choice_system_prompt is not None),
+                ("shuffle_options", "shuffle_options" in _PASSED_KEYWORDS.get()),
+            )
+            for name, is_passed in passed:
+                if is_passed:
+                    warnings.warn(
+                        f"{name} applies to LLM judges only; this grader has none (every "
+                        "judge is a decision model), so it has no effect",
+                        UserWarning,
+                        stacklevel=_INIT_CALLER_STACKLEVEL,
+                    )
 
         self._aggregation = aggregation
         self._ordinal_aggregation = ordinal_aggregation
@@ -505,8 +785,17 @@ class CriterionGrader(Grader):
         else:
             self._multi_choice_system_prompt = multi_choice_system_prompt
 
-        # Create LLM clients for each judge
-        self._clients = {judge.judge_id: LLMClient(judge.llm_config) for judge in self._judges}
+        # Create each judge's client: an LLMClient for an LLM judge, a DecisionModelClient
+        # for a decision-model judge. Building one resolves its credentials, so a missing
+        # SDK or API key fails here rather than on every item.
+        self._clients: dict[str, LLMClient] = {}
+        self._decision_clients: dict[str, DecisionModelClient] = {}
+        for judge in self._judges:
+            config = judge.llm_config
+            if isinstance(config, DecisionModelConfig):
+                self._decision_clients[judge.judge_id] = DecisionModelClient(config)
+            else:
+                self._clients[judge.judge_id] = LLMClient(config)
 
         # Pre-compute few-shot examples if training data provided
         # Note: For multi-choice, examples are stored as (submission, selected_index, reason)
@@ -535,13 +824,19 @@ class CriterionGrader(Grader):
     # =========================================================================
 
     def _prepare_examples(self) -> None:
-        """Pre-compute few-shot examples for each criterion."""
+        """Pre-compute few-shot examples for each criterion and each LLM judge.
+
+        Decision-model judges get none: few-shot examples apply to LLM judges only. Each
+        judge's selection is keyed on its own ``judge_id``, so leaving decision models out
+        changes no LLM judge's examples.
+        """
         training_data = self._training_data
         if training_data is None:
             return
 
         n_criteria = training_data.num_criteria
         rubric_criteria = training_data.rubric.rubric if training_data.rubric else []
+        llm_judges = [j for j in self._judges if not isinstance(j.llm_config, DecisionModelConfig)]
 
         for criterion_idx in range(n_criteria):
             criterion = (
@@ -549,7 +844,7 @@ class CriterionGrader(Grader):
             )
             # Select examples per judge so that ensemble judges see decorrelated few-shot
             # subsets/orderings, mirroring per-judge option shuffling.
-            for judge in self._judges:
+            for judge in llm_judges:
                 if criterion is not None and criterion.is_multi_choice:
                     examples = self._select_multi_choice_examples(criterion_idx, judge.judge_id)
                     self._multi_choice_examples[(criterion_idx, judge.judge_id)] = examples
@@ -836,33 +1131,9 @@ class CriterionGrader(Grader):
             return CriterionResult(report=report, usage=result.usage, cost=result.cost)
 
         except Exception as e:
-            # Classify the failure. Infrastructure (API/network) and parse/validation
-            # failures are not the submission's fault, so route them to CANNOT_ASSESS
-            # (excluded from scoring under the default SKIP strategy) instead of a
-            # score-affecting worst-case verdict. Only truly unknown errors keep the
-            # conservative worst-case default. The error is also surfaced structurally
-            # via CriterionReport.error / is_error.
-            category = classify_grading_error(e)
-            if category == "unknown":
-                verdict = _binary_worst_verdict(criterion.weight)
-            else:
-                verdict = CriterionVerdict.CANNOT_ASSESS
-            logger.warning(
-                f"Error evaluating criterion '{criterion.requirement[:50]}...' "
-                f"with judge '{judge.judge_id}' [{category}]: {e}"
-            )
-            report = CriterionReport(
-                requirement=criterion.requirement,
-                verdict=verdict,
-                reason=f"Judge call failed ({category}): {str(e)}",
-                error=f"{category}: {str(e)}",
-                weight=criterion.weight,
-                name=criterion.name,
-                options=criterion.options,
-                scale_type=criterion.scale_type,
-                aggregation=criterion.aggregation,
-            )
-            return CriterionResult(report=report, usage=None, cost=None)
+            # Classified by classify_grading_error: infrastructure/parse abstain
+            # (CANNOT_ASSESS), unknown keeps the conservative worst case.
+            return _failed_judgment_result(criterion, judge.judge_id, e)
 
     async def _judge_multi_choice_criterion(
         self,
@@ -984,67 +1255,14 @@ class CriterionGrader(Grader):
             return CriterionResult(report=report, usage=result.usage, cost=result.cost)
 
         except Exception as e:
-            category = classify_grading_error(e)
-            logger.warning(
-                f"Error evaluating multi-choice criterion '{criterion.requirement[:50]}...' "
-                f"with judge '{judge.judge_id}' [{category}]: {e}"
-            )
-
-            options = criterion.options
-            if category == "unknown":
-                # Conservative worst case, weight-sign-aware, among scored (non-NA)
-                # options only — mirrors the binary worst case (MET if weight < 0 else
-                # UNMET). Never auto-select an NA option for an unknown error; NA/skip
-                # is reserved for infrastructure/parse failures. Ties resolve to the
-                # first such option in declaration order (deterministic). The shared
-                # helper is also used by the metrics layer's na_mode="as_unmet" remap
-                # so the two layers cannot drift.
-                worst_idx, worst_option = criterion.worst_scored_option()
-                multi_choice_verdict = MultiChoiceVerdict(
-                    selected_index=worst_idx,
-                    selected_label=worst_option.label,
-                    value=worst_option.value,
-                    na=False,
-                )
-            else:
-                # Infrastructure/parse: abstain (excluded under SKIP). Prefer a genuine
-                # NA option — guaranteed when auto_na_option is on — so the abstain verdict
-                # points at a real na=True option (resolves the contradiction for the
-                # default case). With no NA option (forced-choice + no author NA) emit a
-                # GENUINE abstain that selects no option (selected_index/label=None), rather
-                # than forcing na=True onto a scored option (the old contradiction). It
-                # stays na=True → excluded under SKIP, so infra/parse never penalizes.
-                na_idx = criterion.na_option_index
-                if na_idx is not None:
-                    na_option = options[na_idx]
-                    multi_choice_verdict = MultiChoiceVerdict(
-                        selected_index=na_idx,
-                        selected_label=na_option.label,
-                        value=na_option.value,
-                        na=True,
-                    )
-                else:
-                    multi_choice_verdict = MultiChoiceVerdict(
-                        selected_index=None,
-                        selected_label=None,
-                        value=0.0,
-                        na=True,
-                    )
-
-            report = CriterionReport(
-                requirement=criterion.requirement,
-                verdict=None,
-                multi_choice_verdict=multi_choice_verdict,
-                reason=f"Judge call failed ({category}): {str(e)}",
-                error=f"{category}: {str(e)}",
-                weight=criterion.weight,
-                name=criterion.name,
-                options=criterion.options,
-                scale_type=criterion.scale_type,
-                aggregation=criterion.aggregation,
+            # Classified by classify_grading_error: infrastructure/parse abstain (na=True),
+            # unknown keeps the conservative worst case among the scored options.
+            return _failed_judgment_result(
+                criterion,
+                judge.judge_id,
+                e,
                 shuffle_order=shuffled_indices if self._shuffle_options else None,
             )
-            return CriterionResult(report=report, usage=None, cost=None)
 
     async def _judge_all_criteria_for_judge(
         self,
@@ -1054,19 +1272,105 @@ class CriterionGrader(Grader):
         query: str | None = None,
         reference_submission: str | None = None,
     ) -> JudgeCriterionResults:
-        """Evaluate all criteria for a single judge (parallel per criterion)."""
-        tasks = [
-            self._judge_single_criterion(
-                judge, criterion, idx, to_grade, query, reference_submission
+        """Evaluate all criteria for a single judge, one result per criterion, in order.
+
+        An LLM judge is asked about each criterion in its own call, all in parallel. A
+        decision-model judge is asked about the whole rubric in one request
+        (``_judge_all_criteria_with_decision_model``).
+        """
+        if isinstance(judge.llm_config, DecisionModelConfig):
+            results = await self._judge_all_criteria_with_decision_model(
+                judge, rubric, to_grade, query, reference_submission
             )
-            for idx, criterion in enumerate(rubric)
-        ]
-        results = await asyncio.gather(*tasks)
+        else:
+            tasks = [
+                self._judge_single_criterion(
+                    judge, criterion, idx, to_grade, query, reference_submission
+                )
+                for idx, criterion in enumerate(rubric)
+            ]
+            results = await asyncio.gather(*tasks)
         return JudgeCriterionResults(
             judge_id=judge.judge_id,
             weight=judge.weight,
             criterion_results=list(results),
         )
+
+    async def _judge_all_criteria_with_decision_model(
+        self,
+        judge: JudgeSpec,
+        rubric: list[Criterion],
+        to_grade: str,
+        query: str | None = None,
+        reference_submission: str | None = None,
+    ) -> list[CriterionResult]:
+        """Judge every criterion with a decision-model judge in one request.
+
+        The state is built once from the submission (a ``<thinking>``/``<output>``
+        submission is sent as its two parts), and every criterion of the effective rubric
+        that a question can express is posed under the id ``c{criterion_idx}``. Exactly one
+        request is made, and none when no criterion can be expressed. Its answers map back
+        to one result per criterion, in rubric order.
+
+        Failures are scoped as tightly as they occur, and each is reported by the helper
+        that reports an LLM judge's failed call (``_failed_judgment_result``, routed by
+        ``classify_grading_error``):
+
+        - A criterion that cannot be expressed is left out of the request and fails alone
+          (``parse``).
+        - A failed request fails every criterion posed in it, each with the request's
+          error; criteria are never re-sent one at a time.
+        - A missing or unusable answer fails only its criterion (``parse``).
+
+        The request's usage and cost ride on the first result, so the judge's
+        ``total_usage``/``total_cost`` are the item's totals.
+
+        Args:
+            judge: The decision-model judge.
+            rubric: The effective rubric (NA options already guaranteed).
+            to_grade: The submission, as ``judge`` receives it.
+            query: The input that prompted the submission.
+            reference_submission: An exemplar response for grading context.
+
+        Returns:
+            One ``CriterionResult`` per criterion of ``rubric``, in order.
+        """
+        client = self._decision_clients[judge.judge_id]
+        config = client.config
+        state = build_state(to_grade, query=query, reference_submission=reference_submission)
+        questions, unposed = build_questions(rubric, config, state)
+
+        response = None
+        request_error: Exception | None = None
+        if questions:
+            try:
+                response = await client.system_one(state, questions)
+            except Exception as e:
+                request_error = e
+
+        # A criterion fails with its own error if it could not be posed, else with the
+        # request's if the request failed, else its answer is mapped (and may fail alone).
+        answers = response.answers if response is not None else {}
+        results: list[CriterionResult] = []
+        for criterion_idx, criterion in enumerate(rubric):
+            error: Exception | None = unposed.get(criterion_idx, request_error)
+            if error is None:
+                try:
+                    report = answer_to_report(criterion, criterion_idx, answers, config)
+                except Exception as e:
+                    error = e
+                else:
+                    results.append(CriterionResult(report=report))
+                    continue
+            results.append(_failed_judgment_result(criterion, judge.judge_id, error))
+
+        if response is not None and results:
+            results[0] = dataclasses.replace(
+                results[0],
+                usage=client.token_usage(response),
+                cost=client.completion_cost(response),
+            )
+        return results
 
     # =========================================================================
     # Judge and Aggregate (Grader Interface)

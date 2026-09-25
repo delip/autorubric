@@ -30,6 +30,23 @@ def word_count(text: str) -> int:
     return len(text.split())
 
 
+# A <thinking> or <output> section: an opening marker, then its closing marker. Shared by
+# parse_thinking_output and _has_thinking_output_sections, so "has a section" means exactly
+# "parse_thinking_output finds one".
+_THINKING_SECTION = re.compile(r"<thinking>(.*?)</thinking>", re.DOTALL | re.IGNORECASE)
+_OUTPUT_SECTION = re.compile(r"<output>(.*?)</output>", re.DOTALL | re.IGNORECASE)
+
+
+def _has_thinking_output_sections(text: str) -> bool:
+    """Whether ``text`` holds a ``<thinking>`` or ``<output>`` section.
+
+    A section is an opening marker followed by its closing marker, case-insensitive. This
+    is exactly when ``parse_thinking_output`` recovers parts; without a section it returns
+    the whole text, unstripped, as the output.
+    """
+    return bool(_THINKING_SECTION.search(text) or _OUTPUT_SECTION.search(text))
+
+
 def parse_thinking_output(text: str) -> ThinkingOutputDict:
     """Parse thinking and output sections from text with XML-style markers.
 
@@ -53,11 +70,11 @@ def parse_thinking_output(text: str) -> ThinkingOutputDict:
         {'thinking': 'Think', 'output': 'Rest'}
     """
     # Try to extract thinking section
-    thinking_match = re.search(r"<thinking>(.*?)</thinking>", text, re.DOTALL | re.IGNORECASE)
+    thinking_match = _THINKING_SECTION.search(text)
     thinking = thinking_match.group(1).strip() if thinking_match else ""
 
     # Try to extract output section
-    output_match = re.search(r"<output>(.*?)</output>", text, re.DOTALL | re.IGNORECASE)
+    output_match = _OUTPUT_SECTION.search(text)
 
     if output_match:
         # Explicit output markers found
@@ -65,9 +82,7 @@ def parse_thinking_output(text: str) -> ThinkingOutputDict:
     elif thinking_match:
         # Has thinking but no output markers - treat rest as output
         # Remove the thinking section and use remainder
-        output = re.sub(
-            r"<thinking>.*?</thinking>", "", text, flags=re.DOTALL | re.IGNORECASE
-        ).strip()
+        output = _THINKING_SECTION.sub("", text).strip()
     else:
         # No markers at all - treat entire text as output
         output = text
