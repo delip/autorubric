@@ -28,7 +28,6 @@ import json
 import logging
 import math
 import os
-import re
 import weakref
 from collections import Counter
 from collections.abc import AsyncIterator, Mapping, Sequence
@@ -117,44 +116,40 @@ def _shown_url(url: str) -> str:
 
 
 def _check_base_url(url: str, source: str) -> None:
-    """Raise ``ValueError`` unless ``url`` can be the base of every request URL.
+    """Raise ``ValueError`` unless every request can use ``url`` as its base URL.
 
-    Requests go to ``{url}/v1/systemone``: the SDK appends the path to the URL string. So
-    ``url`` must be an absolute http(s) URL with a host and a valid port, and:
+    The SDK appends the endpoint path to the URL string, and its HTTP stack, ``httpx2``,
+    parses the result on every request. Parsing it here once, with ``httpx2``, turns what
+    that parse refuses (control characters, a host that is not a valid internationalized
+    domain name or IPv4 address, a malformed port) into a construction error. The rest are
+    URLs ``httpx2`` parses but no request could use:
 
-    - It contains no whitespace or control characters. ``urlsplit`` silently drops tabs and
-      line breaks (and leading spaces and control characters) before it parses, so those
-      are checked first: a URL read with its trailing newline would otherwise pass here,
-      then fail every request in the HTTP layer.
-    - It has no query or fragment, not even an empty one (a ``?`` or ``#`` anywhere: neither
-      appears unescaped in any other part of a URL). The appended path would land in the
-      query, or be dropped with the fragment, so no request would reach the endpoint.
-    - It has no credentials (``user:password@``). The HTTP layer sends them as Basic
-      authentication in place of the bearer API key, which would never be sent.
+    - Whitespace, such as a trailing newline or space, which ``httpx2`` refuses (line breaks,
+      tabs) or percent-encodes, even in the host (spaces).
+    - A URL that is not absolute http(s), which ``httpx2`` refuses only when it sends.
+    - Credentials (``user:password@``), which the HTTP layer sends as Basic authentication
+      in place of the bearer API key.
+    - A query or fragment, even an empty one: the appended path would land in the query, or
+      be dropped with the fragment.
 
-    A URL with an ``@`` anywhere may hold credentials, so the error never repeats it. This
-    check needs no SDK; ``_check_request_url`` adds, when a client is built, whether the
-    SDK's HTTP stack can encode the request URL's host.
+    A URL with an ``@`` may hold credentials, so no message repeats it; ``httpx2``'s own
+    messages never show credentials.
     """
+    import httpx2
+
     shown = _shown_url(url)
-    parts = None
+    if any(char.isspace() for char in url):
+        raise ValueError(f"{source} cannot contain whitespace; got {shown}")
     try:
-        if url.isprintable() and not any(char.isspace() for char in url):
-            candidate = urlsplit(url)
-            if (
-                candidate.scheme in _DEFAULT_PORTS
-                and candidate.hostname
-                and (candidate.port is None or candidate.port >= 0)  # .port parses the port
-            ):
-                parts = candidate
-    except ValueError:  # e.g. a non-numeric or out-of-range port, a broken IPv6 literal
-        pass
-    if parts is None:
+        request_url = httpx2.URL(url + _SYSTEM_ONE_PATH)
+    except httpx2.InvalidURL as exc:
+        raise ValueError(f"{source} is not a URL HTTP requests can use: {exc}") from exc
+    if request_url.scheme not in _DEFAULT_PORTS or not request_url.host:
         raise ValueError(
-            f"{source} must be an absolute http(s) URL such as 'https://api.typesafe.ai', "
-            f"with no whitespace or control characters; got {shown}"
+            f"{source} must be an absolute http(s) URL such as 'https://api.typesafe.ai'; "
+            f"got {shown}"
         )
-    if "@" in parts.netloc:
+    if request_url.userinfo:
         raise ValueError(
             f"{source} cannot contain credentials (user:password@host): the HTTP layer would "
             "send them as Basic authentication in place of the API key. Authenticate with "
@@ -168,32 +163,6 @@ def _check_base_url(url: str, source: str) -> None:
             f"never reaches the endpoint; got {shown}"
         )
 
-
-def _check_request_url(base_url: str, source: str) -> None:
-    """Raise ``ValueError`` unless the SDK's HTTP stack accepts the request URL.
-
-    ``_check_base_url`` checks the base URL's structure without the SDK. The SDK's HTTP
-    stack, ``httpx2`` (part of the SDK's public API), also encodes the host: a non-ASCII
-    host must be a valid internationalized domain name (IDNA 2008), and a dotted-decimal
-    host a valid IPv4 address. It refuses any other with ``httpx2.InvalidURL`` inside every
-    request, an error no category covers, which would give every criterion of every item
-    its conservative worst case. So the URL every request uses is parsed once, here.
-    ``base_url`` has passed ``_check_base_url``, so it holds no credentials to repeat.
-    """
-    import httpx2
-
-    try:
-        httpx2.URL(base_url + _SYSTEM_ONE_PATH)
-    except httpx2.InvalidURL as exc:
-        raise ValueError(f"{source} is not a URL HTTP requests can use: {exc}") from exc
-
-
-# RFC 9110, section 5.1: a field name is a token, one or more tchar.
-_HTTP_FIELD_NAME = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
-# RFC 9110, section 5.5: a field value is visible characters (VCHAR) separated by spaces or
-# tabs, with no leading or trailing whitespace, possibly empty. Its obsolete obs-text
-# (bytes 0x80-0xFF) is left out: HTTP clients encode header values as ASCII.
-_HTTP_FIELD_VALUE = re.compile(r"(?:[\x21-\x7e]+(?:[ \t]+[\x21-\x7e]+)*)?")
 
 _SDK_OWNED_HEADERS = frozenset(
     {
@@ -209,6 +178,44 @@ _SDK_OWNED_HEADERS = frozenset(
 """The headers (lowercased) the TypeSafe SDK sets on every System One request, replacing
 any value given for them: ``Authorization`` carries the bearer API key, and
 ``X-TypeSafe-Retry-Count`` is set on retries only. Header names are case-insensitive."""
+
+
+def _check_extra_headers(headers: Mapping[str, str], source: str) -> None:
+    """Raise ``ValueError`` for a header no request can carry as given.
+
+    The SDK's HTTP stack checks a header only when it sends it: ``h11``, which writes each
+    HTTP/1.1 request, refuses a name that is not a token and a value that is not an ASCII
+    string or has a line break or surrounding whitespace (typically a secret read from a
+    file with its trailing newline). Refused on every request, after every retry, the error
+    would repeat the value into every failed report. So each header is checked here, once,
+    with ``h11``. A header the SDK sets itself (``_SDK_OWNED_HEADERS``) is refused too: the
+    SDK replaces the value given, so it would never be sent. Header values may be secrets,
+    so messages name the header, never its value.
+    """
+    import h11
+
+    for name, value in headers.items():
+        try:
+            h11.Request(
+                method="POST", target=_SYSTEM_ONE_PATH, headers=[("Host", "h"), (name, value)]
+            )
+        except (h11.LocalProtocolError, TypeError, UnicodeError):
+            raise ValueError(
+                f"{source}[{name!r}] is not a header HTTP can send: its name must be a token "
+                "(letters, digits or !#$%&'*+-.^_`|~) and its value an ASCII string with no "
+                "line breaks or leading or trailing whitespace. The value is not shown."
+            ) from None
+        if name.lower() in _SDK_OWNED_HEADERS:
+            hint = (
+                " The API key is sent as the bearer token of the Authorization header: set "
+                "it with api_key or the TYPESAFE_API_KEY environment variable."
+                if name.lower() == "authorization"
+                else ""
+            )
+            raise ValueError(
+                f"{source} cannot set {name!r}: the TypeSafe SDK sets that header on every "
+                f"request, replacing any value given.{hint}"
+            )
 
 
 def _url_host(url: str) -> str:
@@ -243,7 +250,7 @@ class DecisionModelConfig:
     'autorubric[typesafe]'``); constructing this config does not. The client's HTTP
     requests honour the environment's TLS and proxy settings (``SSL_CERT_FILE``,
     ``HTTPS_PROXY`` and the like), and settings no HTTP client can be built with (e.g. a CA
-    file that does not exist) fail the grader's construction. Field names match
+    file that does not exist) fail the grader's construction with ``ValueError``. Field names match
     ``LLMConfig`` wherever the concept is the same. Every field after ``model`` is
     keyword-only.
 
@@ -262,24 +269,25 @@ class DecisionModelConfig:
             model id a self-hosted endpoint serves. Required.
         api_key: API key, sent as a bearer token. ``None`` (default) reads the
             ``TYPESAFE_API_KEY`` environment variable, which a ``.env`` file may set, as for
-            LLM provider keys. Surrounding whitespace is stripped. Building a client
-            without either, or with a key the SDK rejects (anything but printable ASCII
-            without whitespace), raises ``ValueError``, so a grader fails at construction
-            rather than abstaining on every item. The key is never recorded.
+            LLM provider keys. Surrounding whitespace is stripped, as the SDK strips it, so
+            a key read with its trailing newline works. Building a client without either,
+            or with a key the SDK rejects (anything but printable ASCII without
+            whitespace), raises ``ValueError``, so a grader fails at construction rather
+            than abstaining on every item. No message repeats the key, and it is never
+            recorded.
         api_base: Base URL of a System One-compatible endpoint; requests go to
             ``{api_base}/v1/systemone``. ``None`` (default) reads ``TYPESAFE_BASE_URL``
             (surrounding whitespace stripped), then falls back to TypeSafe's API,
-            ``https://api.typesafe.ai``. The URL is resolved once, when a client is built.
-            It must be an absolute http(s) URL with no whitespace or control characters and
-            no query, fragment or credentials (the path is appended to the URL, and URL
-            credentials would replace the bearer ``api_key``): anything else raises
-            ``ValueError``, here for ``api_base`` and when the client is built for
-            ``TYPESAFE_BASE_URL``. Building the client also parses the request URL with
-            the SDK's HTTP stack, so a host it cannot encode, such as a non-ASCII name that
-            is not a valid internationalized domain name, raises ``ValueError`` there. A
-            base URL that no request could use thus fails when the grader is built. The
-            resolved URL is part of the response cache key, and its host (with any
-            non-default port) names the rate-limit bucket. The URL is not a secret: a failed
+            ``https://api.typesafe.ai``. The URL is resolved and checked once, when a client
+            (and so the grader) is built: the request URL is parsed with the SDK's HTTP
+            stack, which refuses, e.g., a host that is not a valid internationalized domain
+            name, and the URL must be absolute http(s), with no whitespace (a trailing
+            newline included), query or fragment (the path is appended to the URL) and no
+            credentials (they would replace the bearer ``api_key``). Anything else raises
+            ``ValueError``, never repeating a URL that holds an ``@``, so a base URL no
+            request could use fails when the grader is built. The resolved URL is part of
+            the response cache key, and its host (with any non-default port) names the
+            rate-limit bucket. The URL is not a secret: a failed
             request's error, recorded in the reports it fails, shows it with its path, as
             the SDK's logs do. Only its host goes into an experiment's manifest.
         timeout: Per-request timeout in seconds, applied to each HTTP operation, as in
@@ -314,16 +322,17 @@ class DecisionModelConfig:
             use when their ``cache_dir`` matches.
         cache_ttl: Lifetime of a cache entry in seconds; ``None`` (default) never expires.
         extra_headers: Additional HTTP headers sent with every request, header names to
-            values, both strings. Each name must be an HTTP token (letters, digits and
-            ``!#$%&'*+-.^_`|~``) and each value an HTTP field value (visible ASCII, with
-            spaces or tabs only between characters), as RFC 9110 defines them. Anything else,
-            such as a secret read from a file with its trailing newline, raises
-            ``ValueError`` naming the header but never its value: the HTTP layer would
-            refuse it on every request. Unlike ``LLMConfig``, a few headers cannot be set:
-            the TypeSafe SDK sets ``Authorization`` (the bearer ``api_key``), ``Accept``,
-            ``Content-Type``, ``User-Agent``, ``X-TypeSafe-SDK``, ``X-TypeSafe-Runtime`` and
-            ``X-TypeSafe-Retry-Count`` itself on every request, replacing any value given,
-            so naming one of them, in any letter case, raises ``ValueError`` too.
+            values, both strings. Building a client checks each header with the HTTP/1.1
+            layer's own rule (``h11``): a name that is not a token (letters, digits and
+            ``!#$%&'*+-.^_`|~``), or a value that is not an ASCII string or has a line
+            break or surrounding whitespace, such as a secret read from a file with its
+            trailing newline, raises ``ValueError`` naming the header but never its value:
+            the HTTP layer would refuse it on every request. Unlike ``LLMConfig``, a few
+            headers cannot be set: the TypeSafe SDK sets ``Authorization`` (the bearer
+            ``api_key``), ``Accept``, ``Content-Type``, ``User-Agent``, ``X-TypeSafe-SDK``,
+            ``X-TypeSafe-Runtime`` and ``X-TypeSafe-Retry-Count`` itself on every request,
+            replacing any value given, so naming one of them, in any letter case, raises
+            ``ValueError`` too.
         binary_framing: How a binary criterion is posed. The criterion's ``requirement`` is
             always sent verbatim; only the structure around it differs.
 
@@ -398,11 +407,11 @@ class DecisionModelConfig:
     def __post_init__(self) -> None:
         """Validate the configuration.
 
+        ``api_base`` and ``extra_headers`` are checked when a client is built, with the SDK's
+        HTTP stack, which this config does not need.
+
         Raises:
-            ValueError: If a field is out of range or not one of its allowed values, if
-                ``api_base`` is not an absolute http(s) URL free of whitespace and control
-                characters, query, fragment and credentials, or if ``extra_headers`` holds
-                a header name or value HTTP does not allow or a header the SDK sets itself.
+            ValueError: If a field is out of range or not one of its allowed values.
         """
         name = type(self).__name__
         if not isinstance(self.model, str) or not self.model:
@@ -431,11 +440,6 @@ class DecisionModelConfig:
                 f"{name}.max_retries is the total number of attempts and must be an "
                 f"integer >= 1; got {self.max_retries!r}"
             )
-        if not math.isfinite(self.max_retries * self.timeout):
-            raise ValueError(
-                f"{name}.max_retries * {name}.timeout sets the retry budget in seconds and "
-                f"must be finite; got {self.max_retries!r} * {self.timeout!r}"
-            )
         if self.max_parallel_requests is not None and not _is_positive_int(
             self.max_parallel_requests
         ):
@@ -457,48 +461,6 @@ class DecisionModelConfig:
             raise ValueError(
                 f"{name}.input_cost_per_token must be None or a finite number >= 0; got {price!r}"
             )
-        if self.api_base is not None:
-            _check_base_url(self.api_base, f"{name}.api_base")
-        # A header the HTTP layer refuses fails every request: a non-string one inside the
-        # SDK, as an error no category covers (the conservative worst case on every
-        # criterion), and a malformed name or value after every retry, with an error that
-        # repeats the value into every failed report. Header values may be secrets, so
-        # messages name the header, never its value.
-        if not isinstance(self.extra_headers, Mapping):
-            raise ValueError(
-                f"{name}.extra_headers must map header names to values; "
-                f"got {type(self.extra_headers).__name__}"
-            )
-        for header, value in self.extra_headers.items():
-            if not isinstance(header, str) or not isinstance(value, str):
-                raise ValueError(
-                    f"{name}.extra_headers must map str header names to str values; got a "
-                    f"{type(header).__name__} name with a {type(value).__name__} value"
-                )
-            if not _HTTP_FIELD_NAME.fullmatch(header):
-                raise ValueError(
-                    f"{name}.extra_headers has a header name that is not an HTTP field name "
-                    f"(one or more letters, digits or !#$%&'*+-.^_`|~): {header!r}"
-                )
-            # The SDK would replace the value given, so it would never be sent.
-            if header.lower() in _SDK_OWNED_HEADERS:
-                hint = (
-                    " The API key is sent as the bearer token of the Authorization header: "
-                    "set it with api_key or the TYPESAFE_API_KEY environment variable."
-                    if header.lower() == "authorization"
-                    else ""
-                )
-                raise ValueError(
-                    f"{name}.extra_headers cannot set {header!r}: the TypeSafe SDK sets that "
-                    f"header on every request, replacing any value given.{hint}"
-                )
-            if not _HTTP_FIELD_VALUE.fullmatch(value):
-                raise ValueError(
-                    f"The value of {name}.extra_headers[{header!r}] is not an HTTP field "
-                    "value: it must be visible ASCII characters, with spaces or tabs only "
-                    "between them (no line breaks, control characters, or leading or "
-                    "trailing whitespace)."
-                )
 
 
 def _is_valid_api_key(key: str) -> bool:
@@ -558,7 +520,9 @@ class DecisionModelClient:
     Resolution happens once, at construction: the SDK is imported, and the API key and base
     URL are resolved the way the SDK resolves them (explicit value, then ``TYPESAFE_API_KEY``
     / ``TYPESAFE_BASE_URL``, then, for the URL, the SDK's default) and checked, the key by
-    the SDK's own rule and the request URL by the SDK's own HTTP stack.
+    the SDK's own rule, the request URL by the SDK's HTTP stack (``_check_base_url``) and
+    each extra header by the HTTP/1.1 layer's rule (``_check_extra_headers``), so that a
+    misconfiguration fails when the grader is built, never on every item.
 
     Each SDK client gets a new HTTP client, and ``httpx2`` reads the environment's TLS and
     proxy settings whenever it builds one, outside the SDK's error handling. So one is also
@@ -589,16 +553,13 @@ class DecisionModelClient:
 
         Raises:
             ImportError: If the TypeSafe SDK is not installed.
-            ValueError: If no API key is given or set in ``TYPESAFE_API_KEY``, if the key is
-                not printable ASCII without whitespace (the SDK's rule), or if the resolved
-                base URL (``api_base`` or ``TYPESAFE_BASE_URL``) is not an absolute http(s)
-                URL with no whitespace or control characters, query, fragment or
-                credentials, or has a host the SDK's HTTP stack cannot encode (e.g. a
-                non-ASCII name that is not a valid internationalized domain name).
-            Exception: If ``httpx2`` cannot build an HTTP client in this environment, the
-                error it raised, e.g. ``FileNotFoundError`` for an ``SSL_CERT_FILE`` that
-                names a missing file or ``ImportError`` for a SOCKS proxy without the
-                ``socksio`` package, with a note naming the model and the settings to check.
+            ValueError: If no API key is given or set in ``TYPESAFE_API_KEY``, or the key is
+                not printable ASCII without whitespace (the SDK's rule); if the resolved
+                base URL (``api_base`` or ``TYPESAFE_BASE_URL``) is one no request could use
+                (``_check_base_url``); if an extra header is one no request could carry
+                (``_check_extra_headers``); or if ``httpx2`` cannot build an HTTP client in
+                this environment (e.g. an ``SSL_CERT_FILE`` that names a missing file, or a
+                SOCKS proxy without the ``socksio`` package), chained to the error it raised.
         """
         self.config = config
         self._typesafe = _import_typesafe_sdk()
@@ -630,8 +591,8 @@ class DecisionModelClient:
             base_url, source = base_url or constants.DEFAULT_BASE_URL, constants.BASE_URL_ENV
         self._base_url: str = base_url.rstrip("/")
         _check_base_url(self._base_url, source)
-        _check_request_url(self._base_url, source)
         self._host = _url_host(self._base_url)
+        _check_extra_headers(config.extra_headers, "DecisionModelConfig.extra_headers")
 
         limit = config.max_parallel_requests
         self._connections = _DEFAULT_CONNECTIONS if limit is None else limit
@@ -642,13 +603,13 @@ class DecisionModelClient:
         try:
             self._new_http_client()
         except Exception as exc:
-            exc.add_note(
-                f"Decision model {config.model!r} cannot build an HTTP client: check the TLS "
-                "and proxy settings httpx2 reads from the environment (SSL_CERT_FILE, "
-                "SSL_CERT_DIR, HTTP_PROXY, HTTPS_PROXY, ALL_PROXY and NO_PROXY, in either "
-                "letter case) and the system's proxy settings."
-            )
-            raise
+            raise ValueError(
+                f"Decision model {config.model!r} cannot build an HTTP client "
+                f"({type(exc).__name__}: {exc}): check the TLS and proxy settings httpx2 "
+                "reads from the environment (SSL_CERT_FILE, SSL_CERT_DIR, HTTP_PROXY, "
+                "HTTPS_PROXY, ALL_PROXY and NO_PROXY, in either letter case) and the "
+                "system's proxy settings."
+            ) from exc
 
         # max_retries counts attempts; the SDK counts retries after the first. The SDK honours
         # the endpoint's Retry-After with no cap of its own; the only bound on its waits is

@@ -7,7 +7,7 @@ All models are frozen (immutable) for consistency with the rest of autorubric.
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from pydantic import BaseModel, ConfigDict, SerializerFunctionWrapHandler, model_serializer
+from pydantic import BaseModel, ConfigDict
 
 from autorubric.types import _setstate_with_field_defaults
 
@@ -1016,10 +1016,6 @@ class JudgeMetrics(BaseModel):
             criterion's type. Abstentions (``CANNOT_ASSESS`` / NA, by the judge or in the
             ground truth) are counted; the ``cannot_assess`` / ``na_mode`` handling then
             applies to them as for every judge. ``None`` for full-coverage judges.
-
-    ``coverage`` and ``n_pairs`` are serialized only when they differ from their defaults
-    (``"full"``, ``None``), so a full-coverage judge dumps exactly as before these fields
-    existed; validation restores the defaults.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -1043,17 +1039,6 @@ class JudgeMetrics(BaseModel):
 
     # Metrics pickled before ``coverage`` / ``n_pairs`` existed restore them at their defaults.
     __setstate__ = _setstate_with_field_defaults
-
-    # No return annotation: pydantic then keeps the model's own serialization schema.
-    @model_serializer(mode="wrap")
-    def _omit_default_coverage(self, handler: SerializerFunctionWrapHandler):
-        """Serialize ``coverage`` / ``n_pairs`` only when they differ from their defaults."""
-        data = handler(self)
-        if self.coverage == "full":
-            data.pop("coverage", None)
-        if self.n_pairs is None:
-            data.pop("n_pairs", None)
-        return data
 
 
 class MetricsResult(BaseModel):

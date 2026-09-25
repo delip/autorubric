@@ -531,7 +531,7 @@ class TestCascadeConstruction:
                 escalation=cascade(),
                 system_prompt="custom",
                 multi_choice_system_prompt="custom mc",
-                shuffle_options=True,
+                shuffle_options=False,
             )
 
     @pytest.mark.parametrize("name", ["binary_response_format", "multi_choice_response_format"])

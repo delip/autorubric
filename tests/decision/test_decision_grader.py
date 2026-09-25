@@ -306,11 +306,11 @@ class TestConstruction:
         has), outside the SDK's error handling. Raised inside every request, its error would
         give every criterion of every item the conservative worst case."""
         http_environment.break_()
-        with pytest.raises((OSError, ImportError, ValueError)) as excinfo:
+        with pytest.raises(ValueError, match="SSL_CERT_FILE") as excinfo:
             CriterionGrader(
                 judges=[JudgeSpec(dm(), "jev"), JudgeSpec(LLMConfig(model="test-model"), "llm")]
             )
-        assert "'jev-latest'" in excinfo.value.__notes__[0]
+        assert "'jev-latest'" in str(excinfo.value)
 
 
 def training_data() -> RubricDataset:

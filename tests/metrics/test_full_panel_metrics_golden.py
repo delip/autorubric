@@ -4,9 +4,11 @@
 from that library (see ``capture_metrics_fixtures.py`` next to it) for hand-built ensemble
 panels, a single-judge run and a panel graded by ``CriterionGrader`` with mocked judges,
 each under several settings. A full panel (every judge votes on every criterion of every
-item) has no missing vote and no superseded vote, so every ``MetricsResult`` field
-(``model_dump``), both ``summary()`` texts and the ``to_dataframe()`` frame must be
-unchanged, as must the error of a setting the library refuses.
+item) has no missing vote and no superseded vote, so every ``MetricsResult`` field value,
+both ``summary()`` texts and the ``to_dataframe()`` frame must be unchanged, as must the
+error of a setting the library refuses. The ``model_dump`` differs from the captured one
+only by ``ADDED_JUDGE_METRICS_FIELDS``: each per-judge entry carries the ``JudgeMetrics``
+fields added since, at the values every full-panel judge holds.
 
 On the interpreter and platform the outputs were captured on, the current library
 reproduces them bit for bit. Elsewhere a float's last bits may differ from the capture
@@ -38,6 +40,13 @@ whose accumulation order and fused multiply-adds depend on the build and the CPU
 differences reach the p-values. These unit-scale metrics move by a few units in the last
 place (around 1e-16) that way, while any change to what a metric measures moves it by
 orders of magnitude more than this tolerance.
+"""
+
+ADDED_JUDGE_METRICS_FIELDS: dict[str, Any] = {"coverage": "full", "n_pairs": None}
+"""The ``JudgeMetrics`` fields added since the capture, at a full-panel judge's values.
+
+They are the defaults (a judge consulted on every criterion), and a dump carries them like
+every other field. No other key may be added to the captured dump.
 """
 
 
@@ -85,6 +94,23 @@ def assert_same(actual: Any, expected: Any, path: str = "") -> None:
         assert actual == expected, f"{path}: {actual!r} != {expected!r}"
 
 
+def dumped_today(captured: dict[str, Any]) -> dict[str, Any]:
+    """The captured ``model_dump`` as the library dumps it today.
+
+    Each per-judge entry gains ``ADDED_JUDGE_METRICS_FIELDS``; the rest is as captured.
+    """
+    per_judge = captured["per_judge"]
+    if per_judge is None:
+        return captured
+    return {
+        **captured,
+        "per_judge": {
+            judge_id: {**judge, **ADDED_JUDGE_METRICS_FIELDS}
+            for judge_id, judge in per_judge.items()
+        },
+    }
+
+
 def _frame_rows(rows: list[list[str | None]]) -> list[list[Any]]:
     """The frame's cells, with the float cells (``"float:<repr>"``) decoded to floats."""
     return [
@@ -117,7 +143,7 @@ def test_full_panel_metrics_match_the_captured_library(case_name: str, setting_i
     # The texts round every float to a few decimals, so they are compared exactly.
     assert actual["summary"] == expected["summary"]
     assert actual["summary_verbose"] == expected["summary_verbose"]
-    assert_same(json.loads(actual["model_dump"]), json.loads(expected["model_dump"]))
+    assert_same(json.loads(actual["model_dump"]), dumped_today(json.loads(expected["model_dump"])))
     assert actual["frame"]["columns"] == expected["frame"]["columns"]
     assert actual["frame"]["dtypes"] == expected["frame"]["dtypes"]
     assert_same(_frame_rows(actual["frame"]["rows"]), _frame_rows(expected["frame"]["rows"]))
@@ -145,3 +171,22 @@ def test_the_comparison_allows_only_the_last_bits_of_a_float_to_differ():
     for actual, expected in [(0.5, math.nan), (math.nan, 0.5)]:
         with pytest.raises(AssertionError):
             assert_same(actual, expected)
+
+
+def test_the_dump_may_gain_only_the_added_judge_fields_at_a_full_panel_judges_values():
+    judge = {"judge_id": "ja", "phi": 0.5, "score_spearman": None}
+    captured = {"per_judge": {"ja": judge}, "n_samples": 3}
+    today = {"per_judge": {"ja": {**judge, "coverage": "full", "n_pairs": None}}, "n_samples": 3}
+    assert_same(today, dumped_today(captured))
+    assert dumped_today({"per_judge": None, "n_samples": 3}) == {"per_judge": None, "n_samples": 3}
+    changed = [
+        captured,
+        {**today, "per_judge": {"ja": {**today["per_judge"]["ja"], "coverage": "escalated"}}},
+        {**today, "per_judge": {"ja": {**today["per_judge"]["ja"], "n_pairs": 0}}},
+        {**today, "per_judge": {"ja": {**judge, "coverage": "full"}}},
+        {**today, "per_judge": {"ja": {**today["per_judge"]["ja"], "extra": None}}},
+        {**today, "coverage": "full"},
+    ]
+    for value in changed:
+        with pytest.raises(AssertionError):
+            assert_same(value, dumped_today(captured))

@@ -160,6 +160,14 @@ The JSON format is human-readable:
     items need different evaluation instructions -- for example, when the
     same rubric applies to varied patient scenarios with distinct context.
 
+!!! tip "Rubric guidelines"
+    Text that applies to every criterion (conventions, definitions, the audience) belongs in
+    the rubric's `guidelines`, e.g. `Rubric(criteria, guidelines="Patients are adults; judge
+    urgency by the stated symptoms only.")`. A rubric with guidelines is saved as
+    `"rubric": {"guidelines": "...", "criteria": [...]}`; one without them keeps the list form
+    above. Every judge sees the guidelines. See
+    [Rubric Guidelines](../api/core-grading.md#rubric-guidelines).
+
 ### Step 4: Split for Training and Testing
 
 Use `split_train_test()` to create separate sets for few-shot calibration and evaluation:

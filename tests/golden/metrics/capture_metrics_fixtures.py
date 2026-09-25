@@ -5,11 +5,13 @@ before cascade-aware metrics existed (``main`` at the merge of PR #17), on CPyth
 macOS (arm64). The test ``tests/metrics/test_full_panel_metrics_golden.py`` recomputes
 every entry with the current library and requires the outputs to be the same, proving
 that full panels (every judge votes on every criterion of every item) get unchanged
-metrics: every ``MetricsResult`` field (``model_dump``), both ``summary()`` texts and the
-``to_dataframe()`` frame (column names, dtypes and every cell). Both libraries give the
-same bits on any one interpreter and platform, but a float's last bits vary across them
-(the builtin ``sum()`` of floats before Python 3.12, the platform's BLAS and libm), so
-the test compares floats up to its ``FLOAT_TOLERANCE`` and everything else exactly.
+metrics: every ``MetricsResult`` field value, both ``summary()`` texts and the
+``to_dataframe()`` frame (column names, dtypes and every cell). The current
+``model_dump`` adds only the ``JudgeMetrics`` fields ``coverage`` and ``n_pairs``, at
+their defaults, to each per-judge entry. Both libraries give the same bits on any one
+interpreter and platform, but a float's last bits vary across them (the builtin
+``sum()`` of floats before Python 3.12, the platform's BLAS and libm), so the test
+compares floats up to its ``FLOAT_TOLERANCE`` and everything else exactly.
 
 Cases:
 

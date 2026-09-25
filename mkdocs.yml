@@ -112,6 +112,7 @@ extra:
 nav:
   - Home: index.md
   - Quickstart: quickstart.md
+  - Decision-Model Judges: decision-models.md
   - Cookbook:
       - cookbook/index.md
       - Foundation:
@@ -137,6 +138,7 @@ nav:
       - Specialized:
           - Per-Item Rubrics: cookbook/per-item-rubrics.md
           - Cost Optimization: cookbook/cost-optimization.md
+          - Cheap First-Pass Grading with Jev: cookbook/cascade-grading.md
           - Configuration Management: cookbook/configuration-management.md
           - Evaluating Agent Skills: cookbook/agent-skill-evaluation.md
           - Improving Agent Skills: cookbook/improving-agent-skills.md
@@ -145,6 +147,7 @@ nav:
       - Core Grading: api/core-grading.md
       - Graders: api/graders.md
       - Dataset: api/dataset.md
+      - Decision Models: api/decision-models.md
       - Eval Runner: api/eval-runner.md
       - Ensemble: api/ensemble.md
       - Multi-Choice: api/multi-choice.md

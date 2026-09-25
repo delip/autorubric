@@ -2,10 +2,11 @@
 
 ``system_prompt``, ``multi_choice_system_prompt`` and ``shuffle_options`` shape the prompts an
 LLM judge is sent. A decision model's request has no system prompt and keeps the rubric's
-option order, so in a mixed ensemble these settings apply to the LLM judges, and a grader
-whose every judge is a decision model ignores them. Passing one explicitly to such a grader
-warns (``UserWarning``). ``shuffle_options`` defaults to ``True``, so only a value the caller
-passed warns, never the default, and the effective value is exactly what it always was.
+option order, so in a mixed ensemble or a cascade these settings apply to the LLM judges,
+and a grader whose every judge is a decision model ignores them. Such a grader warns
+(``UserWarning``) about each setting that differs from its default: a system prompt that is
+not ``None``, or ``shuffle_options=False``. ``shuffle_options=True`` is the default and what a
+decision model does anyway (it never shuffles), so it never warns, passed or not.
 
 ``binary_response_format`` / ``multi_choice_response_format`` define the fields of a
 generated judgment, which only an LLM judge fills, so either one raises ``ValueError`` at
@@ -35,6 +36,7 @@ from autorubric import (
     CriterionOption,
     CriterionVerdict,
     DecisionModelConfig,
+    EscalationConfig,
     LLMConfig,
     Rubric,
     TokenUsage,
@@ -94,17 +96,27 @@ PANELS: dict[str, Callable[[], dict[str, Any]]] = {
     "decision_model": lambda: {"judge_model_config": dm()},
     "decision_models": lambda: {"judges": [JudgeSpec(dm(), "jev-a"), JudgeSpec(dm(), "jev-b")]},
     "mixed": lambda: {"judges": [JudgeSpec(dm(), "jev"), JudgeSpec(LLM, "llm")]},
+    "cascade": lambda: {
+        "judge_model_config": dm(),
+        "escalation": EscalationConfig(judges=LLM, threshold=0.7),
+    },
     "llm": lambda: {"judge_model_config": LLM},
     "llms": lambda: {"judges": [JudgeSpec(LLM, "a"), JudgeSpec(LLM, "b")]},
 }
 ALL_DECISION_MODELS = {"decision_model", "decision_models"}
 WITH_A_DECISION_MODEL = ["decision_model", "decision_models", "mixed"]
 
-EXPLICIT_SETTINGS = [
+# Each LLM-only setting at a value other than its default.
+CHANGED_SETTINGS = [
     ("system_prompt", "Grade strictly."),
     ("multi_choice_system_prompt", "Pick exactly one option."),
-    ("shuffle_options", True),
     ("shuffle_options", False),
+]
+# Each LLM-only setting passed at its default.
+DEFAULT_SETTINGS = [
+    ("system_prompt", None),
+    ("multi_choice_system_prompt", None),
+    ("shuffle_options", True),
 ]
 
 
@@ -158,11 +170,12 @@ class RecordingLLMClient:
 class TestLLMOnlySettingsWarning:
     @pytest.mark.parametrize("panel", list(PANELS))
     @pytest.mark.parametrize(
-        "setting, value", EXPLICIT_SETTINGS, ids=[f"{s}={v!r}" for s, v in EXPLICIT_SETTINGS]
+        "setting, value", CHANGED_SETTINGS, ids=[f"{s}={v!r}" for s, v in CHANGED_SETTINGS]
     )
-    def test_explicit_setting_warns_only_when_every_judge_is_a_decision_model(
+    def test_changed_setting_warns_only_when_every_judge_is_a_decision_model(
         self, panel, setting, value
     ):
+        """A cascade's escalation judges are LLM judges, so a cascade never warns."""
         _, caught = build(**PANELS[panel](), **{setting: value})
 
         if panel in ALL_DECISION_MODELS:
@@ -177,13 +190,26 @@ class TestLLMOnlySettingsWarning:
         _, caught = build(**PANELS[panel]())
         assert caught == []
 
-    def test_explicit_none_prompts_are_the_defaults_and_do_not_warn(self):
-        _, caught = build(
-            judge_model_config=dm(), system_prompt=None, multi_choice_system_prompt=None
-        )
+    @pytest.mark.parametrize("panel", list(PANELS))
+    @pytest.mark.parametrize(
+        "setting, value", DEFAULT_SETTINGS, ids=[f"{s}={v!r}" for s, v in DEFAULT_SETTINGS]
+    )
+    def test_a_setting_passed_at_its_default_never_warns(self, panel, setting, value):
+        """``shuffle_options=True`` is what a decision model does anyway: it never shuffles."""
+        _, caught = build(**PANELS[panel](), **{setting: value})
         assert caught == []
 
-    def test_each_explicit_setting_warns_once(self):
+    def test_the_warning_names_the_line_that_built_the_grader(self):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            frame = inspect.currentframe()
+            assert frame is not None
+            call_line = frame.f_lineno + 1
+            CriterionGrader(judge_model_config=dm(), shuffle_options=False)
+        (warning,) = [w for w in caught if w.category is UserWarning]
+        assert (warning.filename, warning.lineno) == (__file__, call_line)
+
+    def test_each_changed_setting_warns_once(self):
         _, caught = build(
             judges=[JudgeSpec(dm(), "jev-a"), JudgeSpec(dm(), "jev-b")],
             system_prompt="Grade strictly.",
@@ -300,8 +326,7 @@ class TestShuffleOptionsDefault:
         assert bool(param.default) is True
 
     def test_the_default_object_is_the_bool_true(self):
-        """Telling a passed ``shuffle_options`` from the default changes no default object:
-        signature introspection, ``__kwdefaults__`` and the source (which the API reference
+        """Signature introspection, ``__kwdefaults__`` and the source (which the API reference
         renders) all show the plain ``True`` they always did."""
         param = inspect.signature(CriterionGrader).parameters["shuffle_options"]
         assert param.default is True
@@ -312,10 +337,10 @@ class TestShuffleOptionsDefault:
         "target", [CriterionGrader, CriterionGrader.__init__], ids=["class", "init"]
     )
     def test_the_full_argspec_lists_every_keyword_only_parameter_and_default(self, target):
-        """``inspect.getfullargspec`` does not follow ``__wrapped__`` as ``inspect.signature``
-        does, so the keyword-recording wrapper must carry ``__init__``'s signature itself:
-        otherwise the argspec reads ``(self, *args, **kwargs)``, with no keyword-only
-        parameters and no defaults, for every tool built on it."""
+        """``__init__`` is a plain function: ``inspect.getfullargspec``, which does not
+        follow ``__wrapped__`` as ``inspect.signature`` does, reads the same keyword-only
+        parameters and defaults, never ``(self, *args, **kwargs)``."""
+        assert inspect.unwrap(CriterionGrader.__init__) is CriterionGrader.__init__
         spec = inspect.getfullargspec(target)
         assert spec.args == ["self"]
         assert spec.varargs is None and spec.varkw is None
@@ -338,12 +363,12 @@ class TestShuffleOptionsDefault:
     )
     def test_a_copied_default_is_the_value_true(self, duplicate):
         """A default copied, pickled or serialized by a tool is the plain ``True``. Passing it
-        back is passing ``shuffle_options`` explicitly: the value in effect is ``True``, and
-        a grader with only decision-model judges warns, as for any explicit value."""
+        back is the same as leaving it out: the value in effect is ``True``, and a grader
+        with only decision-model judges does not warn."""
         default = inspect.signature(CriterionGrader).parameters["shuffle_options"].default
         assert duplicate(default) is True
         grader, caught = build(judge_model_config=dm(), shuffle_options=duplicate(default))
-        assert [str(w.message) for w in caught] == [llm_only_warning("shuffle_options")]
+        assert caught == []
         assert grader._shuffle_options is True
 
     def test_calls_the_grader_rejects_fail_exactly_as_before(self):
@@ -357,12 +382,6 @@ class TestShuffleOptionsDefault:
         assert str(unknown.value) == (
             "CriterionGrader.__init__() got an unexpected keyword argument 'bogus'"
         )
-
-    def test_passed_settings_are_tracked_per_construction(self):
-        """What one construction was passed never leaks into the next."""
-        build(judge_model_config=dm(), shuffle_options=False)
-        _, caught = build(judge_model_config=dm())
-        assert caught == []
 
     def test_a_subclass_passing_the_setting_up_passes_it(self):
         class Tuned(CriterionGrader):

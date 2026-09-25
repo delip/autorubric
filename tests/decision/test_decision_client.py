@@ -161,6 +161,13 @@ class TestConstruction:
         client = DecisionModelClient(dm_config(api_key="explicit-key"))
         assert await self._sent_api_key(client, fake_sdk) == "explicit-key"
 
+    @pytest.mark.asyncio
+    async def test_a_key_read_with_its_trailing_newline_is_sent_stripped(self, fake_sdk):
+        """Surrounding whitespace is stripped, as the SDK strips it, so a key read from a
+        file with its line break works instead of failing."""
+        client = DecisionModelClient(dm_config(api_key="sk-test\n"))
+        assert await self._sent_api_key(client, fake_sdk) == "sk-test"
+
     def test_base_url_defaults_to_the_sdk_default(self):
         client = DecisionModelClient(dm_config())
         assert client.base_url == DEFAULT_BASE_URL == "https://api.typesafe.ai"
@@ -183,6 +190,56 @@ class TestConstruction:
         with pytest.raises(ValueError, match="TYPESAFE_BASE_URL"):
             DecisionModelClient(dm_config())
 
+    def test_the_config_leaves_url_and_header_checks_to_the_client(self):
+        """A config needs neither the SDK nor its HTTP stack, so the base URL and the extra
+        headers are checked when the client, and so the grader, is built."""
+        config = dm_config(api_base="dm.example.com", extra_headers={"X-Org": "v\n"})
+        with pytest.raises(ValueError, match="api_base"):
+            DecisionModelClient(config)
+
+    @pytest.mark.parametrize(
+        "url",
+        ["", "dm.example.com", "ftp://dm.example.com", "https://", "https://dm.example.com:x"],
+        ids=["empty", "no-scheme", "ftp", "no-host", "bad-port"],
+    )
+    def test_a_base_url_that_is_not_an_absolute_http_url_fails_at_construction(self, url):
+        """``httpx2`` parses a URL without a scheme or host as a relative one, and refuses to
+        send it only inside every request."""
+        with pytest.raises(ValueError, match="DecisionModelConfig.api_base"):
+            DecisionModelClient(dm_config(api_base=url))
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://dm.example.com\n",
+            "https://dm.example.com\r\n",
+            "https://dm.example.com ",
+            " https://dm.example.com",
+            "https://dm.example.com\t",
+            "https://dm .example.com",
+            "https://dm.example.com/a b",
+            "https://dm.example.com\u00a0",
+            "https://dm.example.com\u2028",
+        ],
+        ids=[
+            "trailing-lf",
+            "trailing-crlf",
+            "trailing-space",
+            "leading-space",
+            "trailing-tab",
+            "space-in-host",
+            "space-in-path",
+            "no-break-space",
+            "line-separator",
+        ],
+    )
+    def test_a_base_url_with_whitespace_fails_at_construction(self, url):
+        """A URL holds no whitespace. ``httpx2`` refuses a line break or tab inside every
+        request, and percent-encodes a space, even in the host, sending the request where
+        the endpoint is not."""
+        with pytest.raises(ValueError, match="api_base .*whitespace"):
+            DecisionModelClient(dm_config(api_base=url))
+
     @pytest.mark.parametrize(
         "url", ["https://dm.exam\nple.com", "https://dm.example.com/v1\r\nX", "https://dm .com"]
     )
@@ -193,14 +250,6 @@ class TestConstruction:
         with pytest.raises(ValueError, match="TYPESAFE_BASE_URL"):
             DecisionModelClient(dm_config())
 
-    @pytest.mark.parametrize("url", ["https://dm.example.com\n", "\thttps://dm.example.com"])
-    def test_a_rejected_base_url_is_one_the_http_layer_refuses(self, url):
-        """The whitespace rule reports at construction what every request would fail on."""
-        with pytest.raises(httpx2.InvalidURL):
-            httpx2.URL(url)
-        with pytest.raises(ValueError, match="api_base"):
-            dm_config(api_base=url)
-
     @pytest.mark.parametrize(
         "url",
         ["https://\uff41\uff50\uff49.typesafe.ai", "https://\u2603\u2603.com", "https://1.2.3.999"],
@@ -210,7 +259,7 @@ class TestConstruction:
         """A host the HTTP layer cannot encode, such as a name that is not a valid IDNA name
         (fullwidth letters pasted from a document) or an impossible IPv4 address, fails every
         request inside the HTTP stack, as an error no category covers: the conservative
-        worst case on every criterion of every item. The client checks the request URL
+        worst case on every criterion of every item. The client parses the request URL
         with the SDK's HTTP stack when it is built, for both sources of the URL."""
         with pytest.raises(httpx2.InvalidURL):
             httpx2.URL(url + "/v1/systemone")
@@ -235,6 +284,64 @@ class TestConstruction:
         assert DecisionModelClient(dm_config(api_base=url)).base_url == base_url
         monkeypatch.setenv("TYPESAFE_BASE_URL", url)
         assert DecisionModelClient(dm_config()).base_url == base_url
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://dm.example.com/api?tenant=a",
+            "https://dm.example.com/api?",
+            "https://dm.example.com?tenant=a",
+            "https://dm.example.com/api#x",
+            "https://dm.example.com/api#",
+        ],
+        ids=["query", "empty-query", "query-without-path", "fragment", "empty-fragment"],
+    )
+    def test_a_base_url_with_a_query_or_fragment_fails_at_construction(self, url):
+        """Requests go to ``{api_base}/v1/systemone``, a path appended to the URL string.
+        After a query, even an empty one, the path lands in the query; after a fragment it is
+        dropped with the fragment. Either way no request reaches the endpoint's path."""
+        with pytest.raises(ValueError, match=r"api_base .*query or fragment"):
+            DecisionModelClient(dm_config(api_base=url))
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://svc:SECRET@dm.example.com/api",
+            "https://SECRET@dm.example.com",
+            "https://:SECRET@dm.example.com:8443/v2",
+            "https://SECRET:@dm.example.com",
+            "http://svc:SECRET@[::1]:9000",
+        ],
+        ids=["user-password", "user", "password", "user-empty-password", "ipv6"],
+    )
+    def test_a_base_url_with_credentials_fails_at_construction_without_repeating_them(self, url):
+        """The HTTP layer sends URL credentials as Basic authentication in place of the
+        bearer API key, so the configured key would never be sent. The message names the
+        field but never repeats the URL."""
+        with pytest.raises(ValueError, match=r"api_base .*credentials") as excinfo:
+            DecisionModelClient(dm_config(api_base=url))
+        assert "SECRET" not in str(excinfo.value)
+        assert "api_key" in str(excinfo.value)
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://svc:SECRET@dm.example.com\n",
+            "https://svc:SECRET@dm.example.com:notaport",
+            "https://svc:SECRET@[::1",
+            "https://svc:SECRET@1.2.3.999",
+            "ftp://svc:SECRET@dm.example.com",
+            "https://svc:SECRET@",
+            "https://dm.example.com/@SECRET?x",
+        ],
+        ids=["line-break", "bad-port", "bad-ipv6", "bad-ipv4", "scheme", "no-host", "at-in-path"],
+    )
+    def test_a_rejected_base_url_with_an_at_sign_is_never_repeated(self, url):
+        """Whatever else is wrong with it, a URL holding an ``@`` may hold credentials, so
+        no error message repeats it."""
+        with pytest.raises(ValueError, match="api_base") as excinfo:
+            DecisionModelClient(dm_config(api_base=url))
+        assert "SECRET" not in str(excinfo.value)
 
     @pytest.mark.parametrize(
         "url",
@@ -287,27 +394,54 @@ class TestConstruction:
             "Bearer sk-test",
         )
         with pytest.raises(ValueError, match="api_base"):
-            dm_config(api_base=url)
+            DecisionModelClient(dm_config(api_base=url))
+
+    # -- Extra headers: checked by the HTTP/1.1 layer's own rule when the client is built
 
     @pytest.mark.parametrize(
         "name, value",
         [
             ("X-Goog-Api-Key", "AIzaSECRET\n"),
             ("Ocp-Apim-Subscription-Key", "abc123SECRET\r"),
-            ("X-Org", "v\r\nX-Injected: 1"),
+            ("X-Org", "SECRET\r\nX-Injected: 1"),
+            ("X-Org", "SEC\x00RET"),
             ("X-Org", " SECRET"),
-            ("X-Org", "caf\u00e9"),
-            ("X Org", "v"),
-            ("X-Org:", "v"),
+            ("X-Org", "SECRET\t"),
+            ("X-Org", "caf\u00e9SECRET"),
+            ("X Org", "SECRET"),
+            ("X-Org:", "SECRET"),
+            ("", "SECRET"),
+            ("X-\u00c4rg", "SECRET"),
+        ],
+        ids=[
+            "trailing-lf",
+            "trailing-cr",
+            "embedded-crlf",
+            "nul",
+            "leading-space",
+            "trailing-tab",
+            "non-ascii-value",
+            "space-in-name",
+            "colon-in-name",
+            "empty-name",
+            "non-ascii-name",
         ],
     )
     def test_headers_the_http_layer_refuses_fail_at_construction(self, name, value):
         """Headers the HTTP layer would refuse on every request (after every retry, with an
-        error repeating the value) are rejected when the config is built instead."""
+        error repeating the value), typically a secret read from a file with its trailing
+        newline, fail when the client is built instead. The message names the header,
+        never its value."""
         assert not _http_layer_sends(name, value)
         with pytest.raises(ValueError, match="extra_headers") as excinfo:
-            dm_config(extra_headers={name: value})
+            DecisionModelClient(dm_config(extra_headers={"X-Team": "evals", name: value}))
+        assert repr(name) in str(excinfo.value)
         assert "SECRET" not in str(excinfo.value)
+
+    @pytest.mark.parametrize("value", [3, None], ids=["int", "none"])
+    def test_a_header_value_that_is_not_a_string_fails_at_construction(self, value):
+        with pytest.raises(ValueError, match=r"extra_headers\['X-Retries'\]"):
+            DecisionModelClient(dm_config(extra_headers={"X-Retries": value}))
 
     @pytest.mark.parametrize(
         "name, value",
@@ -315,12 +449,13 @@ class TestConstruction:
             ("X-Team", "evals"),
             ("X-Empty", ""),
             ("X-Spaced", "a b\tc"),
+            ("X-Control", "a\x01b"),
             ("!#$%&'*+-.^_`|~0-9aZ", "~!@#$%^&*()_+`-={}[]|\\:;\"'<>,.?/"),
         ],
     )
     def test_accepted_headers_are_ones_the_http_layer_sends(self, name, value):
-        assert dm_config(extra_headers={name: value}).extra_headers == {name: value}
         assert _http_layer_sends(name, value)
+        DecisionModelClient(dm_config(extra_headers={name: value}))
 
     def test_base_url_is_resolved_once_at_construction(self, monkeypatch):
         client = DecisionModelClient(dm_config())
@@ -352,14 +487,15 @@ class TestHttpEnvironment:
             httpx2.AsyncClient()
         assert not isinstance(direct.value, typesafe_sdk.TypeSafeError)
 
-        with pytest.raises(type(direct.value)) as excinfo:
+        with pytest.raises(ValueError) as excinfo:
             DecisionModelClient(dm_config())
 
-        # The error httpx2 raised, with a note naming the judge and what to check.
-        assert str(excinfo.value) == str(direct.value)
-        (note,) = excinfo.value.__notes__
-        assert "'jev-latest'" in note
-        assert "SSL_CERT_FILE" in note and "HTTPS_PROXY" in note
+        # A ValueError naming the judge, the error httpx2 raised and what to check.
+        message = str(excinfo.value)
+        assert "'jev-latest'" in message
+        assert f"{type(direct.value).__name__}: {direct.value}" in message
+        assert "SSL_CERT_FILE" in message and "HTTPS_PROXY" in message
+        assert type(excinfo.value.__cause__) is type(direct.value)
 
     @pytest.mark.asyncio
     async def test_an_environment_broken_after_construction_fails_requests_as_connection_errors(
@@ -1212,7 +1348,7 @@ async def _sdk_attempts(headers: dict[str, str]) -> list[httpx2.Request]:
 
 
 class TestHeadersTheSdkSets:
-    """``DecisionModelConfig`` rejects, in ``extra_headers``, exactly the headers the SDK
+    """The client rejects, in ``extra_headers``, exactly the headers the SDK
     sets on every request, since it replaces any value given for them. Both halves are
     pinned against the installed SDK."""
 
@@ -1247,9 +1383,20 @@ class TestHeadersTheSdkSets:
             assert not [value for value in attempt.headers.values() if value.startswith("given-")]
 
     @pytest.mark.parametrize("name", sorted(_SDK_OWNED_HEADERS))
-    def test_the_config_rejects_them(self, name):
-        with pytest.raises(ValueError, match="extra_headers"):
-            dm_config(extra_headers={name: "v"})
+    @pytest.mark.parametrize("case", [str.lower, str.upper, str.title])
+    def test_naming_one_fails_at_construction(self, name, case):
+        """The value given would never be sent (a gateway expecting it would refuse every
+        request), so naming one, in any letter case, fails instead. The message names the
+        header, never its value."""
+        name = case(name)
+        with pytest.raises(ValueError, match="extra_headers") as excinfo:
+            DecisionModelClient(dm_config(extra_headers={"X-Team": "evals", name: "SECRET"}))
+        assert repr(name) in str(excinfo.value)
+        assert "SECRET" not in str(excinfo.value)
+
+    def test_an_authorization_header_points_to_api_key(self):
+        with pytest.raises(ValueError, match="api_key"):
+            DecisionModelClient(dm_config(extra_headers={"Authorization": "Basic Zm9vOmJhcg=="}))
 
 
 # =============================================================================

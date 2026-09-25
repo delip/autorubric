@@ -11,7 +11,8 @@ that library read back from the metrics.
 Pydantic restores a pickle's attributes exactly as they were stored, so a field added since
 would be missing and reading it would raise ``AttributeError``. Each model that gained a
 defaulted field gives a field its pickle lacks the field's default, so the restored objects
-equal the same objects validated today and work wherever they did.
+equal the same objects validated today and work wherever they did. Their dumps carry those
+fields at their defaults, like every other field.
 """
 
 from __future__ import annotations
@@ -129,9 +130,20 @@ class TestLegacyPickledResults:
             )
             assert rebuilt.agreement == cr.agreement
 
-    def test_the_metrics_dump_and_render_as_that_library_did(self, fixture, legacy):
+    def test_the_metrics_render_as_that_library_did_and_dump_the_new_fields_at_defaults(
+        self, fixture, legacy
+    ):
         metrics = legacy["metrics"]
-        assert metrics.model_dump(mode="json") == fixture["metrics_dump"]
+        captured = fixture["metrics_dump"]
+        # That library's dump, with each per-judge entry gaining the fields added since.
+        expected = {
+            **captured,
+            "per_judge": {
+                judge_id: {**judge, **NEW_JUDGE_METRICS_FIELDS}
+                for judge_id, judge in captured["per_judge"].items()
+            },
+        }
+        assert metrics.model_dump(mode="json") == expected
         assert metrics.summary() == fixture["summary"]
         assert metrics.summary(verbose=True) == fixture["summary_verbose"]
         assert list(metrics.to_dataframe().columns) == fixture["frame_columns"]

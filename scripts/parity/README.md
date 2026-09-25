@@ -157,10 +157,10 @@ snapshot, manifest or judge definitions).
 | R1 | Replay: every blocked call is one the baseline could not answer from cache, and nothing else touched the network; an unexpected call prints its prompt diffed against the baseline's prompt for the same (item, criterion, judge). Synthetic: the recorded request logs are identical, with a readable diff of the first differing requests. |
 | R2 | Per vote, per criterion and per item, the processing fields are equal: verdicts or selected options, shuffle orders, reasons, reasoning, final verdicts, agreement, scores, raw scores, judge scores, CANNOT_ASSESS counts, token usage and cost. |
 | R3 | The serialized checkpoint records are equal except for new keys at their defaults (`probabilities: null`, `confidence: null`, `superseded: false`, `escalated: false`). |
-| R4 | Every `compute_metrics` field (fixed-seed bootstrap included), both `summary()` texts and the `to_dataframe()` frames are equal, for results in memory and reloaded from the checkpoint. |
+| R4 | Every `compute_metrics` field (fixed-seed bootstrap included) is equal except for new keys at their defaults (each per-judge entry's `coverage: "full"` and `n_pairs: null`), and both `summary()` texts and the `to_dataframe()` frames are exactly equal, for results in memory and reloaded from the checkpoint. |
 | R5 | Each manifest `grader_config` is a superset of the baseline's with equal values; a newly recorded `normalize` is listed explicitly. |
 | R6 | All construction paths produce identical checkpoints, metrics and request logs; only `CriterionGrader(llm_config=...)` warns; no `DeprecationWarning` is attributed to a file inside `autorubric` (unless the baseline raised the same one). |
-| R7 | The baseline's checkpoints load with `EvalResult.from_experiment`, their metrics recompute equal, and resuming a copy grades no item and makes no call. |
+| R7 | The baseline's checkpoints load with `EvalResult.from_experiment`, their metrics recompute equal (fields as in R4, new keys at their defaults allowed; texts and frames exactly), and resuming a copy grades no item and makes no call. |
 
 Live check L compares (item, criterion, judge) verdicts of the paid configs (multi-choice:
 the selected option, with NA as its own category), excluding any unit that errored in one of

@@ -20,12 +20,11 @@ def pytest_configure(config: pytest.Config) -> None:
     ``judge_model_config=``, never the deprecated ``llm_config=``), so this guards every
     path the suite runs. In an ini filter the module field is a regular expression matched
     at the start of the module name, so it covers all ``autorubric.*`` modules. A caller's
-    own deprecated call is unaffected: the warning's stack level,
-    ``_INIT_CALLER_STACKLEVEL`` in ``autorubric.graders.criterion_grader`` (3, because
-    ``CriterionGrader.__init__`` runs inside its keyword-recording wrapper), attributes it
-    to the caller (a test module), and ``pytest.warns`` still captures it. A stack level
-    that stopped at the wrapper would attribute it to ``autorubric``, and this guard would
-    turn every caller's deprecated call into an error. pytest applies a run's own ``-W``
+    own deprecated call is unaffected: ``CriterionGrader.__init__`` warns with
+    ``stacklevel=2``, which attributes the warning to the caller (a test module), and
+    ``pytest.warns`` still captures it. A stack level that stopped inside the library would
+    attribute it to ``autorubric``, and this guard would turn every caller's deprecated call
+    into an error. pytest applies a run's own ``-W``
     options after ini filters, so they take precedence (``-W always::DeprecationWarning``
     lifts the guard for that run); ``TestSuiteWideDeprecationGuard`` in
     ``tests/graders/test_judge_model_config.py`` checks this configuration independently of

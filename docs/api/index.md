@@ -4,7 +4,7 @@ Complete API documentation for AutoRubric, organized by functional area.
 
 ## Overview
 
-AutoRubric exports 91 public items across the main module and `autorubric.graders`, plus 20 additional building-block functions and types available from `autorubric.meta`. This reference is organized into thematic chapters for easier navigation.
+AutoRubric exports 98 public items across the main module and `autorubric.graders`, plus 20 additional building-block functions and types available from `autorubric.meta`. This reference is organized into thematic chapters for easier navigation.
 
 ## Quick Links
 
@@ -13,6 +13,7 @@ AutoRubric exports 91 public items across the main module and `autorubric.grader
 | [CANNOT_ASSESS Handling](cannot-assess.md) | `CannotAssessConfig`, `CannotAssessStrategy` | Configure handling of uncertain verdicts |
 | [Core Grading](core-grading.md) | `Criterion`, `Rubric`, `EvaluationReport` | Fundamental types for rubric-based evaluation |
 | [Dataset](dataset.md) | `DataItem`, `RubricDataset` | Dataset management and serialization |
+| [Decision Models](decision-models.md) | `DecisionModelConfig`, `EscalationConfig`, `calibrate_escalation` | Decision-model judges and confidence cascades |
 | [Distribution Metrics](distribution-metrics.md) | `earth_movers_distance`, `ks_test` | Statistical distribution comparisons |
 | [Ensemble](ensemble.md) | `EnsembleEvaluationReport`, `JudgeVote` | Multi-judge aggregation |
 | [Eval Runner](eval-runner.md) | `EvalRunner`, `evaluate()` | Batch evaluation with checkpointing |
@@ -53,6 +54,13 @@ from autorubric import (
     # Metrics
     compute_metrics,
     MetricsResult,
+
+    # Decision-model judges and cascades
+    DecisionModelConfig,
+    EscalationConfig,
+    calibrate_escalation,
+    escalation_stats,
+    replay_escalation,
 )
 ```
 
@@ -61,6 +69,7 @@ from autorubric import (
 ```python
 from autorubric.graders import (
     CriterionGrader,
+    EscalationConfig,
     Grader,
     JudgeSpec,
 )

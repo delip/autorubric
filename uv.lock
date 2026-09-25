@@ -188,6 +188,7 @@ dependencies = [
 
 [package.optional-dependencies]
 typesafe = [
+    { name = "h11" },
     { name = "httpx2" },
     { name = "typesafe-sdk" },
 ]
@@ -211,6 +212,7 @@ docs = [
 requires-dist = [
     { name = "coolname", specifier = ">=2.0.0" },
     { name = "diskcache", specifier = ">=5.6.0" },
+    { name = "h11", marker = "extra == 'typesafe'", specifier = ">=0.16" },
     { name = "httpx2", marker = "extra == 'typesafe'", specifier = ">=2.0.0" },
     { name = "krippendorff", specifier = ">=0.8.2" },
     { name = "litellm", specifier = ">=1.50.0" },

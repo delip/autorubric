@@ -45,6 +45,8 @@ result = await rubric.grade(to_grade=response, grader=grader)
 
 `judge_model_config` sets up a single judge and `judges` sets up an ensemble. Pass exactly one of them.
 
+Either accepts a `DecisionModelConfig` as well as an `LLMConfig`: a decision-model judge grades each item with one request for the whole rubric. `escalation=EscalationConfig(...)` makes a grader with one decision-model judge a confidence cascade that escalates uncertain criteria to LLM judges. See [Decision Models](decision-models.md) and [Decision-Model Judges](../decision-models.md).
+
 !!! note "`llm_config` is deprecated"
     `llm_config` is a deprecated alias of `judge_model_config`. It builds the same judge but emits a
     `DeprecationWarning`. To migrate, rename the keyword; nothing else changes. Passing both raises

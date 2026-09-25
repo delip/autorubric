@@ -2,6 +2,13 @@ from importlib.metadata import PackageNotFoundError, version
 
 from autorubric.dataset import DataItem, RubricDataset
 from autorubric.decision import DecisionModelConfig
+from autorubric.escalation import (
+    EscalationCurve,
+    EscalationPoint,
+    calibrate_escalation,
+    escalation_stats,
+    replay_escalation,
+)
 from autorubric.eval import (
     EvalConfig,
     EvalResult,
@@ -132,6 +139,12 @@ __all__ = [
     # Decision-model judges
     "DecisionModelConfig",
     "EscalationConfig",
+    # Confidence cascades: offline replay, diagnostics and calibration
+    "EscalationCurve",
+    "EscalationPoint",
+    "calibrate_escalation",
+    "escalation_stats",
+    "replay_escalation",
     # Core types
     "AggregationStrategy",
     "CannotAssessConfig",

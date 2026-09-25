@@ -40,6 +40,14 @@ KNOWN_NEW_KEYS: dict[str, Any] = {
 """Keys the decision-model feature adds to serialized reports, with their defaults. For
 LLM-judge runs they may appear only at these values."""
 
+KNOWN_NEW_METRICS_KEYS: dict[str, Any] = {
+    "coverage": "full",
+    "n_pairs": None,
+}
+"""Keys the decision-model feature adds to saved ``compute_metrics`` fields (each per-judge
+entry's ``coverage`` and ``n_pairs``), with their defaults. For LLM-judge runs they may
+appear only at these values."""
+
 MASK = "<masked: the baseline call failed and was not cached>"
 
 VOTE_FIELDS_BINARY = ("verdict", "reason", "reasoning", "error", "weight")
@@ -740,15 +748,33 @@ def check_serialization(
     )
 
 
-def compare_metrics_dirs(left: Path, right: Path) -> list[str]:
-    """Differences between two saved ``compute_metrics`` outputs."""
+def compare_metrics_dirs(
+    left: Path, right: Path, seen_new: Counter[str] | None = None
+) -> list[str]:
+    """Differences between two saved ``compute_metrics`` outputs.
+
+    Args:
+        left: Metrics directory of the baseline library (or of the reference pass).
+        right: Metrics directory compared with ``left``.
+        seen_new: Given when ``left`` comes from the baseline library and ``right`` from the
+            changed code: ``right``'s fields may then add the keys of
+            ``KNOWN_NEW_METRICS_KEYS`` at their defaults, each counted here as
+            ``"<key>=<value>"``. Without it the fields must be equal. Summary texts and
+            frames must be equal either way.
+    """
     import pandas as pd
 
     problems: list[str] = []
     for required in (left, right):
         if not (required / "metrics.json").exists():
             return [f"missing metrics in {required}"]
-    paths = diff_paths(pc.read_json(left / "metrics.json"), pc.read_json(right / "metrics.json"))
+    base, new = pc.read_json(left / "metrics.json"), pc.read_json(right / "metrics.json")
+    if seen_new is None:
+        paths = diff_paths(base, new)
+    else:
+        paths = additive_problems(
+            base, new, "$", new_keys=KNOWN_NEW_METRICS_KEYS, seen_new=seen_new
+        )
     problems += [f"metrics.json {p}" for p in paths]
     for name in ("summary.txt", "summary_verbose.txt"):
         a = (left / name).read_text(encoding="utf-8")
@@ -765,22 +791,31 @@ def compare_metrics_dirs(left: Path, right: Path) -> list[str]:
 
 
 def check_metrics(baseline: Run, after: Run, pairs: dict[PairKey, tuple[str, str]]) -> Check:
-    """Item 4: metrics, summaries and frames are identical for every config."""
+    """Item 4: metrics, summaries and frames are identical for every config, except for new
+    metrics keys at their defaults."""
     problems: list[str] = []
+    seen_new: Counter[str] = Counter()
     compared = 0
     for key, (ours, theirs) in pairs.items():
         for sub in (pc.METRICS_SUBDIR, pc.CHECKPOINT_METRICS_SUBDIR):
             compared += 1
-            found = compare_metrics_dirs(baseline.path / sub / ours, after.path / sub / theirs)
+            found = compare_metrics_dirs(
+                baseline.path / sub / ours, after.path / sub / theirs, seen_new
+            )
             problems += [f"{key[0]}/{key[1]} ({sub}): {p}" for p in found]
+    new_keys = ", ".join(f"{k} (x{n})" for k, n in sorted(seen_new.items())) or "none"
     return Check(
         "R4",
         "metrics identical (fields, summary text, frames)",
         status_of(len(problems)),
         f"{compared} metric sets compared (in-memory and from checkpoint); "
-        f"{len(problems)} differences",
+        f"{len(problems)} differences; new keys at defaults: {new_keys}",
         details=[f"- {p}" for p in problems[:MAX_DETAILS]],
-        data={"compared": compared, "differences": len(problems)},
+        data={
+            "compared": compared,
+            "differences": len(problems),
+            "new_keys_at_default": dict(seen_new),
+        },
     )
 
 
@@ -918,6 +953,7 @@ def check_old_checkpoints(baseline: Run, after: Run) -> Check:
         )
     result = pc.read_json(result_path)
     problems: list[str] = []
+    seen_new: Counter[str] = Counter()
     by_pass = {row["pass"]: row for row in result["passes"]}
     for label in sorted(baseline.labels()):
         row = by_pass.get(label)
@@ -934,15 +970,22 @@ def check_old_checkpoints(baseline: Run, after: Run) -> Check:
         found = compare_metrics_dirs(
             baseline.path / pc.CHECKPOINT_METRICS_SUBDIR / label,
             after.path / pc.CHECKPOINT_COMPAT_SUBDIR / pc.METRICS_SUBDIR / label,
+            seen_new,
         )
         problems += [f"{label}: {p}" for p in found]
+    new_keys = ", ".join(f"{k} (x{n})" for k, n in sorted(seen_new.items())) or "none"
     return Check(
         "R7",
         "old checkpoints load, re-score and resume with no grading",
         status_of(len(problems)),
-        f"{len(by_pass)} baseline experiments loaded and resumed; {len(problems)} problems",
+        f"{len(by_pass)} baseline experiments loaded and resumed; {len(problems)} problems; "
+        f"new metrics keys at defaults: {new_keys}",
         details=[f"- {p}" for p in problems[:MAX_DETAILS]],
-        data={"experiments": len(by_pass), "problems": len(problems)},
+        data={
+            "experiments": len(by_pass),
+            "problems": len(problems),
+            "new_keys_at_default": dict(seen_new),
+        },
     )
 
 

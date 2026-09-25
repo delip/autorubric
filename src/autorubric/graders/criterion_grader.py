@@ -5,9 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import dataclasses
-import functools
 import hashlib
-import inspect
 import itertools
 import logging
 import math
@@ -17,7 +15,7 @@ from collections import Counter
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast, overload
+from typing import TYPE_CHECKING, Any, Literal, overload
 
 from pydantic import BaseModel
 
@@ -94,9 +92,6 @@ def _derive_shuffle_rng(
 FEW_SHOT_DOMAIN = "few_shot"
 
 
-_PASSED_KEYWORDS: ContextVar[frozenset[str]] = ContextVar("_PASSED_KEYWORDS", default=frozenset())
-"""Names of the keyword arguments passed to the ``__init__`` call running in this context."""
-
 _ESCALATION_NAMES_CHECKED: ContextVar[bool] = ContextVar("_ESCALATION_NAMES_CHECKED", default=False)
 """True while a batch (``EvalRunner.run``, ``fill_ground_truth``) grades a dataset's items.
 The batch checked the cascade's ``EscalationConfig.per_criterion`` names against the union
@@ -144,44 +139,6 @@ def _escalation_names_marked_checked() -> Iterator[None]:
         yield
     finally:
         _ESCALATION_NAMES_CHECKED.reset(token)
-
-
-_InitT = TypeVar("_InitT", bound=Callable[..., None])
-
-# A warning issued in an ``__init__`` wrapped by ``_records_passed_keywords`` is attributed to
-# the caller's line with this stacklevel: ``__init__`` <- the wrapper <- the caller.
-_INIT_CALLER_STACKLEVEL = 3
-
-
-def _records_passed_keywords(init: _InitT) -> _InitT:
-    """Let a keyword-only ``__init__`` know which of its arguments the caller passed.
-
-    Python does not tell a function whether an argument was passed or left at its default,
-    and a sentinel default would replace the documented default wherever the signature is
-    read (``inspect.signature``, ``__kwdefaults__``, the rendered API reference, tools that
-    log or serialize defaults). Instead, while ``init`` runs, ``_PASSED_KEYWORDS`` holds the
-    names of the keyword arguments of the call; every parameter of ``init`` is keyword-only,
-    so they are exactly the arguments passed. The wrapper reads as ``init`` to every
-    introspection tool: ``functools.update_wrapper`` copies its metadata (and sets the
-    ``__wrapped__`` that ``inspect.signature`` follows), ``__kwdefaults__`` is ``init``'s,
-    and ``__signature__`` is ``init``'s signature, which ``inspect.getfullargspec`` reads
-    because it does not follow ``__wrapped__``. Only the code object (``__code__``) is the
-    wrapper's own. Positional arguments go through to ``init``, which rejects them with its
-    own error. The wrapper adds a frame: a warning issued in ``init`` uses
-    ``_INIT_CALLER_STACKLEVEL`` to name the caller's line.
-    """
-
-    def wrapper(self: Any, *args: Any, **kwargs: Any) -> None:
-        token = _PASSED_KEYWORDS.set(frozenset(kwargs))
-        try:
-            init(self, *args, **kwargs)
-        finally:
-            _PASSED_KEYWORDS.reset(token)
-
-    wrapper.__kwdefaults__ = init.__kwdefaults__
-    # A function attribute that type checkers do not model; inspect reads it by name.
-    setattr(wrapper, "__signature__", inspect.signature(init))
-    return cast(_InitT, functools.update_wrapper(wrapper, init))
 
 
 def _combine_errors(errors: list[str | None]) -> str | None:
@@ -401,9 +358,10 @@ class EscalationConfig:
     Attributes:
         judges: The escalation judges, LLM judges only, in order. A bare ``LLMConfig``
             given to the constructor becomes ``[JudgeSpec(config, "escalation")]``. To
-            compare a cascade with a separate LLM run judge for judge (the same option
-            shuffles and few-shot examples), give that run's judge the same ``judge_id``
-            and both graders the same ``seed``.
+            compare a cascade with a separate LLM run judge for judge (the same prompts,
+            option shuffles and few-shot examples included), grade that run with these
+            judges (``judges=escalation.judges``, their ``judge_id``s included) and the
+            cascade's ``seed`` and other LLM settings (``replay_escalation`` lists them).
         threshold: A criterion is escalated when the decision model's confidence is below
             it, in [0, 1]. ``0.0`` escalates only errors and abstentions; ``1.0`` everything
             short of certainty.
@@ -482,24 +440,12 @@ class EscalationConfig:
                 "DecisionModelConfig; escalation judges judge the criteria the decision model "
                 "escalates"
             )
-        if not (_is_real_number(threshold) and 0 <= threshold <= 1):
-            raise ValueError(f"{name}.threshold must be a number in [0, 1]; got {threshold!r}")
-        if per_criterion is not None:
-            if not isinstance(per_criterion, Mapping):
-                raise ValueError(
-                    f"{name}.per_criterion must map criterion names to thresholds; "
-                    f"got {type(per_criterion).__name__}"
-                )
-            for key, value in per_criterion.items():
-                if not isinstance(key, str):
-                    raise ValueError(
-                        f"{name}.per_criterion keys are criterion names (str); got {key!r}"
-                    )
-                if not (_is_real_number(value) and 0 <= value <= 1):
-                    raise ValueError(
-                        f"{name}.per_criterion[{key!r}] must be a number in [0, 1]; got {value!r}"
-                    )
-            per_criterion = dict(per_criterion)
+        per_criterion = _check_thresholds(
+            threshold,
+            per_criterion,
+            threshold_name=f"{name}.threshold",
+            per_criterion_name=f"{name}.per_criterion",
+        )
         # Frozen: the generated __setattr__ refuses assignment, so store past it.
         object.__setattr__(self, "judges", specs)
         object.__setattr__(self, "threshold", threshold)
@@ -511,9 +457,109 @@ class EscalationConfig:
         Its ``per_criterion`` threshold, looked up by the criterion's name, else
         ``threshold``; an unnamed criterion always gets ``threshold``.
         """
-        if self.per_criterion is not None and criterion.name is not None:
-            return self.per_criterion.get(criterion.name, self.threshold)
-        return self.threshold
+        return _threshold_for(criterion, self.threshold, self.per_criterion)
+
+
+def _check_thresholds(
+    threshold: float,
+    per_criterion: Mapping[str, float] | None,
+    *,
+    threshold_name: str,
+    per_criterion_name: str,
+) -> dict[str, float] | None:
+    """Validate a cascade's escalation thresholds; return the per-criterion ones as a copy.
+
+    The one check of ``EscalationConfig`` and of an offline cascade replay
+    (``autorubric.escalation.replay_escalation``), so both accept exactly the same
+    thresholds.
+
+    Args:
+        threshold: The global threshold, which must be a real number in [0, 1] (no ``bool``;
+            NaN fails the range).
+        per_criterion: ``None``, or a mapping from criterion names (``str``) to thresholds,
+            each a real number in [0, 1].
+        threshold_name: How error messages name ``threshold``.
+        per_criterion_name: How error messages name ``per_criterion``.
+
+    Returns:
+        ``per_criterion`` copied into a ``dict``, or ``None``.
+
+    Raises:
+        ValueError: If a threshold is not a real number in [0, 1], or if ``per_criterion``
+            is not a mapping from criterion names.
+    """
+    if not (_is_real_number(threshold) and 0 <= threshold <= 1):
+        raise ValueError(f"{threshold_name} must be a number in [0, 1]; got {threshold!r}")
+    if per_criterion is None:
+        return None
+    if not isinstance(per_criterion, Mapping):
+        raise ValueError(
+            f"{per_criterion_name} must map criterion names to thresholds; "
+            f"got {type(per_criterion).__name__}"
+        )
+    for key, value in per_criterion.items():
+        if not isinstance(key, str):
+            raise ValueError(f"{per_criterion_name} keys are criterion names (str); got {key!r}")
+        if not (_is_real_number(value) and 0 <= value <= 1):
+            raise ValueError(
+                f"{per_criterion_name}[{key!r}] must be a number in [0, 1]; got {value!r}"
+            )
+    return dict(per_criterion)
+
+
+def _threshold_for(
+    criterion: Criterion, threshold: float, per_criterion: Mapping[str, float] | None
+) -> float:
+    """The confidence threshold below which a cascade escalates ``criterion``.
+
+    Its ``per_criterion`` threshold, looked up by the criterion's name, else ``threshold``;
+    an unnamed criterion always gets ``threshold``. The one lookup of
+    ``EscalationConfig.threshold_for`` and of an offline cascade replay
+    (``autorubric.escalation.replay_escalation``), so both escalate the same criteria.
+    """
+    if per_criterion is not None and criterion.name is not None:
+        return per_criterion.get(criterion.name, threshold)
+    return threshold
+
+
+def _warn_unknown_threshold_names(
+    per_criterion: Mapping[str, float] | None,
+    rubrics: Iterable[Iterable[Criterion]],
+    *,
+    source: str,
+    where: str,
+) -> bool:
+    """Warn about per-criterion thresholds whose names match no criterion of ``rubrics``.
+
+    Thresholds are looked up by criterion name (``_threshold_for``), so such a name sets no
+    threshold; it is most likely a typo or a stale name. The warning is a ``UserWarning``
+    attributed to the code that called autorubric. The one check of a live cascade
+    (``CriterionGrader._check_escalation_names``) and of an offline cascade replay
+    (``autorubric.escalation.replay_escalation``).
+
+    Args:
+        per_criterion: The thresholds by criterion name, if any.
+        rubrics: The criteria the names are checked against, as one or more rubrics.
+        source: What ``per_criterion`` is, for the message (e.g.
+            ``"EscalationConfig.per_criterion"``).
+        where: What ``rubrics`` are, for the message (e.g. "the rubric being graded").
+
+    Returns:
+        Whether it warned. It never does without per-criterion thresholds.
+    """
+    if not per_criterion:
+        return False
+    names = {criterion.name for criterion in itertools.chain.from_iterable(rubrics)}
+    unknown = [name for name in per_criterion if name not in names]
+    if not unknown:
+        return False
+    warnings.warn(
+        f"{source} names {', '.join(map(repr, unknown))} match no criterion of {where}; "
+        "thresholds are looked up by criterion name, so these have no effect",
+        UserWarning,
+        stacklevel=_caller_stacklevel(),
+    )
+    return True
 
 
 @dataclass
@@ -570,7 +616,8 @@ def _escalates(report: CriterionReport, threshold: float) -> bool:
     It does when the judgment failed (any ``error`` category), when the decision model
     abstained (``CANNOT_ASSESS``, or an NA option), and when its ``confidence`` is below
     ``threshold``. A failed judgment has no confidence; nor, therefore, can it clear the
-    threshold.
+    threshold. The one rule of the live cascade (``CriterionGrader.judge``) and of an
+    offline replay (``autorubric.escalation.replay_escalation``).
     """
     return (
         report.is_error
@@ -690,6 +737,98 @@ def _failed_judgment_result(
     return CriterionResult(report=report, usage=None, cost=None)
 
 
+def _ensemble_evaluation_report(
+    ensemble_reports: list[EnsembleCriterionReport],
+    judge_scores: dict[str, float | None],
+    score: Callable[[list[CriterionReport], bool], float],
+    *,
+    normalize: bool,
+    token_usage: TokenUsage | None,
+    completion_cost: float | None,
+) -> EnsembleEvaluationReport:
+    """An item's report, from its criteria's ensemble reports.
+
+    ``score`` and ``raw_score`` are the weighted score over the final verdicts (normalized as
+    ``normalize`` says, and raw), ``mean_agreement`` is the criteria's mean ``agreement``
+    (``None`` for an empty rubric, never a fabricated 1.0), and ``cannot_assess_count``
+    counts the criteria whose final verdict abstains (``CANNOT_ASSESS`` or an NA option).
+    Shared by ``CriterionGrader.aggregate`` and the offline cascade replay
+    (``autorubric.escalation.replay_escalation``), so a replayed report is assembled
+    exactly as a live one.
+
+    Args:
+        ensemble_reports: The item's criterion reports, in rubric order.
+        judge_scores: Each judge's own score over the rubric (``None`` where undefined).
+        score: The weighted scoring of criterion reports, called as
+            ``score(reports, normalize)`` (``score_reports`` under the grader's
+            ``CannotAssessConfig``).
+        normalize: Whether ``score`` is normalized to [0, 1].
+        token_usage: The item's token usage, if known.
+        completion_cost: The item's cost, if known.
+
+    Returns:
+        The item's ``EnsembleEvaluationReport``.
+    """
+    # The final verdicts as criterion reports, for scoring.
+    final_reports = []
+    for er in ensemble_reports:
+        if er.final_multi_choice_verdict is not None:
+            # Multi-choice criterion
+            final_reports.append(
+                CriterionReport(
+                    weight=er.criterion.weight,
+                    requirement=er.criterion.requirement,
+                    name=er.criterion.name,
+                    options=er.criterion.options,
+                    scale_type=er.criterion.scale_type,
+                    aggregation=er.criterion.aggregation,
+                    verdict=None,  # Binary verdict is None
+                    multi_choice_verdict=er.final_multi_choice_verdict,
+                    reason=er.final_reason,
+                )
+            )
+        else:
+            # Binary criterion
+            final_reports.append(
+                CriterionReport(
+                    weight=er.criterion.weight,
+                    requirement=er.criterion.requirement,
+                    name=er.criterion.name,
+                    verdict=er.final_verdict,
+                    reason=er.final_reason,
+                )
+            )
+    final_score = score(final_reports, normalize)
+    raw_score = score(final_reports, False)
+
+    # Calculate agreement
+    mean_agreement = (
+        sum(er.agreement for er in ensemble_reports) / len(ensemble_reports)
+        if ensemble_reports
+        else None  # No criteria to agree on -> not measured (never fabricate 1.0)
+    )
+
+    # Count CANNOT_ASSESS (binary) and NA (multi-choice)
+    cannot_assess_count = sum(
+        1
+        for er in ensemble_reports
+        if (er.final_verdict == CriterionVerdict.CANNOT_ASSESS)
+        or (er.final_multi_choice_verdict is not None and er.final_multi_choice_verdict.na)
+    )
+
+    return EnsembleEvaluationReport(
+        score=final_score,
+        raw_score=raw_score,
+        llm_raw_score=raw_score,
+        report=ensemble_reports,
+        judge_scores=judge_scores,
+        mean_agreement=mean_agreement,
+        cannot_assess_count=cannot_assess_count,
+        token_usage=token_usage,
+        completion_cost=completion_cost,
+    )
+
+
 class CriterionGrader(Grader):
     """Unified criterion-based grader with compositional few-shot and ensemble support.
 
@@ -718,8 +857,9 @@ class CriterionGrader(Grader):
     first and LLM judges behind it. The decision model judges every criterion in its one
     request per item; a criterion it errored or abstained on, or answered with a
     ``confidence`` below the criterion's threshold, is escalated: each escalation judge
-    judges it (and only the escalated criteria), with the same prompt it would get in a
-    grader without the cascade with the same ``seed`` and ``judge_id``. An escalated
+    judges it (and only the escalated criteria), with the same prompt it would get in an
+    otherwise identical grader without the cascade (the same ``seed``, ``judge_id`` and
+    LLM settings). An escalated
     criterion's report is marked ``escalated=True``, keeps the decision model's vote with
     ``superseded=True``, and takes its verdict from the escalation judges' votes alone,
     aggregated as any ensemble's; it never falls back to the decision model's vote. The
@@ -729,8 +869,8 @@ class CriterionGrader(Grader):
     Some settings exist for LLM judges only. Few-shot examples, the system prompts and
     ``shuffle_options`` apply to the LLM judges of a mixed ensemble or a cascade and never
     reach a decision model. A grader whose judges are all decision models rejects few-shot
-    examples and warns when a system prompt or ``shuffle_options`` is passed, since it has
-    no judge to apply them to. A custom response format describes a generated judgment,
+    examples and warns when a system prompt is given or ``shuffle_options`` is ``False``,
+    since it has no judge to apply them to. A custom response format describes a generated judgment,
     which only an LLM judge produces, so it cannot be combined with any decision-model
     judge.
 
@@ -795,7 +935,6 @@ class CriterionGrader(Grader):
     _escalation: EscalationConfig | None = None
     _escalation_names_warned: bool = False
 
-    @_records_passed_keywords
     def __init__(
         self,
         *,
@@ -927,10 +1066,11 @@ class CriterionGrader(Grader):
                 installed (``pip install 'autorubric[typesafe]'``).
 
         Warns:
-            UserWarning: If system_prompt, multi_choice_system_prompt or shuffle_options is
-                passed while every judge is a decision model: these settings apply to LLM
-                judges only, so they have no effect. One warning per setting passed; the
-                defaults (None, None and True) never warn.
+            UserWarning: If system_prompt or multi_choice_system_prompt is not None, or
+                shuffle_options is False, while every judge is a decision model: these
+                settings apply to LLM judges only, so they have no effect. One warning per
+                setting that differs from its default (None, None and True); a cascade's
+                escalation judges are LLM judges, so a cascade never warns.
         """
         if llm_config is not None:
             if judge_model_config is not None:
@@ -941,7 +1081,7 @@ class CriterionGrader(Grader):
             warnings.warn(
                 "llm_config is deprecated; use judge_model_config",
                 DeprecationWarning,
-                stacklevel=_INIT_CALLER_STACKLEVEL,
+                stacklevel=2,
             )
             judge_model_config = llm_config
 
@@ -1029,20 +1169,21 @@ class CriterionGrader(Grader):
                 "produces"
             )
         if every_judge_is_decision_model:
-            # A prompt counts as passed when one is given (None is "no prompt"); a
-            # shuffle_options value, True included, when the caller passed it.
-            passed = (
+            # A setting that differs from its default asks for something no judge here
+            # can do: a prompt (None is "no prompt"), or shuffle_options=False (a decision
+            # model never shuffles, so True, the default, is what it does anyway).
+            changed = (
                 ("system_prompt", system_prompt is not None),
                 ("multi_choice_system_prompt", multi_choice_system_prompt is not None),
-                ("shuffle_options", "shuffle_options" in _PASSED_KEYWORDS.get()),
+                ("shuffle_options", not shuffle_options),
             )
-            for name, is_passed in passed:
-                if is_passed:
+            for name, is_changed in changed:
+                if is_changed:
                     warnings.warn(
                         f"{name} applies to LLM judges only; this grader has none (every "
                         "judge is a decision model), so it has no effect",
                         UserWarning,
-                        stacklevel=_INIT_CALLER_STACKLEVEL,
+                        stacklevel=2,
                     )
 
         self._aggregation = aggregation
@@ -1909,20 +2050,9 @@ class CriterionGrader(Grader):
             Whether it warned. It never does for a grader without per-criterion thresholds.
         """
         per_criterion = self._escalation.per_criterion if self._escalation is not None else None
-        if not per_criterion:
-            return False
-        names = {criterion.name for criterion in itertools.chain.from_iterable(rubrics)}
-        unknown = [name for name in per_criterion if name not in names]
-        if not unknown:
-            return False
-        warnings.warn(
-            f"EscalationConfig.per_criterion names {', '.join(map(repr, unknown))} match no "
-            f"criterion of {where}; thresholds are looked up by criterion name, so these "
-            "have no effect",
-            UserWarning,
-            stacklevel=_caller_stacklevel(),
+        return _warn_unknown_threshold_names(
+            per_criterion, rubrics, source="EscalationConfig.per_criterion", where=where
         )
-        return True
 
     async def aggregate(
         self, judge_results: list[JudgeCriterionResults], *, normalize: bool = True
@@ -2077,53 +2207,6 @@ class CriterionGrader(Grader):
                 else None
             )
 
-        # Calculate final score from aggregated verdicts
-        final_reports = []
-        for er in ensemble_reports:
-            if er.final_multi_choice_verdict is not None:
-                # Multi-choice criterion
-                final_reports.append(
-                    CriterionReport(
-                        weight=er.criterion.weight,
-                        requirement=er.criterion.requirement,
-                        name=er.criterion.name,
-                        options=er.criterion.options,
-                        scale_type=er.criterion.scale_type,
-                        aggregation=er.criterion.aggregation,
-                        verdict=None,  # Binary verdict is None
-                        multi_choice_verdict=er.final_multi_choice_verdict,
-                        reason=er.final_reason,
-                    )
-                )
-            else:
-                # Binary criterion
-                final_reports.append(
-                    CriterionReport(
-                        weight=er.criterion.weight,
-                        requirement=er.criterion.requirement,
-                        name=er.criterion.name,
-                        verdict=er.final_verdict,
-                        reason=er.final_reason,
-                    )
-                )
-        final_score = self._calculate_score_from_reports(final_reports, normalize)
-        raw_score = self._calculate_score_from_reports(final_reports, normalize=False)
-
-        # Calculate agreement
-        mean_agreement = (
-            sum(er.agreement for er in ensemble_reports) / len(ensemble_reports)
-            if ensemble_reports
-            else None  # No criteria to agree on -> not measured (never fabricate 1.0)
-        )
-
-        # Count CANNOT_ASSESS (binary) and NA (multi-choice)
-        cannot_assess_count = sum(
-            1
-            for er in ensemble_reports
-            if (er.final_verdict == CriterionVerdict.CANNOT_ASSESS)
-            or (er.final_multi_choice_verdict is not None and er.final_multi_choice_verdict.na)
-        )
-
         # Aggregate token usage and cost
         total_usage = TokenUsage()
         total_cost = 0.0
@@ -2133,14 +2216,11 @@ class CriterionGrader(Grader):
             if jr.total_cost:
                 total_cost += jr.total_cost
 
-        return EnsembleEvaluationReport(
-            score=final_score,
-            raw_score=raw_score,
-            llm_raw_score=raw_score,
-            report=ensemble_reports,
-            judge_scores=judge_scores,
-            mean_agreement=mean_agreement,
-            cannot_assess_count=cannot_assess_count,
+        return _ensemble_evaluation_report(
+            ensemble_reports,
+            judge_scores,
+            self._calculate_score_from_reports,
+            normalize=normalize,
             token_usage=total_usage if total_usage.total_tokens > 0 else None,
             completion_cost=total_cost if total_cost > 0 else None,
         )

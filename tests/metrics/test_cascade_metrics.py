@@ -21,6 +21,8 @@ predictions. Fleiss' kappa skips superseded votes (no cascade row is complete, s
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from autorubric.dataset import RubricDataset
@@ -560,10 +562,12 @@ def test_mixed_judge_sets_do_not_fabricate_an_na_option():
 # =============================================================================
 
 
-def test_full_coverage_judge_dump_omits_the_cascade_fields():
-    dm_dump = _binary_metrics().per_judge[DM].model_dump()
-    assert "coverage" not in dm_dump
-    assert "n_pairs" not in dm_dump
+def test_full_coverage_judge_dump_carries_the_cascade_fields_at_their_defaults():
+    """Like every other field, ``coverage`` / ``n_pairs`` are dumped at their defaults too."""
+    dm = _binary_metrics().per_judge[DM]
+    for dump in (dm.model_dump(), dm.model_dump(mode="json"), json.loads(dm.model_dump_json())):
+        assert dump["coverage"] == "full"
+        assert "n_pairs" in dump and dump["n_pairs"] is None
 
 
 def test_escalation_judge_dump_carries_the_cascade_fields_and_round_trips():
