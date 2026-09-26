@@ -112,7 +112,7 @@ A binary criterion's votes are in `votes`, a multi-choice criterion's in `multi_
 
 ## Ensembles
 
-An ensemble is a list of `JudgeSpec`s, each a config, a `judge_id` and an optional `weight` (default `1.0`):
+An ensemble is a list of `JudgeSpec`s, each a config, a `judge_id` and an optional `weight`, a positive number (default `1.0`):
 
 ```python
 from autorubric import LLMConfig

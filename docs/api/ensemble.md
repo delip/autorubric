@@ -47,7 +47,9 @@ for cr in result.report:
 
 ## Keyword Form
 
-`JudgeSpec` takes the judge's config, its `judge_id`, and an optional `weight`, in that order. When
+`JudgeSpec` takes the judge's config, its `judge_id`, and an optional `weight`, in that order. A
+weight must be a positive, finite number (default `1.0`); zero, negative, NaN and infinite weights
+raise `ValueError`, because the weighted and threshold strategies sum and compare judge weights. When
 you pass the config by keyword, call it `judge_model_config`:
 
 ```python

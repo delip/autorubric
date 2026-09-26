@@ -9,6 +9,7 @@ import hashlib
 import itertools
 import logging
 import math
+import numbers
 import random
 import warnings
 from collections import Counter
@@ -240,6 +241,29 @@ def _top_tied_keys(scores: Mapping[int, float]) -> list[int]:
     return [i for i, s in scores.items() if s == top]
 
 
+def _check_judge_weight(weight: object, judge_id: object) -> None:
+    """Refuse a judge weight that is not a positive, finite real number (no ``bool``).
+
+    Aggregation sums judge weights (``weighted``, ``weighted_mean``, ``weighted_mode``)
+    and compares their sums with zero (``unanimous``, ``any``), so a zero, negative or
+    non-finite weight would silently change verdicts: a zero-weight UNMET vote could not
+    block ``unanimous``, and weights of +1 and -1 could cancel out.
+
+    Raises:
+        ValueError: If ``weight`` is not a positive, finite number.
+    """
+    if (
+        isinstance(weight, bool)
+        or not isinstance(weight, numbers.Real)
+        or not math.isfinite(weight)
+        or weight <= 0
+    ):
+        raise ValueError(
+            f"Judge {judge_id!r} has weight {weight!r}; a judge weight must be a positive, "
+            "finite number"
+        )
+
+
 @dataclass
 class JudgeSpec:
     """Specification for a single judge in an ensemble.
@@ -261,7 +285,8 @@ class JudgeSpec:
             ``DecisionModelConfig`` (the stored field; also readable and writable as the
             ``judge_model_config`` property).
         judge_id: Unique identifier for this judge (e.g., "gpt-4", "claude-sonnet").
-        weight: Voting weight for weighted aggregation (default 1.0).
+        weight: Voting weight for weighted aggregation (default 1.0); a positive, finite
+            number.
 
     Example:
         >>> gemini = LLMConfig(model="gemini/gemini-3-flash-preview")
@@ -309,11 +334,13 @@ class JudgeSpec:
             llm_config: The judge's model configuration, positionally or by the stored
                 field name. Mutually exclusive with ``judge_model_config``.
             judge_id: Unique identifier for this judge.
-            weight: Voting weight for weighted aggregation (default 1.0).
+            weight: Voting weight for weighted aggregation (default 1.0); a positive,
+                finite number.
             judge_model_config: The judge's model configuration (preferred keyword).
 
         Raises:
-            ValueError: If both ``judge_model_config`` and ``llm_config`` are passed.
+            ValueError: If both ``judge_model_config`` and ``llm_config`` are passed, or if
+                ``weight`` is not a positive, finite number.
             TypeError: If the configuration or ``judge_id`` is missing.
         """
         if judge_model_config is not dataclasses.MISSING:
@@ -337,6 +364,7 @@ class JudgeSpec:
                 f"JudgeSpec.__init__() missing {len(missing)} required {kind}{plural}: "
                 + " and ".join(missing)
             )
+        _check_judge_weight(weight, judge_id)
         self.llm_config = llm_config
         self.judge_id = judge_id
         self.weight = weight
@@ -1269,6 +1297,8 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         self._clients: dict[str, LLMClient] = {}
         self._decision_clients: dict[str, DecisionModelClient] = {}
         for judge in all_judges:
+            # A spec is mutable, so check the weight it has now, not only the one it was built with
+            _check_judge_weight(judge.weight, judge.judge_id)
             config = judge.llm_config
             if isinstance(config, DecisionModelConfig):
                 self._decision_clients[judge.judge_id] = DecisionModelClient(config)
