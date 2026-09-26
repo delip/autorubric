@@ -315,9 +315,11 @@ class DecisionModelConfig:
             however long, counts against neither ``timeout`` nor the retry budget: those
             measure the endpoint.
         cache_enabled: Cache responses on disk, as in ``LLMConfig``. There is one entry per
-            request, keyed by the model, the resolved base URL, the state and the questions.
-            A hit returns the stored response, usage included, without a request. Failed
-            requests are never cached.
+            request, keyed by the model, the resolved base URL, the state and the questions,
+            plus the ``judge_id`` of any judge other than a lone ``judge_model_config``
+            judge, so that judges of one decision model keep their own answers. A hit
+            returns the stored response, usage included, without a request. Failed requests
+            are never cached.
         cache_dir: Directory of the response cache. It is the same store that LLM judges
             use when their ``cache_dir`` matches.
         cache_ttl: Lifetime of a cache entry in seconds; ``None`` (default) never expires.
@@ -545,11 +547,15 @@ class DecisionModelClient:
     involved; a long queue would then fail requests the endpoint never saw.
     """
 
-    def __init__(self, config: DecisionModelConfig) -> None:
+    def __init__(self, config: DecisionModelConfig, *, cache_namespace: str | None = None) -> None:
         """Build a client for ``config``.
 
         Args:
             config: The decision-model configuration.
+            cache_namespace: Keeps this client's response-cache entries apart from those of
+                other clients that send identical requests, such as several judges of one
+                decision model, each of which gets its own answer. It becomes part of the
+                cache key; ``None`` (the default) leaves the key exactly as without it.
 
         Raises:
             ImportError: If the TypeSafe SDK is not installed.
@@ -562,6 +568,7 @@ class DecisionModelClient:
                 SOCKS proxy without the ``socksio`` package), chained to the error it raised.
         """
         self.config = config
+        self._cache_namespace = cache_namespace
         self._typesafe = _import_typesafe_sdk()
         constants = self._typesafe.constants
 
@@ -727,11 +734,15 @@ class DecisionModelClient:
     def _cache_key(self, state: JSONContent, questions: Mapping[str, Question]) -> str:
         """SHA-256 over the model, the resolved base URL, the state and the questions.
 
-        Everything that shapes the request is in the key; nothing else is. Framing is
-        already expressed in the questions, and ``decision_threshold`` only post-processes
-        answers, so changing it re-reads cached answers instead of asking again.
+        Everything that shapes the request is in the key, and so is the client's
+        ``cache_namespace`` when it has one; nothing else is. Framing is already expressed in
+        the questions, and ``decision_threshold`` only post-processes answers, so changing it
+        re-reads cached answers instead of asking again.
         """
-        content = _canonical_json([self.config.model, self._base_url, state, questions])
+        parts: list[object] = [self.config.model, self._base_url, state, questions]
+        if self._cache_namespace is not None:
+            parts.append({"namespace": self._cache_namespace})
+        content = _canonical_json(parts)
         return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
     def _cached_response(self, cache_key: str) -> SystemOneResponse | None:

@@ -7,6 +7,7 @@ in-memory network (``http_network``); see ``conftest.py``. No test reaches the n
 
 import asyncio
 import dataclasses
+import hashlib
 import json
 import logging
 import sys
@@ -880,6 +881,38 @@ class TestCacheKey:
         assert client._cache_key(STATE, as_objects) == client._cache_key(STATE, as_dicts)
         assert client._cache_key(types.MappingProxyType(STATE), as_objects) == (
             client._cache_key(STATE, as_objects)
+        )
+
+
+class TestCacheNamespace:
+    """``cache_namespace`` keeps independent samplers of one model apart in the cache."""
+
+    def test_clients_with_different_namespaces_use_different_keys(self):
+        config = dm_config()
+        key_a = DecisionModelClient(config, cache_namespace="jev-0")._cache_key(STATE, QUESTIONS)
+        key_b = DecisionModelClient(config, cache_namespace="jev-1")._cache_key(STATE, QUESTIONS)
+        assert key_a != key_b
+
+    def test_a_namespace_changes_the_key(self):
+        config = dm_config()
+        namespaced = DecisionModelClient(config, cache_namespace="jev-0")._cache_key(
+            STATE, QUESTIONS
+        )
+        assert namespaced != DecisionModelClient(config)._cache_key(STATE, QUESTIONS)
+
+    def test_no_namespace_keeps_the_key_existing_caches_were_written_with(self):
+        config = dm_config(api_base="https://dm.example.com")
+        content = (
+            '["jev-latest","https://dm.example.com",'
+            '{"input":"Explain photosynthesis.","submission":"Plants turn light into sugar."},'
+            '{"c0":{"type":"noul","instructions":"Mentions light"},'
+            '"c1":{"type":"choice","instructions":"Tone","criteria":{"formal":null,"casual":null}}}]'
+        )
+        expected = hashlib.sha256(content.encode()).hexdigest()
+        assert DecisionModelClient(config)._cache_key(STATE, QUESTIONS) == expected
+        assert (
+            DecisionModelClient(config, cache_namespace=None)._cache_key(STATE, QUESTIONS)
+            == expected
         )
 
 

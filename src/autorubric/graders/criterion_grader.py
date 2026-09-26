@@ -1300,10 +1300,15 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
             # A spec is mutable, so check the weight it has now, not only the one it was built with
             _check_judge_weight(judge.weight, judge.judge_id)
             config = judge.llm_config
+            # Each judge of an ensemble or cascade caches under its own id, so judges sending
+            # identical requests never read one another's answers; the lone judge keeps the
+            # plain key, and with it the caches of earlier single-judge runs.
+            namespace = None if judge.judge_id == _SINGLE_JUDGE_ID else judge.judge_id
             if isinstance(config, DecisionModelConfig):
-                self._decision_clients[judge.judge_id] = DecisionModelClient(config)
+                self._decision_clients[judge.judge_id] = DecisionModelClient(
+                    config, cache_namespace=namespace
+                )
             else:
-                namespace = None if judge.judge_id == _SINGLE_JUDGE_ID else judge.judge_id
                 self._clients[judge.judge_id] = LLMClient(config, cache_namespace=namespace)
 
         # Pre-compute few-shot examples if training data provided

@@ -74,9 +74,9 @@ it emits a `FutureWarning` naming the repeated ids. A repeated `judge_id` will r
 in the next major version. A cascade already rejects repeats (see
 [Decision Models](../cookbook/decision-models.md)).
 
-To poll one model several times, give each copy its own id. Each copy then also gets its own
-option shuffle, and with `cache_enabled=True` its own response-cache entries, so a rerun replays
-each copy's own answers:
+To poll one model several times, LLM or decision model, give each copy its own id. Each copy then
+gets its own response-cache entries with `cache_enabled=True`, so a rerun replays each copy's own
+answers, and each copy of an LLM judge also gets its own option shuffle:
 
 ```python
 judges = [JudgeSpec(LLMConfig(model="openai/gpt-4.1-mini"), f"gpt-{i}") for i in range(3)]

@@ -110,7 +110,7 @@ A request's cost is its input tokens times `input_cost_per_token`. There is no b
 
 ### Reproducibility
 
-Decision-model answers are not bit-deterministic: repeating an identical request can return slightly different probabilities, so a verdict whose probability lies near `decision_threshold` can change between runs. With `cache_enabled=True`, re-running an experiment returns the stored answers, usage included. The cache key is the model, the resolved base URL, the state and the questions. `decision_threshold` is not part of it, so changing the threshold re-reads cached answers instead of asking again. Failed requests are never cached.
+Decision-model answers are not bit-deterministic: repeating an identical request can return slightly different probabilities, so a verdict whose probability lies near `decision_threshold` can change between runs. With `cache_enabled=True`, re-running an experiment returns the stored answers, usage included. The cache key is the model, the resolved base URL, the state and the questions, plus the `judge_id` of any judge other than a lone `judge_model_config` judge, so that judges of one decision model keep their own answers. `decision_threshold` is not part of it, so changing the threshold re-reads cached answers instead of asking again. Failed requests are never cached.
 
 ## Standalone use
 
