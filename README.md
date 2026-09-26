@@ -150,9 +150,15 @@ When writing or editing code that uses AutoRubric:
 - Verify exact signatures and types against the API reference
   (https://autorubric.org/docs/api/) and reuse patterns from the cookbook
   (https://autorubric.org/docs/cookbook/).
-- Ensure provider keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, …) are set; AutoRubric
-  reaches 100+ providers via LiteLLM. Decision-model judges need the `typesafe` extra
-  (`pip install 'autorubric[typesafe]'`) and `TYPESAFE_API_KEY`.
+- Ensure provider keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, …) are set in the
+  environment or present in the project's `.env`; AutoRubric reaches 100+ providers via
+  LiteLLM.
+- If `TYPESAFE_API_KEY` is set in the environment or present in the project's `.env`
+  (check without printing its value), ask the user which judges to use before writing
+  the grader: a cheaper decision model (`DecisionModelConfig`, one request per item), an
+  LLM judge or a panel of LLM judges, or a cascade (`EscalationConfig`) in which the
+  decision model grades first and escalates uncertain criteria to LLM judges. Decision
+  models need `pip install 'autorubric[typesafe]'`.
 ```
 
 ## Features
