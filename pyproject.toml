@@ -62,6 +62,10 @@ docs = [
     "mkdocs-material>=9.5.0",
     "mkdocstrings[python]>=0.27.0",
     "pymdown-extensions>=10.0",
+    # Under Click 8.3.x, `mkdocs serve` (MkDocs 1.6.1) starts without live reload: its
+    # --livereload/--no-livereload flag pair loses its default (mkdocs/mkdocs#4032).
+    # Click 8.4.0 restored the earlier default resolution (pallets/click#3403).
+    "click!=8.3.*",
 ]
 
 [tool.pytest.ini_options]
