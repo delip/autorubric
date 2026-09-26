@@ -104,7 +104,7 @@ item is errored when:
 - every one of its criteria stands in for a failed judge call (each criterion report's
   `is_error`).
 
-The last rule matters for runs saved by an earlier release, which gave an item whose every
+The last rule matters for runs saved by v1.5.3 or earlier, which gave an item whose every
 judgment failed a fabricated score (for example 0.0 under `SKIP`) and no error. Metrics
 recomputed from such a run leave that item out too, and read a judge's score on an item where
 every one of its calls failed as `None`.
