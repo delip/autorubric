@@ -1,8 +1,8 @@
 """Tests for the compute-layer coverage/error wiring in ``compute_metrics``.
 
 Builds per-criterion and aggregate ``CoverageStats`` from the live counts under the
-``exclude`` handling mode (raw pre-exclusion denominator, union-exclusion), counts items
-lost to a grading error (with a warning), and sets the top-level ``n_samples``. Under
+``exclude`` handling mode (raw pre-exclusion denominator, union-exclusion), counts the
+pairs lost to a grading error (with a warning), and sets the top-level ``n_samples``. Under
 non-``exclude`` modes coverage is trivially 1.0 and is left ``None``.
 """
 
@@ -143,7 +143,9 @@ class TestErroredItemCounting:
         eval_result.item_results[1].error = "boom"
         metrics = compute_metrics(eval_result, dataset)
         assert metrics.coverage_stats is not None
-        assert metrics.coverage_stats.n_errored == 1
-        assert metrics.coverage_stats.error_rate is not None
-        assert metrics.coverage_stats.error_rate > 0
+        # Its pair of each of the two criteria is an errored pair: 2 of the 6 raw pairs.
+        assert metrics.coverage_stats.n_errored == 2
+        assert metrics.coverage_stats.error_rate == pytest.approx(1 / 3)
+        for cm in metrics.per_criterion:
+            assert cm.coverage_stats is not None and cm.coverage_stats.n_errored == 1
         assert any("error" in w.lower() and "exclud" in w.lower() for w in metrics.warnings)

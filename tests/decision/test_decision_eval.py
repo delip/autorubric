@@ -367,7 +367,9 @@ async def test_a_failed_request_fails_like_an_llm_grader_whose_calls_all_failed(
     metrics = result.compute_metrics(data)
     assert metrics.model_dump_json() == llm_result.compute_metrics(data).model_dump_json()
     assert metrics.n_items == 3
-    assert metrics.coverage_stats is not None and metrics.coverage_stats.n_errored == 1
+    # Its pair of each of the three criteria is an errored pair.
+    assert metrics.coverage_stats is not None
+    assert metrics.coverage_stats.n_errored == len(RUBRIC.rubric)
     assert any("grading errored" in warning for warning in metrics.warnings)
     # Only the answered items are paired, and each matches its ground truth.
     assert metrics.score_rmse == pytest.approx(0.0)

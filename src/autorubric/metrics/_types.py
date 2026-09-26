@@ -362,12 +362,13 @@ class CoverageStats(BaseModel):
 
     Built only under the ``exclude`` handling mode, where abstentions (CANNOT_ASSESS / NA) and
     grading errors drop a paired observation from the agreement denominator. Under ``as_unmet``
-    or ``as_category`` no observation is dropped, so coverage would be trivially ``1.0`` and
-    these stats are not produced (left ``None`` by callers).
+    or ``as_category`` no abstention is dropped (only errored pairs are), so these stats are
+    not produced (left ``None`` by callers).
 
     ``n_total`` is the raw pre-exclusion denominator; ``n_covered`` is what remained after the
     union of all exclusion reasons (it equals the per-criterion ``n_samples``). Every rate
-    honours undefined→None (``None`` when its denominator is zero); counts stay ``int``.
+    honours undefined→None (``None`` when its denominator is zero); counts stay ``int``. An
+    errored pair counts only in ``n_errored``, not as an abstention on either side.
 
     Attributes:
         n_total: Raw pre-exclusion paired count (the denominator before any drops).
@@ -379,9 +380,12 @@ class CoverageStats(BaseModel):
             ``n_total == 0``.
         union_exclusion_rate: Fraction excluded for any reason (``1 - coverage``). None when
             ``n_total == 0``.
-        n_errored: Count of paired observations dropped because grading errored (the grade
-            raised or failed, e.g. every criterion's judgment failed; see
-            ``compute_metrics``).
+        n_errored: Count of paired observations dropped because grading errored (see
+            ``compute_metrics``): each pair of an errored item (its grade raised or failed,
+            e.g. every criterion's judgment failed) and each failed cell (a criterion whose
+            judgment failed on another item: its stand-in verdict is no prediction). Per
+            criterion, the errored items plus the criterion's failed cells; in the aggregate
+            rollup, their sum over the criteria, a pair count like ``n_total``.
         error_rate: ``n_errored / n_total``. None when ``n_total == 0``.
     """
 
@@ -514,7 +518,9 @@ class NAStats(BaseModel):
 
     Tracks how the prediction and ground truth agree on the dichotomized
     {NA, not-NA} decision per item, similar to how CANNOT_ASSESS is handled for
-    binary criteria.
+    binary criteria. A criterion whose judgment failed (its verdict, e.g. the NA option or
+    no option at all, stands in for failed judge calls) is no prediction: its pair is in
+    none of these counts.
 
     Attributes:
         na_count_true: Number of NA selections in ground truth.
@@ -547,7 +553,9 @@ class CannotAssessStats(BaseModel):
     """Statistics for CANNOT_ASSESS handling in binary criteria.
 
     The binary parallel of :class:`NAStats`: tracks how the prediction and ground truth
-    agree on the dichotomized {CANNOT_ASSESS, not-CANNOT_ASSESS} decision per item.
+    agree on the dichotomized {CANNOT_ASSESS, not-CANNOT_ASSESS} decision per item. A
+    criterion whose judgment failed (its verdict, e.g. CANNOT_ASSESS, stands in for failed
+    judge calls) is no prediction: its pair is in none of these counts.
 
     Both CANNOT_ASSESS (binary) and NA (multi-choice) are *abstentions* that flow through
     the same SKIP scoring path (``score_reports``), and both get a parallel dichotomized

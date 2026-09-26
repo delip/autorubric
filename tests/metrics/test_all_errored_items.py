@@ -169,7 +169,10 @@ def test_an_item_with_every_judgment_failed_is_an_errored_item(error, style):
 
     for metrics in (failed, raised):
         assert metrics.n_items == FAILED_ITEM
-        assert metrics.coverage_stats is not None and metrics.coverage_stats.n_errored == 1
+        # Its pair of each criterion is an errored pair: one item of the four errored.
+        assert metrics.coverage_stats is not None
+        assert metrics.coverage_stats.n_errored == len(CRITERIA)
+        assert metrics.coverage_stats.error_rate == pytest.approx(1 / 4)
         assert _errored_item_warnings(metrics)
         # Only the judged items are paired, and judge "a" matched them all.
         assert metrics.score_rmse == pytest.approx(0.0)
@@ -213,11 +216,15 @@ def test_a_single_judge_report_with_every_criterion_errored_is_an_errored_item()
     failed = compute_metrics(_eval_result([*judged, failed_item]), _dataset())
 
     assert failed.n_items == FAILED_ITEM
-    assert failed.coverage_stats is not None and failed.coverage_stats.n_errored == 1
+    # Its pair of each criterion is an errored pair.
+    assert failed.coverage_stats is not None
+    assert failed.coverage_stats.n_errored == len(CRITERIA)
     assert failed.score_rmse == pytest.approx(0.0)
 
 
 def test_an_item_with_some_criteria_errored_is_still_scored():
+    """The item counts; only its failed criterion is left out, an errored pair (see
+    ``test_failed_criteria.py``), not an errored item."""
     judged = [_judged(i) for i in range(FAILED_ITEM)]
     partial = _ensemble_item(
         FAILED_ITEM, [[_vote("a", MET)], [_vote("a", CA, INFRA)]]
@@ -225,7 +232,8 @@ def test_an_item_with_some_criteria_errored_is_still_scored():
     metrics = compute_metrics(_eval_result([*judged, partial]), _dataset())
 
     assert metrics.n_items == 4
-    assert metrics.coverage_stats is not None and metrics.coverage_stats.n_errored == 0
+    assert metrics.coverage_stats is not None and metrics.coverage_stats.n_errored == 1
+    assert not _errored_item_warnings(metrics)
 
 
 @pytest.mark.parametrize("style", STYLES)
@@ -469,7 +477,9 @@ async def test_llm_grader_item_whose_calls_all_failed_is_an_errored_item(tmp_pat
 
     metrics = compute_metrics(result, _llm_dataset())
     assert metrics.n_items == 4
-    assert metrics.coverage_stats is not None and metrics.coverage_stats.n_errored == 1
+    # Its pair of each criterion is an errored pair.
+    assert metrics.coverage_stats is not None
+    assert metrics.coverage_stats.n_errored == len(LLM_RUBRIC.rubric)
     assert _errored_item_warnings(metrics)
     assert metrics.score_rmse == pytest.approx(0.0)
     assert metrics.criterion_accuracy == pytest.approx(1.0)
