@@ -62,6 +62,23 @@ spec.judge_model_config  # read/write; the same object as spec.llm_config
 The underlying dataclass field is still named `llm_config`, so `JudgeSpec(llm_config=...)` and
 `spec.llm_config` keep working without a warning. Passing both keywords raises `ValueError`.
 
+## Judge IDs
+
+Give every judge in `judges=` its own `judge_id`. A `judge_id` is the key that separates judges,
+so judges that share one are merged. Judges of the same kind all call the model of the last one.
+They also share a single `judge_scores` entry, one set of per-judge metrics, and the same option
+order and few-shot examples. `CriterionGrader` still accepts a repeated `judge_id` for now, but
+it emits a `FutureWarning` naming the repeated ids. A repeated `judge_id` will raise `ValueError`
+in the next major version. A cascade already rejects repeats (see
+[Decision Models](../decision-models.md)).
+
+To poll one model several times, give each copy its own id. Each copy then also gets its own
+option shuffle:
+
+```python
+judges = [JudgeSpec(LLMConfig(model="openai/gpt-4.1-mini"), f"gpt-{i}") for i in range(3)]
+```
+
 ## Aggregation Strategies
 
 | Strategy | Description |

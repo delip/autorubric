@@ -336,6 +336,12 @@ class JudgeSpec:
         self.llm_config = value
 
 
+def _repeated_judge_ids(judges: Iterable[JudgeSpec]) -> list[str]:
+    """The ``judge_id``s that more than one of ``judges`` has, each once, sorted."""
+    counts = Counter(judge.judge_id for judge in judges)
+    return sorted(judge_id for judge_id, count in counts.items() if count > 1)
+
+
 @dataclass(frozen=True)
 class EscalationConfig:
     """Configuration of a confidence cascade: which LLM judges take over, and when.
@@ -978,8 +984,8 @@ class CriterionGrader(Grader):
                 is given ``judge_id="default"``: an ``LLMConfig`` for an LLM judge or a
                 ``DecisionModelConfig`` for a decision-model judge. Mutually exclusive with
                 judges.
-            judges: List of JudgeSpec for ensemble mode, each an LLM or a decision model.
-                Mutually exclusive with judge_model_config.
+            judges: List of JudgeSpec for ensemble mode, each an LLM or a decision model,
+                each with its own ``judge_id``. Mutually exclusive with judge_model_config.
             aggregation: Strategy for aggregating votes in ensemble mode (binary criteria).
             ordinal_aggregation: Strategy for aggregating ordinal multi-choice votes.
                 Central tendency: "mean", "median", "weighted_mean", "mode". Conservative/
@@ -1071,6 +1077,12 @@ class CriterionGrader(Grader):
                 settings apply to LLM judges only, so they have no effect. One warning per
                 setting that differs from its default (None, None and True); a cascade's
                 escalation judges are LLM judges, so a cascade never warns.
+            FutureWarning: If a ``judge_id`` repeats among ``judges``. Judges that share
+                one are conflated: those of one kind (LLM or decision model) all call the
+                model of the last of them, and all share one ``judge_scores`` entry, one set
+                of per-judge metrics, and the same option shuffles and few-shot examples.
+                Grading is otherwise unchanged; a repeat will be a ``ValueError`` in the
+                next major version, as it already is in a cascade.
         """
         if llm_config is not None:
             if judge_model_config is not None:
@@ -1130,13 +1142,27 @@ class CriterionGrader(Grader):
                     "DecisionModelConfig(...), ...)]), which judges every criterion and "
                     f"escalates the ones it is unsure of; got {', '.join(described)}"
                 )
-            judge_ids = Counter(j.judge_id for j in (*primary, *self._escalation_judges))
-            repeated = sorted(judge_id for judge_id, count in judge_ids.items() if count > 1)
+            repeated = _repeated_judge_ids((*primary, *self._escalation_judges))
             if repeated:
                 raise ValueError(
                     "judge_ids must be unique across the decision model and the escalation "
                     f"judges; repeated: {', '.join(repr(judge_id) for judge_id in repeated)}"
                 )
+        # A panel's judge_ids should be unique too, but a repeat has always been accepted,
+        # so it warns until the next major version makes it the cascade's ValueError. A
+        # cascade's primary is one judge, so this never warns for a cascade.
+        repeated = _repeated_judge_ids(self._judges)
+        if repeated:
+            warnings.warn(
+                f"judge_ids should be unique; repeated: {', '.join(map(repr, repeated))}. "
+                "Judges that share a judge_id are conflated: those of one kind (LLM or "
+                "decision model) all call the model of the last of them, and all share one "
+                "judge_scores entry, one set of per-judge metrics, and the same option "
+                "shuffles and few-shot examples. Give each judge its own judge_id; a "
+                "repeated judge_id will be a ValueError in the next major version.",
+                FutureWarning,
+                stacklevel=2,
+            )
         all_judges = [*self._judges, *self._escalation_judges]
 
         # Settings a decision-model judge cannot use, checked before any client is built so
