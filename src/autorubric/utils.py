@@ -381,9 +381,10 @@ async def fill_ground_truth(
 
     Returns:
         A new RubricDataset with ground_truth filled in. Graded items keep all
-        their other fields. Items that fail to grade are excluded from the
-        returned dataset. Items with existing ground_truth (when force=False)
-        are included unchanged.
+        their other fields, except that an item re-graded with force=True loses
+        its ground_truth_reasons, which explained the ground truth it replaces.
+        Items that fail to grade are excluded from the returned dataset. Items
+        with existing ground_truth (when force=False) are included unchanged.
 
     Raises:
         ValueError: If dataset has no items.
@@ -438,9 +439,10 @@ async def fill_ground_truth(
                     reference_submission=reference,
                 )
                 gt = _extract_ground_truth_from_report(report, effective_rubric.rubric)
-                # Copy every per-item field (rubric, prompt, reference, ...); only
-                # ground_truth changes.
-                new_item = dataclasses.replace(item, ground_truth=gt)
+                # Copy every per-item field (rubric, prompt, reference, ...); only the ground
+                # truth changes. Reasons written for a replaced ground truth (force=True)
+                # explain verdicts the item no longer has, so they are dropped.
+                new_item = dataclasses.replace(item, ground_truth=gt, ground_truth_reasons=None)
                 return (idx, new_item, None)
             except Exception as e:
                 return (idx, None, str(e))

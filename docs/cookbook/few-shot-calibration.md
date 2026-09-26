@@ -112,7 +112,7 @@ calibrated_grader = CriterionGrader(
     few_shot_config=FewShotConfig(
         n_examples=3,           # Include 3 examples per criterion
         balance_verdicts=True,  # Try to include both MET and UNMET examples
-        include_reason=False,   # Don't include explanations (cleaner prompts)
+        include_reason=False,   # Omit items' ground_truth_reasons (this dataset has none)
         seed=42                 # Reproducible example selection
     )
 )

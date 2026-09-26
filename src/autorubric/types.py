@@ -1148,7 +1148,10 @@ class FewShotExample:
     Attributes:
         submission: The content that was evaluated. Can be plain text or JSON-serialized.
         verdict: The ground truth verdict for this criterion.
-        reason: Optional explanation for why the verdict was assigned.
+        reason: Optional explanation for why the verdict was assigned. ``CriterionGrader``
+            takes it from the training item's ``DataItem.ground_truth_reasons`` for this
+            criterion (None when the item has none) and shows it in the prompt only when
+            ``FewShotConfig.include_reason`` is True.
 
     Example:
         >>> example = FewShotExample(
@@ -1173,8 +1176,12 @@ class FewShotConfig:
             (MET/UNMET/CANNOT_ASSESS) for binary criteria, option indices for multi-choice
             criteria. If False, randomly sample without balancing. (The name is historical; the
             balancing logic is class-agnostic and applies to both criterion types.)
-        include_reason: If True, include the reason/explanation in examples.
-            Note: Ground truth datasets typically don't have reasons.
+        include_reason: If True, each example shows its training item's written reason for
+            the criterion, from ``DataItem.ground_truth_reasons``, after its verdict or
+            selected option. An example whose item has no reason for that criterion (the
+            entry or the whole list is None) is shown without one, so with no reasons in the
+            training data the prompts are the same as with False. Reasons never change which
+            examples are selected.
         seed: Random seed for reproducible sampling.
 
     Example:

@@ -65,7 +65,7 @@ from autorubric.types import (
 from autorubric.utils import _normalize_guidelines
 
 if TYPE_CHECKING:
-    from autorubric.dataset import RubricDataset
+    from autorubric.dataset import DataItem, RubricDataset
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +90,16 @@ def _derive_shuffle_rng(
 # selection. Few-shot examples are a fixed property of (criterion, judge), not of the
 # item being graded, so the per-call item content is intentionally not part of the key.
 FEW_SHOT_DOMAIN = "few_shot"
+
+
+def _ground_truth_reason(item: DataItem, criterion_idx: int) -> str | None:
+    """A training item's written reason for its ground truth on a criterion, if it has one.
+
+    The reason rides along with the few-shot example drawn from the item; it never
+    affects which items are drawn.
+    """
+    reasons = item.ground_truth_reasons
+    return reasons[criterion_idx] if reasons is not None else None
 
 
 _ESCALATION_NAMES_CHECKED: ContextVar[bool] = ContextVar("_ESCALATION_NAMES_CHECKED", default=False)
@@ -998,7 +1008,9 @@ class CriterionGrader(Grader):
             training_data: Dataset for few-shot examples. If provided, enables few-shot
                 prompting for the LLM judges; examples are selected for, and sent to, LLM
                 judges only, never to a decision-model judge, whose request is exactly what
-                it would be without them.
+                it would be without them. An example shows its item's ground truth for the
+                criterion and, when ``few_shot_config.include_reason`` is True, the item's
+                written reason for it (``DataItem.ground_truth_reasons``), if any.
             few_shot_config: Configuration for few-shot example selection (LLM judges only).
             system_prompt: Custom system prompt for binary criteria. Applies to LLM judges
                 only (a decision model's request has no system prompt); in a mixed ensemble
@@ -1338,7 +1350,11 @@ class CriterionGrader(Grader):
     def _select_examples_for_criterion(
         self, criterion_idx: int, judge_id: str
     ) -> list[FewShotExample]:
-        """Select stratified examples for a specific criterion and judge."""
+        """Select stratified examples for a specific criterion and judge.
+
+        Each example carries its item's reason for this criterion
+        (``DataItem.ground_truth_reasons``), if it has one; reasons never affect the draw.
+        """
         if self._training_data is None:
             return []
 
@@ -1377,7 +1393,7 @@ class CriterionGrader(Grader):
                 FewShotExample(
                     submission=item.submission,
                     verdict=item.ground_truth[criterion_idx],  # type: ignore
-                    reason=None,
+                    reason=_ground_truth_reason(item, criterion_idx),
                 )
                 for item in all_items[:n_examples]
             ]
@@ -1447,7 +1463,7 @@ class CriterionGrader(Grader):
             transform=lambda item: FewShotExample(
                 submission=item.submission,
                 verdict=item.ground_truth[criterion_idx],  # type: ignore
-                reason=None,
+                reason=_ground_truth_reason(item, criterion_idx),
             ),
             identity=lambda item: item.submission,
         )
@@ -1471,7 +1487,9 @@ class CriterionGrader(Grader):
 
         Groups training items by their selected option index and balances
         across options when configured. Ground truth labels are converted
-        to 0-based option indices.
+        to 0-based option indices. Each example carries its item's reason for
+        this criterion (``DataItem.ground_truth_reasons``), if it has one;
+        reasons never affect the draw.
         """
         if self._training_data is None:
             return []
@@ -1510,7 +1528,11 @@ class CriterionGrader(Grader):
                 groups=sorted_groups,
                 n_examples=n_examples,
                 rng=rng,
-                transform=lambda pair: (pair[0].submission, pair[1], None),
+                transform=lambda pair: (
+                    pair[0].submission,
+                    pair[1],
+                    _ground_truth_reason(pair[0], criterion_idx),
+                ),
                 identity=lambda pair: pair[0].submission,
             )
         else:
@@ -1521,7 +1543,7 @@ class CriterionGrader(Grader):
             ]
             rng.shuffle(all_pairs)
             return [
-                (item.submission, resolved_idx, None)
+                (item.submission, resolved_idx, _ground_truth_reason(item, criterion_idx))
                 for item, resolved_idx in all_pairs[:n_examples]
             ]
 

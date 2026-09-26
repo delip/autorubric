@@ -501,3 +501,69 @@ async def test_fill_ground_truth_dataset_with_only_per_item_prompts(binary_rubri
         [CriterionVerdict.MET, CriterionVerdict.MET],
         [CriterionVerdict.MET, CriterionVerdict.MET],
     ]
+
+
+@pytest.mark.asyncio
+async def test_fill_ground_truth_force_drops_reasons_of_regraded_items(
+    binary_rubric, binary_criteria
+):
+    """force=True replaces the ground truth, so the reasons written for the old one go."""
+    dataset = RubricDataset(
+        prompt="Evaluate the response",
+        rubric=binary_rubric,
+        items=[
+            DataItem(
+                submission="Response 1",
+                description="Item 1",
+                ground_truth=[CriterionVerdict.MET, CriterionVerdict.MET],
+                ground_truth_reasons=["States the right date.", "Reads clearly."],
+            ),
+        ],
+        name="test",
+    )
+
+    mock_grader = MagicMock()
+    new_gt = [CriterionVerdict.UNMET, CriterionVerdict.UNMET]
+
+    async def mock_grade(to_grade, grader, query, reference_submission=None):
+        return create_mock_ensemble_binary_report(new_gt, binary_criteria)
+
+    with patch.object(binary_rubric, "grade", side_effect=mock_grade):
+        result = await fill_ground_truth(dataset, mock_grader, force=True, show_progress=False)
+
+    assert result.items[0].ground_truth == new_gt
+    assert result.items[0].ground_truth_reasons is None
+
+
+@pytest.mark.asyncio
+async def test_fill_ground_truth_keeps_reasons_of_items_it_does_not_grade(
+    binary_rubric, binary_criteria
+):
+    """Without force, an item that has ground truth is kept as it is, reasons included."""
+    dataset = RubricDataset(
+        prompt="Evaluate the response",
+        rubric=binary_rubric,
+        items=[
+            DataItem(
+                submission="Response 1",
+                description="Item 1",
+                ground_truth=[CriterionVerdict.MET, CriterionVerdict.UNMET],
+                ground_truth_reasons=["States the right date.", None],
+            ),
+            DataItem(submission="Response 2", description="Item 2"),
+        ],
+        name="test",
+    )
+
+    mock_grader = MagicMock()
+    new_gt = [CriterionVerdict.UNMET, CriterionVerdict.MET]
+
+    async def mock_grade(to_grade, grader, query, reference_submission=None):
+        return create_mock_ensemble_binary_report(new_gt, binary_criteria)
+
+    with patch.object(binary_rubric, "grade", side_effect=mock_grade):
+        result = await fill_ground_truth(dataset, mock_grader, show_progress=False)
+
+    assert result.items[0].ground_truth == [CriterionVerdict.MET, CriterionVerdict.UNMET]
+    assert result.items[0].ground_truth_reasons == ["States the right date.", None]
+    assert result.items[1].ground_truth == new_gt

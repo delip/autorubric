@@ -117,6 +117,13 @@ dataset.add_item(
 | `UNMET` | The criterion is not satisfied | Positive-weight criteria contribute nothing; negative-weight criteria contribute nothing |
 | `CANNOT_ASSESS` | Evidence is insufficient to judge | The criterion is excluded from scoring entirely |
 
+!!! tip "Recording why a verdict was given"
+    An item can also carry the expert's reasons: `ground_truth_reasons`, one entry per verdict in
+    the same order, with `None` where there is no written reason, e.g.
+    `ground_truth_reasons=["Restates chest pain and shortness of breath.", None, None, None]`.
+    Few-shot examples drawn from the item show them with `FewShotConfig(include_reason=True)`.
+    See [Example Reasons](../api/few-shot.md#example-reasons).
+
 ### Step 3: Save and Load Datasets
 
 Persist datasets to JSON for sharing and reproducibility:
@@ -148,6 +155,7 @@ The JSON format is human-readable:
       "submission": "I understand you're experiencing...",
       "description": "Emergency symptoms - appropriate urgent response",
       "ground_truth": ["MET", "MET", "MET", "UNMET"],
+      "ground_truth_reasons": ["Restates chest pain and shortness of breath.", null, null, null],
       "prompt": "Optional per-item prompt that overrides the global prompt"
     }
   ]

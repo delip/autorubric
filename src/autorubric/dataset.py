@@ -41,6 +41,11 @@ class DataItem:
             precedence over dataset-level reference.
         prompt: Optional per-item prompt. If provided, overrides the dataset-level
             prompt for this item.
+        ground_truth_reasons: Optional written reasons for the ground truth, one per
+            criterion and aligned index-for-index with ``ground_truth``, which must then be
+            set. A ``None`` entry means that criterion's ground truth has no written reason.
+            A few-shot example drawn from this item shows its reason for the criterion when
+            ``FewShotConfig.include_reason`` is True.
 
     Example:
         >>> # Binary criteria only
@@ -54,6 +59,13 @@ class DataItem:
         ...     submission="The assistant responded helpfully...",
         ...     description="Good dialogue",
         ...     ground_truth=[CriterionVerdict.MET, "Very satisfied", "Yes - reasonable"]
+        ... )
+        >>> # With written reasons for the ground truth (None where there is none)
+        >>> item = DataItem(
+        ...     submission="The Industrial Revolution began in Britain around 1760...",
+        ...     description="Excellent essay",
+        ...     ground_truth=[CriterionVerdict.MET, CriterionVerdict.UNMET],
+        ...     ground_truth_reasons=["Dates the start and names Britain.", None],
         ... )
         >>> # With per-item rubric
         >>> from autorubric import Rubric, Criterion
@@ -70,9 +82,10 @@ class DataItem:
     rubric: Rubric | None = None
     reference_submission: str | None = None
     prompt: str | None = None
+    ground_truth_reasons: list[str | None] | None = None
 
     def __post_init__(self) -> None:
-        """Validate ground truth values and rubric consistency."""
+        """Validate ground truth values, their reasons, and rubric consistency."""
         if self.ground_truth is not None:
             for v in self.ground_truth:
                 if not isinstance(v, (CriterionVerdict, str)):
@@ -86,6 +99,28 @@ class DataItem:
                     f"Ground truth has {len(self.ground_truth)} values, "
                     f"but item rubric has {len(self.rubric.rubric)} criteria"
                 )
+        if self.ground_truth_reasons is not None:
+            # Reasons align index-for-index with ground_truth, so they are checked against it
+            # (and, through it, against the rubric)
+            if not isinstance(self.ground_truth_reasons, list):
+                raise ValueError(
+                    f"Ground truth reasons must be a list, "
+                    f"got {type(self.ground_truth_reasons).__name__}"
+                )
+            if self.ground_truth is None:
+                raise ValueError(
+                    "Ground truth reasons require ground truth, but ground_truth is None"
+                )
+            if len(self.ground_truth_reasons) != len(self.ground_truth):
+                raise ValueError(
+                    f"Ground truth reasons have {len(self.ground_truth_reasons)} values, "
+                    f"but ground truth has {len(self.ground_truth)} values"
+                )
+            for r in self.ground_truth_reasons:
+                if r is not None and not isinstance(r, str):
+                    raise ValueError(
+                        f"Ground truth reasons must be str or None, got {type(r).__name__}"
+                    )
 
 
 @dataclass
@@ -287,6 +322,8 @@ class RubricDataset:
         rubric: Rubric | None = None,
         reference_submission: str | None = None,
         prompt: str | None = None,
+        *,
+        ground_truth_reasons: list[str | None] | None = None,
     ) -> None:
         """Add a new item to the dataset.
 
@@ -299,11 +336,16 @@ class RubricDataset:
             rubric: Optional per-item rubric. If None, uses global rubric.
             reference_submission: Optional exemplar response for grading context.
             prompt: Optional per-item prompt. If None, uses global prompt.
+            ground_truth_reasons: Optional written reasons for the ground truth, one per
+                criterion and aligned with ``ground_truth`` (which must then be given); a
+                ``None`` entry means that criterion has no written reason. Few-shot
+                examples show them when ``FewShotConfig.include_reason`` is True.
 
         Raises:
             ValueError: If ground_truth length doesn't match effective rubric criteria count,
                 or if neither per-item nor global rubric is available, or if neither
-                per-item nor global prompt is available.
+                per-item nor global prompt is available, or if ground_truth_reasons is
+                not a list of ``str`` or ``None`` entries aligned with ground_truth.
         """
         if prompt is None and self.prompt is None:
             raise ValueError(
@@ -316,6 +358,7 @@ class RubricDataset:
             rubric=rubric,
             reference_submission=reference_submission,
             prompt=prompt,
+            ground_truth_reasons=ground_truth_reasons,
         )
         effective_rubric = item.rubric if item.rubric is not None else self.rubric
         if effective_rubric is None:
@@ -414,6 +457,10 @@ class RubricDataset:
                 item_data["ground_truth"] = gt_values
             else:
                 item_data["ground_truth"] = None
+            # Serialize ground truth reasons if present (an item without them is written
+            # exactly as before they existed)
+            if item.ground_truth_reasons is not None:
+                item_data["ground_truth_reasons"] = item.ground_truth_reasons
             # Serialize per-item rubric if present
             if item.rubric is not None:
                 item_data["rubric"] = self._serialize_rubric(item.rubric)
@@ -450,7 +497,8 @@ class RubricDataset:
 
         Raises:
             ValueError: If the JSON is invalid, missing required fields, or if
-                an item has no rubric when no global rubric is set.
+                an item has no rubric when no global rubric is set, or if an item's
+                ``ground_truth_reasons`` do not align with its ``ground_truth``.
         """
         try:
             data = json.loads(json_string)
@@ -528,6 +576,9 @@ class RubricDataset:
                                 f"Must be 'MET', 'UNMET', or 'CANNOT_ASSESS'."
                             ) from None
 
+            # Parse ground truth reasons if present (DataItem checks them against the
+            # ground truth)
+            ground_truth_reasons = item_data.get("ground_truth_reasons")
             # Parse per-item reference_submission if present
             item_reference = item_data.get("reference_submission")
             # Parse per-item prompt if present
@@ -541,6 +592,7 @@ class RubricDataset:
                     rubric=item_rubric,
                     reference_submission=item_reference,
                     prompt=item_prompt,
+                    ground_truth_reasons=ground_truth_reasons,
                 )
             )
 

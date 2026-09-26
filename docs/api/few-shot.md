@@ -29,7 +29,7 @@ grader = CriterionGrader(
     few_shot_config=FewShotConfig(
         n_examples=3,
         balance_verdicts=True,  # Balance examples across label classes (verdicts for binary, option indices for multi-choice)
-        include_reason=True,
+        include_reason=True,    # Show each example's written reason, when its item has one
         seed=42,
     ),
 )
@@ -37,6 +37,38 @@ grader = CriterionGrader(
 # Grade with few-shot calibration
 result = await rubric.grade(to_grade=response, grader=grader)
 ```
+
+## Example Reasons
+
+With `include_reason=True`, an example also shows why it got its label: the training item's
+written reason for that criterion, from `DataItem.ground_truth_reasons`. Give an item one entry
+per criterion, in the order of its `ground_truth`, with `None` where there is no reason:
+
+```python
+from autorubric import CriterionVerdict
+
+dataset.add_item(
+    submission="Water boils at 100 °C at sea level, and at lower temperatures at altitude.",
+    description="Correct and qualified",
+    ground_truth=[CriterionVerdict.MET, CriterionVerdict.UNMET],
+    ground_truth_reasons=["Gives 100 °C and the sea-level condition.", None],
+)
+```
+
+A dataset file keeps them beside the ground truth, with `null` for `None`:
+
+```json
+{
+  "submission": "Water boils at 100 °C at sea level, and at lower temperatures at altitude.",
+  "description": "Correct and qualified",
+  "ground_truth": ["MET", "UNMET"],
+  "ground_truth_reasons": ["Gives 100 °C and the sea-level condition.", null]
+}
+```
+
+An example whose item has no reason for the criterion is shown with its label alone, so without
+reasons in the training data the prompts are the same whether `include_reason` is `True` or
+`False`. Reasons never change which examples are selected.
 
 ## Ensemble + Few-Shot
 
