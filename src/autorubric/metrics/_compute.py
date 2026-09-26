@@ -809,52 +809,44 @@ def _compute_bootstrap_ci(
     kappa_samples: list[float] = []
     rmse_samples: list[float] = []
 
-    with warnings.catch_warnings():
-        # Single-class resamples are an expected, handled part of bootstrapping (kappa -> None
-        # via _kappa_or_none). Suppress the resulting spurious sklearn warnings so the loop does
-        # not flood output, mirroring the local scipy-constant suppression elsewhere here.
-        warnings.filterwarnings("ignore", message="A single label was found")
-        warnings.filterwarnings("ignore", message="invalid value encountered")
-        for _ in range(n_bootstrap):
-            # Verdict-item axis: resample items (shared index across all criteria), drop each
-            # criterion's failed cells, then recompute the SAME criterion_accuracy +
-            # mean_kappa the aggregate reports.
-            if n_items > 0:
-                idx_v = rng.choice(n_items, size=n_items, replace=True).tolist()
-                rs_pred = _judged_cells(per_criterion_pred, per_criterion_failed, idx_v)
-                rs_true = _judged_cells(per_criterion_true, per_criterion_failed, idx_v)
-                # Only failed cells can hold a None prediction, and they were just dropped, so
-                # the static type matches the helpers' expected list[CriterionVerdict | int].
-                kappas = _per_criterion_kappas(
-                    rs_pred,  # type: ignore[arg-type]
-                    rs_true,
-                    criterion_types,
-                    effective_criteria,
-                    cannot_assess,
-                    na_mode,
-                )
-                accuracy, _p, _r, _f1, mean_kappa, _phi, _mk = _criterion_level_scalars(
-                    rs_pred,  # type: ignore[arg-type]
-                    rs_true,
-                    criterion_types,
-                    cannot_assess,
-                    precomputed_kappas=kappas,
-                )
-                # Append only defined values; a degenerate replicate contributes nothing (so an
-                # all-degenerate axis → empty samples → None CI, never a fabricated 0.0).
-                if accuracy is not None:
-                    acc_samples.append(accuracy)
-                if mean_kappa is not None:
-                    kappa_samples.append(mean_kappa)
+    for _ in range(n_bootstrap):
+        # Verdict-item axis: resample items (shared index across all criteria), drop each
+        # criterion's failed cells, then recompute the SAME criterion_accuracy +
+        # mean_kappa the aggregate reports.
+        if n_items > 0:
+            idx_v = rng.choice(n_items, size=n_items, replace=True).tolist()
+            rs_pred = _judged_cells(per_criterion_pred, per_criterion_failed, idx_v)
+            rs_true = _judged_cells(per_criterion_true, per_criterion_failed, idx_v)
+            # Only failed cells can hold a None prediction, and they were just dropped, so
+            # the static type matches the helpers' expected list[CriterionVerdict | int].
+            kappas = _per_criterion_kappas(
+                rs_pred,  # type: ignore[arg-type]
+                rs_true,
+                criterion_types,
+                effective_criteria,
+                cannot_assess,
+                na_mode,
+            )
+            accuracy, _p, _r, _f1, mean_kappa, _phi, _mk = _criterion_level_scalars(
+                rs_pred,  # type: ignore[arg-type]
+                rs_true,
+                criterion_types,
+                cannot_assess,
+                precomputed_kappas=kappas,
+            )
+            # Append only defined values; a degenerate replicate contributes nothing (so an
+            # all-degenerate axis → empty samples → None CI, never a fabricated 0.0).
+            if accuracy is not None:
+                acc_samples.append(accuracy)
+            if mean_kappa is not None:
+                kappa_samples.append(mean_kappa)
 
-            # Score-item axis (independent draw): resample per-item scores for RMSE.
-            if n_scores > 0:
-                idx_s = rng.choice(n_scores, size=n_scores, replace=True)
-                rmse_samples.append(
-                    float(
-                        np.sqrt(mean_squared_error(true_scores_arr[idx_s], pred_scores_arr[idx_s]))
-                    )
-                )
+        # Score-item axis (independent draw): resample per-item scores for RMSE.
+        if n_scores > 0:
+            idx_s = rng.choice(n_scores, size=n_scores, replace=True)
+            rmse_samples.append(
+                float(np.sqrt(mean_squared_error(true_scores_arr[idx_s], pred_scores_arr[idx_s])))
+            )
 
     alpha = 1 - confidence_level
     lower_q = alpha / 2 * 100
@@ -881,10 +873,18 @@ def _compute_bootstrap_ci(
 def _kappa_or_none(y1, y2, *, weights: str | None = None) -> float | None:
     """Cohen's kappa, or None when undefined.
 
-    Returns None on either failure path: an exception, OR a NaN result. Degenerate
-    single-class data makes ``cohen_kappa_score`` return NaN with NO exception, so the old
-    ``except: 0.0`` pattern let a NaN leak through as a real value — this catches it.
+    Kappa is undefined when the two sides together hold fewer than two labels: chance
+    agreement is then total, so kappa is 0/0. That case is None without calling
+    ``cohen_kappa_score``, which would warn twice (a single label found, then an invalid
+    value) and return NaN, as ``_mcc_or_none`` guards its constant input. The guard reads
+    both sides together: each side constant with different labels is a defined 0.0.
+
+    Any other failure is None too: an exception, OR a NaN result, which ``cohen_kappa_score``
+    returns with NO exception, so the old ``except: 0.0`` pattern let a NaN leak through as
+    a real value.
     """
+    if len(set(y1) | set(y2)) < 2:
+        return None
     try:
         k = cohen_kappa_score(y1, y2, weights=weights)
     except Exception:
@@ -2558,13 +2558,7 @@ def compute_metrics(
                     if t_is_na:
                         total_na_true += 1
 
-        na_kappa: float | None = None
-        if na_pred_bool:
-            try:
-                k = float(cohen_kappa_score(na_true_bool, na_pred_bool))
-                na_kappa = None if math.isnan(k) else k
-            except Exception:
-                na_kappa = None
+        na_kappa = _kappa_or_none(na_true_bool, na_pred_bool) if na_pred_bool else None
         na_kappa_interpretation = (
             KappaResult.interpret_kappa(na_kappa) if na_kappa is not None else None
         )
@@ -2614,13 +2608,7 @@ def compute_metrics(
                     if t_is_ca and not p_is_ca:
                         total_ca_fn += 1
 
-        ca_kappa: float | None = None
-        if ca_pred_bool:
-            try:
-                k = float(cohen_kappa_score(ca_true_bool, ca_pred_bool))
-                ca_kappa = None if math.isnan(k) else k
-            except Exception:
-                ca_kappa = None
+        ca_kappa = _kappa_or_none(ca_true_bool, ca_pred_bool) if ca_pred_bool else None
         ca_kappa_interpretation = (
             KappaResult.interpret_kappa(ca_kappa) if ca_kappa is not None else None
         )
