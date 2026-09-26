@@ -22,7 +22,7 @@ Every call repeats the system prompt, about 1,600 tokens with OpenAI's tokenizer
 
 LLM judges need no extra: `pip install autorubric` installs LiteLLM. A judge's `model` is a LiteLLM model id, `provider/model`, such as `openai/gpt-4.1-mini`, `anthropic/claude-sonnet-4-5-20250929` or `gemini/gemini-3-flash-preview`. LiteLLM reads each provider's key from that provider's environment variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, ...), and `api_key=` overrides it for one config. [Supported providers](../quickstart.md#supported-providers) lists common providers and their variables; the [LiteLLM provider list](https://docs.litellm.ai/docs/providers) has the rest.
 
-AutoRubric loads a `.env` file when it is imported. In a notebook or REPL it searches from the working directory upward; in a script it searches from AutoRubric's installation directory upward, which reaches your project's `.env` only when AutoRubric is installed inside the project, in its `.venv` for example. Otherwise, export the variables or call `dotenv.load_dotenv()` in your script.
+When it is imported, AutoRubric loads the nearest `.env` file at or above the working directory, in scripts and notebooks alike. Variables already set in the environment take precedence.
 
 Keys are not checked when a grader is built. With a missing or rejected key every call fails as an `infrastructure` error, so every criterion abstains (see [Failures](#standalone-use)).
 

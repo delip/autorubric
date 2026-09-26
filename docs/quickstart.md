@@ -31,7 +31,7 @@ export ANTHROPIC_API_KEY=your_key_here
 export GEMINI_API_KEY=your_key_here
 ```
 
-AutoRubric automatically loads environment variables from `.env` files.
+When it is imported, AutoRubric loads the nearest `.env` file at or above your working directory, so a `.env` in your project directory works from scripts and notebooks alike. Variables already set in your environment take precedence.
 
 ### Supported Providers
 

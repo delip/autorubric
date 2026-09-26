@@ -20,7 +20,7 @@ import diskcache
 import litellm
 import openai
 import yaml
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 from pydantic import BaseModel, ValidationError
 from rich.console import Console
 from rich.panel import Panel
@@ -37,8 +37,9 @@ from autorubric.rate_limit import RateLimitPool
 if TYPE_CHECKING:
     from autorubric.types import TokenUsage
 
-# Load environment variables from .env file (idempotent - safe to call multiple times)
-load_dotenv()
+# Load the nearest .env at or above the working directory, in scripts and notebooks alike;
+# variables already set in the environment take precedence.
+load_dotenv(find_dotenv(usecwd=True))
 
 logger = logging.getLogger(__name__)
 
