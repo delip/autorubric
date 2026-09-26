@@ -77,7 +77,7 @@ grader = CriterionGrader(
             weight=1.0
         ),
     ],
-    aggregation="majority",  # Final verdict requires >50% agreement
+    aggregation="majority",  # Head count of MET vs UNMET votes (see Step 3)
 )
 ```
 
@@ -109,13 +109,13 @@ flowchart LR
 Choose how judge votes are combined:
 
 ```python
-# Majority: >50% must agree (default, good balance)
+# Majority: Head count of MET vs UNMET votes (default, good balance)
 grader = CriterionGrader(judges=[...], aggregation="majority")
 
 # Weighted: Votes weighted by judge weight
 grader = CriterionGrader(judges=[...], aggregation="weighted")
 
-# Unanimous: All judges must agree for MET (conservative)
+# Unanimous: All non-abstaining judges must vote MET (conservative)
 grader = CriterionGrader(judges=[...], aggregation="unanimous")
 
 # Any: Any judge voting MET results in MET (permissive)
@@ -124,10 +124,16 @@ grader = CriterionGrader(judges=[...], aggregation="any")
 
 | Strategy | MET Condition | Best For |
 |----------|--------------|----------|
-| `majority` | >50% vote MET | General use, balanced |
+| `majority` | More MET than UNMET votes | General use, balanced |
 | `weighted` | Weighted sum favors MET | Expert judges with different reliability |
-| `unanimous` | All vote MET | High-stakes, avoid false positives |
+| `unanimous` | All non-abstaining judges vote MET | High-stakes, avoid false positives |
 | `any` | Any votes MET | Recall-focused, catch all positives |
+
+Only MET and UNMET votes count. CANNOT_ASSESS votes, including those of judge calls that failed
+with an API or parse error, are set aside before any strategy applies, and a criterion whose
+votes all abstain is CANNOT_ASSESS. A `majority` or `weighted` tie goes to the verdict that
+scores lowest for the criterion's weight sign: UNMET for a positive (or zero) weight, MET for a
+negative one such as `red_flags` (see the tie-breaking warning in Step 6).
 
 ### Step 4: Grade and Examine Results
 

@@ -21,8 +21,8 @@ flowchart LR
     B --> C{Mode}
     C -->|Single Judge| D[One Reason per Criterion]
     C -->|Ensemble| E[Multiple Judge Reasons]
-    E --> F[Aggregated final_reason]
-    D --> G[CriterionReport]
+    D --> F[Aggregated final_reason]
+    E --> F
     F --> H[EnsembleCriterionReport]
 ```
 
@@ -68,17 +68,25 @@ asyncio.run(main())
 
 !!! tip "Single vs. Ensemble Explanations"
     `grade()` always returns an `EnsembleEvaluationReport` (a single LLM is treated as an
-    "ensemble of 1"), so you always read explanations via `cr.final_reason`. With a single
-    judge, `final_reason` is simply that one judge's explanation. With multiple judges,
+    "ensemble of 1"), so you always read explanations via `cr.final_reason`. Each judge's
+    reason appears there prefixed with its `judge_id`: with a single judge, whose `judge_id`
+    is `"default"`, `final_reason` reads `"default: ..."`. With multiple judges,
     `final_reason` concatenates all judges' reasons with a pipe separator, and individual
-    verdicts are accessible through `cr.votes`. Choose multiple judges when you need
-    multiple perspectives or higher reliability.
+    verdicts are accessible through `cr.votes`. A binary criterion on which every vote is
+    `CANNOT_ASSESS` reads `"All judges could not assess"` instead; each vote keeps its own
+    `reason`. Choose multiple judges when you need multiple perspectives or higher
+    reliability.
 
 ### Step 2: Format as Student Feedback
 
-Structure the explanations into a readable feedback report:
+Structure the explanations into a readable feedback report. `final_reason` prefixes each explanation with its judge's `judge_id`, so student-facing text reads the votes' own `reason`s instead:
 
 ```python
+def explanation(cr):
+    # The judges' own explanations, without final_reason's judge_id prefixes
+    return " ".join(vote.reason for vote in cr.votes if vote.reason)
+
+
 def format_feedback(result):
     # result.score is `float | None` (None if the grade failed); render None as "n/a".
     score_line = f"Overall Score: {result.score:.0%}\n" if result.score is not None else "Overall Score: n/a\n"
@@ -91,24 +99,24 @@ def format_feedback(result):
     if met:
         lines.append("Strengths:")
         for cr in met:
-            lines.append(f"  + {cr.criterion.name}: {cr.final_reason}")
+            lines.append(f"  + {cr.criterion.name}: {explanation(cr)}")
 
     if unmet:
         lines.append("\nAreas for Improvement:")
         for cr in unmet:
-            lines.append(f"  - {cr.criterion.name}: {cr.final_reason}")
+            lines.append(f"  - {cr.criterion.name}: {explanation(cr)}")
 
     if errors:
         lines.append("\nErrors Found:")
         for cr in errors:
-            lines.append(f"  ! {cr.criterion.name}: {cr.final_reason}")
+            lines.append(f"  ! {cr.criterion.name}: {explanation(cr)}")
 
     return "\n".join(lines)
 ```
 
 ### Step 3: Ensemble Explanations
 
-When using ensemble judging, `final_reason` combines all judges' explanations with a pipe (`|`) separator:
+When using ensemble judging, `final_reason` combines all judges' explanations, each as `judge_id: reason`, with a pipe (`|`) separator:
 
 ```python
 from autorubric.graders import CriterionGrader, JudgeSpec
@@ -124,11 +132,11 @@ grader = CriterionGrader(
 result = await rubric.grade(to_grade=essay, grader=grader, query=prompt)
 
 for cr in result.report:
-    # Individual judge reasons are pipe-separated
+    # Individual judge reasons are pipe-separated, each as "judge_id: reason"
     judge_reasons = cr.final_reason.split(" | ")
     print(f"[{cr.final_verdict.value}] {cr.criterion.name}")
-    for i, reason in enumerate(judge_reasons):
-        print(f"  Judge {i + 1}: {reason}")
+    for reason in judge_reasons:
+        print(f"  {reason}")
 
     # Individual votes are also available
     for vote in cr.votes:
@@ -168,11 +176,12 @@ def get_error_explanations(result):
 `grade()` always returns an `EnsembleEvaluationReport`, so the right-hand column is what
 you use in practice (with one judge, the "ensemble" simply wraps that single judge). The
 left column documents the single-report `CriterionReport` type you encounter elsewhere
-(e.g., per-judge `EvaluationReport`s).
+(e.g., the `report` of each per-judge `CriterionResult` that `CriterionGrader.judge()`
+returns, or an `EvaluationReport` from a custom grader).
 
 | Concept | `CriterionReport` (single report) | `EnsembleCriterionReport` (from `grade()`) |
 |---------|-------------|----------|
-| Reason | `cr.reason` — judge's direct explanation | `cr.final_reason` — all judges' reasons joined with ` \| ` (the single judge's reason when there is one) |
+| Reason | `cr.reason` — judge's direct explanation | `cr.final_reason` — each judge's reason as `judge_id: reason`, joined with ` \| ` (`default: ...` with a single judge) |
 | Individual votes | (no votes; it *is* the single report) | `cr.votes` — one `JudgeVote` per judge |
 | Verdict | `cr.verdict` — the judge's verdict | `cr.final_verdict` — aggregated verdict (e.g., majority vote) |
 | Criterion access | `cr.name`, `cr.weight` | `cr.criterion.name`, `cr.criterion.weight` |
@@ -202,6 +211,11 @@ from autorubric.graders import CriterionGrader
 DATASET_PATH = Path(__file__).parent / "examples" / "data" / "essay_grading_dataset.json"
 
 
+def explanation(cr):
+    """The judges' own explanations, without final_reason's judge_id prefixes."""
+    return " ".join(vote.reason for vote in cr.votes if vote.reason)
+
+
 def format_feedback(result):
     """Format grading result as student-readable feedback."""
     # result.score is `float | None` (None if the grade failed); render None as "n/a".
@@ -215,17 +229,17 @@ def format_feedback(result):
     if met:
         lines.append("Strengths:")
         for cr in met:
-            lines.append(f"  + {cr.criterion.name}: {cr.final_reason}")
+            lines.append(f"  + {cr.criterion.name}: {explanation(cr)}")
 
     if unmet:
         lines.append("\nAreas for Improvement:")
         for cr in unmet:
-            lines.append(f"  - {cr.criterion.name}: {cr.final_reason}")
+            lines.append(f"  - {cr.criterion.name}: {explanation(cr)}")
 
     if errors:
         lines.append("\nErrors Found:")
         for cr in errors:
-            lines.append(f"  ! {cr.criterion.name}: {cr.final_reason}")
+            lines.append(f"  ! {cr.criterion.name}: {explanation(cr)}")
 
     return "\n".join(lines)
 

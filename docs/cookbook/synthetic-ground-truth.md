@@ -204,7 +204,7 @@ from autorubric import evaluate
 # Production model (cheaper, faster)
 production_grader = CriterionGrader(
     judge_model_config=LLMConfig(
-        model="openai/gpt-4.1-mini",  # or "gemini/gemini-2.0-flash"
+        model="openai/gpt-4.1-mini",  # or "gemini/gemini-2.5-flash"
     )
 )
 

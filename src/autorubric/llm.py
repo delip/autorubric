@@ -478,13 +478,14 @@ class LLMConfig:
             - OpenAI: Reasoning for o-series and GPT-5 models
             - Gemini: Thinking mode (2.5+, 3.0+ models)
             - DeepSeek: Reasoning content
-        prompt_caching: Enable prompt caching for supported models (default: True).
-            When enabled, automatically detects if the model supports caching via
-            litellm.supports_prompt_caching() and applies provider-specific config:
-            - Anthropic: Adds cache_control to system messages + beta header
-            - OpenAI/Deepseek: Automatic for prompts ≥1024 tokens (no extra config)
-            - Bedrock: Supported for all models
-            Set to False to disable prompt caching entirely.
+        prompt_caching: Mark the system prompt for Anthropic's prompt cache (default: True).
+            Applies only to model ids that start with ``anthropic/`` or ``claude``: the
+            system message is sent with ``cache_control: {"type": "ephemeral"}`` and the
+            ``anthropic-beta: prompt-caching-2024-07-31`` header, which replaces any
+            ``anthropic-beta`` value in ``extra_headers``. Other model ids, Claude models
+            served through Bedrock or Vertex AI included, are sent unchanged. Providers
+            that cache long prompts on their own (OpenAI, DeepSeek) do so whatever this
+            setting is.
         seed: Random seed for reproducible outputs (OpenAI, some other providers).
         extra_headers: Additional HTTP headers for provider-specific features.
         extra_params: Additional provider-specific parameters passed to LiteLLM.

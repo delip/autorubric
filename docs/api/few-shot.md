@@ -40,7 +40,10 @@ result = await rubric.grade(to_grade=response, grader=grader)
 
 ## Ensemble + Few-Shot
 
-Few-shot works orthogonally with ensemble mode. All judges receive the same examples:
+Few-shot works orthogonally with ensemble mode. Each LLM judge gets its own examples, drawn from
+the training data per criterion and per `judge_id` with a generator seeded by `FewShotConfig.seed`
+(the grader's `seed` when unset). Judges therefore generally see different examples in a
+different order, and a fixed seed draws the same ones again:
 
 ```python
 from autorubric.graders import JudgeSpec

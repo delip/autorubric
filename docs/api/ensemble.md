@@ -83,15 +83,21 @@ judges = [JudgeSpec(LLMConfig(model="openai/gpt-4.1-mini"), f"gpt-{i}") for i in
 
 | Strategy | Description |
 |----------|-------------|
-| `majority` | > 50% of judges must vote MET |
+| `majority` | Head count of MET vs UNMET votes; the larger count wins |
 | `weighted` | Weighted vote using judge weights |
-| `unanimous` | All judges must vote MET |
+| `unanimous` | All non-abstaining judges must vote MET |
 | `any` | Any judge voting MET results in MET |
 
 These apply to **binary** criteria only and are independent of multi-choice aggregation
 (`ordinal_aggregation` / `nominal_aggregation`). Conceptually, binary `unanimous` ≡ the
 **min** over the {0, 1} option values and `any` ≡ the **max**; the ordinal analogs are the
 `min` / `max` strategies (see the [multi-choice cookbook](../cookbook/multi-choice-rubrics.md)).
+
+Every strategy counts only MET and UNMET votes. CANNOT_ASSESS votes, including those of judge
+calls that failed with an API or parse error, are set aside first, and a criterion whose votes
+all abstain is CANNOT_ASSESS. A `majority` or `weighted` tie goes to the verdict that scores
+lowest for the criterion's weight sign: UNMET for a positive (or zero) weight, MET for a
+negative one.
 
 ---
 

@@ -1,4 +1,7 @@
-"""Generate a cost vs accuracy scatter plot for different models."""
+"""Generate the cost vs accuracy scatter plot for the Cost Optimization recipe.
+
+The numbers are illustrative, matching the recipe's sample output; they are not measurements.
+"""
 
 from pathlib import Path
 
@@ -18,22 +21,28 @@ THEME = (
 
 MODELS = [
     {
-        "name": "Gemini Flash",
+        "name": "Gemini 2.5 Flash",
         "accuracy": 87.5,
         "cost": 0.0012,
         "color": "#e76f51",
         "offset": (8, -10),
     },
     {
-        "name": "Claude Haiku",
+        "name": "Claude Haiku 4.5",
         "accuracy": 89.2,
         "cost": 0.0018,
         "color": "#2a9d8f",
         "offset": (8, 6),
     },
-    {"name": "GPT-4 Mini", "accuracy": 91.3, "cost": 0.0034, "color": "#264653", "offset": (-8, 6)},
     {
-        "name": "GPT-4 Turbo",
+        "name": "GPT-4.1-mini",
+        "accuracy": 91.3,
+        "cost": 0.0034,
+        "color": "#264653",
+        "offset": (-8, 6),
+    },
+    {
+        "name": "GPT-4.1",
         "accuracy": 94.1,
         "cost": 0.0156,
         "color": "#e9c46a",

@@ -280,7 +280,11 @@ class Criterion(BaseModel):
         options: List of options for multi-choice criteria. If None, criterion is binary.
         scale_type: For multi-choice, indicates if options are ordinal (ordered) or
             nominal (unordered categories). Affects aggregation strategy selection.
-        aggregation: Per-criterion aggregation strategy override. If None, uses grader default.
+        aggregation: For a multi-choice criterion, overrides the grader's
+            ``ordinal_aggregation`` or ``nominal_aggregation`` (whichever matches
+            ``scale_type``) with an ``OrdinalAggregation`` or ``NominalAggregation`` value.
+            If None, the grader's setting applies. Ignored for binary criteria, which
+            always use the grader's ``aggregation``.
 
     Example:
         >>> # Binary criterion (existing behavior)
@@ -920,10 +924,13 @@ class MultiChoiceJudgment(BaseModel):
 AggregationStrategy = Literal["majority", "weighted", "unanimous", "any"]
 """Strategy for aggregating votes from multiple judges (binary criteria).
 
-- majority: Simple majority vote (> 50% of judges must agree)
+- majority: Head count of MET vs UNMET votes; the larger count wins
 - weighted: Weighted vote based on judge weights
-- unanimous: All judges must agree for MET
+- unanimous: All non-abstaining judges must vote MET
 - any: Any judge voting MET results in MET
+
+Only MET and UNMET votes count: CANNOT_ASSESS votes (including failed judge calls) are set
+aside first, and a criterion whose votes all abstain is CANNOT_ASSESS.
 
 Tie-breaking (``majority`` head-count tie or ``weighted`` equal-weight tie) resolves to
 the **score-minimizing verdict by weight sign**: UNMET for weight ≥ 0 (earns 0), MET for

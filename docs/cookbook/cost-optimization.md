@@ -50,9 +50,9 @@ grader = CriterionGrader(
     Caching is most valuable when:
 
     - Re-running evaluations during development
-    - Evaluating the same content with different rubrics
+    - Evaluating the same content with rubrics that share criteria
     - Running regression tests on known content
-    - Processing duplicate items in your dataset
+    - Processing duplicate items in your dataset, when a duplicate is graded after its first copy finishes (`evaluate` grades items concurrently by default, and identical requests in flight at once all miss)
 
 ### Step 2: Monitor Cache Performance
 
@@ -78,23 +78,35 @@ import asyncio
 import time
 
 async def benchmark_cache():
+    client = grader._clients["default"]
+
     # First run - populates cache
     start = time.perf_counter()
     result1 = await evaluate(dataset, grader, show_progress=False)
     cold_time = time.perf_counter() - start
     cold_cost = result1.total_completion_cost or 0
+    entries_after_cold = client.cache_stats()["count"]
 
     # Second run - uses cache
     start = time.perf_counter()
     result2 = await evaluate(dataset, grader, show_progress=False)
     warm_time = time.perf_counter() - start
     warm_cost = result2.total_completion_cost or 0
+    new_entries = client.cache_stats()["count"] - entries_after_cold
 
-    print(f"Cold run: {cold_time:.1f}s, ${cold_cost:.4f}")
-    print(f"Warm run: {warm_time:.1f}s, ${warm_cost:.4f}")
+    print(f"Cold run: {cold_time:.1f}s, reported cost ${cold_cost:.4f}")
+    print(f"Warm run: {warm_time:.1f}s, reported cost ${warm_cost:.4f}")
     print(f"Speedup: {cold_time / warm_time:.1f}x")
-    print(f"Cost savings: ${cold_cost - warm_cost:.4f}")
+    print(f"New cache entries on the warm run: {new_entries}")
 ```
+
+A cache hit returns the stored response together with the token usage and cost recorded when
+it was first generated. A warm run served from the cache therefore reports the same
+`total_completion_cost` and `total_token_usage` as the cold run, although it sent no requests
+for those responses: the reported cost is not what the rerun spent, and the difference between
+the two runs is not a saving. Measure the benefit in elapsed time instead, and in the cache
+itself: entries are added only for requests that missed it, so a rerun served entirely from
+the cache adds none.
 
 ### Step 4: Clear Cache When Needed
 
@@ -106,7 +118,7 @@ print(f"Cleared {cleared} cached entries")
 ```
 
 !!! warning "Cache Invalidation"
-    Changing the model, temperature, rubric criteria, or system prompt invalidates cached responses. An unset `temperature` (provider default) and an explicit `temperature=0.0` are different cache keys. Use distinct experiment names or cache keys when testing different configurations so that stale results from a prior setup are never reused.
+    Changing the model, temperature, rubric criteria, or system prompt invalidates cached responses. An unset `temperature` (provider default) and an explicit `temperature=0.0` are different cache keys. Multi-choice option shuffling and few-shot example selection follow `CriterionGrader(seed=...)`, which is random when unset, so fix the seed for those prompts to repeat across runs and hit the cache (see [Fixing Seeds](fixing-seeds.md)). Settings outside the cache key, such as `api_base`, `extra_params` and `extra_headers`, do not invalidate cached responses. Use a separate `cache_dir` when testing configurations that differ only in such settings, and distinct experiment names so that `resume=True` never reuses a checkpoint from a prior setup.
 
 ### Step 5: Enable Prompt Caching (Anthropic)
 
@@ -150,10 +162,10 @@ Evaluate the same dataset with different models:
 
 ```python
 models = [
-    ("openai/gpt-4.1", "GPT-4 Turbo"),
-    ("openai/gpt-4.1-mini", "GPT-4 Mini"),
-    ("anthropic/claude-haiku-3-5-20241022", "Claude Haiku"),
-    ("gemini/gemini-2.0-flash", "Gemini Flash"),
+    ("openai/gpt-4.1", "GPT-4.1"),
+    ("openai/gpt-4.1-mini", "GPT-4.1-mini"),
+    ("anthropic/claude-haiku-4-5-20251001", "Claude Haiku 4.5"),
+    ("gemini/gemini-2.5-flash", "Gemini 2.5 Flash"),
 ]
 
 results = []
@@ -179,15 +191,15 @@ for r in sorted(results, key=lambda x: x["cost"]):
     print(f"{r['model']:<20} {r['accuracy']:>9.1%} ${r['cost']:>9.4f} {r['time']:>9.1f}s")
 ```
 
-Sample output:
+Sample output (illustrative numbers; yours depend on your data and on current provider prices):
 
 ```
 Model                  Accuracy       Cost       Time
 ----------------------------------------------------
-Gemini Flash              87.5%    $0.0012       4.2s
-Claude Haiku              89.2%    $0.0018       5.1s
-GPT-4 Mini                91.3%    $0.0034       6.8s
-GPT-4 Turbo               94.1%    $0.0156      12.3s
+Gemini 2.5 Flash          87.5%    $0.0012       4.2s
+Claude Haiku 4.5          89.2%    $0.0018       5.1s
+GPT-4.1-mini              91.3%    $0.0034       6.8s
+GPT-4.1                   94.1%    $0.0156      12.3s
 ```
 
 ![Model cost vs accuracy comparison](../images/cost-accuracy-models.png)
@@ -274,6 +286,10 @@ def summarize_experiment_costs(experiments_dir: Path):
 # Usage
 summarize_experiment_costs(Path("./experiments"))
 ```
+
+These are reported costs. An experiment served from the response cache reports the recorded
+cost of every response it reused (see Step 3), so when experiments reuse cached responses, the
+total exceeds what they spent.
 
 ## Key Takeaways
 
@@ -475,13 +491,15 @@ async def compare_models(dataset: RubricDataset):
     models = [
         ("openai/gpt-4.1", "GPT-4.1"),
         ("openai/gpt-4.1-mini", "GPT-4.1-mini"),
-        ("anthropic/claude-haiku-3-5-20241022", "Claude Haiku"),
+        ("anthropic/claude-haiku-4-5-20251001", "Claude Haiku 4.5"),
     ]
 
     print("\n" + "=" * 60)
     print("MODEL COST COMPARISON")
     print("=" * 60)
 
+    # evaluate() resumes an existing experiment by default, so give every run fresh names
+    run_id = time.strftime("%Y%m%d-%H%M%S")
     results = []
     for model_id, name in models:
         grader = CriterionGrader(
@@ -492,7 +510,7 @@ async def compare_models(dataset: RubricDataset):
         result = await evaluate(
             dataset, grader,
             show_progress=False,
-            experiment_name=f"cost-compare-{name.lower().replace(' ', '-')}"
+            experiment_name=f"cost-compare-{name.lower().replace(' ', '-')}-{run_id}"
         )
         elapsed = time.perf_counter() - start
 
@@ -534,6 +552,7 @@ async def benchmark_caching(dataset: RubricDataset):
     result1 = await evaluate(dataset, grader, show_progress=False)
     cold_time = time.perf_counter() - start
     cold_cost = result1.total_completion_cost or 0
+    entries_after_cold = client.cache_stats()["count"]
 
     # Warm run
     print("Warm run (cache populated)...")
@@ -545,11 +564,14 @@ async def benchmark_caching(dataset: RubricDataset):
     # Stats
     stats = client.cache_stats()
 
+    # Cache hits carry the usage and cost recorded when each response was first
+    # generated, so the warm run's reported cost repeats the cold run's: it is not
+    # what the warm run spent. Compare the times and the new cache entries instead.
     print(f"\nResults:")
-    print(f"  Cold run: {cold_time:.1f}s, ${cold_cost:.4f}")
-    print(f"  Warm run: {warm_time:.1f}s, ${warm_cost:.4f}")
+    print(f"  Cold run: {cold_time:.1f}s, reported cost ${cold_cost:.4f}")
+    print(f"  Warm run: {warm_time:.1f}s, reported cost ${warm_cost:.4f}")
     print(f"  Speedup: {cold_time / max(warm_time, 0.01):.1f}x")
-    print(f"  Cost savings: ${cold_cost - warm_cost:.4f}")
+    print(f"  New cache entries on the warm run: {stats['count'] - entries_after_cold}")
     print(f"\nCache stats:")
     print(f"  Entries: {stats['count']}")
     print(f"  Size: {stats['size'] / 1024:.1f} KB")
