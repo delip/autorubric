@@ -1048,63 +1048,78 @@ class EvalRunner:
     def _setup_experiment(self, started_at: datetime) -> tuple[set[int], list[ItemResult]]:
         """Set up experiment directory and load checkpoint if resuming.
 
+        A run resumes only from a checkpoint of the same dataset: ``resume=True`` and a
+        manifest whose dataset hash matches. Any other run starts fresh, and a fresh start
+        replaces a previous run's checkpoint in the directory (see
+        ``_start_fresh_checkpoint``), so the directory always holds exactly one run.
+
         Returns:
             Tuple of (completed_indices, previous_results).
         """
         completed_indices: set[int] = set()
         previous_results: list[ItemResult] = []
 
-        if self._exp_dir.exists() and self.config.resume:
-            # Load existing manifest
-            manifest_path = self._exp_dir / "manifest.json"
-            if manifest_path.exists():
-                with open(manifest_path, encoding="utf-8") as f:
-                    manifest = ExperimentManifest.from_dict(json.load(f))
+        manifest_path = self._exp_dir / "manifest.json"
+        if self.config.resume and manifest_path.exists():
+            with open(manifest_path, encoding="utf-8") as f:
+                manifest = ExperimentManifest.from_dict(json.load(f))
 
-                # Verify dataset hash
-                current_hash = _compute_dataset_hash(self.dataset)
-                if manifest.dataset_hash != current_hash:
-                    logger.warning(
-                        f"Dataset hash mismatch. Expected {manifest.dataset_hash}, "
-                        f"got {current_hash}. Starting fresh."
-                    )
-                else:
-                    completed_indices = manifest.completed_indices
-                    # Load previous results
-                    items_path = self._exp_dir / "items.jsonl"
-                    if items_path.exists():
-                        with open(items_path, encoding="utf-8") as f:
-                            for line in f:
-                                if line.strip():
-                                    data = json.loads(line)
-                                    idx = data["item_idx"]
-                                    if idx < len(self.dataset):
-                                        item = self.dataset[idx]
-                                        previous_results.append(ItemResult.from_dict(data, item))
-                    logger.info(
-                        f"Resuming experiment {self._experiment_name} with "
-                        f"{len(completed_indices)} completed items"
-                    )
-        else:
-            # Create new experiment directory
-            self._exp_dir.mkdir(parents=True, exist_ok=True)
+            # Verify dataset hash
+            current_hash = _compute_dataset_hash(self.dataset)
+            if manifest.dataset_hash == current_hash:
+                completed_indices = manifest.completed_indices
+                # Load previous results
+                items_path = self._exp_dir / "items.jsonl"
+                if items_path.exists():
+                    with open(items_path, encoding="utf-8") as f:
+                        for line in f:
+                            if line.strip():
+                                data = json.loads(line)
+                                idx = data["item_idx"]
+                                if idx < len(self.dataset):
+                                    item = self.dataset[idx]
+                                    previous_results.append(ItemResult.from_dict(data, item))
+                logger.info(
+                    f"Resuming experiment {self._experiment_name} with "
+                    f"{len(completed_indices)} completed items"
+                )
+                return completed_indices, previous_results
 
-            # Write initial manifest with full config for reproducibility
-            manifest = ExperimentManifest(
-                experiment_name=self._experiment_name,
-                created_at=started_at,
-                dataset_name=self.dataset.name,
-                dataset_hash=_compute_dataset_hash(self.dataset),
-                total_items=len(self.dataset),
-                status="running",
-                completed_indices=set(),
-                started_at=started_at,
-                grader_config=_serialize_grader_config(self.grader),
-                eval_config=_serialize_eval_config(self.config),
+            logger.warning(
+                f"Dataset hash mismatch. Expected {manifest.dataset_hash}, "
+                f"got {current_hash}. Starting fresh."
             )
-            self._write_manifest(manifest)
 
+        self._start_fresh_checkpoint(started_at)
         return completed_indices, previous_results
+
+    def _start_fresh_checkpoint(self, started_at: datetime) -> None:
+        """Write this run's manifest and start an empty ``items.jsonl``.
+
+        A previous run's checkpoint in the directory is replaced: its items would otherwise
+        stay in ``items.jsonl`` (appended to as items complete) beside this run's, and a
+        reload (``EvalResult.from_experiment``) would count them too.
+        """
+        self._exp_dir.mkdir(parents=True, exist_ok=True)
+        items_path = self._exp_dir / "items.jsonl"
+        if items_path.exists():
+            logger.info(f"Starting fresh: replacing the previous checkpoint in {self._exp_dir}")
+            items_path.unlink()
+
+        # Write initial manifest with full config for reproducibility
+        manifest = ExperimentManifest(
+            experiment_name=self._experiment_name,
+            created_at=started_at,
+            dataset_name=self.dataset.name,
+            dataset_hash=_compute_dataset_hash(self.dataset),
+            total_items=len(self.dataset),
+            status="running",
+            completed_indices=set(),
+            started_at=started_at,
+            grader_config=_serialize_grader_config(self.grader),
+            eval_config=_serialize_eval_config(self.config),
+        )
+        self._write_manifest(manifest)
 
     def _write_manifest(self, manifest: ExperimentManifest) -> None:
         """Write manifest to experiment directory."""

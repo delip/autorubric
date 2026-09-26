@@ -123,6 +123,8 @@ INFO: Resuming experiment customer-feedback-v1 with 4,235 completed items
 ⠋ Evaluating ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4,236/10,000 (2.28/s) 0:00:01 -0:42:15
 ```
 
+A run resumes only from a checkpoint of the same dataset. With a changed dataset, or with `resume=False`, it starts fresh and replaces the checkpoint in that experiment directory, so the directory always holds a single run. Resuming checks the dataset, not the grader: resume with a different model or grader settings and the results mix two configurations, so give each configuration its own `experiment_name`.
+
 !!! tip "Experiment naming conventions"
     Use descriptive experiment names that encode the date, model, and config variant --
     for example, `feedback-gpt4m-2026-03-14` or `feedback-v2-ensemble`. This makes it

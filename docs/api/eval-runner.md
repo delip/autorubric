@@ -55,6 +55,10 @@ result = await runner.run()  # Skips already-completed items
 result = EvalResult.from_experiment("experiments/my-essay-eval")
 ```
 
+A run resumes only from a checkpoint of the same dataset. With a changed dataset, or with
+`resume=False`, it starts fresh and replaces the directory's checkpoint, so an experiment
+directory always holds exactly one run.
+
 ## Rate Limiting
 
 ```python
