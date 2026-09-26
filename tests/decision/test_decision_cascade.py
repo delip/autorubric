@@ -1052,6 +1052,37 @@ class TestEscalationJudgeFailures:
         assert light.error == light.votes[1].error
         assert light.error.startswith("infrastructure: ")
 
+    @pytest.mark.asyncio
+    async def test_fill_ground_truth_labels_a_failed_request_from_its_escalations(
+        self, fake_sdk, make_grader
+    ):
+        """A failed request escalates every criterion, and the escalation judges' answers are
+        genuine judgments: they label the item (#22)."""
+        fake_sdk.error = typesafe_sdk.TypeSafeAPIConnectionError("Connection error: refused")
+        data = RubricDataset(prompt=QUERY, rubric=Rubric([LIGHT, CLARITY]))
+        data.add_item(SUBMISSION, "the only item")
+        grader = make_grader(judge_model_config=dm(), escalation=cascade(0.5))
+
+        labeled = await fill_ground_truth(data, grader, show_progress=False)
+
+        assert [item.ground_truth for item in labeled] == [[MET, "Mostly clear"]]
+
+    @pytest.mark.asyncio
+    async def test_fill_ground_truth_leaves_out_an_item_whose_escalations_failed_too(
+        self, fake_sdk, make_grader
+    ):
+        fake_sdk.error = typesafe_sdk.TypeSafeAPIConnectionError("Connection error: refused")
+        data = RubricDataset(prompt=QUERY, rubric=Rubric([LIGHT, CLARITY]))
+        data.add_item(SUBMISSION, "the only item")
+        failing = {LIGHT.requirement: infrastructure(), CLARITY.requirement: infrastructure()}
+        grader = make_grader(
+            judge_model_config=dm(), escalation=cascade(0.5), scripts={"gemini": failing}
+        )
+
+        labeled = await fill_ground_truth(data, grader, show_progress=False)
+
+        assert len(labeled) == 0
+
 
 # =============================================================================
 # judge_scores: the decision model's own score; None by role for escalation judges

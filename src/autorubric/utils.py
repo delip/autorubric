@@ -310,7 +310,8 @@ def _extract_ground_truth_from_report(
         - str (option label) for multi-choice criteria
 
     Raises:
-        ValueError: If report is missing or malformed.
+        ValueError: If report is missing or malformed, or if a criterion's verdict stands in
+            for failed judge calls (its report's ``error`` is set).
     """
     from autorubric.metrics._helpers import _extract_raw_verdicts
 
@@ -324,6 +325,14 @@ def _extract_ground_truth_from_report(
 
     for i, cr in enumerate(report.report):
         criterion = criteria[i]
+        if cr.is_error:
+            # For a failed judge call the grader stands in a verdict (CANNOT_ASSESS, the NA
+            # option, or the worst case) so that scoring can go on. It is not a judgment, so
+            # it is never a label. A criterion some judge did judge has no error.
+            raise ValueError(
+                f"Criterion {i} ({criterion.name or 'unnamed'}) has no ground truth: its "
+                f"verdict stands in for failed judge calls ({cr.error})"
+            )
         binary_v, mc_v = _extract_raw_verdicts(cr)
 
         if criterion.is_binary:
@@ -338,12 +347,10 @@ def _extract_ground_truth_from_report(
             if mc_v is not None and mc_v.selected_label is not None:
                 ground_truth.append(mc_v.selected_label)
             elif mc_v is not None and mc_v.na:
-                # A genuine abstain that selected no option (selected_label is None — an
-                # error-abstain with no NA option) is not a usable ground-truth label.
+                # An abstain that selected no option (selected_label is None) has no label.
                 raise ValueError(
                     f"Criterion {i} ({criterion.name or 'unnamed'}) abstained with no option "
-                    f"selected (likely a judge-call failure); filter error reports before "
-                    f"generating ground truth from them"
+                    f"selected, so it has no label to record"
                 )
             else:
                 raise ValueError(
@@ -383,8 +390,12 @@ async def fill_ground_truth(
         A new RubricDataset with ground_truth filled in. Graded items keep all
         their other fields, except that an item re-graded with force=True loses
         its ground_truth_reasons, which explained the ground truth it replaces.
-        Items that fail to grade are excluded from the returned dataset. Items
-        with existing ground_truth (when force=False) are included unchanged.
+        Items that fail to grade are excluded from the returned dataset, and so
+        are items with a criterion whose every judge call failed: the verdict a
+        grader stands in for failed calls (CANNOT_ASSESS, the NA option, or the
+        worst case) is never saved as a label. A criterion that at least one
+        judge judged is labelled as graded. Items with existing ground_truth
+        (when force=False) are included unchanged.
 
     Raises:
         ValueError: If dataset has no items.

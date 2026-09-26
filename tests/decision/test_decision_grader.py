@@ -41,6 +41,7 @@ from autorubric import (
     Rubric,
     RubricDataset,
     TokenUsage,
+    fill_ground_truth,
 )
 from autorubric.decision import DecisionModelClient
 from autorubric.graders import CriterionGrader, JudgeSpec
@@ -733,6 +734,24 @@ class TestWholeRequestFailure:
         assert list(fake_sdk.calls[0][1]) == ["c0"]
         assert report.report[0].votes[0].error == "unknown: boom"
         assert report.report[1].multi_choice_votes[0].error.startswith("parse: Cannot pose")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("category", list(REQUEST_FAILURES))
+    async def test_a_failed_request_is_never_saved_as_ground_truth(
+        self, fake_sdk, make_grader, category
+    ):
+        """The failure reports stand in verdicts so that scoring can go on; fill_ground_truth
+        leaves the item out instead of labelling it with them (#22)."""
+        fake_sdk.error = REQUEST_FAILURES[category]()
+        data = RubricDataset(prompt=QUERY, rubric=Rubric(RUBRIC))
+        data.add_item(SUBMISSION, "the only item")
+
+        labeled = await fill_ground_truth(
+            data, make_grader(judge_model_config=dm()), show_progress=False
+        )
+
+        assert len(fake_sdk.calls) == 1
+        assert len(labeled) == 0
 
 
 # =============================================================================

@@ -78,7 +78,8 @@ async def generate_labels():
         force=False,        # Only label items without ground_truth
         show_progress=True,
     )
-    # Items that fail to label are left out, so len(labeled) can be < len(dataset)
+    # Items that fail to label, failed judge calls included, are left out,
+    # so len(labeled) can be < len(dataset)
 
     labeled.to_file("labeled.json")
 ```
