@@ -42,8 +42,10 @@ from escalation.cascade_runs import (
     ITEMS,
     PER_CRITERION,
     PER_ITEM_LLM_SCRIPT,
+    RUBRIC,
     THRESHOLD,
     dataset,
+    llm_scripts,
     per_item_dataset,
     per_item_decision_model_scripts,
 )
@@ -286,8 +288,9 @@ class TestHandBuiltRun:
             "compute_seconds": 21.0,
             "calibration_fingerprint": None,
         }
-        # Items 0 to 3 and 5; not the failed item's, nor the one outside the dataset.
-        assert point.cost_usd == pytest.approx(0.10)
+        # Items 0 to 5, the failed item's cost included (a billed call counts whatever
+        # became of the grade, as in the run's total); not the one outside the dataset.
+        assert point.cost_usd == pytest.approx(5.10)
 
     def test_a_metric_by_name_or_function(self):
         result, data = hand_built()
@@ -606,3 +609,44 @@ class TestLiveAndReplayedRuns:
         assert live.dm_accuracy_escalated == 2 / 3
         assert live.fallback_accuracy_escalated == 1 / 3
         assert live.metric == pooled_binary(compute_metrics(runs.live, data))
+
+
+@pytest.mark.asyncio
+async def test_a_billed_item_counts_in_the_cost_when_every_judgment_failed(cascade_runs):
+    """The decision model answered, and billed, every criterion of the first item, all of
+    which escalated, and every escalation call failed. The item fails, yet what it cost
+    counts, live and replayed, in the run's total and in ``cost_usd`` (#18)."""
+    first = ITEMS[0].submission
+    script = {
+        **llm_scripts(),
+        **{(first, c.requirement): RuntimeError("down") for c in RUBRIC.rubric},
+    }
+    runs = await cascade_runs(threshold=1.0, per_criterion=None, llm_script=script)
+    replay = replay_escalation(runs.dm, runs.llm, 1.0)
+
+    for result in (runs.live, replay):
+        failed = next(r for r in result.item_results if r.item_idx == 0)
+        assert failed.error is not None and failed.report.completion_cost is not None
+        per_item = sum(r.report.completion_cost or 0.0 for r in result.item_results)
+        assert result.total_completion_cost == pytest.approx(per_item)
+        assert escalation_stats(result, runs.data).cost_usd == pytest.approx(per_item)
+
+
+@pytest.mark.asyncio
+async def test_an_item_whose_every_judgment_failed_keeps_its_pairs_and_replays(cascade_runs):
+    """The decision model's request fails on item 4 and so, here, does every escalation call
+    on it: the item fails, live and replayed alike, yet it has votes, so its pairs still
+    count (all five escalated) and the LLM run that failed on it still replays (#18)."""
+    failed = ITEMS[4].submission
+    script = {
+        **llm_scripts(),
+        **{(failed, c.requirement): RuntimeError("down") for c in RUBRIC.rubric},
+    }
+    runs = await cascade_runs(llm_script=script)
+    replay = replay_escalation(runs.dm, runs.llm, THRESHOLD, per_criterion=PER_CRITERION)
+
+    live_item = next(r for r in runs.live.item_results if r.item_idx == 4)
+    replayed_item = next(r for r in replay.item_results if r.item_idx == 4)
+    assert live_item.error is not None and replayed_item.error == live_item.error
+    for result in (runs.live, replay):
+        assert escalation_stats(result, runs.data).escalation_rate == 15 / 35

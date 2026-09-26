@@ -154,13 +154,14 @@ BaseModel (Pydantic)
 # Negative criteria: MET subtracts weight, UNMET contributes 0
 weighted_sum = sum(verdict_value * criterion.weight for each criterion)
 score = clamp(weighted_sum / total_positive_weight, 0, 1)  # if normalized
+# No criterion left to score (under SKIP, every criterion abstained): score is None
 # Length penalty subtracted after base calculation
 ```
 
 ## Conventions
 
 - All graders return `EnsembleEvaluationReport` for consistent interface
-- `raw_score` (the unnormalized weighted sum) is populated regardless of the `normalize` setting on a successful grade, but is `None` on a failed/error report (consumers should filter on `error is not None`)
-- Judge-call failures route via `classify_grading_error`: infrastructure/parse failures become `CANNOT_ASSESS` (`na=True`, excluded from scoring under the default SKIP strategy); only `unknown` errors fall back to the conservative worst-case verdict (UNMET for positive weight, MET for negative weight). Failed reports carry a category-prefixed `error` and `is_error`
-- Filter `error is not None` results in training pipelines
+- `raw_score` (the unnormalized weighted sum) is populated regardless of the `normalize` setting, and is `None` exactly when `score` is: on a failed/error report, or when no criterion was left to score (consumers should filter on `error is not None`, then skip `score is None`)
+- Judge-call failures route via `classify_grading_error`: infrastructure/parse failures become `CANNOT_ASSESS` (`na=True`, excluded from scoring under the default SKIP strategy); only `unknown` errors fall back to the conservative worst-case verdict (UNMET for positive weight, MET for negative weight). Failed criterion reports carry a category-prefixed `error` and `is_error`. An item whose every criterion's judgment failed has no score under any strategy: its report's `error` begins `Every criterion's judgment failed:`, and `EvalRunner` counts it as a failed item
+- Filter `error is not None` results in training pipelines, then skip `score is None` (nothing left to score)
 - Rate limiting via `LLMConfig.max_parallel_requests` (per-provider semaphore)

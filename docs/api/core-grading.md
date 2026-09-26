@@ -30,8 +30,9 @@ rubric = Rubric.from_file("rubric.yaml")
 grader = CriterionGrader(judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"))
 result = await rubric.grade(to_grade="...", grader=grader)
 
-# result.score is `float | None` (None if the grade failed); guard before formatting.
-print(f"Score: {result.score:.2f}" if result.score is not None else "Score: n/a (grade failed)")
+# result.score is `float | None` (None if the grade failed or no criterion was left to
+# score); guard before formatting.
+print(f"Score: {result.score:.2f}" if result.score is not None else "Score: n/a")
 for cr in result.report:
     # `final_verdict` is None on error/multi-choice criteria; guard before printing.
     verdict = cr.final_verdict.value if cr.final_verdict is not None else "n/a"
@@ -51,6 +52,13 @@ Final score:
 $$
 \text{score} = \max\left(0, \min\left(1, \frac{\sum_{i=1}^{n} \mathbb{1}[\text{verdict}_i = \text{MET}] \cdot w_i}{\sum_{i=1}^{n} \max(0, w_i)}\right)\right)
 $$
+
+A criterion that abstains (`CANNOT_ASSESS`, or a multi-choice NA option) is left out of both sums under the default `SKIP` strategy (see [CANNOT_ASSESS Handling](cannot-assess.md)). Some items have no score, and then `score` and `raw_score` are `None`, never a fabricated 0.0:
+
+- **No criterion left to score.** Under `SKIP`, every criterion abstained. Unless every judgment failed (next case), this is not a failed grade, and `error` is `None`.
+- **The grade failed.** `error` says why. When the judgment of every criterion failed (for example, every judge call failed), each criterion keeps its stand-in verdict and its own `error`, and the report's `error` begins `Every criterion's judgment failed:`. This holds under every strategy.
+
+`Rubric.compute_score`, which scores ground-truth verdicts, follows the same rule: it returns `None` when no criterion is left to score.
 
 ## Rubric Guidelines
 

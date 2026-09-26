@@ -288,7 +288,7 @@ class RubricDataset:
         verdicts: list[CriterionVerdict | str],
         normalize: bool = True,
         rubric: Rubric | None = None,
-    ) -> float:
+    ) -> float | None:
         """Compute weighted score from verdicts (binary or multi-choice).
 
         Args:
@@ -299,7 +299,9 @@ class RubricDataset:
             rubric: Optional rubric to use for scoring. If None, uses global rubric.
 
         Returns:
-            Weighted score based on criterion weights and verdicts.
+            Weighted score based on criterion weights and verdicts, or ``None`` when
+            every verdict abstains (CANNOT_ASSESS or an NA option), leaving nothing to
+            score.
 
         Raises:
             ValueError: If a multi-choice label doesn't match any option, or if

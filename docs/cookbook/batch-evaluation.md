@@ -160,7 +160,8 @@ Throughput: 2.31 items/s
 ```python
 print(f"\nCost Summary:")
 print(f"  Total cost: ${result.total_completion_cost or 0:.2f}")
-print(f"  Cost per item: ${(result.total_completion_cost or 0) / result.successful_items:.4f}")
+# The total covers every item: a billed call counts whatever became of the grade
+print(f"  Cost per item: ${(result.total_completion_cost or 0) / result.total_items:.4f}")
 
 # Token breakdown
 if result.total_token_usage:
@@ -179,9 +180,10 @@ if result.total_token_usage:
 ### Step 7: Process Results
 
 ```python
-# Get all scores
+# Get all scores (items with no score are skipped)
 scores = result.get_scores()
-print(f"Mean score: {sum(scores) / len(scores):.2f}")
+if scores:
+    print(f"Mean score: {sum(scores) / len(scores):.2f}")
 
 # Filter successful vs failed
 successful = result.filter_successful()
@@ -196,6 +198,13 @@ if failed:
     for item_result in failed[:3]:
         print(f"  Item {item_result.item_idx}: {item_result.error}")
 ```
+
+An item fails when its grading raises or when the judgment of every criterion fails (every
+judge call fails, say); the latter's error begins `Every criterion's judgment failed:`. Failed
+items have no score, and a resumed run does not grade them again, though what they cost still
+counts in the totals. An item whose judges answered `CANNOT_ASSESS` on every criterion has no
+score either (nothing is left to score under the default strategy), but it is not a failure.
+`get_scores()` skips both. See [Failed Items](../api/eval-runner.md#failed-items).
 
 ### Step 8: Load Results from Experiment Directory
 
@@ -431,7 +440,7 @@ async def run_batch_evaluation():
     if result.total_completion_cost:
         print(f"\nCost:")
         print(f"  Total: ${result.total_completion_cost:.4f}")
-        print(f"  Per item: ${result.total_completion_cost / result.successful_items:.6f}")
+        print(f"  Per item: ${result.total_completion_cost / result.total_items:.6f}")
 
     # Tokens
     if result.total_token_usage:
@@ -446,7 +455,8 @@ async def run_batch_evaluation():
         print(f"  Min: {min(scores):.2f}")
         print(f"  Max: {max(scores):.2f}")
 
-    # Sample results. report.score is `float | None` (None if that item's grade failed).
+    # Sample results. report.score is `float | None` (None if that item's grade failed or
+    # no criterion was left to score).
     print(f"\nSample Results:")
     for item_result in result.item_results[:5]:
         score = item_result.report.score

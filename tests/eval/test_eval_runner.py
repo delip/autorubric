@@ -1525,3 +1525,28 @@ class TestFreshStartInExistingExperiment:
             assert regrader.grade.await_count == 0
             _, items = _checkpoint(Path(tmp_dir) / "resumed")
             assert sorted(item["item_idx"] for item in items) == [0, 1, 2]
+
+    @pytest.mark.asyncio
+    async def test_a_resumed_run_counts_the_items_that_failed_before(self, sample_dataset):
+        """Resuming grades nothing new here, and the item whose grade failed in the first run
+        still counts as failed, as it does when the run is loaded."""
+        ok = EvaluationReport(score=1.0, raw_score=15.0)
+        failed = EvaluationReport(
+            score=None, raw_score=None, error="Every criterion's judgment failed: unknown: x"
+        )
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            runs = [
+                await evaluate(
+                    dataset=sample_dataset,
+                    grader=create_mock_grader([ok, failed, ok]),
+                    show_progress=False,
+                    experiment_name="resumed-failures",
+                    experiments_dir=tmp_dir,
+                )
+                for _ in range(2)
+            ]
+            loaded = EvalResult.from_experiment(Path(tmp_dir) / "resumed-failures")
+
+        first, resumed = runs
+        assert first.failed_items == resumed.failed_items == loaded.failed_items == 1
+        assert resumed.errors == first.errors

@@ -197,11 +197,11 @@ def _mixed_judge_sets_result() -> EvalResult:
 
 def test_judge_absent_from_some_items_is_rejected_by_name():
     """Per-judge metrics do not support a judge set that changed between items: the error
-    names the first such judge and how many scored items it is on."""
+    names the first such judge and how many graded items it is on."""
     with pytest.raises(
         ValueError,
-        match=r"^per_judge=True needs every scored item graded by the same judges, but "
-        r"judge 'b' is in the judge_scores of 2 of 4 scored items",
+        match=r"^per_judge=True needs every item graded by the same judges, but "
+        r"judge 'b' is in the judge_scores of 2 of 4 graded items",
     ):
         compute_metrics(_mixed_judge_sets_result(), _dataset(), per_judge=True)
 

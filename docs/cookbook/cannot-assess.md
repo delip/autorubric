@@ -78,7 +78,9 @@ The specific data can be found on page 47 of the annual report.
     counts both genuine and error-induced abstains. To tell them apart, inspect each
     report's `criterion.is_error` (or the category-prefixed `criterion.error` string):
     `True` means the verdict was driven entirely by a judge-call failure rather than a
-    real judgment.
+    real judgment. When every criterion of an item is error-induced, the item has no score
+    under any strategy (`score` is `None`), and the report's `error` begins
+    `Every criterion's judgment failed:`.
 
 ```mermaid
 flowchart LR
@@ -158,6 +160,12 @@ grader_fail = CriterionGrader(
 !!! tip "Choosing a default strategy"
     SKIP is the safest default because it avoids penalizing submissions for criteria the judge genuinely cannot evaluate. The denominator shrinks, so assessed criteria still receive their full weight. However, ZERO or FAIL may be more appropriate when the inability to assess itself signals a problem -- for instance, if a response lacks citations and citation quality is a criterion, the missing evidence is the finding.
 
+!!! note "When every criterion abstains"
+    Under `SKIP`, a response whose every criterion is `CANNOT_ASSESS` (or an NA option) has
+    nothing left to score. Its `score` and `raw_score` are `None`, not 0.0. When the judge
+    answered, this is not a failed grade, and `error` is `None`. `ZERO`, `PARTIAL` and `FAIL`
+    keep abstentions in the score, so such a response still gets a number.
+
 ### Step 4: One Abstain Concept, Two Surfaces
 
 Binary `CANNOT_ASSESS` and multi-choice NA are *the same abstain concept* wearing two interfaces. A binary judge abstains by returning the `CANNOT_ASSESS` verdict; a multi-choice judge abstains by selecting a dedicated NA option (`na=True`). Both are routed through the same `CannotAssessStrategy` by the shared `scoring.score_reports` core, so the choices you made in Step 3 apply uniformly: under the default `SKIP`, *both* are excluded from the numerator and denominator.
@@ -232,7 +240,8 @@ async def compare_strategies():
             query=query
         )
 
-        # result.score is `float | None` (None if the grade failed).
+        # result.score is `float | None` (None if the grade failed or, under SKIP, if
+        # every criterion abstained).
         score_str = f"{result.score:>8.2f}" if result.score is not None else f"{'n/a':>8}"
         print(f"{name:<15} {score_str} {result.cannot_assess_count:>10}")
 
@@ -281,7 +290,7 @@ for criterion in result.report:
 ## Key Takeaways
 
 - **CANNOT_ASSESS** is legitimate when evidence is insufficient
-- **SKIP** (default) is safest for general use—excludes unknowns from scoring
+- **SKIP** (default) is safest for general use—excludes unknowns from scoring; a response whose every criterion abstains has no score (`None`), not 0.0
 - **ZERO** puts burden of proof on the response
 - **PARTIAL** offers a configurable middle ground
 - **FAIL** is conservative for safety-critical applications
@@ -464,7 +473,8 @@ async def main():
 
             verdict_str = " ".join(verdicts)
 
-            # result.score is `float | None` (None if the grade failed).
+            # result.score is `float | None` (None if the grade failed or, under SKIP, if
+            # every criterion abstained).
             score_str = f"{result.score:>8.2f}" if result.score is not None else f"{'n/a':>8}"
             print(f"{name:<12} {score_str} {result.cannot_assess_count:>5} | {verdict_str}")
 

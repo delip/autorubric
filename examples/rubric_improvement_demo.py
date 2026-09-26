@@ -78,7 +78,7 @@ def quality_plateau(current: IterationResult, history: list[IterationResult]) ->
 async def measure_test_correlation(
     rubric: Rubric,
     test: RubricDataset,
-    expected_scores: list[float],
+    expected_scores: list[float | None],
     grader: CriterionGrader,
     task_prompt: str,
     label: str = "Grading test set",

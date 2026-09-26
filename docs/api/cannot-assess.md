@@ -46,6 +46,10 @@ grader = CriterionGrader(
 | `PARTIAL` | Treat as partial credit (configurable fraction) |
 | `FAIL` | Treat as worst case (UNMET for positive, MET for negative weights) |
 
+The strategies apply to multi-choice NA options too. Under `SKIP`, an item every criterion of which abstains has nothing left to score: its `score` and `raw_score` are `None`, not 0.0. This is not a failed grade, so its `error` is `None` (unless every judgment failed, below). Zero-weight criteria still count as scored. `ZERO`, `PARTIAL` and `FAIL` keep abstentions in the score, so abstentions never leave them without one. Ground truth follows the same rule: `Rubric.compute_score` and `RubricDataset.compute_weighted_score` return `None` when every label abstains under `SKIP`.
+
+A judge call that fails with an API or parse error also yields `CANNOT_ASSESS` (or the NA option), and one that fails for another reason yields the worst case. These stand-in verdicts are not judgments, though. When the judgment of every criterion of an item failed, the item has no score under any strategy, and its report's `error` begins `Every criterion's judgment failed:`.
+
 ---
 
 ## CannotAssessConfig

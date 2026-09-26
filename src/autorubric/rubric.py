@@ -397,7 +397,7 @@ class Rubric:
         normalize: bool = True,
         cannot_assess_strategy: CannotAssessStrategy = CannotAssessStrategy.SKIP,
         partial_credit: float = 0.5,
-    ) -> float:
+    ) -> float | None:
         """Compute a weighted score from raw verdicts against this rubric.
 
         Single source of truth for scoring from verdict lists (e.g. ground truth
@@ -419,7 +419,9 @@ class Rubric:
             partial_credit: Credit fraction when strategy is PARTIAL.
 
         Returns:
-            The computed score.
+            The computed score, or ``None`` when no criterion is left to score (under
+            SKIP, every verdict is CANNOT_ASSESS or an NA option): the score is then
+            undefined, never a fabricated 0.0.
         """
         if len(verdicts) != len(self.rubric):
             raise ValueError(f"Expected {len(self.rubric)} verdicts, got {len(verdicts)}")

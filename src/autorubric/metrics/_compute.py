@@ -24,6 +24,7 @@ from sklearn.metrics import (
     recall_score,
 )
 
+from ..scoring import _every_judgment_failed
 from ..types import Criterion, CriterionVerdict
 from ._helpers import (
     classify_criteria,
@@ -82,8 +83,44 @@ except ImportError:
 
 if TYPE_CHECKING:
     from ..dataset import RubricDataset
-    from ..eval import EvalResult
+    from ..eval import EvalResult, ItemResult
     from ..rubric import Rubric
+    from ..types import EnsembleEvaluationReport, EvaluationReport
+
+
+def _criterion_votes(cr: Any) -> list[Any]:
+    """Every vote cast on a criterion report: binary ``votes`` and ``multi_choice_votes``
+    (a criterion has one kind; a single-judge ``CriterionReport`` has neither)."""
+    return [*(getattr(cr, "votes", None) or []), *(getattr(cr, "multi_choice_votes", None) or [])]
+
+
+def _judge_failed_every_vote(
+    report: EvaluationReport | EnsembleEvaluationReport, judge_id: str
+) -> bool:
+    """Whether ``judge_id`` cast votes on ``report``'s criteria and every one failed: the
+    judge judged nothing on the item, so it has no score for it."""
+    votes = [
+        vote
+        for cr in report.report or []
+        for vote in _criterion_votes(cr)
+        if vote.judge_id == judge_id
+    ]
+    return bool(votes) and all(vote.is_error for vote in votes)
+
+
+def _is_errored_item(item_result: ItemResult) -> bool:
+    """Whether an item has no usable judgment: its grading raised (``ItemResult.error``),
+    its report is an error report (``error`` set), or every criterion's verdict stands in
+    for failed judge calls (``_every_judgment_failed``). The last is how an item nothing
+    judged is recognized in a run saved before such reports carried an ``error`` (or from
+    a grader that does not set one), so its metrics match a current run's (#18).
+    """
+    report = item_result.report
+    return (
+        item_result.error is not None
+        or report.error is not None
+        or _every_judgment_failed(report.report or [])
+    )
 
 
 def _interpret_correlation(r: float) -> str:
@@ -1085,7 +1122,7 @@ def _build_coverage_stats(
 def _compute_judge_metrics(
     judge_id: str,
     judge_scores: list[float | None],
-    true_scores: list[float],
+    true_scores: list[float | None],
     judge_verdicts: list[list[CriterionVerdict]],
     judge_mc_preds: list[list[int | None]],
     judge_errors: list[list[str | None]],
@@ -1096,6 +1133,7 @@ def _compute_judge_metrics(
     effective_criteria: list[Criterion],
     cannot_assess: CannotAssessMode,
     na_mode: NAMode,
+    escalation_judge: bool = False,
 ) -> JudgeMetrics:
     """Compute metrics for a single judge, mirroring the aggregate's type handling.
 
@@ -1111,8 +1149,11 @@ def _compute_judge_metrics(
     layout placeholders only. A ``superseded`` vote is present: it is the judge's prediction.
 
     ``judge_scores`` is item-aligned with ``true_scores``. A ``None`` entry means the
-    judge's whole-rubric score is undefined for its role (a judge consulted only on some
-    criteria is ``None`` on every item, even an item where it judged every criterion).
+    judge's whole-rubric score is undefined: for its role (a judge consulted only on some
+    criteria is ``None`` on every item, even an item where it judged every criterion),
+    because every vote of the judge on the item failed, or because none of its verdicts
+    is left to score. A ``None`` true score (ground truth that leaves nothing to score)
+    leaves the item out of the pairs too.
     Score-level metrics are undefined for a judge with no defined score, so all of its
     score fields (``score_rmse``, ``score_mae``, ``score_spearman``, ``score_kendall``,
     ``score_pearson``, ``bias``) are ``None``. Otherwise they are computed over the items
@@ -1122,11 +1163,13 @@ def _compute_judge_metrics(
     items) has no entry there, not a ``None`` entry; ``compute_metrics`` rejects that case
     before calling this function.
 
-    A judge whose ``judge_scores`` entries are all ``None`` has no whole-rubric score on any
-    item, the mark of a cascade escalation judge (by role, however many criteria escalated):
-    its ``coverage`` is ``"escalated"`` and ``n_pairs`` counts the included cells, i.e. its
-    escalated subset, before the ``cannot_assess`` / ``na_mode`` handling. Any other judge
-    has ``coverage="full"`` and ``n_pairs=None``.
+    A cascade escalation judge (``escalation_judge``: by role, however many criteria
+    escalated; the caller reads it from the cascade's structure, as the judge votes on no
+    criterion that was not escalated and casts no ``superseded`` vote) has ``coverage``
+    ``"escalated"``, and ``n_pairs`` counts the included cells, i.e. its escalated subset,
+    before the ``cannot_assess`` / ``na_mode`` handling. Any other judge has
+    ``coverage="full"`` and ``n_pairs=None``, even one whose score is ``None`` on every
+    item (a panel judge every call of which failed).
     """
     n_criteria = len(criterion_types)
 
@@ -1205,7 +1248,7 @@ def _compute_judge_metrics(
     scored_pairs = [
         (pred, true)
         for pred, true in zip(judge_scores, true_scores, strict=True)
-        if pred is not None
+        if pred is not None and true is not None
     ]
     score_rmse: float | None = None
     score_mae: float | None = None
@@ -1213,9 +1256,9 @@ def _compute_judge_metrics(
     score_kendall: CorrelationResult | None = None
     score_pearson: CorrelationResult | None = None
     bias: BiasResult | None = None
-    # A judge with no whole-rubric score on any item was consulted only on the criteria
-    # escalated to it: its criterion-level metrics above cover exactly that subset.
-    escalated = all(score is None for score in judge_scores)
+    # A cascade's escalation judge was consulted only on the criteria escalated to it: its
+    # criterion-level metrics above cover exactly that subset.
+    escalated = escalation_judge
     if scored_pairs:
         pred_scores = [pred for pred, _ in scored_pairs]
         true_scored = [true for _, true in scored_pairs]
@@ -1304,6 +1347,7 @@ def _compute_per_item_pooled_metrics(
     bin_true: list[int] = []
     bin_pred: list[int] = []
     n_items = 0
+    n_errored_items = 0  # GT-bearing items with no usable judgment, as on the other path
 
     for idx in common_indices:
         item = dataset.items[idx]
@@ -1311,7 +1355,8 @@ def _compute_per_item_pooled_metrics(
         if item.ground_truth is None:
             result_warnings.append(f"Item {idx} has no ground truth, skipping")
             continue
-        if item_result.error is not None:
+        if _is_errored_item(item_result):
+            n_errored_items += 1
             continue
         rubric = dataset.get_item_rubric(idx)
         criteria = rubric.rubric
@@ -1379,6 +1424,14 @@ def _compute_per_item_pooled_metrics(
                 val_pred[scale].append(pred_v)
                 if pred_opt.label == true_opt.label:
                     exact_hits[scale] += 1
+
+    if n_items == 0:
+        raise ValueError("No valid items with ground truth found")
+    if n_errored_items > 0:
+        result_warnings.append(
+            f"{n_errored_items} item(s) with ground truth were excluded from metrics because "
+            "grading errored; their verdicts and scores do not contribute."
+        )
 
     # Assemble per-scale pooled metrics.
     pooled_by_scale: list[PooledScaleMetrics] = []
@@ -1483,6 +1536,16 @@ def compute_metrics(
     It compares predicted verdicts and scores against ground truth from the dataset.
     Supports binary, ordinal, and nominal (multi-choice) criteria.
 
+    An item with no usable judgment is an errored item: it is left out of every metric,
+    counted in ``CoverageStats.n_errored`` and warned about. That is an item whose grading
+    raised, whose report is an error report, or every criterion's verdict of which stands
+    in for failed judge calls (how an item whose every judgment failed shows in a run saved before
+    such reports carried an ``error``). Score-level metrics pair an item's score with its
+    ground truth's score where both are defined: an item with nothing left to score, or
+    whose ground truth leaves nothing to score, keeps its verdicts in the criterion-level
+    metrics but has no score pair. Per judge likewise: a judge every vote of which on an
+    item failed has no score for that item, whatever its ``judge_scores`` entry says.
+
     Args:
         eval_result: The evaluation result from EvalRunner.
         dataset: The dataset with ground truth labels.
@@ -1491,13 +1554,13 @@ def compute_metrics(
             ``kappa_ci``←``mean_kappa`` (ordinal quadratic-weighted), ``rmse_ci``←``score_rmse``.
             Each CI is ``None`` when undefined (empty/degenerate axis).
         n_bootstrap: Number of bootstrap samples if bootstrap=True.
-        per_judge: If True and ensemble, compute per-judge metrics. Every scored item must
+        per_judge: If True and ensemble, compute per-judge metrics. Every graded item must
             have been graded by the same judges (see Raises). A judge's missing vote on a
             criterion (a cascade escalation judge on a criterion that was not escalated) is
             left out of its metrics, as neither a verdict nor an abstention, while a cascade
-            decision model's ``superseded`` votes are its predictions. A judge with no
-            whole-rubric score on any item (every ``judge_scores`` entry ``None``: a cascade
-            escalation judge) is measured on its escalated subset:
+            decision model's ``superseded`` votes are its predictions. A cascade escalation
+            judge (one that votes on no criterion that was not escalated and casts no
+            ``superseded`` vote) is measured on its escalated subset:
             ``JudgeMetrics.coverage == "escalated"``, ``n_pairs`` is the subset's size and
             the score-level fields are ``None``.
         cannot_assess: How to handle CANNOT_ASSESS verdicts (binary criteria):
@@ -1540,8 +1603,13 @@ def compute_metrics(
 
     Raises:
         ValueError: If no common items between eval_result and dataset.
+        ValueError: If no item has ground truth and a usable judgment (e.g. every item
+            errored).
+        ValueError: If no graded item has both a score and a true score (every one has
+            nothing left to score, in its grade or in its ground truth): the score-level
+            metrics are undefined, and ``MetricsResult`` has no place for undefined ones.
         ValueError: If ``per_judge`` is True and a judge is in the ``judge_scores`` of only
-            some scored items (the judge set changed between items). A ``None`` entry is
+            some graded items (the judge set changed between items). A ``None`` entry is
             present, not absent, and is supported.
 
     Example:
@@ -1634,8 +1702,15 @@ def compute_metrics(
     all_true_scores: list[float] = []
 
     # For ensemble: per-judge data (binary verdicts + multi-choice option indices). A judge
-    # score is None when that judge's whole-rubric score is undefined for its role.
+    # score is None when that judge's whole-rubric score is undefined (for its role, or on
+    # an item it judged nothing on or left nothing to score on).
     judge_scores: dict[str, list[float | None]] = {}
+    # Each collected ensemble item's true score (None where undefined), aligned with the
+    # per-judge lists; and the judges whose votes show they are not a cascade's escalation
+    # judges (a vote on an unescalated criterion, or a superseded vote).
+    judge_true_scores: list[float | None] = []
+    judges_voting_unescalated: set[str] = set()
+    judges_superseded: set[str] = set()
     judge_verdicts: dict[str, list[list[CriterionVerdict]]] = {}
     # Per-judge multi-choice predictions (items x criteria); binary cells are a None
     # placeholder. A multi-choice cell may transiently be None (genuine error-abstain);
@@ -1685,9 +1760,11 @@ def compute_metrics(
             result_warnings.append(f"Item {idx} has no ground truth, skipping")
             continue
 
-        if item_result.error is not None:
-            # GT-bearing item lost to a grading error: counted toward the raw coverage
-            # denominator (it had ground truth) but contributes no usable verdicts.
+        if _is_errored_item(item_result):
+            # GT-bearing item with no usable judgment (its grading raised, its report is an
+            # error report, or every criterion's verdict stands in for failed judge calls):
+            # counted toward the raw coverage denominator (it had ground truth) but
+            # contributes nothing.
             n_errored_items += 1
             continue
 
@@ -1719,62 +1796,66 @@ def compute_metrics(
             per_criterion_pred[c_idx].append(pred_val)
             per_criterion_true[c_idx].append(true_val)
 
-        # Score-level aggregation (RMSE/correlation/bias). A grade-FAILURE has no score
-        # (report.error set, score is None): EXCLUDE it from the paired score arrays
-        # rather than fabricating a 0.0 — a fake 0.0 would corrupt RMSE/bias and is
-        # indistinguishable from a real catastrophic score. The per-criterion verdict
-        # arrays above are unaffected (they handle errored verdicts on their own terms).
-        # Item-level errors are already skipped earlier; this catches a report-level
-        # error with no item-level error (e.g. the "No judge results" report).
-        if report.error is None and report.score is not None:
-            # For true score, need to pass the original ground truth format.
-            # compute_weighted_score expects CriterionVerdict for binary, str for multi-choice.
-            true_score_verdicts = []
-            for c_idx in range(n_criteria):
-                if criterion_types[c_idx] == "binary":
-                    true_score_verdicts.append(true_all[c_idx])
+        # The item's true score: its ground truth's weighted score under the item's effective
+        # rubric (== the global rubric when one is set, so this is a no-op there, and
+        # homogeneous per-item-rubric datasets don't raise on a missing global rubric; the
+        # predicted score was computed with the same rubric). ``None`` when the ground truth
+        # leaves nothing to score (every label abstains under SKIP).
+        # compute_weighted_score expects CriterionVerdict for binary, str for multi-choice.
+        true_score_verdicts = []
+        for c_idx in range(n_criteria):
+            if criterion_types[c_idx] == "binary":
+                true_score_verdicts.append(true_all[c_idx])
+            else:
+                # For multi-choice, pass the option label (string)
+                criterion = criteria[c_idx]
+                opt_idx = true_all[c_idx]
+                if isinstance(opt_idx, int) and 0 <= opt_idx < len(criterion.options):
+                    true_score_verdicts.append(criterion.options[opt_idx].label)
                 else:
-                    # For multi-choice, pass the option label (string)
-                    criterion = criteria[c_idx]
-                    opt_idx = true_all[c_idx]
-                    if isinstance(opt_idx, int) and 0 <= opt_idx < len(criterion.options):
-                        true_score_verdicts.append(criterion.options[opt_idx].label)
-                    else:
-                        # Default to first option if index is invalid
-                        true_score_verdicts.append(criterion.options[0].label)
+                    # Default to first option if index is invalid
+                    true_score_verdicts.append(criterion.options[0].label)
+        true_score = dataset.compute_weighted_score(
+            true_score_verdicts, rubric=dataset.get_item_rubric(idx)
+        )
 
-            # Use the item's effective rubric (== the global rubric when one is set, so this
-            # is a no-op there) so homogeneous per-item-rubric datasets don't raise on a
-            # missing global rubric. The predicted score was computed with the same rubric.
-            true_score = dataset.compute_weighted_score(
-                true_score_verdicts, rubric=dataset.get_item_rubric(idx)
-            )
-
+        # Score-level aggregation (RMSE/correlation/bias) pairs the item's score with its
+        # true score where both are defined. An item with nothing left to score has no
+        # score, and ground truth that leaves nothing to score has no true score: either
+        # way the item is left out of the pairs, never paired through a fabricated 0.0
+        # (which would corrupt RMSE/bias and is indistinguishable from a real catastrophic
+        # score). Its verdicts above count all the same.
+        if report.score is not None and true_score is not None:
             all_pred_scores.append(report.score)
             all_true_scores.append(true_score)
 
-        # Check if ensemble and collect per-judge data. Gate on the SAME score/error
-        # condition as the score-level append above so per-item arrays stay length-aligned
-        # with `all_true_scores`: a score-less report (report-level error, score None)
-        # contributes nothing to per-judge metrics or inter-judge agreement, exactly as it
-        # contributes nothing to the aggregate score metrics. (In normal operation a
-        # score-less ensemble report has empty judge_scores anyway; this also keeps a
-        # hand-built / deserialized score-less report from de-aligning the arrays.)
-        if (
-            report.error is None
-            and report.score is not None
-            and hasattr(report, "judge_scores")
-            and report.judge_scores
-        ):
+        # Per-judge data and inter-judge agreement, from every ensemble item that is not
+        # errored, with a score or without: a judge's verdicts count as the aggregate's do.
+        # ``judge_true_scores`` stays item-aligned with the per-judge lists, and a judge's
+        # own metrics pair its score with it where both are defined.
+        if hasattr(report, "judge_scores") and report.judge_scores:
             is_ensemble = True
-            for jid, score in report.judge_scores.items():
+            judge_true_scores.append(true_score)
+            for jid, entry in report.judge_scores.items():
                 if jid not in judge_scores:
                     judge_scores[jid] = []
                     judge_verdicts[jid] = []
                     judge_mc_preds[jid] = []
                     judge_errors[jid] = []
                     judge_missing[jid] = []
-                judge_scores[jid].append(score)
+                # A judge none of whose votes on the item was judged (every one failed) has
+                # no score for it, whatever the entry says (a run saved before such an entry
+                # was None).
+                judge_scores[jid].append(None if _judge_failed_every_vote(report, jid) else entry)
+            # A cascade's escalation judge votes only on escalated criteria and never casts
+            # a superseded vote; that structure, not a missing score, marks its role.
+            for cr in report.report or []:
+                escalated_criterion = getattr(cr, "escalated", False)
+                for vote in _criterion_votes(cr):
+                    if not escalated_criterion:
+                        judges_voting_unescalated.add(vote.judge_id)
+                    if vote.superseded:
+                        judges_superseded.add(vote.judge_id)
 
             # Align ground truth (all criteria) once per ensemble item.
             per_item_true.append(list(true_all))
@@ -1862,12 +1943,16 @@ def compute_metrics(
     if n_items == 0:
         raise ValueError("No valid items with ground truth found")
 
-    # Score-level metrics need ≥1 scoreable (non-errored, real-float) item. Every
-    # ground-truth item having a report-level error would leave these arrays empty
-    # (sklearn's mean_squared_error rejects empty input). Treat it like no-valid-items
-    # rather than fabricating a score.
+    # Score-level metrics need >= 1 item with both a score and a true score (errored items
+    # are already left out). With none, every graded item has nothing left to score, in
+    # its grade or its ground truth; MetricsResult holds no undefined score-level metrics,
+    # so refuse rather than fabricate one (sklearn's mean_squared_error rejects empty input).
     if not all_pred_scores:
-        raise ValueError("No valid items with a computed score found")
+        raise ValueError(
+            "No valid items with a computed score found: every graded item has nothing "
+            "left to score, in its grade or in its ground truth, so the score-level "
+            "metrics are undefined"
+        )
 
     # Reconstruct the effective criterion for any multi-choice criterion whose graded
     # reports used an auto-injected NA option OR produced a genuine None error-abstain.
@@ -2274,18 +2359,21 @@ def compute_metrics(
             # judge_scores (a None entry counts: it is present, with an undefined score). A
             # judge absent from some items has no entry to align, so its per-judge metrics
             # are not supported; say which judge, rather than failing on the length mismatch.
-            if len(judge_scores[jid]) != len(all_true_scores):
+            if len(judge_scores[jid]) != len(judge_true_scores):
                 raise ValueError(
-                    "per_judge=True needs every scored item graded by the same judges, but "
+                    "per_judge=True needs every item graded by the same judges, but "
                     f"judge {jid!r} is in the judge_scores of {len(judge_scores[jid])} of "
-                    f"{len(all_true_scores)} scored items (did the judge set change between "
+                    f"{len(judge_true_scores)} graded items (did the judge set change between "
                     "items, e.g. on a resumed run?). Use per_judge=False for the other metrics."
                 )
 
             per_judge_metrics[jid] = _compute_judge_metrics(
                 judge_id=jid,
                 judge_scores=judge_scores[jid],
-                true_scores=all_true_scores,
+                true_scores=judge_true_scores,
+                escalation_judge=(
+                    jid not in judges_voting_unescalated and jid not in judges_superseded
+                ),
                 judge_verdicts=jv,
                 judge_mc_preds=judge_mc_preds.get(jid, []),
                 judge_errors=judge_errors.get(jid, []),

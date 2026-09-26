@@ -71,8 +71,9 @@ async def main():
         query="What is the answer to life, the universe, and everything?",
     )
 
-    # result.score is `float | None` (None if the grade failed); guard before formatting.
-    print(f"Score: {result.score:.2f}" if result.score is not None else "Score: n/a (grade failed)")
+    # result.score is `float | None` (None if the grade failed or no criterion was left
+    # to score); guard before formatting.
+    print(f"Score: {result.score:.2f}" if result.score is not None else "Score: n/a")
     for criterion in result.report:
         print(f"  [{criterion.final_verdict}] {criterion.criterion.requirement}")
 

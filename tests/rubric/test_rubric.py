@@ -5,9 +5,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from autorubric import Criterion, CriterionVerdict, Rubric
+from autorubric import Criterion, CriterionVerdict, Rubric, TokenUsage
 from autorubric.graders import CriterionGrader
-from autorubric.llm import LLMConfig
+from autorubric.llm import GenerateResult, LLMConfig
 from autorubric.types import CriterionJudgment
 
 MOCK_DATASET = [
@@ -37,10 +37,17 @@ def create_mock_client() -> MagicMock:
         user_prompt: str,
         response_format: type | None = None,
         **kwargs: Any,
-    ) -> CriterionJudgment:
-        return CriterionJudgment(
-            criterion_status=CriterionVerdict.MET,
-            explanation="Mock test explanation",
+    ) -> GenerateResult:
+        return GenerateResult(
+            content="{}",
+            thinking=None,
+            raw_response=None,
+            usage=TokenUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+            cost=None,
+            parsed=CriterionJudgment(
+                criterion_status=CriterionVerdict.MET,
+                explanation="Mock test explanation",
+            ),
         )
 
     mock_client = MagicMock()
@@ -102,12 +109,13 @@ async def test_rubric():
             assert correctness_report is not None, f"Item {idx + 1}: Correctness report is None"
             assert formatting_report is not None, f"Item {idx + 1}: Formatting report is None"
 
-            # Normalized scores are 0-1
-            assert 0 <= correctness_report.score <= 1, (
-                f"Item {idx + 1}: Correctness score {correctness_report.score} out of range"
+            # Every criterion is met, so both normalized scores are 1.0.
+            assert correctness_report.error is None and formatting_report.error is None
+            assert correctness_report.score == 1.0, (
+                f"Item {idx + 1}: Correctness score {correctness_report.score}"
             )
-            assert 0 <= formatting_report.score <= 1, (
-                f"Item {idx + 1}: Formatting score {formatting_report.score} out of range"
+            assert formatting_report.score == 1.0, (
+                f"Item {idx + 1}: Formatting score {formatting_report.score}"
             )
 
             assert correctness_report.report is not None, (

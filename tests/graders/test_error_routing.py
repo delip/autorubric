@@ -381,8 +381,9 @@ async def test_multi_choice_infrastructure_failure_is_na(mock_llm_config):
     assert cr.error is not None
     assert cr.error.startswith("infrastructure:")
 
-    # NA criterion excluded from scoring under SKIP: only criterion present -> 0.0.
-    assert report.score == 0.0
+    # Its only criterion failed, so nothing judged the item: it has no score (#18).
+    assert report.score is None
+    assert report.error is not None and report.error.startswith("Every criterion's judgment failed")
 
 
 @pytest.mark.asyncio
@@ -418,7 +419,9 @@ async def test_multi_choice_unknown_with_na_option_does_not_select_na(mock_llm_c
     assert cr.final_multi_choice_verdict is not None
     assert cr.final_multi_choice_verdict.na is False
     assert cr.final_multi_choice_verdict.selected_index == 1
-    assert report.score == 0.0
+    # Its only criterion failed, so nothing judged the item: it has no score (#18).
+    assert report.score is None
+    assert report.error is not None and report.error.startswith("Every criterion's judgment failed")
 
 
 @pytest.mark.asyncio
@@ -452,7 +455,9 @@ async def test_multi_choice_unknown_positive_weight_picks_lowest_value(mock_llm_
     assert cr.final_multi_choice_verdict.selected_index == 0
     assert cr.final_multi_choice_verdict.value == 0.0
     assert cr.final_multi_choice_verdict.na is False
-    assert report.score == 0.0
+    # Its only criterion failed, so nothing judged the item: it has no score (#18).
+    assert report.score is None
+    assert report.error is not None and report.error.startswith("Every criterion's judgment failed")
 
 
 @pytest.mark.asyncio
@@ -579,7 +584,8 @@ async def test_ensemble_forced_choice_all_fail_clean_abstain():
 
     With no NA option to abstain into, each per-judge error-abstain has selected_index=None
     (na=True), and the aggregate must be a GENUINE abstain: na=True with selected_index/label
-    None — never na=True pointing at a real scored option. Excluded under SKIP -> 0.0.
+    None — never na=True pointing at a real scored option. Nothing judged the item, so it
+    has no score.
     """
     rubric = Rubric(
         [
@@ -629,7 +635,8 @@ async def test_ensemble_forced_choice_all_fail_clean_abstain():
     # Every per-judge vote is a clean None-abstain.
     assert cr.multi_choice_votes
     assert all(v.na and v.selected_index is None for v in cr.multi_choice_votes)
-    assert report.score == 0.0
+    assert report.score is None
+    assert report.error is not None and report.error.startswith("Every criterion's judgment failed")
 
 
 # =============================================================================
@@ -1051,5 +1058,159 @@ async def test_binary_judgment_missing_a_field_fails_on_the_first_one_read(
     assert vote.reason.startswith("Judge call failed (unknown): ")
     assert vote.reason.endswith(f"has no attribute {missing_field!r}")
     assert cr.final_verdict == CriterionVerdict.UNMET
-    # The worst case counts against the score; it is not excluded like an abstain.
-    assert report.score == pytest.approx(0.0)
+    # The worst case stands in for the failed call, but it is no judgment, and this was
+    # the item's only criterion: nothing judged the item, so it has no score (#18).
+    assert report.score is None and report.error is not None
+
+
+# =============================================================================
+# Items with nothing judged, or nothing left to score, have no score (#18)
+# =============================================================================
+
+from autorubric import CannotAssessConfig, CannotAssessStrategy  # noqa: E402
+
+TWO_BINARY = Rubric(
+    [
+        Criterion(name="good", requirement="Is good", weight=10.0),
+        Criterion(name="bad", requirement="Is bad", weight=-3.0),
+    ]
+)
+STRATEGIES = {
+    "skip": CannotAssessConfig(),
+    "zero": CannotAssessConfig(strategy=CannotAssessStrategy.ZERO),
+}
+FAILURES = {
+    "infrastructure": lambda: litellm.Timeout("timed out", model="m", llm_provider="p"),
+    "parse": lambda: ValueError("bad json"),
+    "unknown": lambda: RuntimeError("boom"),
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("strategy", list(STRATEGIES))
+@pytest.mark.parametrize("category", list(FAILURES))
+async def test_an_item_whose_every_judgment_failed_has_no_score(
+    mock_llm_config, category, strategy
+):
+    """The verdicts standing in for failed calls keep each criterion routed as before, but
+    an item nothing judged has no score, under any strategy: ``score``, ``raw_score`` and
+    ``llm_raw_score`` are None and ``error`` says so, as for any failed grade."""
+    with patch(
+        "autorubric.graders.criterion_grader.LLMClient",
+        return_value=_client_raising(FAILURES[category]()),
+    ):
+        grader = CriterionGrader(
+            judge_model_config=mock_llm_config, cannot_assess_config=STRATEGIES[strategy]
+        )
+        report = await TWO_BINARY.grade("submission", grader=grader)
+
+    assert report.report is not None and len(report.report) == 2
+    assert all(cr.error and cr.error.startswith(f"{category}:") for cr in report.report)
+    assert (report.score, report.raw_score, report.llm_raw_score) == (None, None, None)
+    assert report.error is not None and report.error.startswith("Every criterion's judgment failed")
+    assert f"{category}:" in report.error
+    assert report.judge_scores == {"default": None}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("strategy", "expected"), [("skip", None), ("zero", 0.0)], ids=["skip", "zero"]
+)
+async def test_an_item_with_nothing_left_to_score_has_no_score(mock_llm_config, strategy, expected):
+    """Judges that genuinely answer CANNOT_ASSESS on every criterion leave nothing to score
+    under SKIP: no score, and no error either, since nothing failed. ZERO keeps the
+    abstentions in the score."""
+    client = MagicMock()
+    client.generate = AsyncMock(return_value=_ok_binary_result(CriterionVerdict.CANNOT_ASSESS))
+    with patch("autorubric.graders.criterion_grader.LLMClient", return_value=client):
+        grader = CriterionGrader(
+            judge_model_config=mock_llm_config, cannot_assess_config=STRATEGIES[strategy]
+        )
+        report = await TWO_BINARY.grade("submission", grader=grader)
+
+    assert report.error is None
+    assert report.score == expected and report.raw_score == expected
+    assert report.judge_scores == {"default": expected}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("category", "strategy"),
+    [("unknown", "skip"), ("infrastructure", "zero")],
+    ids=["unknown-skip", "infrastructure-zero"],
+)
+async def test_a_judge_whose_every_vote_failed_has_no_score_for_the_item(category, strategy):
+    """Its stand-in verdicts would score (the worst case; or an abstention ZERO keeps), yet
+    it judged nothing: its ``judge_scores`` entry is None. A judge that answered decides
+    the item, which keeps its score and has no error."""
+    down, up = LLMConfig(model="down"), LLMConfig(model="up")
+    clients = {"down": _client_raising(FAILURES[category]())}
+    clients["up"] = MagicMock()
+    clients["up"].generate = AsyncMock(return_value=_ok_binary_result(CriterionVerdict.MET))
+
+    def client(config: LLMConfig, *, cache_namespace: str | None = None) -> MagicMock:
+        return clients[config.model]
+
+    with patch("autorubric.graders.criterion_grader.LLMClient", side_effect=client):
+        grader = CriterionGrader(
+            judges=[JudgeSpec(down, "down"), JudgeSpec(up, "up")],
+            cannot_assess_config=STRATEGIES[strategy],
+        )
+        report = await TWO_BINARY.grade("submission", grader=grader)
+
+    assert report.error is None and report.score is not None
+    assert report.judge_scores["down"] is None
+    assert report.judge_scores["up"] == pytest.approx(10.0 / 10.0 - 3.0 / 10.0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("category", "expected"), [("unknown", 0.5), ("infrastructure", 1.0)], ids=["unknown", "infra"]
+)
+async def test_a_failed_criterion_among_judged_ones_is_scored_by_its_stand_in(
+    mock_llm_config, category, expected
+):
+    """An item some criterion of which was judged keeps its score, and a failed criterion's
+    stand-in is scored by its kind: an unknown failure's worst case counts against the score,
+    while an abstention (infrastructure or parse) is left out under SKIP."""
+    rubric = Rubric(
+        [
+            Criterion(name="good", requirement="Is good", weight=10.0),
+            Criterion(name="complete", requirement="Is complete", weight=10.0),
+        ]
+    )
+    error = FAILURES[category]()
+
+    async def generate(*, user_prompt: str, **_: Any) -> GenerateResult:
+        if "\nIs good\n" in user_prompt:
+            raise error
+        return _ok_binary_result(CriterionVerdict.MET)
+
+    client = MagicMock()
+    client.generate = generate
+    with patch("autorubric.graders.criterion_grader.LLMClient", return_value=client):
+        grader = CriterionGrader(judge_model_config=mock_llm_config)
+        report = await rubric.grade("submission", grader=grader)
+
+    assert report.error is None
+    assert report.score == pytest.approx(expected)
+
+
+@pytest.mark.asyncio
+async def test_the_error_of_an_item_nothing_judged_names_the_first_failure(mock_llm_config):
+    """The report's error names the first criterion's failure and counts the other
+    distinct ones; each criterion keeps its own."""
+    errors = {"Is good": RuntimeError("boom"), "Is bad": ValueError("bad json")}
+
+    async def generate(*, user_prompt: str, **_: Any) -> GenerateResult:
+        raise next(error for requirement, error in errors.items() if requirement in user_prompt)
+
+    client = MagicMock()
+    client.generate = generate
+    with patch("autorubric.graders.criterion_grader.LLMClient", return_value=client):
+        grader = CriterionGrader(judge_model_config=mock_llm_config)
+        report = await TWO_BINARY.grade("submission", grader=grader)
+
+    assert report.error == "Every criterion's judgment failed: unknown: boom (and 1 other error)"
+    assert report.report is not None
+    assert [cr.error for cr in report.report] == ["unknown: boom", "parse: bad json"]

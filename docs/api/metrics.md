@@ -78,10 +78,54 @@ metrics = result.compute_metrics(
 )
 
 for judge_id, jm in metrics.per_judge.items():
-    # jm.criterion_accuracy is `float | None` (None when undefined); score_rmse is always a float.
+    # jm.criterion_accuracy and jm.score_rmse are `float | None`. The score fields are None
+    # for a judge with no score to compare, e.g. a cascade's escalation judge or a judge
+    # whose every call failed.
     acc = f"{jm.criterion_accuracy:.1%}" if jm.criterion_accuracy is not None else "n/a"
-    print(f"{judge_id}: Accuracy={acc}, RMSE={jm.score_rmse:.4f}")
+    rmse = f"{jm.score_rmse:.4f}" if jm.score_rmse is not None else "n/a"
+    print(f"{judge_id}: Accuracy={acc}, RMSE={rmse}")
 ```
+
+A judge's score on an item is `None` when every one of its calls on that item failed (it
+judged nothing) or none of its verdicts is left to score, and always for a cascade's
+escalation judge, which never judges a whole rubric. Its score fields pair its score with
+the ground-truth score where both are defined, and are `None` when there is no such item. A
+cascade's escalation judge has `coverage="escalated"`; any other judge, even one whose every
+call failed, has `coverage="full"`.
+
+## Errored Items and Score Pairs
+
+`compute_metrics` leaves an **errored item** out of every metric, its verdicts included. An
+item is errored when:
+
+- its `ItemResult.error` is set (its grading raised, or returned an error report), or
+- its report's `error` is set, as in the report of an item whose every criterion's judgment
+  failed, whose `error` begins `Every criterion's judgment failed:`, or
+- every one of its criteria stands in for a failed judge call (each criterion report's
+  `is_error`).
+
+The last rule matters for runs saved by an earlier release, which gave an item whose every
+judgment failed a fabricated score (for example 0.0 under `SKIP`) and no error. Metrics
+recomputed from such a run leave that item out too, and read a judge's score on an item where
+every one of its calls failed as `None`.
+
+Errored items are reported in `warnings` ("... excluded from metrics because grading errored
+..."), and counted in `coverage_stats.n_errored` (under the default `exclude` modes; a dataset
+whose items have different rubrics, reported through `pooled_by_scale`, has no
+`coverage_stats`). If every item with ground truth is errored, `compute_metrics` raises
+`ValueError("No valid items with ground truth found")`. An item with only some criteria failed
+is not errored: its failed criteria's stand-in verdicts count like any other verdict.
+
+The score-level metrics (`score_rmse`, `score_mae`, the correlations, `bias` and the bootstrap
+`rmse_ci`) pair an item's score with its ground-truth score only where both are defined. An
+item with nothing left to score (under `SKIP`, every criterion abstained), or whose ground
+truth abstains on every criterion, keeps its verdicts in the criterion-level metrics but has no
+score pair. If no item has a score pair, `compute_metrics` raises a `ValueError` that begins
+"No valid items with a computed score found" and says why. (For items with different rubrics,
+reported through `pooled_by_scale`, the score-level metrics pool rubric-point values instead of
+item scores, with no such refusal: `score_rmse` and `score_mae` fall back to 0.0 when every
+point abstains.) Per-judge metrics and inter-judge agreement use every item that is not
+errored, with a score or without.
 
 ## Metric Fields
 
@@ -105,17 +149,17 @@ for judge_id, jm in metrics.per_judge.items():
 | `mean_krippendorff_alpha` | Macro mean of the per-criterion Krippendorff's α (inter-judge). `float | None`. |
 | `cannot_assess_mode` / `na_mode` | How CANNOT_ASSESS / NA were handled when the metrics were computed (`exclude` / `as_unmet` / `as_category`). Frozen on the result and round-tripped by `to_file` so a serialized number is never ambiguous among the estimands. |
 | `n_samples` | Total paired observations contributing to the aggregate metrics. `int | None`. |
-| `coverage_stats` | Under the `exclude` mode, how much of the raw paired sample survived abstention/error exclusion (`CoverageStats | None`). Counts `n_total` (raw pre-exclusion denominator), `n_covered` (== per-criterion `n_samples`), and `n_errored`; rates `coverage`, `judge_abstain_rate`, `gt_abstain_rate`, `union_exclusion_rate`, `error_rate` are each `float | None` (`None` when `n_total == 0`). |
+| `coverage_stats` | Under the `exclude` mode, how much of the raw paired sample survived abstention/error exclusion (`CoverageStats | None`). Counts `n_total` (raw pre-exclusion denominator), `n_covered` (== per-criterion `n_samples`), and `n_errored` (errored items, see [Errored Items and Score Pairs](#errored-items-and-score-pairs)); rates `coverage`, `judge_abstain_rate`, `gt_abstain_rate`, `union_exclusion_rate`, `error_rate` are each `float | None` (`None` when `n_total == 0`). |
 | `per_criterion` | Per-criterion metrics breakdown (polymorphic: `CriterionMetrics`, `OrdinalCriterionMetrics`, `NominalCriterionMetrics`). Their per-criterion numeric fields (`accuracy`, `precision`, `recall`, `f1`, `kappa`, `weighted_kappa`, `adjacent_accuracy`, per-option metrics) are likewise `float | None` when undefined. |
-| `score_rmse` | RMSE of cumulative scores (always a `float`). |
-| `score_mae` | MAE of cumulative scores (always a `float`). |
+| `score_rmse` | RMSE of cumulative scores (always a `float`), over the items whose score and ground-truth score are both defined (see [Errored Items and Score Pairs](#errored-items-and-score-pairs)). |
+| `score_mae` | MAE of cumulative scores (always a `float`), over the same items as `score_rmse`. |
 | `score_spearman` | Spearman rank correlation (`CorrelationResult`). Its `.coefficient` is `float | None` — `None` for a constant array or fewer than 3 samples. |
 | `score_kendall` | Kendall tau correlation (`CorrelationResult`). `.coefficient` is `float | None` (`None` for a constant array or < 3 samples). |
 | `score_pearson` | Pearson correlation (`CorrelationResult`). `.coefficient` is `float | None` (`None` for a constant array or < 3 samples). |
 | `bias` | Systematic bias analysis (`BiasResult`). Its `.mean_bias` / `.std_bias` are `float | None` — `mean_bias` is `None` at n=0 and `std_bias` is `None` for n < 2. |
 | `bootstrap` | Bootstrap confidence intervals (`BootstrapResults`, if enabled) |
 | `per_judge` | Per-judge metrics for ensemble (`dict[str, JudgeMetrics]`, if enabled) |
-| `n_items` | Number of items used in computation |
+| `n_items` | Number of items used in computation (items with ground truth that are not errored) |
 | `n_criteria` | Number of criteria |
 | `n_binary_criteria` | Number of binary criteria |
 | `n_ordinal_criteria` | Number of ordinal multi-choice criteria |
@@ -270,7 +314,7 @@ Statistics for CANNOT_ASSESS handling in binary criteria — the binary parallel
 
 ## CoverageStats
 
-How much of the raw paired sample survived abstention/error exclusion. Built only under the `exclude` handling mode (under `as_unmet` / `as_category` no observation is dropped, so coverage would be trivially `1.0` and these stats are left `None`). `n_total` is the raw pre-exclusion denominator and `n_covered` equals the per-criterion `n_samples`; every rate (`coverage`, `judge_abstain_rate`, `gt_abstain_rate`, `union_exclusion_rate`, `error_rate`) is `float | None`, `None` when its denominator is zero.
+How much of the raw paired sample survived abstention/error exclusion. Built only under the `exclude` handling mode (under `as_unmet` / `as_category` no observation is dropped, so coverage would be trivially `1.0` and these stats are left `None`). `n_total` is the raw pre-exclusion denominator, `n_covered` equals the per-criterion `n_samples`, and `n_errored` counts the [errored items](#errored-items-and-score-pairs); every rate (`coverage`, `judge_abstain_rate`, `gt_abstain_rate`, `union_exclusion_rate`, `error_rate`) is `float | None`, `None` when its denominator is zero.
 
 ::: autorubric.metrics.CoverageStats
     options:

@@ -76,8 +76,8 @@ async def main():
     )
 
     # 4. Review results. result.score is `float | None` — a float 0.0-1.0, or None
-    # if the grade failed (so guard before formatting).
-    print(f"Score: {result.score:.2f}" if result.score is not None else "Score: n/a (grade failed)")
+    # if the grade failed or no criterion was left to score (so guard before formatting).
+    print(f"Score: {result.score:.2f}" if result.score is not None else "Score: n/a")
     for criterion in result.report:
         print(f"  [{criterion.final_verdict}] {criterion.criterion.requirement}")
         print(f"    -> {criterion.final_reason}")
@@ -161,6 +161,7 @@ The final score is calculated from weighted verdicts:
 - Positive criteria: MET earns the weight, UNMET earns 0
 - Negative criteria: MET subtracts the weight, UNMET contributes 0
 - Score is normalized to 0-1 range by default
+- `CANNOT_ASSESS` criteria are left out by default; when every criterion is `CANNOT_ASSESS`, no criterion is left to score and the score is `None`, as it is when the grade failed (see [CANNOT_ASSESS Handling](api/cannot-assess.md))
 
 $$
 \text{score} = \max\left(0, \min\left(1, \frac{\sum_{i=1}^{n} \mathbb{1}[\text{verdict}_i = \text{MET}] \cdot w_i}{\sum_{i=1}^{n} \max(0, w_i)}\right)\right)

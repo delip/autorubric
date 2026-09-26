@@ -1160,6 +1160,46 @@ class TestImprovementRunner:
             assert result.best_rubric is rubric
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("error", "message"),
+        [
+            (None, "nothing was left to score"),
+            (
+                "Every criterion's judgment failed: infrastructure: down",
+                "failed .no score.: Every criterion.s judgment",
+            ),
+        ],
+        ids=["nothing-left-to-score", "failed"],
+    )
+    async def test_a_quality_evaluation_without_a_score_stops_the_run_and_says_why(
+        self, error, message
+    ):
+        """No score cannot drive convergence or acceptance, so the run stops; the message
+        tells a failed evaluation from one that had nothing left to score (#18)."""
+        from autorubric.meta._improve import ImprovementRunner
+
+        rubric = Rubric([Criterion(name="clarity", weight=1.0, requirement="Is clear")])
+        no_score = _make_ensemble_report(
+            [_make_ensemble_criterion_report("clarity", 1.0, CriterionVerdict.CANNOT_ASSESS)]
+        ).model_copy(update={"score": None, "raw_score": None, "error": error})
+        config = ImprovementConfig(
+            eval_llm=LLMConfig(model="test-model"),
+            revision_llm=LLMConfig(model="test-model"),
+            save_artifacts=False,
+            show_progress=False,
+        )
+
+        with (
+            patch(
+                "autorubric.meta._improve.evaluate_rubric_in_context",
+                new_callable=AsyncMock,
+                return_value=no_score,
+            ),
+            pytest.raises(RuntimeError, match=message),
+        ):
+            await ImprovementRunner(rubric, "Write a summary", config=config).run()
+
+    @pytest.mark.asyncio
     async def test_requires_task_prompt_for_in_context(self):
         from autorubric.meta._improve import ImprovementRunner
 
@@ -1640,6 +1680,40 @@ class TestValidateAgreementCallback:
             )
 
         assert cost == pytest.approx(0.03)
+
+
+class TestValidateAgreementFailedGrades:
+    @pytest.mark.asyncio
+    async def test_a_sample_whose_grade_failed_measures_no_agreement(self):
+        """Every judgment of the second sample failed: its stand-in votes all "agree", yet it
+        measured nothing, so it is left out of the agreement (#18). Its cost still counts."""
+        rubric = Rubric([Criterion(name="x", weight=1.0, requirement="Test")])
+        judged = _make_ensemble_report(
+            [_make_ensemble_criterion_report("x", 1.0, CriterionVerdict.MET, agreement=0.5)],
+            score=1.0,
+            mean_agreement=0.5,
+        )
+        failed = _make_ensemble_report(
+            [_make_ensemble_criterion_report("x", 1.0, CriterionVerdict.CANNOT_ASSESS)],
+            mean_agreement=1.0,
+        ).model_copy(
+            update={
+                "score": None,
+                "raw_score": None,
+                "error": "Every criterion's judgment failed: infrastructure: down",
+            }
+        )
+
+        with patch.object(rubric, "grade", new_callable=AsyncMock, side_effect=[judged, failed]):
+            agreement, per_crit, cost = await validate_agreement(
+                rubric,
+                ["sample1", "sample2"],
+                [JudgeSpec(judge_model_config=LLMConfig(model="test"), judge_id="j1")],
+            )
+
+        assert agreement == pytest.approx(0.5)
+        assert per_crit == {"x": pytest.approx(0.5)}
+        assert cost == pytest.approx(0.02)
 
 
 # ============================================================================
@@ -3862,3 +3936,95 @@ class TestSerializeIterationHeldOut:
         data = _serialize_iteration(iter_result)
         assert "quality_report" not in data
         assert "held_out_diagnostics" not in data
+
+
+# ============================================================================
+# validate_ground_truth: items with no score to compare, and failed grades (#18)
+# ============================================================================
+
+
+class TestValidateGroundTruthWithoutAScore:
+    @staticmethod
+    def _rubric_and_dataset(labels: list[list[CriterionVerdict]]) -> tuple[Rubric, RubricDataset]:
+        rubric = Rubric([Criterion(name="a", weight=10.0, requirement="First")])
+        items = [
+            DataItem(submission=f"s{i}", description=f"d{i}", ground_truth=list(gt))
+            for i, gt in enumerate(labels)
+        ]
+        return rubric, RubricDataset(prompt="task", rubric=rubric, items=items)
+
+    @staticmethod
+    def _graded(verdict: CriterionVerdict, score: float | None) -> EnsembleEvaluationReport:
+        report = _make_ensemble_report([_make_ensemble_criterion_report("a", 10.0, verdict)])
+        return report.model_copy(update={"score": score, "raw_score": score})
+
+    @pytest.mark.asyncio
+    async def test_items_with_no_score_to_compare_are_left_out(self):
+        """Ground truth that abstains has no expected score, and a grade that abstains (with
+        nothing failed) has no score: neither item is compared, and the diagnostics stay
+        aligned with the compared pairs."""
+        rubric, dataset = self._rubric_and_dataset(
+            [
+                [CriterionVerdict.MET],
+                [CriterionVerdict.CANNOT_ASSESS],
+                [CriterionVerdict.MET],
+                [CriterionVerdict.UNMET],
+            ]
+        )
+        expected = compute_expected_scores(dataset)
+        assert expected == [1.0, None, 1.0, 0.0]
+        met = self._graded(CriterionVerdict.MET, 1.0)
+        unmet = self._graded(CriterionVerdict.UNMET, 0.0)
+        nothing = self._graded(CriterionVerdict.CANNOT_ASSESS, None)
+        reports: list = []
+
+        with patch.object(
+            rubric, "grade", new_callable=AsyncMock, side_effect=[met, met, nothing, unmet]
+        ):
+            metric, per_item, cost = await validate_ground_truth(
+                rubric,
+                dataset,
+                expected,
+                CriterionGrader(judge_model_config=LLMConfig(model="test")),
+                _item_reports=reports,
+            )
+
+        assert per_item == [(1.0, 1.0), (0.0, 0.0)]
+        assert reports == [met, unmet]
+        assert metric == pytest.approx(1.0)  # two pairs: 1 - MAE
+        assert cost == pytest.approx(0.04)  # every graded item's cost counts
+
+    @pytest.mark.asyncio
+    async def test_no_item_to_compare_leaves_the_metric_unmeasured(self):
+        rubric, dataset = self._rubric_and_dataset(
+            [[CriterionVerdict.CANNOT_ASSESS], [CriterionVerdict.CANNOT_ASSESS]]
+        )
+        met = self._graded(CriterionVerdict.MET, 1.0)
+
+        with patch.object(rubric, "grade", new_callable=AsyncMock, side_effect=[met, met]):
+            metric, per_item, _ = await validate_ground_truth(
+                rubric,
+                dataset,
+                compute_expected_scores(dataset),
+                CriterionGrader(judge_model_config=LLMConfig(model="test")),
+            )
+
+        assert (metric, per_item) == (None, [])
+
+    @pytest.mark.asyncio
+    async def test_a_failed_grade_stops_the_validation(self):
+        rubric, dataset = self._rubric_and_dataset([[CriterionVerdict.MET]])
+        failed = self._graded(CriterionVerdict.CANNOT_ASSESS, None).model_copy(
+            update={"error": "Every criterion's judgment failed: infrastructure: down"}
+        )
+
+        with (
+            patch.object(rubric, "grade", new_callable=AsyncMock, return_value=failed),
+            pytest.raises(RuntimeError, match="Every criterion's judgment failed"),
+        ):
+            await validate_ground_truth(
+                rubric,
+                dataset,
+                compute_expected_scores(dataset),
+                CriterionGrader(judge_model_config=LLMConfig(model="test")),
+            )

@@ -686,7 +686,8 @@ async def run_experiment_from_config(config_path: str):
 
     for item_result in result.item_results:
         print(f"\n  {item_result.item.description}")
-        # report.score is `float | None` (None if that item's grade failed).
+        # report.score is `float | None` (None if that item's grade failed or no criterion
+        # was left to score).
         score = item_result.report.score
         print(f"    Score: {score:.2f}" if score is not None else "    Score: n/a")
 

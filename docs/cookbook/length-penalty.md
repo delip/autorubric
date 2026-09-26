@@ -189,7 +189,8 @@ async def main():
     concise_words = len(concise_summary.split())
     verbose_words = len(verbose_summary.split())
 
-    # result.score is `float | None` (None if the grade failed); render None as "n/a".
+    # result.score is `float | None` (None if the grade failed or no criterion was left to
+    # score); render None as "n/a".
     def fmt(x):
         return f"{x:.2f}" if x is not None else "n/a"
 
@@ -482,7 +483,8 @@ async def main():
             query="Summarize Q3 business performance for executive review."
         )
 
-        # .score is `float | None` (None if the grade failed); only diff when both defined.
+        # .score is `float | None` (None if the grade failed or no criterion was left to
+        # score); only diff when both defined.
         with_pen, no_pen = result_with_pen.score, result_no_pen.score
         if with_pen is not None and no_pen is not None:
             delta = with_pen - no_pen
@@ -509,7 +511,8 @@ async def main():
     )
 
     print(f"Word count: {len(verbose['text'].split())}")
-    # score / raw_score are `float | None` (None if the grade failed); guard before formatting.
+    # score / raw_score are `float | None` (None if the grade failed or no criterion was
+    # left to score); guard before formatting.
     print(f"Final score: {result.score:.2f}" if result.score is not None else "Final score: n/a")
     print(f"Raw score: {result.raw_score:.2f}" if result.raw_score is not None else "Raw score: n/a")
     print("\nPer-criterion verdicts:")

@@ -461,3 +461,42 @@ class TestHeldOutHtmlReport:
         assert "fleiss" not in lowered
         assert "pearson" not in lowered
         assert "positive-rate drift" not in lowered
+
+
+# ---------------------------------------------------------------------------
+# Failed grades (#18)
+# ---------------------------------------------------------------------------
+
+
+class TestHeldOutFailedGrades:
+    @pytest.mark.asyncio
+    async def test_an_item_whose_grade_failed_counts_only_in_the_coverage_denominator(
+        self,
+    ) -> None:
+        """Every judgment of the second item failed, and worst-case UNMETs stand in. They are
+        no judgments: as an errored item in ``compute_metrics``, the item counts in each
+        criterion's raw denominator, so coverage drops, and in no tally or exemplar."""
+        rubric = _two_criterion_rubric()
+        met = [CriterionVerdict.MET, CriterionVerdict.MET]
+        ds = _dataset([met, met])
+        failed = _report([CriterionVerdict.UNMET, CriterionVerdict.UNMET]).model_copy(
+            update={
+                "score": None,
+                "raw_score": None,
+                "error": "Every criterion's judgment failed: unknown: x",
+            }
+        )
+
+        with patch.object(
+            rubric, "grade", new_callable=AsyncMock, side_effect=[_report(met), failed]
+        ):
+            result = await validate_held_out(
+                rubric, ds, _mock_grader(), task_prompt="Write an essay"
+            )
+
+        for cr in result.per_criterion:
+            assert cr.n_samples == 1
+            assert cr.accuracy == 1.0
+            assert cr.coverage == 0.5
+            assert cr.ca_rate == 0.0
+            assert not cr.disagreement_exemplars

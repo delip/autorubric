@@ -163,7 +163,7 @@ async def test_skip_strategy_excludes_cannot_assess_from_scoring(mock_llm_config
 
 
 @pytest.mark.asyncio
-async def test_skip_strategy_all_cannot_assess_returns_zero(mock_llm_config):
+async def test_skip_strategy_all_cannot_assess_has_no_score(mock_llm_config):
     """Test SKIP strategy when all criteria are CANNOT_ASSESS."""
     rubric = Rubric(
         [
@@ -195,8 +195,9 @@ async def test_skip_strategy_all_cannot_assess_returns_zero(mock_llm_config):
         grader = CriterionGrader(judge_model_config=mock_llm_config)
         result = await rubric.grade("Test", grader=grader)
 
-        # All excluded -> 0 score
-        assert result.score == 0.0
+        # All excluded: nothing is left to score, so there is no score (and no error,
+        # since nothing failed) (#18).
+        assert result.score is None and result.error is None
         assert result.cannot_assess_count == 2
 
 

@@ -40,7 +40,7 @@ from autorubric.prompts import (
     build_multi_choice_user_prompt,
     build_user_prompt,
 )
-from autorubric.scoring import score_reports
+from autorubric.scoring import _every_judgment_failed, score_reports
 from autorubric.types import (
     AggregatedMultiChoiceVerdict,
     AggregationStrategy,
@@ -789,7 +789,7 @@ def _failed_judgment_result(
 def _ensemble_evaluation_report(
     ensemble_reports: list[EnsembleCriterionReport],
     judge_scores: dict[str, float | None],
-    score: Callable[[list[CriterionReport], bool], float],
+    score: Callable[[list[CriterionReport], bool], float | None],
     *,
     normalize: bool,
     token_usage: TokenUsage | None,
@@ -798,9 +798,14 @@ def _ensemble_evaluation_report(
     """An item's report, from its criteria's ensemble reports.
 
     ``score`` and ``raw_score`` are the weighted score over the final verdicts (normalized as
-    ``normalize`` says, and raw), ``mean_agreement`` is the criteria's mean ``agreement``
-    (``None`` for an empty rubric, never a fabricated 1.0), and ``cannot_assess_count``
-    counts the criteria whose final verdict abstains (``CANNOT_ASSESS`` or an NA option).
+    ``normalize`` says, and raw), ``None`` when no criterion is left to score. When every
+    criterion's judgment failed (its verdict stands in for failed judge calls; in a
+    cascade, the escalation judges', even where the decision model judged it), the item
+    has no score at all: ``score``, ``raw_score`` and ``llm_raw_score`` are ``None`` and
+    ``error`` says so, as for any failed grade, whatever the ``CannotAssessStrategy``.
+    ``mean_agreement`` is the criteria's mean ``agreement`` (``None`` for an empty rubric,
+    never a fabricated 1.0), and ``cannot_assess_count`` counts the criteria whose final
+    verdict abstains (``CANNOT_ASSESS`` or an NA option).
     Shared by ``CriterionGrader.aggregate`` and the offline cascade replay
     (``autorubric.escalation.replay_escalation``), so a replayed report is assembled
     exactly as a live one.
@@ -808,7 +813,8 @@ def _ensemble_evaluation_report(
     Args:
         ensemble_reports: The item's criterion reports, in rubric order.
         judge_scores: Each judge's own score over the rubric (``None`` where undefined).
-        score: The weighted scoring of criterion reports, called as
+        score: The weighted scoring of criterion reports (``None`` when none is left to
+            score), called as
             ``score(reports, normalize)`` (``score_reports`` under the grader's
             ``CannotAssessConfig``).
         normalize: Whether ``score`` is normalized to [0, 1].
@@ -847,8 +853,20 @@ def _ensemble_evaluation_report(
                     reason=er.final_reason,
                 )
             )
-    final_score = score(final_reports, normalize)
-    raw_score = score(final_reports, False)
+    error: str | None = None
+    final_score: float | None = None
+    raw_score: float | None = None
+    if _every_judgment_failed(ensemble_reports):
+        # Every criterion's judgment failed: its verdict only stands in for failed judge
+        # calls, so the item has no score, and its report says why, as a failed grade's does.
+        errors = list(dict.fromkeys(er.error for er in ensemble_reports if er.error is not None))
+        error = f"Every criterion's judgment failed: {errors[0]}"
+        if len(errors) > 1:
+            others = len(errors) - 1
+            error += f" (and {others} other error{'s' if others > 1 else ''})"
+    else:
+        final_score = score(final_reports, normalize)
+        raw_score = score(final_reports, False)
 
     # Calculate agreement
     mean_agreement = (
@@ -875,6 +893,7 @@ def _ensemble_evaluation_report(
         cannot_assess_count=cannot_assess_count,
         token_usage=token_usage,
         completion_cost=completion_cost,
+        error=error,
     )
 
 
@@ -2289,12 +2308,15 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 )
 
         # Calculate per-judge scores: a primary judge's over its own verdicts on every
-        # criterion; an escalation judge's is undefined, None by role on every item.
+        # criterion; an escalation judge's is undefined, None by role on every item. A
+        # judge none of whose votes on the item it judged (every call failed) has no score
+        # for it either, whatever its stand-in verdicts would score.
         judge_scores: dict[str, float | None] = {}
         for judge_result in judge_results:
             judge_scores[judge_result.judge_id] = (
                 self._calculate_score_from_reports(judge_result.reports, normalize)
                 if judge_result.role == "primary"
+                and not _every_judgment_failed(judge_result.reports)
                 else None
             )
 
@@ -2623,6 +2645,7 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
 
     def _calculate_score_from_reports(
         self, reports: list[CriterionReport], normalize: bool
-    ) -> float:
-        """Calculate score from criterion reports via the shared scoring core."""
+    ) -> float | None:
+        """Calculate score from criterion reports via the shared scoring core (``None``
+        when no criterion is left to score)."""
         return score_reports(reports, self._cannot_assess_config, normalize)

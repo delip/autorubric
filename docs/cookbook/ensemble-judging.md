@@ -169,8 +169,8 @@ result = asyncio.run(main())
 ### Step 5: Analyze Judge Agreement
 
 ```python
-# Overall score and agreement. score / mean_agreement are `float | None`
-# (None on a failed grade); guard before formatting.
+# Overall score and agreement. score / mean_agreement are `float | None` (score is None
+# on a failed grade or when no criterion was left to score); guard before formatting.
 print(f"Final Score: {result.score:.2f}" if result.score is not None else "Final Score: n/a")
 print(
     f"Mean Agreement: {result.mean_agreement:.1%}"
@@ -178,10 +178,11 @@ print(
     else "Mean Agreement: n/a"
 )
 
-# Per-judge scores
+# Per-judge scores. A judge's score is None when every one of its calls failed or none
+# of its verdicts is left to score.
 print("\nPer-Judge Scores:")
 for judge_id, score in result.judge_scores.items():
-    print(f"  {judge_id}: {score:.2f}")
+    print(f"  {judge_id}: {score:.2f}" if score is not None else f"  {judge_id}: n/a")
 
 # Per-criterion voting breakdown
 print("\nPer-Criterion Votes:")
@@ -621,7 +622,8 @@ async def main():
         print(f"\n{'=' * 70}")
         print(f"Application {i}: {app['description']}")
         print(f"{'=' * 70}")
-        # score / mean_agreement are `float | None` (None on a failed grade).
+        # score / mean_agreement are `float | None` (score is None on a failed grade or
+        # when no criterion was left to score).
         print(f"Final Score: {result.score:.2f}" if result.score is not None else "Final Score: n/a")
         print(
             f"Mean Agreement: {result.mean_agreement:.1%}"
@@ -629,10 +631,11 @@ async def main():
             else "Mean Agreement: n/a"
         )
 
-        # Per-judge scores
+        # Per-judge scores (None for a judge whose every call failed, or with nothing
+        # left to score)
         print("\nPer-Judge Scores:")
         for judge_id, score in result.judge_scores.items():
-            print(f"  {judge_id}: {score:.2f}")
+            print(f"  {judge_id}: {score:.2f}" if score is not None else f"  {judge_id}: n/a")
 
         # Per-criterion breakdown (abbreviated)
         print("\nCriteria:")

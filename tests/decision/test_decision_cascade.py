@@ -1110,12 +1110,24 @@ class TestCascadeJudgeScores:
     async def test_escalation_judges_are_none_even_when_every_criterion_escalated(
         self, fake_sdk, make_grader
     ):
-        fake_sdk.error = typesafe_sdk.TypeSafeAPIConnectionError("Connection error: refused")
-        grader = make_grader(judge_model_config=dm(), escalation=cascade(0.5))
+        fake_sdk.response = response(answers())  # judged, but short of certainty everywhere
+        grader = make_grader(judge_model_config=dm(), escalation=cascade(1.0))
         report = await grade(grader)
         assert escalated_flags(report) == [True] * 5
         assert report.judge_scores["escalation"] is None
         assert report.judge_scores["default"] is not None
+
+    @pytest.mark.asyncio
+    async def test_a_decision_model_whose_request_failed_has_no_score(self, fake_sdk, make_grader):
+        """Its failed request escalates every criterion, and it judged none of them: it has no
+        score for the item, as any judge whose every vote failed. The escalation judge judged
+        the item, which keeps its score (#18)."""
+        fake_sdk.error = typesafe_sdk.TypeSafeAPIConnectionError("Connection error: refused")
+        grader = make_grader(judge_model_config=dm(), escalation=cascade(0.5))
+        report = await grade(grader)
+        assert escalated_flags(report) == [True] * 5
+        assert report.judge_scores == {"default": None, "escalation": None}
+        assert report.error is None and report.score is not None
 
 
 # =============================================================================

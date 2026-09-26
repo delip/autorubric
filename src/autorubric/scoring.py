@@ -3,11 +3,36 @@
 Used by the grader (live scores), ``Rubric.compute_score`` (ground-truth/expected
 scores), and ``RubricDataset.compute_weighted_score``, so all paths agree across
 ``CannotAssessStrategy`` x {binary, multi-choice} x {+/- weight}.
+
+A score is undefined, ``None``, never a fabricated 0.0, when there is nothing to score:
+``score_reports`` returns ``None`` when no criterion is left to score, and a report whose
+every criterion's judgment failed (``_every_judgment_failed``) has no score at all.
 """
 
 from __future__ import annotations
 
-from autorubric.types import CannotAssessConfig, CannotAssessStrategy, CriterionReport
+from collections.abc import Sequence
+
+from autorubric.types import (
+    CannotAssessConfig,
+    CannotAssessStrategy,
+    CriterionReport,
+    EnsembleCriterionReport,
+)
+
+
+def _every_judgment_failed(
+    reports: Sequence[CriterionReport | EnsembleCriterionReport],
+) -> bool:
+    """Whether every judgment of ``reports`` failed: there is at least one, and each stands
+    in for failed judge calls (``is_error``; for an ``EnsembleCriterionReport``, every vote
+    aggregated on the criterion failed).
+
+    The verdict standing in for a failed call keeps a criterion routed (an abstention, or
+    the worst case for an unknown failure), but it is no judgment, so reports whose every
+    judgment failed have no score.
+    """
+    return bool(reports) and all(report.is_error for report in reports)
 
 
 def _abstain_contribution(report: CriterionReport, config: CannotAssessConfig) -> float | None:
@@ -39,7 +64,7 @@ def score_reports(
     reports: list[CriterionReport],
     config: CannotAssessConfig,
     normalize: bool = True,
-) -> float:
+) -> float | None:
     """Compute a weighted score from criterion reports, applying ``config`` uniformly
     to binary CANNOT_ASSESS and multi-choice NA.
 
@@ -47,10 +72,16 @@ def score_reports(
     FAIL keep them in the denominator with a strategy-defined (weight-sign-aware)
     contribution. Returns the raw weighted sum when ``normalize`` is False, else a value
     clamped to [0, 1] (with the negative-weight-only fallback ``1 + sum/neg_weight``).
+
+    Returns ``None``, normalized or raw, when no criterion is left to score: there are no
+    reports, or SKIP excluded every one (every criterion abstained). Such a score is
+    undefined, never a fabricated 0.0. Zero-weight criteria are scored, though they move
+    nothing: when only they are left, the score is 0.0.
     """
     weighted_sum = 0.0
     total_positive_weight = 0.0
     total_negative_weight = 0.0
+    n_scored = 0
     for r in reports:
         w = r.weight
         if r.is_na:
@@ -60,14 +91,17 @@ def score_reports(
             weighted_sum += contribution
         else:
             weighted_sum += r.score_value * w
+        n_scored += 1
         if w > 0:
             total_positive_weight += w
         else:
             total_negative_weight += abs(w)
+    if n_scored == 0:
+        return None
     if not normalize:
         return weighted_sum
     if total_positive_weight > 0:
         return max(0.0, min(1.0, weighted_sum / total_positive_weight))
     if total_negative_weight > 0:
         return max(0.0, min(1.0, 1.0 + weighted_sum / total_negative_weight))
-    return 0.0
+    return 0.0  # only zero-weight criteria were scored

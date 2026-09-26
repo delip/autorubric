@@ -804,17 +804,18 @@ class EvaluationReport(BaseModel):
 
     Attributes:
         score: The final score (0-1 if normalized, raw weighted sum otherwise).
-            ``None`` only when grading FAILED (an error report); the normal grading
-            path always COMPUTES a real float. Consumers must skip ``None`` (most
-            already filter on ``error is not None``).
-        raw_score: The unnormalized weighted sum. ``None`` only on a failed/empty report.
+            ``None`` when there is no score: grading FAILED (an error report, which
+            includes an item whose every criterion's judgment failed), or no criterion is
+            left to score (under
+            the SKIP strategy, every criterion abstained). Consumers must skip ``None``.
+        raw_score: The unnormalized weighted sum. ``None`` exactly when ``score`` is.
         llm_raw_score: The original score returned by the LLM (same as raw_score).
         report: Per-criterion breakdown with verdicts and explanations.
         cannot_assess_count: Number of criteria with CANNOT_ASSESS verdict.
-        error: Optional error message if grading failed (e.g., JSON parse error).
-            When set, score/raw_score are ``None`` (a failure has no score — a fabricated
-            0.0 is indistinguishable from a real catastrophic score). Training pipelines
-            should filter these out.
+        error: Optional error message if grading failed (e.g., JSON parse error, or
+            "Every criterion's judgment failed: ..."). When set, score/raw_score are
+            ``None`` (a failure has no score — a fabricated 0.0 is indistinguishable from
+            a real catastrophic score). Training pipelines should filter these out.
         token_usage: Aggregated token usage across all LLM calls made during grading.
             For CriterionGrader, this is the sum across all criterion evaluations.
         completion_cost: Total cost in USD for all LLM calls made during grading.
@@ -1103,23 +1104,29 @@ class EnsembleEvaluationReport(BaseModel):
     Extends EvaluationReport with per-judge breakdown and agreement metrics.
 
     Attributes:
-        score: The final aggregated score (0-1 if normalized). ``None`` only when
-            grading FAILED (an error report, e.g. no judge results); the normal
-            grading path always COMPUTES a real float.
-        raw_score: The unnormalized weighted sum. ``None`` only on a failed/empty report.
+        score: The final aggregated score (0-1 if normalized). ``None`` when there is no
+            score: grading FAILED (an error report: no judge results, or every criterion's
+            judgment failed), or no criterion is left to score (under the SKIP strategy,
+            every final verdict abstains).
+        raw_score: The unnormalized weighted sum. ``None`` exactly when ``score`` is.
         llm_raw_score: Same as raw_score (for compatibility with EvaluationReport).
         report: Per-criterion breakdown with ensemble voting details.
         judge_scores: Each judge's own score over the whole rubric (from its own verdicts),
             keyed by ``judge_id``. ``None`` when that judge's whole-rubric score is
-            undefined for its role: a judge consulted only on some criteria (e.g. an
+            undefined: by role, a judge consulted only on some criteria (e.g. an
             escalation judge) is ``None`` on every item, even an item where it happened to
-            judge every criterion, so the entry's meaning never depends on the item.
+            judge every criterion, so the entry's meaning never depends on the item; and
+            on an item where every vote of the judge failed (it judged nothing) or none of
+            its verdicts is left to score.
         mean_agreement: Average agreement across all criteria, or None when there
             are no criteria to agree on (empty rubric) / agreement was not measured.
         cannot_assess_count: Number of criteria with CANNOT_ASSESS final verdict.
         token_usage: Total token usage across all judges.
         completion_cost: Total cost across all judges.
-        error: Error message if grading failed.
+        error: Error message if grading failed: no judge results, or "Every criterion's
+            judgment failed: ..." when each criterion's verdict stands in for failed calls
+            (each keeps its own error). When set, ``score``, ``raw_score`` and
+            ``llm_raw_score`` are ``None``.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)

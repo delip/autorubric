@@ -238,6 +238,7 @@ def test_negative_multi_choice_na_fail_strictly_worse_than_zero():
         verdicts, normalize=True, cannot_assess_strategy=CannotAssessStrategy.ZERO
     )
 
+    assert fail_score is not None and zero_score is not None
     assert fail_score < zero_score
     # ZERO: 10 / 10 = 1.0 (NA contributes nothing, no penalty).
     assert zero_score == pytest.approx(1.0)
@@ -343,3 +344,33 @@ def test_compute_score_skip_excludes_na_from_denominator_multi_choice():
         verdicts, normalize=True, cannot_assess_strategy=CannotAssessStrategy.SKIP
     )
     assert score == pytest.approx(1.0)
+
+
+def test_ground_truth_with_nothing_left_to_score_has_no_score():
+    """Ground truth follows the live grader: under SKIP, labels that all abstain leave
+    nothing to score, so the expected score is undefined (None), never 0.0."""
+    from autorubric import RubricDataset
+
+    rubric = Rubric(
+        [
+            Criterion(name="b", weight=10.0, requirement="B"),
+            Criterion(
+                name="m",
+                weight=5.0,
+                requirement="M",
+                scale_type="ordinal",
+                options=[
+                    CriterionOption(label="low", value=0.0),
+                    CriterionOption(label="high", value=1.0),
+                    CriterionOption(label="n/a", value=0.0, na=True),
+                ],
+            ),
+        ]
+    )
+    labels = [CriterionVerdict.CANNOT_ASSESS, "n/a"]
+    assert rubric.compute_score(labels) is None
+    assert rubric.compute_score(labels, normalize=False) is None
+    assert RubricDataset(prompt="p", rubric=rubric).compute_weighted_score(labels) is None
+    # ZERO keeps the abstentions in the score.
+    zero = CannotAssessStrategy.ZERO
+    assert rubric.compute_score(labels, cannot_assess_strategy=zero) == pytest.approx(0.0)

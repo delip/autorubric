@@ -280,7 +280,7 @@ class TestDatasetMultiChoice:
             normalize=True,
         )
         # Total positive weight = 15, score = (10 + 1.65)/15 = 0.777
-        assert 0.77 < score < 0.78
+        assert score is not None and 0.77 < score < 0.78
 
     def test_dataset_serialization_with_multi_choice(self, mixed_rubric):
         """RubricDataset serializes and deserializes multi-choice ground truth."""

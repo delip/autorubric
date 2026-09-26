@@ -59,6 +59,38 @@ A run resumes only from a checkpoint of the same dataset. With a changed dataset
 `resume=False`, it starts fresh and replaces the directory's checkpoint, so an experiment
 directory always holds exactly one run.
 
+## Failed Items
+
+An item fails when its grading raises, or when the grade returns a report whose `error` is
+set. The second case covers an item whose every criterion's judgment failed, for example
+because every judge call failed: the report has no score and its `error` begins
+`Every criterion's judgment failed:`. The runner records the error in the item's
+`ItemResult.error` and logs a warning. A failed item:
+
+- counts in `failed_items` and `errors`;
+- stops the run when `fail_fast=True`;
+- is left out of `get_scores()`, `get_reports()` and `filter_successful()` (and returned by
+  `filter_failed()`);
+- still counts in `total_token_usage` and `total_completion_cost`: a billed call counts
+  whatever became of the grade (a decision-model request answered without a usable answer,
+  say);
+- is not graded again when the run resumes, like any item already done, but still counts in
+  the resumed run's `failed_items`.
+
+A run saved by an earlier release recorded an item whose every judgment failed as successful,
+with a fabricated score (for example 0.0 under `SKIP`). `EvalResult.from_experiment` loads it
+as it was saved, and `compute_metrics` still leaves it out (see
+[Errored Items and Score Pairs](metrics.md#errored-items-and-score-pairs)).
+
+An item whose judges answered `CANNOT_ASSESS` on every criterion has nothing left to score
+under the default `SKIP` strategy. Its `score` is `None`, but nothing failed: its `error` is
+`None` and it counts as successful, though `get_scores()` skips it.
+
+```python
+for item_result in result.filter_failed():
+    print(f"Item {item_result.item_idx}: {item_result.error}")
+```
+
 ## Rate Limiting
 
 ```python

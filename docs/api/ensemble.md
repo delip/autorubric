@@ -28,9 +28,10 @@ grader = CriterionGrader(
 
 result = await rubric.grade(to_grade=response, grader=grader)
 
-# Ensemble-specific fields. score / mean_agreement are `float | None`
-# (None on a failed grade or an empty rubric); guard before formatting.
-print(f"Score: {result.score:.3f}" if result.score is not None else "Score: n/a (grade failed)")
+# Ensemble-specific fields. score / mean_agreement are `float | None`: score is None if
+# the grade failed or no criterion was left to score, mean_agreement if nothing was
+# measured (an empty rubric). Guard before formatting.
+print(f"Score: {result.score:.3f}" if result.score is not None else "Score: n/a")
 print(
     f"Mean Agreement: {result.mean_agreement:.1%}"
     if result.mean_agreement is not None
@@ -101,6 +102,11 @@ calls that failed with an API or parse error, are set aside first, and a criteri
 all abstain is CANNOT_ASSESS. A `majority` or `weighted` tie goes to the verdict that scores
 lowest for the criterion's weight sign: UNMET for a positive (or zero) weight, MET for a
 negative one.
+
+A judge whose every call on an item failed judged nothing there, so its `judge_scores` entry
+for that item is `None`, whatever its stand-in verdicts would score. When every judge
+failed on every criterion, the item has no score at all: `score` and `raw_score` are `None`,
+and the report's `error` begins `Every criterion's judgment failed:`.
 
 ---
 
