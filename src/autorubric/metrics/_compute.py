@@ -1337,6 +1337,11 @@ def _compute_per_item_pooled_metrics(
     scale type. Categorical metrics that need a shared option space (weighted/nominal kappa,
     per-option, N×N confusion) are omitted; only binary points get a 2×2 confusion + Cohen
     kappa + phi (MET/UNMET is universal). Abstentions (CANNOT_ASSESS / NA) are excluded.
+
+    Raises ``ValueError`` when no item is left (every one errored), and when graded items
+    leave no rubric point to pool (no prediction could be paired with its ground truth):
+    every pooled metric is then undefined, and ``MetricsResult`` has no place for an
+    undefined RMSE or MAE, so it refuses rather than report a fabricated 0.0.
     """
     # Per-scale pools.
     val_true: dict[str, list[float]] = {"binary": [], "ordinal": [], "nominal": []}
@@ -1478,11 +1483,16 @@ def _compute_per_item_pooled_metrics(
     all_true = [v for s in ("binary", "ordinal", "nominal") for v in val_true[s]]
     all_pred = [v for s in ("binary", "ordinal", "nominal") for v in val_pred[s]]
     n_total = len(all_true)
+    if n_total == 0:
+        raise ValueError(
+            "No valid rubric points found: no prediction on the graded items could be "
+            "paired with its ground truth, so the pooled metrics are undefined"
+        )
     total_exact = sum(exact_hits.values())
     overall_acc = total_exact / n_total if n_total else None
     binary_entry = next((e for e in pooled_by_scale if e.scale_type == "binary"), None)
-    score_rmse = float(np.sqrt(mean_squared_error(all_true, all_pred))) if n_total else 0.0
-    score_mae = float(np.mean(np.abs(np.array(all_true) - np.array(all_pred)))) if n_total else 0.0
+    score_rmse = float(np.sqrt(mean_squared_error(all_true, all_pred)))
+    score_mae = float(np.mean(np.abs(np.array(all_true) - np.array(all_pred))))
     macro_acc = _mean_or_none([e.exact_accuracy for e in pooled_by_scale])
 
     result_warnings.append(
@@ -1608,6 +1618,9 @@ def compute_metrics(
         ValueError: If no graded item has both a score and a true score (every one has
             nothing left to score, in its grade or in its ground truth): the score-level
             metrics are undefined, and ``MetricsResult`` has no place for undefined ones.
+        ValueError: If the dataset's items have different rubrics (the pooled per-item path)
+            and no prediction on the graded items could be paired with its ground truth
+            (e.g. every one abstained): every pooled metric is undefined.
         ValueError: If ``per_judge`` is True and a judge is in the ``judge_scores`` of only
             some graded items (the judge set changed between items). A ``None`` entry is
             present, not absent, and is supported.

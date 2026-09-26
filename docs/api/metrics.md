@@ -123,8 +123,9 @@ truth abstains on every criterion, keeps its verdicts in the criterion-level met
 score pair. If no item has a score pair, `compute_metrics` raises a `ValueError` that begins
 "No valid items with a computed score found" and says why. (For items with different rubrics,
 reported through `pooled_by_scale`, the score-level metrics pool rubric-point values instead of
-item scores, with no such refusal: `score_rmse` and `score_mae` fall back to 0.0 when every
-point abstains.) Per-judge metrics and inter-judge agreement use every item that is not
+item scores. When the graded items leave no rubric point to pool, because no prediction could be
+paired with its ground truth (every one abstained, say), `compute_metrics` raises a `ValueError`
+that begins "No valid rubric points found".) Per-judge metrics and inter-judge agreement use every item that is not
 errored, with a score or without.
 
 ## Metric Fields
