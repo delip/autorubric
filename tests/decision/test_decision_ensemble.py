@@ -448,3 +448,15 @@ async def test_metrics_of_a_mixed_panel_equal_its_mirrors(
     assert mixed.mean_krippendorff_alpha is not None
     assert any(m.fleiss_kappa is not None for m in mixed.per_criterion)
     assert mixed.per_judge is not None and list(mixed.per_judge) == ["jev", "a", "b"]
+
+
+# =============================================================================
+# Repeated judge_ids
+# =============================================================================
+
+
+def test_a_judge_id_repeated_across_judge_kinds_warns():
+    # The two kinds have separate client maps, but share judge_scores and the per-judge
+    # metrics, so a repeat across kinds conflates them as one within a kind does.
+    with pytest.warns(FutureWarning, match=r"judge_ids should be unique; repeated: 'x'\."):
+        CriterionGrader(judges=[JudgeSpec(dm("jev"), "x"), JudgeSpec(LLMConfig(model="a"), "x")])
