@@ -91,6 +91,11 @@ def _derive_shuffle_rng(
 # item being graded, so the per-call item content is intentionally not part of the key.
 FEW_SHOT_DOMAIN = "few_shot"
 
+# The judge_id a grader built with ``judge_model_config`` gives its one judge. That judge's
+# LLM client keeps the plain response-cache key; every other LLM judge caches under its
+# judge_id, so judges polling one model keep their own answers (see ``LLMClient``).
+_SINGLE_JUDGE_ID = "default"
+
 
 def _ground_truth_reason(item: DataItem, criterion_idx: int) -> str | None:
     """A training item's written reason for its ground truth on a criterion, if it has one.
@@ -1125,7 +1130,9 @@ class CriterionGrader(Grader):
         self._judges: list[JudgeSpec]
         if judge_model_config is not None:
             self._judges = [
-                JudgeSpec(judge_model_config=judge_model_config, judge_id="default", weight=1.0)
+                JudgeSpec(
+                    judge_model_config=judge_model_config, judge_id=_SINGLE_JUDGE_ID, weight=1.0
+                )
             ]
         else:
             assert judges is not None
@@ -1266,7 +1273,8 @@ class CriterionGrader(Grader):
             if isinstance(config, DecisionModelConfig):
                 self._decision_clients[judge.judge_id] = DecisionModelClient(config)
             else:
-                self._clients[judge.judge_id] = LLMClient(config)
+                namespace = None if judge.judge_id == _SINGLE_JUDGE_ID else judge.judge_id
+                self._clients[judge.judge_id] = LLMClient(config, cache_namespace=namespace)
 
         # Pre-compute few-shot examples if training data provided
         # Note: For multi-choice, examples are stored as (submission, selected_index, reason)

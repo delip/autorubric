@@ -617,3 +617,39 @@ class TestProviderResponseFormat:
         assert isinstance(result, CriterionJudgment)
         assert result.criterion_status.value == "MET"
         assert result.reasoning is None
+
+
+class TestCacheNamespace:
+    """``cache_namespace`` keeps independent samplers of one model apart in the cache."""
+
+    def test_clients_with_different_namespaces_use_different_keys(self):
+        config = LLMConfig(model="openai/gpt-5.2")
+        key_a = LLMClient(config, cache_namespace="gpt-0")._cache_key(
+            "openai/gpt-5.2", "System", "User", None
+        )
+        key_b = LLMClient(config, cache_namespace="gpt-1")._cache_key(
+            "openai/gpt-5.2", "System", "User", None
+        )
+        assert key_a != key_b
+
+    def test_a_namespace_changes_the_key(self):
+        config = LLMConfig(model="openai/gpt-5.2")
+        namespaced = LLMClient(config, cache_namespace="gpt-0")._cache_key(
+            "openai/gpt-5.2", "System", "User", None
+        )
+        assert namespaced != LLMClient(config)._cache_key("openai/gpt-5.2", "System", "User", None)
+
+    def test_no_namespace_keeps_the_key_existing_caches_were_written_with(self):
+        config = LLMConfig(model="openai/gpt-5.2")
+        content = (
+            "openai/gpt-5.2:System:User:str:temp=None:top_p=None:max_tokens=None"
+            ":thinking=none:seed=None"
+        )
+        expected = hashlib.sha256(content.encode()).hexdigest()
+        assert LLMClient(config)._cache_key("openai/gpt-5.2", "System", "User", None) == expected
+        assert (
+            LLMClient(config, cache_namespace=None)._cache_key(
+                "openai/gpt-5.2", "System", "User", None
+            )
+            == expected
+        )

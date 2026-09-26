@@ -647,11 +647,15 @@ class LLMClient:
     Uses diskcache for efficient, thread-safe response caching.
     """
 
-    def __init__(self, config: LLMConfig):
+    def __init__(self, config: LLMConfig, *, cache_namespace: str | None = None):
         """Initialize LLM client.
 
         Args:
             config: LLMConfig instance. The model field is required.
+            cache_namespace: Keeps this client's response-cache entries apart from those of
+                other clients that send identical requests, such as several judges polling
+                one model, whose answers are independent samples. It becomes part of the
+                cache key; ``None`` (the default) leaves the key exactly as without it.
 
         Raises:
             ValueError: If config.model is not specified.
@@ -660,6 +664,7 @@ class LLMClient:
             raise ValueError("LLMConfig.model is required and cannot be empty")
 
         self.config = config
+        self._cache_namespace = cache_namespace
         self._cache: diskcache.Cache | None = None
 
         if self.config.cache_enabled:
@@ -686,7 +691,8 @@ class LLMClient:
         """Generate a unique cache key for the request.
 
         Includes sampling parameters so that different configurations
-        (temperature, thinking, top_p, seed) produce distinct cache entries.
+        (temperature, thinking, top_p, seed) produce distinct cache entries, and the
+        client's ``cache_namespace`` when it has one.
 
         Args:
             model: Model identifier sent with the request.
@@ -711,6 +717,8 @@ class LLMClient:
             f":thinking={thinking_str}"
             f":seed={self.config.seed}"
         )
+        if self._cache_namespace is not None:
+            content += f":namespace={self._cache_namespace}"
         return hashlib.sha256(content.encode()).hexdigest()
 
     def _get_retry_decorator(self) -> Any:

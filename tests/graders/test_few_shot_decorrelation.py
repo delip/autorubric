@@ -206,7 +206,7 @@ async def test_few_shot_examples_differ_per_judge_in_prompt():
 
     captured: dict[str, list[str]] = {}
 
-    def make_client(config: LLMConfig) -> MagicMock:
+    def make_client(config: LLMConfig, *, cache_namespace: str | None = None) -> MagicMock:
         model = config.model
 
         async def mock_generate(

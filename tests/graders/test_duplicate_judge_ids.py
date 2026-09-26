@@ -84,7 +84,7 @@ async def test_a_panel_with_a_repeated_judge_id_grades_as_the_warning_describes(
     client, and the judges share one ``judge_scores`` entry."""
     clients: dict[str, MagicMock] = {}
 
-    def client_for(config: LLMConfig) -> MagicMock:
+    def client_for(config: LLMConfig, *, cache_namespace: str | None = None) -> MagicMock:
         client = MagicMock()
 
         async def generate(*_args, **_kwargs) -> GenerateResult:

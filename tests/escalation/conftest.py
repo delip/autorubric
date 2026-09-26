@@ -61,7 +61,7 @@ def make_grader(decision_model: ScriptedSDK) -> Iterator[Any]:
     built: list[CriterionGrader] = []
 
     def build(*, llm_script: dict[tuple[str, str], Any] | None = None, **kwargs: Any) -> Any:
-        def client(config: LLMConfig) -> ScriptedLLM:
+        def client(config: LLMConfig, *, cache_namespace: str | None = None) -> ScriptedLLM:
             return ScriptedLLM(config.model, llm_script or {})
 
         with patch("autorubric.graders.criterion_grader.LLMClient", side_effect=client):
