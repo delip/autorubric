@@ -383,7 +383,7 @@ async def test_multi_choice_infrastructure_failure_is_na(mock_llm_config):
 
     # Its only criterion failed, so nothing judged the item: it has no score (#18).
     assert report.score is None
-    assert report.error is not None and report.error.startswith("Every judgment failed")
+    assert report.error is not None and report.error.startswith("Every criterion's judgment failed")
 
 
 @pytest.mark.asyncio
@@ -421,7 +421,7 @@ async def test_multi_choice_unknown_with_na_option_does_not_select_na(mock_llm_c
     assert cr.final_multi_choice_verdict.selected_index == 1
     # Its only criterion failed, so nothing judged the item: it has no score (#18).
     assert report.score is None
-    assert report.error is not None and report.error.startswith("Every judgment failed")
+    assert report.error is not None and report.error.startswith("Every criterion's judgment failed")
 
 
 @pytest.mark.asyncio
@@ -457,7 +457,7 @@ async def test_multi_choice_unknown_positive_weight_picks_lowest_value(mock_llm_
     assert cr.final_multi_choice_verdict.na is False
     # Its only criterion failed, so nothing judged the item: it has no score (#18).
     assert report.score is None
-    assert report.error is not None and report.error.startswith("Every judgment failed")
+    assert report.error is not None and report.error.startswith("Every criterion's judgment failed")
 
 
 @pytest.mark.asyncio
@@ -636,7 +636,7 @@ async def test_ensemble_forced_choice_all_fail_clean_abstain():
     assert cr.multi_choice_votes
     assert all(v.na and v.selected_index is None for v in cr.multi_choice_votes)
     assert report.score is None
-    assert report.error is not None and report.error.startswith("Every judgment failed")
+    assert report.error is not None and report.error.startswith("Every criterion's judgment failed")
 
 
 # =============================================================================
@@ -1107,7 +1107,7 @@ async def test_an_item_whose_every_judgment_failed_has_no_score(
     assert report.report is not None and len(report.report) == 2
     assert all(cr.error and cr.error.startswith(f"{category}:") for cr in report.report)
     assert (report.score, report.raw_score, report.llm_raw_score) == (None, None, None)
-    assert report.error is not None and report.error.startswith("Every judgment failed")
+    assert report.error is not None and report.error.startswith("Every criterion's judgment failed")
     assert f"{category}:" in report.error
     assert report.judge_scores == {"default": None}
 
@@ -1194,3 +1194,23 @@ async def test_a_failed_criterion_among_judged_ones_is_scored_by_its_stand_in(
 
     assert report.error is None
     assert report.score == pytest.approx(expected)
+
+
+@pytest.mark.asyncio
+async def test_the_error_of_an_item_nothing_judged_names_the_first_failure(mock_llm_config):
+    """The report's error names the first criterion's failure and counts the other
+    distinct ones; each criterion keeps its own."""
+    errors = {"Is good": RuntimeError("boom"), "Is bad": ValueError("bad json")}
+
+    async def generate(*, user_prompt: str, **_: Any) -> GenerateResult:
+        raise next(error for requirement, error in errors.items() if requirement in user_prompt)
+
+    client = MagicMock()
+    client.generate = generate
+    with patch("autorubric.graders.criterion_grader.LLMClient", return_value=client):
+        grader = CriterionGrader(judge_model_config=mock_llm_config)
+        report = await TWO_BINARY.grade("submission", grader=grader)
+
+    assert report.error == "Every criterion's judgment failed: unknown: boom (and 1 other error)"
+    assert report.report is not None
+    assert [cr.error for cr in report.report] == ["unknown: boom", "parse: bad json"]

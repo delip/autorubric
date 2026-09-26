@@ -361,7 +361,7 @@ async def test_a_failed_request_fails_like_an_llm_grader_whose_calls_all_failed(
     for item in (failed, llm_failed):
         assert item.report.score is None and item.report.raw_score is None
         assert item.error is not None and item.error == item.report.error
-        assert item.error.startswith("Every judgment failed: infrastructure: ")
+        assert item.error.startswith("Every criterion's judgment failed: infrastructure: ")
         assert all(cr.error.startswith("infrastructure: ") for cr in item.report.report)
 
     metrics = result.compute_metrics(data)
@@ -372,6 +372,37 @@ async def test_a_failed_request_fails_like_an_llm_grader_whose_calls_all_failed(
     # Only the answered items are paired, and each matches its ground truth.
     assert metrics.score_rmse == pytest.approx(0.0)
     assert metrics.criterion_accuracy == pytest.approx(1.0)
+
+
+@pytest.mark.asyncio
+async def test_a_billed_request_counts_in_the_totals_when_every_answer_failed(
+    fake_sdk, graders, tmp_path
+):
+    """The endpoint answered, and billed, with no usable answer for any criterion: the item
+    fails (every judgment failed), yet its usage and cost count in the run's totals, as any
+    billed call's do, and again when the run is loaded (#18)."""
+    fake_sdk.response = SystemOneResponse.model_validate_json(
+        json.dumps(
+            {
+                "model": "jev-test",
+                "usage": {"input_tokens": 1000, "output_tokens": 3},
+                "answers": {},
+            }
+        )
+    )
+    grader = CriterionGrader(judge_model_config=dm(input_cost_per_token=1e-6))
+    graders.append(grader)
+    result = await evaluate(
+        dataset(2), grader, show_progress=False, experiment_name="billed", experiments_dir=tmp_path
+    )
+
+    assert result.failed_items == 2
+    assert all(ir.report.completion_cost == pytest.approx(1e-3) for ir in result.item_results)
+    loaded = EvalResult.from_experiment(result.experiment_dir)
+    for run in (result, loaded):
+        assert run.total_completion_cost == pytest.approx(2e-3)
+        assert run.total_token_usage is not None
+        assert run.total_token_usage.prompt_tokens == 2000
 
 
 @pytest.mark.asyncio

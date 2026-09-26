@@ -1347,6 +1347,7 @@ def _compute_per_item_pooled_metrics(
     bin_true: list[int] = []
     bin_pred: list[int] = []
     n_items = 0
+    n_errored_items = 0  # GT-bearing items with no usable judgment, as on the other path
 
     for idx in common_indices:
         item = dataset.items[idx]
@@ -1355,6 +1356,7 @@ def _compute_per_item_pooled_metrics(
             result_warnings.append(f"Item {idx} has no ground truth, skipping")
             continue
         if _is_errored_item(item_result):
+            n_errored_items += 1
             continue
         rubric = dataset.get_item_rubric(idx)
         criteria = rubric.rubric
@@ -1422,6 +1424,14 @@ def _compute_per_item_pooled_metrics(
                 val_pred[scale].append(pred_v)
                 if pred_opt.label == true_opt.label:
                     exact_hits[scale] += 1
+
+    if n_items == 0:
+        raise ValueError("No valid items with ground truth found")
+    if n_errored_items > 0:
+        result_warnings.append(
+            f"{n_errored_items} item(s) with ground truth were excluded from metrics because "
+            "grading errored; their verdicts and scores do not contribute."
+        )
 
     # Assemble per-scale pooled metrics.
     pooled_by_scale: list[PooledScaleMetrics] = []
@@ -1529,7 +1539,7 @@ def compute_metrics(
     An item with no usable judgment is an errored item: it is left out of every metric,
     counted in ``CoverageStats.n_errored`` and warned about. That is an item whose grading
     raised, whose report is an error report, or every criterion's verdict of which stands
-    in for failed judge calls (how an item no judge judged shows in a run saved before
+    in for failed judge calls (how an item whose every judgment failed shows in a run saved before
     such reports carried an ``error``). Score-level metrics pair an item's score with its
     ground truth's score where both are defined: an item with nothing left to score, or
     whose ground truth leaves nothing to score, keeps its verdicts in the criterion-level
@@ -1593,6 +1603,11 @@ def compute_metrics(
 
     Raises:
         ValueError: If no common items between eval_result and dataset.
+        ValueError: If no item has ground truth and a usable judgment (e.g. every item
+            errored).
+        ValueError: If no graded item has both a score and a true score (every one has
+            nothing left to score, in its grade or in its ground truth): the score-level
+            metrics are undefined, and ``MetricsResult`` has no place for undefined ones.
         ValueError: If ``per_judge`` is True and a judge is in the ``judge_scores`` of only
             some graded items (the judge set changed between items). A ``None`` entry is
             present, not absent, and is supported.
@@ -1928,12 +1943,16 @@ def compute_metrics(
     if n_items == 0:
         raise ValueError("No valid items with ground truth found")
 
-    # Score-level metrics need ≥1 scoreable (non-errored, real-float) item. Every
-    # ground-truth item having a report-level error would leave these arrays empty
-    # (sklearn's mean_squared_error rejects empty input). Treat it like no-valid-items
-    # rather than fabricating a score.
+    # Score-level metrics need >= 1 item with both a score and a true score (errored items
+    # are already left out). With none, every graded item has nothing left to score, in
+    # its grade or its ground truth; MetricsResult holds no undefined score-level metrics,
+    # so refuse rather than fabricate one (sklearn's mean_squared_error rejects empty input).
     if not all_pred_scores:
-        raise ValueError("No valid items with a computed score found")
+        raise ValueError(
+            "No valid items with a computed score found: every graded item has nothing "
+            "left to score, in its grade or in its ground truth, so the score-level "
+            "metrics are undefined"
+        )
 
     # Reconstruct the effective criterion for any multi-choice criterion whose graded
     # reports used an auto-injected NA option OR produced a genuine None error-abstain.

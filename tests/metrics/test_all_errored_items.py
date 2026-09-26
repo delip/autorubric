@@ -128,7 +128,7 @@ def _every_judgment_failed(idx: int, error: str = INFRA, style: str = "current")
     verdict = CA if error.startswith("infrastructure") else UNMET
     item = _ensemble_item(idx, [[_vote("a", verdict, error)] for _ in range(2)])
     if style == "current":
-        message = f"Every judgment failed: {error}"
+        message = f"Every criterion's judgment failed: {error}"
         item.report = item.report.model_copy(
             update={
                 "score": None,
@@ -305,6 +305,13 @@ def test_per_item_rubrics_leave_out_an_item_with_every_judgment_failed():
     (raised_binary,) = raised.pooled_by_scale
     assert failed_binary.n_points == raised_binary.n_points
     assert failed_binary.exact_accuracy == pytest.approx(1.0)
+    # Left out, as on the per-criterion path: counted and warned about.
+    assert _errored_item_warnings(failed) and _errored_item_warnings(raised)
+
+    # With every item errored there is nothing to measure, as on the per-criterion path.
+    every_item = [_every_judgment_failed(i, UNKNOWN, "saved-before") for i in range(4)]
+    with pytest.raises(ValueError, match="No valid items with ground truth found"):
+        compute_metrics(_eval_result(every_item), dataset)
 
 
 # =============================================================================
@@ -334,6 +341,40 @@ def test_an_item_with_nothing_left_to_score_counts_only_its_verdicts():
     assert as_unmet.n_samples == 2 * 4
     assert as_unmet.cannot_assess_stats is not None
     assert as_unmet.cannot_assess_stats.ca_count_pred == 2
+
+
+def test_an_item_with_nothing_left_to_score_counts_for_each_judge():
+    """Its verdicts count for each judge as they do for the aggregate: under ``as_unmet`` the
+    judges' abstentions read as UNMET against a true MET, for the judges too."""
+    judged = [_judged(i, ("a", "b")) for i in range(FAILED_ITEM)]
+    abstained = _ensemble_item(FAILED_ITEM, [[_vote("a", CA), _vote("b", CA)] for _ in range(2)])
+    abstained.report = abstained.report.model_copy(
+        update={"score": None, "raw_score": None, "judge_scores": {"a": None, "b": None}}
+    )
+
+    metrics = compute_metrics(
+        _eval_result([*judged, abstained]), _dataset(), per_judge=True, cannot_assess="as_unmet"
+    )
+
+    assert metrics.criterion_accuracy == pytest.approx(6 / 8)
+    assert metrics.per_judge is not None
+    for judge in metrics.per_judge.values():
+        assert judge.criterion_accuracy == pytest.approx(6 / 8)
+        assert judge.score_pearson is not None and judge.score_pearson.n_samples == FAILED_ITEM
+
+
+def test_no_score_pairs_at_all_is_refused_with_its_cause():
+    """Every graded item has nothing left to score: the score-level metrics are undefined,
+    and ``MetricsResult`` holds none, so ``compute_metrics`` refuses and says why."""
+    items = []
+    for idx in range(len(GROUND_TRUTH)):
+        item = _ensemble_item(idx, [[_vote("a", CA)] for _ in range(2)])
+        item.report = item.report.model_copy(
+            update={"score": None, "raw_score": None, "judge_scores": {"a": None}}
+        )
+        items.append(item)
+    with pytest.raises(ValueError, match="nothing left to score"):
+        compute_metrics(_eval_result(items), _dataset(), cannot_assess="as_unmet")
 
 
 def test_an_item_whose_ground_truth_leaves_nothing_to_score_leaves_the_score_pairs():
@@ -421,7 +462,7 @@ async def test_llm_grader_item_whose_calls_all_failed_is_an_errored_item(tmp_pat
     failed = result.item_results[4]
     assert failed.report.score is None and failed.report.raw_score is None
     assert failed.report.error is not None
-    assert failed.report.error.startswith("Every judgment failed: infrastructure: ")
+    assert failed.report.error.startswith("Every criterion's judgment failed: infrastructure: ")
     assert failed.error == failed.report.error
     assert all(cr.error.startswith("infrastructure: ") for cr in failed.report.report)
     assert (result.successful_items, result.failed_items) == (4, 1)

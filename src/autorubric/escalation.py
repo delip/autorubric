@@ -505,9 +505,9 @@ def replay_escalation(
         n_llm_pairs += judged
     share = n_escalated / n_llm_pairs if n_llm_pairs else 0.0
 
-    # Totals as EvalRunner computes them.
+    # Totals as EvalRunner computes them: a failed item's cost counts too.
     errors = [(r.item_idx, r.error) for r in item_results if r.error]
-    reports = [r.report for r in item_results if r.error is None]
+    reports = [r.report for r in item_results]
     total_duration = (
         dm_result.timing_stats.total_duration_seconds
         + llm_result.timing_stats.total_duration_seconds * share
@@ -649,7 +649,7 @@ def _has_votes(item_result: ItemResult) -> bool:
     every judgment failed. Only an item whose grading raised (or that no judge result
     reached) has none: ``ItemResult.error`` alone does not say, since an item every
     judgment of which failed carries an error too, with its failed votes."""
-    return bool(item_result.report.report)
+    return item_result.report.report is not None
 
 
 def _checked_llm_judge_ids(item_result: ItemResult) -> list[str]:
@@ -789,7 +789,8 @@ def _replayed_item(
         item=item,
         report=report,
         duration_seconds=dm_item.duration_seconds + llm_item.duration_seconds * share,
-        # As EvalRunner records it: an item no judge judged fails like one that raised.
+        # As EvalRunner records it: an item whose every criterion's judgment failed fails
+        # like one whose grading raised.
         error=report.error,
     )
     return replayed, n_escalated, len(reports)
@@ -944,9 +945,7 @@ def escalation_stats(
         dm_accuracy_escalated=_accuracy(dm_escalated),
         fallback_accuracy_escalated=_accuracy(fallback),
         metric=_metric_value(compute_metrics(result, dataset), metric),
-        cost_usd=aggregate_completion_cost(
-            [r.report.completion_cost for r in items if r.error is None]
-        ),
+        cost_usd=aggregate_completion_cost([r.report.completion_cost for r in items]),
         compute_seconds=float(sum(r.duration_seconds for r in items)),
     )
 

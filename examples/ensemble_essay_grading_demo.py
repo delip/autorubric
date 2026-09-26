@@ -156,10 +156,10 @@ async def main():
         print(f"  Scores: Ensemble={ensemble_str} | Actual={actual_str} | Error={error_str}")
         print(f"  Agreement: {agreement_str}")
 
-        # Show per-judge scores
+        # Show per-judge scores (None for a judge that judged nothing on the item)
         print("  Judge Scores: ", end="")
         for judge_id, score in sorted(report.judge_scores.items()):
-            print(f"{judge_id}={score:.3f}  ", end="")
+            print(f"{judge_id}={score:.3f}  " if score is not None else f"{judge_id}=N/A  ", end="")
         print()
 
     # Show per-judge comparison table
@@ -177,8 +177,9 @@ async def main():
             print(
                 f"{judge_id:<15} {_cell(jm.criterion_accuracy, '>10.1%', 10)} "
                 f"{_cell(jm.mean_kappa, '>10.3f', 10)} "
-                f"{jm.score_rmse:>10.4f} {_cell(jm.score_spearman.coefficient, '>10.4f', 10)} "
-                f"{_cell(jm.bias.mean_bias, '>+10.4f', 10)}"
+                f"{_cell(jm.score_rmse, '>10.4f', 10)} "
+                f"{_cell(jm.score_spearman.coefficient if jm.score_spearman else None, '>10.4f', 10)} "
+                f"{_cell(jm.bias.mean_bias if jm.bias else None, '>+10.4f', 10)}"
             )
 
         print("-" * 70)

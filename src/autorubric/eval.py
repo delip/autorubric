@@ -529,7 +529,12 @@ class EvalTimingStats:
 
 @dataclass
 class EvalResult:
-    """Complete result from an evaluation run."""
+    """Complete result from an evaluation run.
+
+    ``failed_items`` counts the items whose grading failed (``ItemResult.error``). The usage
+    and cost totals sum over every item, failed ones included: a call that was billed
+    counts whatever became of the grade.
+    """
 
     # Core results
     item_results: list[ItemResult]
@@ -701,7 +706,9 @@ class EvalResult:
         item_results.sort(key=lambda r: r.item_idx)
 
         # Compute aggregated stats
-        reports = [r.report for r in item_results if r.error is None]
+        # Every item's usage and cost count, a failed item's too: a call that was billed
+        # counts whatever became of the grade (a grading that raised carries none).
+        reports = [r.report for r in item_results]
         usages = [r.token_usage for r in reports if r.token_usage]
         costs = [r.completion_cost for r in reports if r.completion_cost is not None]
 
@@ -962,7 +969,10 @@ class EvalRunner:
         ]
 
         item_results: list[ItemResult] = list(previous_results)
-        errors: list[tuple[int, str]] = []
+        # A resumed run's failed items include those that failed before it resumed.
+        errors: list[tuple[int, str]] = [
+            (r.item_idx, r.error) for r in previous_results if r.error is not None
+        ]
         completed_count = len(completed_indices)
 
         # Create progress display
@@ -1022,7 +1032,9 @@ class EvalRunner:
         completed_at = datetime.now()
 
         # Aggregate usage and cost
-        reports = [r.report for r in item_results if r.error is None]
+        # Every item's usage and cost count, a failed item's too: a call that was billed
+        # counts whatever became of the grade (a grading that raised carries none).
+        reports = [r.report for r in item_results]
         usages = [r.token_usage for r in reports if r.token_usage]
         costs = [r.completion_cost for r in reports if r.completion_cost is not None]
 

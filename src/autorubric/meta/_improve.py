@@ -1176,7 +1176,9 @@ async def validate_agreement(
     Returns:
         Tuple of (mean_agreement, per_criterion_agreement, total_cost). The mean
         is None when there was nothing to measure (no sample yielded a usable
-        ensemble report with a measured agreement) -- never a fabricated 0.0.
+        ensemble report with a measured agreement) -- never a fabricated 0.0. A sample
+        whose grade failed (its report has an ``error``, e.g. every judgment failed)
+        measured no agreement and is left out; its cost still counts.
 
     Raises:
         ValueError: If a judge is a decision model: the improvement loop's evaluation
@@ -1192,14 +1194,17 @@ async def validate_agreement(
     for sample in samples:
         result = await rubric.grade(to_grade=sample, grader=grader, query=task_prompt)
         if isinstance(result, EnsembleEvaluationReport) and result.report:
-            # mean_agreement may be None (empty-rubric / not-measured); only an
-            # actually-measured value contributes to the mean (never coerce None).
-            if result.mean_agreement is not None:
-                all_agreements.append(result.mean_agreement)
             total_cost += result.completion_cost or 0.0
-            for cr in result.report:
-                name = cr.criterion.name or cr.criterion.requirement[:30]
-                per_criterion_totals.setdefault(name, []).append(cr.agreement)
+            # A failed grade (e.g. every judgment failed) measured no agreement: its
+            # stand-in votes agree with one another, so it is left out (#18).
+            if result.error is None:
+                # mean_agreement may be None (empty-rubric / not-measured); only an
+                # actually-measured value contributes to the mean (never coerce None).
+                if result.mean_agreement is not None:
+                    all_agreements.append(result.mean_agreement)
+                for cr in result.report:
+                    name = cr.criterion.name or cr.criterion.requirement[:30]
+                    per_criterion_totals.setdefault(name, []).append(cr.agreement)
 
             if _capture is not None:
                 from autorubric.eval import _serialize_ensemble_criterion_report
@@ -1428,7 +1433,8 @@ async def validate_held_out(
             "as_unmet" folds CANNOT_ASSESS into UNMET; "as_category" keeps it as a
             distinct label. Coverage and the abstention rate are always measured over
             the raw, pre-exclusion per-criterion denominator (numerically aligned
-            with ``CoverageStats``).
+            with ``CoverageStats``). An item whose grade failed (its report has an
+            ``error``, e.g. every judgment failed) counts in that denominator only.
         on_item_complete: Callback invoked after each item is graded.
         _capture: When provided, per-item results are appended for artifact persistence.
 
@@ -1492,6 +1498,11 @@ async def validate_held_out(
             # observation for the criterion, regardless of how the abstention is
             # later handled.
             n_paired[c_idx] += 1
+            if result.error is not None:
+                # A failed grade (e.g. every judgment failed) has no usable verdict: as
+                # an errored item in compute_metrics, it counts in the raw denominator
+                # (coverage drops) and in no tally, kappa or exemplar (#18).
+                continue
             if (
                 llm_verdicts[c_idx] == CriterionVerdict.CANNOT_ASSESS
                 or gt_verdicts[c_idx] == CriterionVerdict.CANNOT_ASSESS
@@ -2243,12 +2254,17 @@ class ImprovementRunner:
             )
 
             issues = extract_issues(quality_report)
-            # A meta-rubric quality eval normally COMPUTES a real float; a None score
-            # means the grading itself failed and the loop cannot proceed (a fabricated
-            # fallback would corrupt convergence/acceptance). Narrow it explicitly.
+            # Without a score the loop cannot proceed (a fabricated fallback would corrupt
+            # convergence/acceptance): the grading failed (its report has an error), or the
+            # meta-judge could assess none of the meta-rubric's criteria. Say which.
             if quality_report.score is None:
+                if quality_report.error is not None:
+                    raise RuntimeError(
+                        f"Meta-rubric quality evaluation failed (no score): {quality_report.error}"
+                    )
                 raise RuntimeError(
-                    f"Meta-rubric quality evaluation failed (no score): {quality_report.error}"
+                    "Meta-rubric quality evaluation has no score: the meta-judge could "
+                    "assess none of the meta-rubric's criteria, so nothing was left to score"
                 )
             quality_score = quality_report.score
             iter_cost = quality_report.completion_cost or 0.0

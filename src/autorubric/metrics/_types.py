@@ -380,7 +380,8 @@ class CoverageStats(BaseModel):
         union_exclusion_rate: Fraction excluded for any reason (``1 - coverage``). None when
             ``n_total == 0``.
         n_errored: Count of paired observations dropped because grading errored (the grade
-            raised or failed, e.g. no judge judged the item; see ``compute_metrics``).
+            raised or failed, e.g. every criterion's judgment failed; see
+            ``compute_metrics``).
         error_rate: ``n_errored / n_total``. None when ``n_total == 0``.
     """
 

@@ -272,8 +272,10 @@ async def main():
                 item = ir.item
                 pred = ir.report.score
                 pred_str = f"{pred:>10.3f}" if pred is not None else f"{'N/A':>10}"
+                # None when the ground truth leaves nothing to score.
                 expected = dataset.compute_weighted_score(item.ground_truth)
-                print(f"P{paper_idx + 1:<7} {cond:<20} {pred_str} {expected:>10.3f}")
+                expected_str = f"{expected:>10.3f}" if expected is not None else f"{'N/A':>10}"
+                print(f"P{paper_idx + 1:<7} {cond:<20} {pred_str} {expected_str}")
         if paper_idx < 2:
             print()
 

@@ -5,8 +5,8 @@ scores), and ``RubricDataset.compute_weighted_score``, so all paths agree across
 ``CannotAssessStrategy`` x {binary, multi-choice} x {+/- weight}.
 
 A score is undefined, ``None``, never a fabricated 0.0, when there is nothing to score:
-``score_reports`` returns ``None`` when no criterion is left to score, and a report none
-of whose criteria any judge judged (``_every_judgment_failed``) has no score at all.
+``score_reports`` returns ``None`` when no criterion is left to score, and a report whose
+every criterion's judgment failed (``_every_judgment_failed``) has no score at all.
 """
 
 from __future__ import annotations
@@ -24,13 +24,13 @@ from autorubric.types import (
 def _every_judgment_failed(
     reports: Sequence[CriterionReport | EnsembleCriterionReport],
 ) -> bool:
-    """Whether no judge judged any of ``reports``: there is at least one, and each stands in
-    for failed judge calls (``is_error``; for an ``EnsembleCriterionReport``, every vote
+    """Whether every judgment of ``reports`` failed: there is at least one, and each stands
+    in for failed judge calls (``is_error``; for an ``EnsembleCriterionReport``, every vote
     aggregated on the criterion failed).
 
     The verdict standing in for a failed call keeps a criterion routed (an abstention, or
-    the worst case for an unknown failure), but it is no judgment, so reports none of
-    which were judged have no score.
+    the worst case for an unknown failure), but it is no judgment, so reports whose every
+    judgment failed have no score.
     """
     return bool(reports) and all(report.is_error for report in reports)
 

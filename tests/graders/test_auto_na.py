@@ -247,7 +247,7 @@ async def test_infra_failure_points_at_genuine_injected_na(mock_llm_config):
     assert cr.error is not None and cr.error.startswith("infrastructure:")
     # Its only criterion failed, so nothing judged the item: it has no score (#18).
     assert report.score is None
-    assert report.error is not None and report.error.startswith("Every judgment failed")
+    assert report.error is not None and report.error.startswith("Every criterion's judgment failed")
 
 
 @pytest.mark.asyncio
@@ -311,7 +311,7 @@ async def test_forced_choice_infra_error_is_genuine_abstain(mock_llm_config):
     assert cr.is_na is True
     # Its only criterion failed, so nothing judged the item: it has no score (#18).
     assert report.score is None
-    assert report.error is not None and report.error.startswith("Every judgment failed")
+    assert report.error is not None and report.error.startswith("Every criterion's judgment failed")
 
 
 @pytest.mark.asyncio

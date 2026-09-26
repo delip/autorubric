@@ -798,13 +798,14 @@ def _ensemble_evaluation_report(
     """An item's report, from its criteria's ensemble reports.
 
     ``score`` and ``raw_score`` are the weighted score over the final verdicts (normalized as
-    ``normalize`` says, and raw), ``None`` when no criterion is left to score. When no judge
-    judged any criterion (every criterion's verdict stands in for failed judge calls), the
-    item has no score at all: ``score``, ``raw_score`` and ``llm_raw_score`` are ``None``
-    and ``error`` says that every judgment failed, as for any failed grade, whatever the
-    ``CannotAssessStrategy``. ``mean_agreement`` is the criteria's mean ``agreement``
-    (``None`` for an empty rubric, never a fabricated 1.0), and ``cannot_assess_count``
-    counts the criteria whose final verdict abstains (``CANNOT_ASSESS`` or an NA option).
+    ``normalize`` says, and raw), ``None`` when no criterion is left to score. When every
+    criterion's judgment failed (its verdict stands in for failed judge calls; in a
+    cascade, the escalation judges', even where the decision model judged it), the item
+    has no score at all: ``score``, ``raw_score`` and ``llm_raw_score`` are ``None`` and
+    ``error`` says so, as for any failed grade, whatever the ``CannotAssessStrategy``.
+    ``mean_agreement`` is the criteria's mean ``agreement`` (``None`` for an empty rubric,
+    never a fabricated 1.0), and ``cannot_assess_count`` counts the criteria whose final
+    verdict abstains (``CANNOT_ASSESS`` or an NA option).
     Shared by ``CriterionGrader.aggregate`` and the offline cascade replay
     (``autorubric.escalation.replay_escalation``), so a replayed report is assembled
     exactly as a live one.
@@ -856,12 +857,13 @@ def _ensemble_evaluation_report(
     final_score: float | None = None
     raw_score: float | None = None
     if _every_judgment_failed(ensemble_reports):
-        # Nothing was judged: the verdicts only stand in for failed judge calls, so the
-        # item has no score, and its report says why, as a failed grade's does.
-        errors = list(dict.fromkeys(er.error for er in ensemble_reports if er.error))
-        error = f"Every judgment failed: {errors[0]}"
+        # Every criterion's judgment failed: its verdict only stands in for failed judge
+        # calls, so the item has no score, and its report says why, as a failed grade's does.
+        errors = list(dict.fromkeys(er.error for er in ensemble_reports if er.error is not None))
+        error = f"Every criterion's judgment failed: {errors[0]}"
         if len(errors) > 1:
-            error += f" (and {len(errors) - 1} other errors)"
+            others = len(errors) - 1
+            error += f" (and {others} other error{'s' if others > 1 else ''})"
     else:
         final_score = score(final_reports, normalize)
         raw_score = score(final_reports, False)

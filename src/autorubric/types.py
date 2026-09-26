@@ -805,17 +805,17 @@ class EvaluationReport(BaseModel):
     Attributes:
         score: The final score (0-1 if normalized, raw weighted sum otherwise).
             ``None`` when there is no score: grading FAILED (an error report, which
-            includes an item no judge judged), or no criterion is left to score (under
+            includes an item whose every criterion's judgment failed), or no criterion is
+            left to score (under
             the SKIP strategy, every criterion abstained). Consumers must skip ``None``.
         raw_score: The unnormalized weighted sum. ``None`` exactly when ``score`` is.
         llm_raw_score: The original score returned by the LLM (same as raw_score).
         report: Per-criterion breakdown with verdicts and explanations.
         cannot_assess_count: Number of criteria with CANNOT_ASSESS verdict.
         error: Optional error message if grading failed (e.g., JSON parse error, or
-            "Every judgment failed: ..." when no judge judged any criterion). When set,
-            score/raw_score are ``None`` (a failure has no score — a fabricated 0.0 is
-            indistinguishable from a real catastrophic score). Training pipelines
-            should filter these out.
+            "Every criterion's judgment failed: ..."). When set, score/raw_score are
+            ``None`` (a failure has no score — a fabricated 0.0 is indistinguishable from
+            a real catastrophic score). Training pipelines should filter these out.
         token_usage: Aggregated token usage across all LLM calls made during grading.
             For CriterionGrader, this is the sum across all criterion evaluations.
         completion_cost: Total cost in USD for all LLM calls made during grading.
@@ -1105,8 +1105,8 @@ class EnsembleEvaluationReport(BaseModel):
 
     Attributes:
         score: The final aggregated score (0-1 if normalized). ``None`` when there is no
-            score: grading FAILED (an error report: no judge results, or no judge judged
-            any criterion), or no criterion is left to score (under the SKIP strategy,
+            score: grading FAILED (an error report: no judge results, or every criterion's
+            judgment failed), or no criterion is left to score (under the SKIP strategy,
             every final verdict abstains).
         raw_score: The unnormalized weighted sum. ``None`` exactly when ``score`` is.
         llm_raw_score: Same as raw_score (for compatibility with EvaluationReport).
@@ -1124,7 +1124,7 @@ class EnsembleEvaluationReport(BaseModel):
         token_usage: Total token usage across all judges.
         completion_cost: Total cost across all judges.
         error: Error message if grading failed: no judge results, or "Every judgment
-            failed: ..." when no judge judged any criterion (each criterion report keeps
+            failed: ..." when each criterion's verdict stands in for failed calls (each keeps
             its own error). When set, ``score``, ``raw_score`` and ``llm_raw_score`` are
             ``None``.
     """
