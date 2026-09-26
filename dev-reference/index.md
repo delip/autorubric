@@ -1,6 +1,6 @@
 # AutoRubric Development Reference
 
-A Python library for evaluating text outputs against weighted criteria using LLM-as-a-judge.
+A Python library for evaluating text outputs against weighted criteria using AI judges such as LLMs and decision models.
 
 **For detailed documentation, examples, and usage guides, see docs/.**
 

@@ -6,8 +6,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AutoRubric - Research-Backed LLM Evaluation</title>
     <meta name="description"
-        content="Evaluate LLM-generated and human-authored content with weighted rubrics and LLM-as-a-Judge — ensemble judging, bias mitigation, and agreement metrics.">
-    <meta name="keywords" content="LLM evaluation, LLM-as-a-Judge, LLM judge, rubric evaluation, weighted rubric criteria, analytic rubrics, automated grading, structured evaluation, LLM-generated content, human-authored content evaluation, ensemble judging, multi-judge panel, bias mitigation, position bias, self-preference bias, verbosity bias, few-shot calibration, CANNOT_ASSESS, abstention, length penalty, multi-choice rubrics, ordinal scale, nominal scale, extended thinking, meta-rubric evaluation, automated rubric improvement, held-out rubric improvement, judge validation, synthetic ground truth, agent skill evaluation, batch evaluation, cost optimization, Cohen's kappa, Krippendorff's alpha, Fleiss' kappa, inter-rater agreement, Matthews correlation coefficient, accuracy, precision, recall, F1, Spearman correlation, Kendall correlation, Pearson correlation, Earth Mover's Distance, KS test, bootstrap confidence intervals, distribution analysis, systematic bias detection, LiteLLM, OpenAI, Anthropic, Google, Azure, Groq, Ollama, Python evaluation library, open source">
+        content="Evaluate LLM-generated and human-authored content with weighted rubrics, LLM-as-a-Judge, and decision models — ensemble judging and agreement metrics.">
+    <meta name="keywords" content="LLM evaluation, LLM-as-a-Judge, LLM judge, AI judges, decision models, decision-model judges, probabilistic judges, TypeSafe Jev, System One protocol, rubric evaluation, weighted rubric criteria, analytic rubrics, automated grading, structured evaluation, LLM-generated content, human-authored content evaluation, ensemble judging, multi-judge panel, mixed ensembles, confidence cascade, LLM fallback, escalation threshold calibration, cascade replay, bias mitigation, position bias, self-preference bias, verbosity bias, few-shot calibration, CANNOT_ASSESS, abstention, length penalty, multi-choice rubrics, ordinal scale, nominal scale, extended thinking, meta-rubric evaluation, automated rubric improvement, held-out rubric improvement, judge validation, synthetic ground truth, agent skill evaluation, batch evaluation, cost optimization, Cohen's kappa, Krippendorff's alpha, Fleiss' kappa, inter-rater agreement, Matthews correlation coefficient, accuracy, precision, recall, F1, Spearman correlation, Kendall correlation, Pearson correlation, Earth Mover's Distance, KS test, bootstrap confidence intervals, distribution analysis, systematic bias detection, LiteLLM, OpenAI, Anthropic, Google, Azure, Groq, Ollama, Python evaluation library, open source">
     <meta name="robots" content="index, follow, max-image-preview:large">
     <link rel="canonical" href="https://autorubric.org/">
 
@@ -16,14 +16,14 @@
     <meta property="og:site_name" content="AutoRubric">
     <meta property="og:title" content="AutoRubric — Research-Backed LLM Evaluation">
     <meta property="og:description"
-        content="Evaluate LLM-generated and human-authored content with weighted rubrics and LLM-as-a-Judge — ensemble judging, bias mitigation, and agreement metrics.">
+        content="Evaluate LLM-generated and human-authored content with weighted rubrics, LLM-as-a-Judge, and decision models — ensemble judging and agreement metrics.">
     <meta property="og:url" content="https://autorubric.org/">
 
     <!-- Twitter -->
     <meta name="twitter:card" content="summary">
     <meta name="twitter:title" content="AutoRubric — Research-Backed LLM Evaluation">
     <meta name="twitter:description"
-        content="Evaluate LLM-generated and human-authored content with weighted rubrics and LLM-as-a-Judge — ensemble judging, bias mitigation, and agreement metrics.">
+        content="Evaluate LLM-generated and human-authored content with weighted rubrics, LLM-as-a-Judge, and decision models — ensemble judging and agreement metrics.">
 
     <!-- Structured data: keyword-rich feature list for search engines -->
     <script type="application/ld+json">
@@ -32,7 +32,7 @@
   "@type": "SoftwareApplication",
   "name": "AutoRubric",
   "alternateName": "AutoRubric — Research-Backed LLM Evaluation",
-  "description": "Evaluate LLM-generated and human-authored content with weighted rubrics and LLM-as-a-Judge: ensemble judging, bias mitigation, agreement metrics (Cohen's kappa), and meta-rubric feedback.",
+  "description": "Evaluate LLM-generated and human-authored content with weighted rubrics and AI judges, LLM-as-a-Judge and decision models: ensemble judging, confidence cascades, bias mitigation, agreement metrics (Cohen's kappa), and meta-rubric feedback.",
   "applicationCategory": "DeveloperApplication",
   "operatingSystem": "Cross-platform (Python 3.11+)",
   "url": "https://autorubric.org/",
@@ -54,15 +54,19 @@
     "price": "0",
     "priceCurrency": "USD"
   },
-  "keywords": "LLM evaluation, LLM-as-a-Judge, LLM judge, rubric evaluation, weighted rubric criteria, analytic rubrics, automated grading, structured evaluation, LLM-generated content, human-authored content evaluation, ensemble judging, multi-judge panel, bias mitigation, position bias, self-preference bias, verbosity bias, few-shot calibration, CANNOT_ASSESS, abstention, length penalty, multi-choice rubrics, ordinal scale, nominal scale, extended thinking, meta-rubric evaluation, automated rubric improvement, held-out rubric improvement, judge validation, synthetic ground truth, agent skill evaluation, batch evaluation, cost optimization, Cohen's kappa, Krippendorff's alpha, Fleiss' kappa, inter-rater agreement, Matthews correlation coefficient, accuracy, precision, recall, F1, Spearman correlation, Kendall correlation, Pearson correlation, Earth Mover's Distance, KS test, bootstrap confidence intervals, distribution analysis, systematic bias detection, LiteLLM, OpenAI, Anthropic, Google, Azure, Groq, Ollama, Python evaluation library, open source",
+  "keywords": "LLM evaluation, LLM-as-a-Judge, LLM judge, AI judges, decision models, decision-model judges, probabilistic judges, TypeSafe Jev, System One protocol, rubric evaluation, weighted rubric criteria, analytic rubrics, automated grading, structured evaluation, LLM-generated content, human-authored content evaluation, ensemble judging, multi-judge panel, mixed ensembles, confidence cascade, LLM fallback, escalation threshold calibration, cascade replay, bias mitigation, position bias, self-preference bias, verbosity bias, few-shot calibration, CANNOT_ASSESS, abstention, length penalty, multi-choice rubrics, ordinal scale, nominal scale, extended thinking, meta-rubric evaluation, automated rubric improvement, held-out rubric improvement, judge validation, synthetic ground truth, agent skill evaluation, batch evaluation, cost optimization, Cohen's kappa, Krippendorff's alpha, Fleiss' kappa, inter-rater agreement, Matthews correlation coefficient, accuracy, precision, recall, F1, Spearman correlation, Kendall correlation, Pearson correlation, Earth Mover's Distance, KS test, bootstrap confidence intervals, distribution analysis, systematic bias detection, LiteLLM, OpenAI, Anthropic, Google, Azure, Groq, Ollama, Python evaluation library, open source",
   "featureList": [
     "Weighted rubric criteria with positive and negative weights",
+    "Two kinds of AI judges: LLM judges and decision models",
+    "Decision-model judges (TypeSafe Jev or any System One endpoint) that grade a whole rubric in one request, with a probability and a confidence for every verdict",
     "Binary and multi-choice verdicts (ordinal and nominal scales)",
-    "Ensemble judging with majority and weighted voting",
+    "Ensemble judging with majority and weighted voting, including mixed panels of LLM and decision-model judges",
     "Cross-provider judge panels to mitigate self-preference bias",
+    "Confidence cascades that escalate a decision model's failed, abstained, or low-confidence criteria to LLM judges",
+    "Offline cascade calibration and replay with no extra model calls",
     "Position-bias mitigation via option shuffling",
     "CANNOT_ASSESS verdict for explicit uncertainty and abstention",
-    "Few-shot calibration with balanced sampling",
+    "Few-shot calibration of LLM judges with balanced sampling",
     "Length penalties to control verbosity bias",
     "Agreement metrics: Cohen's kappa, Krippendorff's alpha, Fleiss' kappa, accuracy, precision, recall, F1",
     "Matthews correlation coefficient (phi) and confusion matrices",
@@ -481,11 +485,11 @@
         <section class="hero">
             <div class="container">
                 <h1 class="hero-headline">
-                    <span class="sr-only">Structured evaluation for LLM-generated content. LLM-based grading for human-authored content. Structured evaluation for non-verifiable domains.</span>
+                    <span class="sr-only">Structured evaluation for LLM-generated content. Automated grading for human-authored content. Structured evaluation for non-verifiable domains.</span>
                     <span class="roll-viewport" aria-hidden="true">
                         <span class="roll-track">
                             <span class="roll-phrase">Structured evaluation for<br><span class="accent">LLM-generated content</span></span>
-                            <span class="roll-phrase">LLM-based grading for<br><span class="accent">Human-authored content</span></span>
+                            <span class="roll-phrase">Automated grading for<br><span class="accent">Human-authored content</span></span>
                             <span class="roll-phrase">Structured evaluation for<br><span class="accent">Non-verifiable domains</span></span>
                             <!-- seam: duplicate of the first phrase so the roll can snap back invisibly -->
                             <span class="roll-phrase">Structured evaluation for<br><span class="accent">LLM-generated content</span></span>
@@ -493,8 +497,8 @@
                     </span>
                 </h1>
                 <p class="tagline">AutoRubric brings together best practices from rubric science and LLM-as-a-Judge
-                    research. Define criteria, validate against humans, and iterate on your rubrics with built-in
-                    meta-evaluation.</p>
+                    research, and grades with AI judges: LLMs, decision models, or both. Define criteria, validate
+                    against humans, and iterate on your rubrics with built-in meta-evaluation.</p>
                 <div class="cta-group">
                     <a href="/docs/quickstart/" class="btn btn-primary">Get Started</a>
                     <a href="/docs/cookbook/" class="btn btn-secondary">
@@ -520,11 +524,13 @@
 
                 <div class="code-block">
                     <pre><span class="keyword">import</span> asyncio
-<span class="keyword">from</span> autorubric <span class="keyword">import</span> Rubric, LLMConfig
+<span class="keyword">from</span> autorubric <span class="keyword">import</span> Rubric, LLMConfig, DecisionModelConfig
 <span class="keyword">from</span> autorubric.graders <span class="keyword">import</span> CriterionGrader
 
 <span class="keyword">async def</span> <span class="function">main</span>():
     grader = CriterionGrader(judge_model_config=LLMConfig(model=<span class="string">"openai/gpt-5.1-mini"</span>))
+    <span class="comment"># Or let a decision model grade the whole rubric in one request (pip install 'autorubric[typesafe]'):</span>
+    <span class="comment"># grader = CriterionGrader(judge_model_config=DecisionModelConfig(model="jev-latest"))</span>
 
     rubric = Rubric.from_dict([
         {<span class="string">"weight"</span>: <span class="number">10.0</span>, <span class="string">"requirement"</span>: <span class="string">"States NMC cell-level energy density in the 250-300 Wh/kg range"</span>},
@@ -563,6 +569,10 @@ asyncio.run(main())</pre>
                         analytic rubrics with atomic criteria, multi-judge panels, explicit uncertainty handling, and
                         validation against human judgments. It also provides <strong>meta-rubric evaluation</strong> to
                         assess and improve your rubrics themselves.</p>
+                    <p>AutoRubric grades with two kinds of AI judges. LLM judges take one criterion per call and explain
+                        each verdict. Decision models, such as TypeSafe's Jev, grade the whole rubric in one request and
+                        attach a probability to every verdict. Use either alone, mix them in one panel, or let a decision
+                        model take the first pass and escalate only its uncertain criteria to an LLM.</p>
                 </div>
             </div>
         </section>
@@ -583,7 +593,21 @@ asyncio.run(main())</pre>
                             Weighted Criteria
                         </h3>
                         <p>Define rubrics with positive and negative weights. Binary verdicts or multi-choice scales
-                            (ordinal, nominal). Per-criterion explanations.</p>
+                            (ordinal, nominal). Per-criterion explanations or probabilities.</p>
+                    </div>
+                    <div class="feature">
+                        <div class="feature-category">Core</div>
+                        <h3>
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)"
+                                stroke-width="2">
+                                <line x1="19" y1="5" x2="5" y2="19"></line>
+                                <circle cx="6.5" cy="6.5" r="2.5"></circle>
+                                <circle cx="17.5" cy="17.5" r="2.5"></circle>
+                            </svg>
+                            Decision-Model Judges
+                        </h3>
+                        <p>Grade a whole rubric in one request with TypeSafe's Jev or any System One endpoint. A
+                            probability and a confidence for every verdict.</p>
                     </div>
                     <div class="feature">
                         <div class="feature-category">Robustness</div>
@@ -597,8 +621,8 @@ asyncio.run(main())</pre>
                             </svg>
                             Ensemble Judging
                         </h3>
-                        <p>Combine multiple LLM judges with voting strategies. Mitigate self-preference bias with
-                            cross-provider panels.</p>
+                        <p>Combine LLM and decision-model judges with voting strategies. Mitigate self-preference bias
+                            with cross-provider panels.</p>
                     </div>
                     <div class="feature">
                         <div class="feature-category">Robustness</div>
@@ -612,8 +636,8 @@ asyncio.run(main())</pre>
                             </svg>
                             Few-Shot Calibration
                         </h3>
-                        <p>Calibrate judges with labeled examples. Balanced sampling prevents verdict bias. Works with
-                            single or ensemble judges.</p>
+                        <p>Calibrate LLM judges with labeled examples. Balanced sampling prevents verdict bias. Works
+                            with single or ensemble judges.</p>
                     </div>
                     <div class="feature">
                         <div class="feature-category">Robustness</div>
@@ -657,6 +681,26 @@ asyncio.run(main())</pre>
                             Per-judge breakdowns.</p>
                     </div>
                     <div class="feature">
+                        <div class="feature-category">Validation</div>
+                        <h3>
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)"
+                                stroke-width="2">
+                                <line x1="4" y1="21" x2="4" y2="14"></line>
+                                <line x1="4" y1="10" x2="4" y2="3"></line>
+                                <line x1="12" y1="21" x2="12" y2="12"></line>
+                                <line x1="12" y1="8" x2="12" y2="3"></line>
+                                <line x1="20" y1="21" x2="20" y2="16"></line>
+                                <line x1="20" y1="12" x2="20" y2="3"></line>
+                                <line x1="1" y1="14" x2="7" y2="14"></line>
+                                <line x1="9" y1="8" x2="15" y2="8"></line>
+                                <line x1="17" y1="16" x2="23" y2="16"></line>
+                            </svg>
+                            Cascade Calibration
+                        </h3>
+                        <p>Sweep escalation thresholds offline from one decision-model run and one LLM run, with no
+                            extra calls. Per-criterion thresholds and held-out replay.</p>
+                    </div>
+                    <div class="feature">
                         <div class="feature-category">Meta-Evaluation</div>
                         <h3>
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)"
@@ -682,6 +726,18 @@ asyncio.run(main())</pre>
                         </h3>
                         <p>High-throughput processing with rate limiting. Checkpointing and resumption. Timing stats and
                             cost tracking.</p>
+                    </div>
+                    <div class="feature">
+                        <div class="feature-category">Operations</div>
+                        <h3>
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)"
+                                stroke-width="2">
+                                <path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"></path>
+                            </svg>
+                            Confidence Cascades
+                        </h3>
+                        <p>A decision model grades every criterion first. Only failed, abstained, or low-confidence
+                            criteria go to LLM judges.</p>
                     </div>
                     <div class="feature">
                         <div class="feature-category">Operations</div>

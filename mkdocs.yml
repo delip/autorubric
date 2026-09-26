@@ -1,6 +1,6 @@
 site_name: AutoRubric
 site_url: https://autorubric.org/docs/
-site_description: A Python library for evaluating text outputs against weighted criteria using LLM-as-a-judge.
+site_description: A Python library for evaluating text outputs against weighted criteria using AI judges such as LLMs and decision models.
 site_author: Delip Rao
 repo_url: https://github.com/delip/autorubric
 repo_name: delip/autorubric

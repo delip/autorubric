@@ -1,6 +1,6 @@
 # AutoRubric
 
-A Python library for evaluating text outputs against weighted criteria using LLM-as-a-judge.
+A Python library for evaluating text outputs against weighted criteria using AI judges such as LLMs and decision models.
 
 <p align="center">
   <a href="https://pypi.org/project/autorubric/">
@@ -16,15 +16,17 @@ A Python library for evaluating text outputs against weighted criteria using LLM
 
 ## What is AutoRubric?
 
-AutoRubric provides a structured, research-backed approach to evaluating LLM outputs using rubric-based grading with LLM judges. Instead of relying on vague quality assessments, AutoRubric enables you to define explicit, weighted criteria and receive detailed per-criterion verdicts with explanations.
+AutoRubric provides a structured, research-backed approach to evaluating LLM outputs using rubric-based grading with AI judges. Instead of relying on vague quality assessments, AutoRubric enables you to define explicit, weighted criteria and receive detailed per-criterion verdicts.
+
+Judges come in two kinds. [LLM judges](cookbook/llm-judges.md) take one criterion per call and explain each verdict. [Decision models](cookbook/decision-models.md), such as TypeSafe's Jev, grade a whole rubric in one request and return probabilities instead of explanations. Use either alone, mix them in an ensemble, or let a decision model take the first pass and hand its uncertain criteria to an LLM.
 
 ### Key Features
 
 - **Rubric-based evaluation**: Define weighted criteria with explicit requirements
-- **Multi-provider support**: Works with OpenAI, Anthropic, Google, Azure, Groq, Ollama, and 100+ providers via LiteLLM
-- **Ensemble judging**: Combine multiple LLM judges to reduce bias and improve robustness
+- **LLM judges**: Works with OpenAI, Anthropic, Google, Azure, Groq, Ollama, and 100+ providers via LiteLLM, with a written explanation for each verdict
 - **Decision-model judges**: Grade a whole rubric in one request with a probabilistic decision model such as TypeSafe's Jev, alone, in an ensemble, or as a cheap first pass with an LLM fallback
-- **Few-shot learning**: Calibrate judges with labeled examples
+- **Ensemble judging**: Combine multiple judges, LLMs and decision models alike, to reduce bias and improve robustness
+- **Few-shot learning**: Calibrate LLM judges with labeled examples
 - **Multi-choice criteria**: Support for ordinal and nominal scales beyond binary verdicts
 - **Structured outputs**: Type-safe responses with detailed per-criterion reports
 - **Batch evaluation**: High-throughput processing with checkpointing and resumption
@@ -102,6 +104,7 @@ AutoRubric is built on research findings about effective LLM-as-a-judge evaluati
 - Python 3.11+
 - [LiteLLM](https://docs.litellm.ai/) for multi-provider LLM support
 - [Pydantic](https://docs.pydantic.dev/) for structured outputs
+- Optional: the TypeSafe SDK for decision-model judges (`pip install 'autorubric[typesafe]'`)
 
 ## References
 
