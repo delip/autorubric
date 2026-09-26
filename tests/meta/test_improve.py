@@ -77,6 +77,19 @@ def _make_ensemble_criterion_report(
     )
 
 
+def _make_reasonless_criterion_report(
+    name: str, weight: float, verdict: CriterionVerdict
+) -> EnsembleCriterionReport:
+    """A criterion report whose judge gave no explanation (``final_reason`` is ``None``)."""
+    return EnsembleCriterionReport(
+        criterion=_make_criterion(name, weight),
+        final_verdict=verdict,
+        final_reason=None,
+        votes=[JudgeVote(judge_id="judge_0", verdict=verdict, reason=None)],
+        agreement=1.0,
+    )
+
+
 def _make_ensemble_report(
     criterion_reports: list[EnsembleCriterionReport],
     score: float = 0.8,
@@ -198,6 +211,26 @@ class TestExtractIssues:
         assert len(issues) == 2
         names = {i.criterion_name for i in issues}
         assert names == {"bad", "anti_bad"}
+
+    def test_none_final_reason_gives_empty_feedback(self):
+        """No explanation from the judges still yields the issue, with empty feedback."""
+        report = _make_ensemble_report(
+            [
+                _make_reasonless_criterion_report("clarity", 1.0, CriterionVerdict.UNMET),
+                _make_reasonless_criterion_report("overlap", -1.0, CriterionVerdict.MET),
+            ]
+        )
+        issues = _extract_issues(report)
+        assert [(i.criterion_name, i.is_antipattern, i.feedback) for i in issues] == [
+            ("clarity", False, ""),
+            ("overlap", True, ""),
+        ]
+
+    def test_empty_final_reason_is_kept_as_is(self):
+        report = _make_ensemble_report(
+            [_make_ensemble_criterion_report("clarity", 1.0, CriterionVerdict.UNMET, reason="")]
+        )
+        assert _extract_issues(report)[0].feedback == ""
 
 
 # ============================================================================
@@ -441,7 +474,7 @@ class TestMetaCriterionJudgment:
         generate_mock = AsyncMock(return_value=gen_result)
 
         grader = CriterionGrader(
-            llm_config=LLMConfig(model="test-model"),
+            judge_model_config=LLMConfig(model="test-model"),
             binary_response_format=MetaCriterionJudgment,
         )
 
@@ -476,7 +509,7 @@ class TestMetaCriterionJudgment:
         generate_mock = AsyncMock(return_value=gen_result)
 
         grader = CriterionGrader(
-            llm_config=LLMConfig(model="test-model"),
+            judge_model_config=LLMConfig(model="test-model"),
             binary_response_format=MetaCriterionJudgment,
         )
 
@@ -510,7 +543,7 @@ class TestMetaCriterionJudgment:
         )
         generate_mock = AsyncMock(return_value=gen_result)
 
-        grader = CriterionGrader(llm_config=LLMConfig(model="test-model"))
+        grader = CriterionGrader(judge_model_config=LLMConfig(model="test-model"))
 
         with patch.object(list(grader._clients.values())[0], "generate", generate_mock):
             rubric = Rubric(
@@ -1500,7 +1533,7 @@ class TestValidateAgreementCallback:
             agreement, per_crit, cost = await validate_agreement(
                 rubric,
                 samples,
-                [JudgeSpec(llm_config=LLMConfig(model="test"), judge_id="j1")],
+                [JudgeSpec(judge_model_config=LLMConfig(model="test"), judge_id="j1")],
                 on_sample_complete=callback,
             )
 
@@ -1523,7 +1556,7 @@ class TestValidateAgreementCallback:
             agreement, per_crit, cost = await validate_agreement(
                 rubric,
                 samples,
-                [JudgeSpec(llm_config=LLMConfig(model="test"), judge_id="j1")],
+                [JudgeSpec(judge_model_config=LLMConfig(model="test"), judge_id="j1")],
                 on_sample_complete=None,
             )
 
@@ -1548,7 +1581,7 @@ class TestValidateAgreementCallback:
             agreement, per_crit, cost = await validate_agreement(
                 rubric,
                 samples,
-                [JudgeSpec(llm_config=LLMConfig(model="test"), judge_id="j1")],
+                [JudgeSpec(judge_model_config=LLMConfig(model="test"), judge_id="j1")],
             )
 
         assert agreement is None
@@ -1575,7 +1608,7 @@ class TestValidateAgreementCallback:
             agreement, per_crit, _ = await validate_agreement(
                 rubric,
                 samples,
-                [JudgeSpec(llm_config=LLMConfig(model="test"), judge_id="j1")],
+                [JudgeSpec(judge_model_config=LLMConfig(model="test"), judge_id="j1")],
             )
 
         assert agreement is None
@@ -1603,7 +1636,7 @@ class TestValidateAgreementCallback:
             _, _, cost = await validate_agreement(
                 rubric,
                 samples,
-                [JudgeSpec(llm_config=LLMConfig(model="test"), judge_id="j1")],
+                [JudgeSpec(judge_model_config=LLMConfig(model="test"), judge_id="j1")],
             )
 
         assert cost == pytest.approx(0.03)
@@ -1817,7 +1850,7 @@ class TestValidateAgreementCapture:
             await validate_agreement(
                 rubric,
                 samples,
-                [JudgeSpec(llm_config=LLMConfig(model="test"), judge_id="j1")],
+                [JudgeSpec(judge_model_config=LLMConfig(model="test"), judge_id="j1")],
                 _capture=capture,
             )
 
@@ -1844,7 +1877,7 @@ class TestValidateAgreementCapture:
             agreement, per_crit, cost = await validate_agreement(
                 rubric,
                 samples,
-                [JudgeSpec(llm_config=LLMConfig(model="test"), judge_id="j1")],
+                [JudgeSpec(judge_model_config=LLMConfig(model="test"), judge_id="j1")],
                 _capture=None,
             )
 
@@ -2187,7 +2220,7 @@ class TestValidateGroundTruth:
             score=0.0,
         )
 
-        grader = CriterionGrader(llm_config=LLMConfig(model="test"))
+        grader = CriterionGrader(judge_model_config=LLMConfig(model="test"))
 
         with patch.object(
             rubric,
@@ -2244,7 +2277,7 @@ class TestValidateGroundTruth:
             score=0.0,
         )
 
-        grader = CriterionGrader(llm_config=LLMConfig(model="test"))
+        grader = CriterionGrader(judge_model_config=LLMConfig(model="test"))
 
         with patch.object(
             rubric,
@@ -2294,7 +2327,7 @@ class TestValidateGroundTruth:
             score=1.0,
         )
 
-        grader = CriterionGrader(llm_config=LLMConfig(model="test"))
+        grader = CriterionGrader(judge_model_config=LLMConfig(model="test"))
 
         with patch.object(
             rubric,
@@ -2580,6 +2613,31 @@ class TestFormatErrorCriteria:
         assert "w=+10" in lines[0]
         assert "w=-5" in lines[1]
 
+    def test_line_format_with_a_reason(self):
+        report = _make_ensemble_report(
+            [
+                _make_ensemble_criterion_report("pos", 10.0, CriterionVerdict.MET, reason="r1"),
+                _make_ensemble_criterion_report("neg", -5.0, CriterionVerdict.UNMET, reason=""),
+            ]
+        )
+        assert _format_error_criteria(report, over_scored=True) == [
+            "    [w=+10.0, MET] pos: r1",
+            "    [w=-5.0, UNMET] neg: ",
+        ]
+
+    def test_none_final_reason_omits_the_reason_suffix(self):
+        """No explanation from the judges: the line ends at the name, never ": None"."""
+        report = _make_ensemble_report(
+            [
+                _make_reasonless_criterion_report("pos", 10.0, CriterionVerdict.UNMET),
+                _make_reasonless_criterion_report("neg", -5.0, CriterionVerdict.MET),
+            ]
+        )
+        assert _format_error_criteria(report, over_scored=False) == [
+            "    [w=+10.0, UNMET] pos",
+            "    [w=-5.0, MET] neg",
+        ]
+
 
 # ============================================================================
 # Startup validation in ImprovementRunner.run()
@@ -2663,7 +2721,7 @@ class TestStartupValidation:
         )
 
         config = ImprovementConfig(
-            eval_llm=[JudgeSpec(llm_config=LLMConfig(model="test"), judge_id="j1")],
+            eval_llm=[JudgeSpec(judge_model_config=LLMConfig(model="test"), judge_id="j1")],
             revision_llm=LLMConfig(model="test"),
             validation_data=dataset,
             save_artifacts=False,
@@ -2726,7 +2784,7 @@ class TestValidateHeldOut:
         from autorubric.meta._improve import validate_held_out
 
         rubric, dataset = self._rubric_and_dataset()
-        grader = CriterionGrader(llm_config=LLMConfig(model="test"))
+        grader = CriterionGrader(judge_model_config=LLMConfig(model="test"))
 
         # LLM agrees with ground truth on all items for criterion 0 (accuracy),
         # disagrees on all items for criterion 1 (style).
@@ -2780,7 +2838,7 @@ class TestValidateHeldOut:
         from autorubric.meta._improve import validate_held_out
 
         rubric, dataset = self._rubric_and_dataset()
-        grader = CriterionGrader(llm_config=LLMConfig(model="test"))
+        grader = CriterionGrader(judge_model_config=LLMConfig(model="test"))
 
         # For criterion 0 (accuracy):
         #   item0: GT=MET, LLM=MET -> TP
@@ -2845,7 +2903,7 @@ class TestValidateHeldOut:
             for i in range(5)
         ]
         dataset = RubricDataset(prompt="task", rubric=rubric, items=items)
-        grader = CriterionGrader(llm_config=LLMConfig(model="test"))
+        grader = CriterionGrader(judge_model_config=LLMConfig(model="test"))
 
         report = self._make_grade_report([("c", 1.0, CriterionVerdict.UNMET)])
 
@@ -2870,7 +2928,7 @@ class TestValidateHeldOut:
         from autorubric.meta._improve import validate_held_out
 
         rubric, dataset = self._rubric_and_dataset()
-        grader = CriterionGrader(llm_config=LLMConfig(model="test"))
+        grader = CriterionGrader(judge_model_config=LLMConfig(model="test"))
         report = self._make_grade_report(
             [
                 ("accuracy", 1.0, CriterionVerdict.MET),
@@ -2916,7 +2974,7 @@ class TestValidateHeldOut:
                 ),
             ],
         )
-        grader = CriterionGrader(llm_config=LLMConfig(model="test"))
+        grader = CriterionGrader(judge_model_config=LLMConfig(model="test"))
 
         # a: correct (MET==MET), b: wrong (UNMET!=MET)
         report = self._make_grade_report(

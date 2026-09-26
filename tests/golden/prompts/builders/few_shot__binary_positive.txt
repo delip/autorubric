@@ -1,0 +1,26 @@
+<criterion_type>
+positive
+</criterion_type>
+
+<criterion>
+States the boiling point of water at sea level
+</criterion>
+
+<examples>
+<example_1>
+<example_submission>Water boils at 100 C.</example_submission>
+<verdict>MET</verdict>
+</example_1>
+<example_2>
+<example_submission>Water is wet.</example_submission>
+<verdict>UNMET</verdict>
+</example_2>
+<example_3>
+<example_submission>[See attached table]</example_submission>
+<verdict>CANNOT_ASSESS</verdict>
+</example_3>
+</examples>
+
+<submission>
+Water boils at 100 degrees Celsius at sea level.
+</submission>

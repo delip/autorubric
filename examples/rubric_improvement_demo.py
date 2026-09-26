@@ -151,7 +151,7 @@ async def main() -> None:
     val, test = dataset.split_train_test(n_train=N_VAL, seed=42)
     test_expected = compute_expected_scores(test)
 
-    grader = CriterionGrader(llm_config=eval_llm)
+    grader = CriterionGrader(judge_model_config=eval_llm)
 
     # ================================================================
     # Track A — Baseline (zero-shot LLM-generated rubric)

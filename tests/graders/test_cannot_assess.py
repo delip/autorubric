@@ -98,7 +98,7 @@ async def test_cannot_assess_count_in_report(mock_llm_config, sample_rubric):
         "autorubric.graders.criterion_grader.LLMClient",
         return_value=mock_client,
     ):
-        grader = CriterionGrader(llm_config=mock_llm_config)
+        grader = CriterionGrader(judge_model_config=mock_llm_config)
         result = await sample_rubric.grade("Test submission", grader=grader)
 
         assert result.cannot_assess_count == 1
@@ -153,7 +153,7 @@ async def test_skip_strategy_excludes_cannot_assess_from_scoring(mock_llm_config
         return_value=mock_client,
     ):
         # Default strategy is SKIP
-        grader = CriterionGrader(llm_config=mock_llm_config)
+        grader = CriterionGrader(judge_model_config=mock_llm_config)
         result = await sample_rubric.grade("Test", grader=grader)
 
         # With SKIP: only fact2 (weight=5) is considered
@@ -192,7 +192,7 @@ async def test_skip_strategy_all_cannot_assess_returns_zero(mock_llm_config):
         "autorubric.graders.criterion_grader.LLMClient",
         return_value=mock_client,
     ):
-        grader = CriterionGrader(llm_config=mock_llm_config)
+        grader = CriterionGrader(judge_model_config=mock_llm_config)
         result = await rubric.grade("Test", grader=grader)
 
         # All excluded -> 0 score
@@ -269,7 +269,7 @@ async def test_cannot_assess_strategy_scoring(
         return_value=mock_client,
     ):
         grader = CriterionGrader(
-            llm_config=mock_llm_config,
+            judge_model_config=mock_llm_config,
             cannot_assess_config=cannot_assess_config,
         )
         result = await sample_rubric.grade("Test", grader=grader)
@@ -320,7 +320,7 @@ async def test_fail_strategy_negative_criterion_cannot_assess(mock_llm_config):
         return_value=mock_client,
     ):
         grader = CriterionGrader(
-            llm_config=mock_llm_config,
+            judge_model_config=mock_llm_config,
             cannot_assess_config=CannotAssessConfig(strategy=CannotAssessStrategy.FAIL),
         )
         result = await rubric.grade("Test", grader=grader)
@@ -368,7 +368,7 @@ async def test_partial_strategy_custom_credit(mock_llm_config):
         return_value=mock_client,
     ):
         grader = CriterionGrader(
-            llm_config=mock_llm_config,
+            judge_model_config=mock_llm_config,
             cannot_assess_config=CannotAssessConfig(
                 strategy=CannotAssessStrategy.PARTIAL,
                 partial_credit=0.3,  # 30% credit
@@ -434,7 +434,7 @@ async def test_mixed_verdicts_all_strategies(mock_llm_config):
     ):
         # SKIP strategy
         grader_skip = CriterionGrader(
-            llm_config=mock_llm_config,
+            judge_model_config=mock_llm_config,
             cannot_assess_config=CannotAssessConfig(strategy=CannotAssessStrategy.SKIP),
         )
         # Reset call count
@@ -447,7 +447,7 @@ async def test_mixed_verdicts_all_strategies(mock_llm_config):
         # FAIL strategy
         call_count = 0
         grader_fail = CriterionGrader(
-            llm_config=mock_llm_config,
+            judge_model_config=mock_llm_config,
             cannot_assess_config=CannotAssessConfig(strategy=CannotAssessStrategy.FAIL),
         )
         result_fail = await rubric.grade("Test", grader=grader_fail)
@@ -458,7 +458,7 @@ async def test_mixed_verdicts_all_strategies(mock_llm_config):
         # PARTIAL strategy (0.5)
         call_count = 0
         grader_partial = CriterionGrader(
-            llm_config=mock_llm_config,
+            judge_model_config=mock_llm_config,
             cannot_assess_config=CannotAssessConfig(
                 strategy=CannotAssessStrategy.PARTIAL, partial_credit=0.5
             ),
@@ -513,7 +513,7 @@ async def test_raw_score_with_cannot_assess(mock_llm_config, sample_rubric):
         return_value=mock_client,
     ):
         grader = CriterionGrader(
-            llm_config=mock_llm_config,
+            judge_model_config=mock_llm_config,
             normalize=False,
             cannot_assess_config=CannotAssessConfig(
                 strategy=CannotAssessStrategy.PARTIAL,

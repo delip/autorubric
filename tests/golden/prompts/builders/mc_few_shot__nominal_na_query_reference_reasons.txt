@@ -1,0 +1,40 @@
+<question>
+Which register best describes the answer?
+</question>
+
+<options>
+1. Formal
+2. Conversational
+3. Slang
+4. N/A
+</options>
+
+<examples>
+<example_1>
+<example_submission>Dear Sir, the temperature is 100 °C.</example_submission>
+<selected_option>1</selected_option>
+<selected_label>Formal</selected_label>
+<reason>Formal salutation.</reason>
+</example_1>
+<example_2>
+<example_submission>yo it's like 100 lol</example_submission>
+<selected_option>3</selected_option>
+<selected_label>Slang</selected_label>
+</example_2>
+<example_3>
+<example_submission></example_submission>
+<selected_option>4</selected_option>
+<selected_label>N/A</selected_label>
+<reason>Empty submission.</reason>
+</example_3>
+</examples>
+
+<input>At what temperature does water boil?</input>
+
+<reference_submission>
+At sea level, water boils at 100 °C (212 °F).
+</reference_submission>
+
+<submission>
+Water boils at 100 degrees Celsius at sea level.
+</submission>

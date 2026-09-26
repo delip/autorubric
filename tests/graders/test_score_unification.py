@@ -188,7 +188,7 @@ async def test_grader_matches_compute_score_all_strategies(strategy):
         return_value=_mock_client_for_mixed(),
     ):
         grader = CriterionGrader(
-            llm_config=LLMConfig(model="test-model"),
+            judge_model_config=LLMConfig(model="test-model"),
             cannot_assess_config=CannotAssessConfig(strategy=strategy),
             shuffle_options=False,
         )
@@ -267,7 +267,7 @@ async def test_grader_negative_multi_choice_na_fail_strictly_worse_than_zero():
             return_value=_mock_client_for_mixed(),
         ):
             grader = CriterionGrader(
-                llm_config=LLMConfig(model="test-model"),
+                judge_model_config=LLMConfig(model="test-model"),
                 cannot_assess_config=CannotAssessConfig(strategy=strategy),
                 shuffle_options=False,
             )

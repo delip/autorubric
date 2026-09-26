@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict
 
+from autorubric.types import _setstate_with_field_defaults
+
 if TYPE_CHECKING:
     import pandas as pd
 
@@ -173,6 +175,12 @@ class CorrelationResult(BaseModel):
 
         direction = "positive" if r >= 0 else "negative"
         return f"{strength} {direction}"
+
+
+def _coefficient(result: CorrelationResult | None) -> float | None:
+    """The coefficient of an optional correlation result: ``None`` when the correlation
+    itself is undefined (``result is None``) or its coefficient is."""
+    return result.coefficient if result is not None else None
 
 
 class BiasResult(BaseModel):
@@ -416,11 +424,15 @@ class CriterionMetrics(BaseModel):
             kappa is None).
         krippendorff_alpha: Krippendorff's alpha — the general, recommended inter-judge
             agreement statistic. It natively handles unequal/missing raters (errored or
-            excluded votes) and is level-aware (nominal for binary criteria). None unless
-            this is an ensemble with >=2 judges and >=2 items.
+            excluded votes, a judge with no vote) and is level-aware (nominal for binary
+            criteria). A cascade decision model's ``superseded`` votes count as its ratings,
+            so on a cascade alpha measures the decision model's agreement with the escalation
+            judges on the escalated criteria. None unless this is an ensemble with >=2
+            judges and >=2 items.
         fleiss_kappa: Fleiss' kappa — the classic fixed-rater nominal inter-judge agreement
             measure, computed complete-case (only items where every judge cast a genuine
-            counted vote contribute). Prefer ``krippendorff_alpha`` as the general statistic.
+            counted, non-``superseded`` vote contribute; a cascade has no such item, so its
+            Fleiss' kappa is None). Prefer ``krippendorff_alpha`` as the general statistic.
             None unless ensemble with >=2 judges and >=2 complete-case items.
         support_true: Count of MET in ground truth.
         support_pred: Count of MET in predictions.
@@ -601,11 +613,13 @@ class OrdinalCriterionMetrics(BaseModel):
         krippendorff_alpha: Krippendorff's alpha — the general, recommended inter-judge
             agreement statistic. Computed with ``level_of_measurement="ordinal"`` so it
             is distance-aware (near-miss disagreements penalized less than far-miss), and
-            it natively handles unequal/missing raters. None unless ensemble with >=2
+            it natively handles unequal/missing raters. ``superseded`` votes are kept (see
+            ``CriterionMetrics.krippendorff_alpha``). None unless ensemble with >=2
             judges and >=2 items.
         fleiss_kappa: Fleiss' kappa — the classic fixed-rater *nominal* measure (ignores
-            ordering), computed complete-case. Prefer ``krippendorff_alpha`` for ordinal
-            criteria. None unless ensemble with >=2 judges and >=2 complete-case items.
+            ordering), computed complete-case over non-``superseded`` votes (None for a
+            cascade). Prefer ``krippendorff_alpha`` for ordinal criteria. None unless
+            ensemble with >=2 judges and >=2 complete-case items.
         spearman: Spearman rank correlation result.
         kendall: Kendall tau correlation result.
         rmse: RMSE on option values (0-1 scale). None when undefined / no samples.
@@ -663,11 +677,13 @@ class NominalCriterionMetrics(BaseModel):
             kappa is None).
         krippendorff_alpha: Krippendorff's alpha — the general, recommended inter-judge
             agreement statistic. Computed with ``level_of_measurement="nominal"`` and
-            natively handles unequal/missing raters. None unless ensemble with >=2 judges
+            natively handles unequal/missing raters. ``superseded`` votes are kept (see
+            ``CriterionMetrics.krippendorff_alpha``). None unless ensemble with >=2 judges
             and >=2 items.
         fleiss_kappa: Fleiss' kappa — the classic fixed-rater nominal measure, computed
-            complete-case. Prefer ``krippendorff_alpha`` as the general statistic. None
-            unless ensemble with >=2 judges and >=2 complete-case items.
+            complete-case over non-``superseded`` votes (None for a cascade). Prefer
+            ``krippendorff_alpha`` as the general statistic. None unless ensemble with >=2
+            judges and >=2 complete-case items.
         per_option: Per-option precision/recall/F1 breakdown.
         confusion_matrix: N×N labelled confusion matrix (rows=true, cols=pred); its
             ``.labels`` carry the option labels (the former ``option_labels``).
@@ -972,12 +988,34 @@ class JudgeMetrics(BaseModel):
         confusion_matrix: This judge's confusion matrix, aggregated across criteria from the
             raw pre-filter codes (binary MET/UNMET with an abstain ``CANNOT_ASSESS`` class
             last → 3×3). ``None`` when there is no data.
-        score_rmse: RMSE of cumulative scores.
-        score_mae: MAE of cumulative scores.
-        score_spearman: Spearman correlation result.
-        score_kendall: Kendall tau correlation result.
-        score_pearson: Pearson correlation result.
-        bias: Systematic bias analysis result.
+        score_rmse: RMSE of this judge's cumulative scores (its
+            ``EnsembleEvaluationReport.judge_scores`` entries) against the ground-truth
+            scores. ``None`` when the judge's score is undefined on every item (a judge
+            consulted only on some criteria has a ``None`` entry by role), and likewise
+            for every other score field below. An item whose entry is ``None`` while
+            others are defined is left out of the judge's score pairs, as the aggregate
+            leaves out score-less items.
+        score_mae: MAE of cumulative scores, over the same items as ``score_rmse``.
+        score_spearman: Spearman correlation result (same items as ``score_rmse``).
+        score_kendall: Kendall tau correlation result (same items as ``score_rmse``).
+        score_pearson: Pearson correlation result (same items as ``score_rmse``).
+        bias: Systematic bias analysis result (same items as ``score_rmse``).
+        coverage: Which (item, criterion) pairs the criterion-level metrics cover.
+            ``"full"``: the judge was consulted on every criterion, like any ensemble
+            member or a cascade's decision model (whose ``superseded`` votes are its
+            predictions). ``"escalated"``: the judge has no whole-rubric score on any item
+            (every ``judge_scores`` entry is ``None``), the mark of a cascade escalation
+            judge, which is consulted only on the criteria escalated to it. Its
+            criterion-level metrics then cover exactly the pairs it voted on (the escalated
+            subset) and every score field above is ``None``. The value follows the judge's
+            role, not how many criteria escalated: it stays ``"escalated"`` on a run where
+            every criterion escalated.
+        n_pairs: For ``coverage == "escalated"``, the size of the escalated subset: the
+            number of (item, criterion) pairs its criterion-level metrics are computed from,
+            i.e. pairs where it cast a genuine (error-free) vote and the ground truth has the
+            criterion's type. Abstentions (``CANNOT_ASSESS`` / NA, by the judge or in the
+            ground truth) are counted; the ``cannot_assess`` / ``na_mode`` handling then
+            applies to them as for every judge. ``None`` for full-coverage judges.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -990,12 +1028,17 @@ class JudgeMetrics(BaseModel):
     mean_kappa: float | None
     phi: float | None = None
     confusion_matrix: ConfusionMatrix | None = None
-    score_rmse: float
-    score_mae: float
-    score_spearman: CorrelationResult
-    score_kendall: CorrelationResult
-    score_pearson: CorrelationResult
-    bias: BiasResult
+    score_rmse: float | None
+    score_mae: float | None
+    score_spearman: CorrelationResult | None
+    score_kendall: CorrelationResult | None
+    score_pearson: CorrelationResult | None
+    bias: BiasResult | None
+    coverage: Literal["full", "escalated"] = "full"
+    n_pairs: int | None = None
+
+    # Metrics pickled before ``coverage`` / ``n_pairs`` existed restore them at their defaults.
+    __setstate__ = _setstate_with_field_defaults
 
 
 class MetricsResult(BaseModel):
@@ -1275,17 +1318,21 @@ class MetricsResult(BaseModel):
             for judge_id, jm in sorted(self.per_judge.items()):
                 # Default line leads with the chance-corrected accuracy + mean kappa (and
                 # phi), the metrics most comparable across judges. RMSE/Spearman are demoted
-                # to the verbose view.
+                # to the verbose view. A cascade escalation judge's criterion-level metrics
+                # cover only its escalated subset, which the line says, with its size.
+                subset = (
+                    f" (escalated subset, {jm.n_pairs} pairs)" if jm.coverage == "escalated" else ""
+                )
                 lines.append(
                     f"  {judge_id}: Acc={_fmt_opt(jm.criterion_accuracy, '.1%')}, "
                     f"Mean Kappa={_fmt_opt(jm.mean_kappa, '.3f')}, "
-                    f"Phi={_fmt_opt(jm.phi, '.3f')}"
+                    f"Phi={_fmt_opt(jm.phi, '.3f')}{subset}"
                 )
                 if verbose:
                     lines.append(
-                        f"      RMSE={jm.score_rmse:.4f}, "
-                        f"Spearman={_fmt_opt(jm.score_spearman.coefficient, '.4f')}, "
-                        f"MAE={jm.score_mae:.4f}"
+                        f"      RMSE={_fmt_opt(jm.score_rmse, '.4f')}, "
+                        f"Spearman={_fmt_opt(_coefficient(jm.score_spearman), '.4f')}, "
+                        f"MAE={_fmt_opt(jm.score_mae, '.4f')}"
                     )
                     if jm.confusion_matrix is not None:
                         lines.append(
@@ -1451,6 +1498,10 @@ class MetricsResult(BaseModel):
         mode). On binary/nominal data Krippendorff's α equals Fleiss' κ up to a
         finite-sample correction, so α is the single primary inter-judge column and the bare
         ``fleiss_kappa`` value is emitted only for ordinal criteria (different geometry).
+        When a per-judge entry has ``coverage == "escalated"`` (a cascade escalation judge,
+        measured on its escalated subset), two more columns follow the others:
+        ``judge_coverage`` and ``n_pairs`` (``JudgeMetrics.coverage`` / ``n_pairs`` on the
+        judge rows, ``None`` elsewhere). Frames without such a judge have neither column.
         """
         import pandas as pd
 
@@ -1632,43 +1683,51 @@ class MetricsResult(BaseModel):
                     }
                 )
 
-        # Per-judge rows (if available)
+        # Per-judge rows (if available). A cascade escalation judge's criterion-level
+        # metrics cover only its escalated subset. When any judge has that coverage, every
+        # row gains ``judge_coverage`` / ``n_pairs`` columns (None outside the judge rows) so
+        # the frame labels the subset; a frame without such a judge is unchanged.
         if self.per_judge:
+            label_coverage = any(jm.coverage == "escalated" for jm in self.per_judge.values())
+            if label_coverage:
+                for row in rows:
+                    row.update(judge_coverage=None, n_pairs=None)
             for judge_id, jm in self.per_judge.items():
-                rows.append(
-                    {
-                        "level": "judge",
-                        "name": judge_id,
-                        "criterion_type": "all",
-                        "accuracy_micro": jm.criterion_accuracy,
-                        "accuracy_macro": None,
-                        "precision_micro": jm.criterion_precision,
-                        "recall_micro": jm.criterion_recall,
-                        "f1_micro": jm.criterion_f1,
-                        "mean_kappa_macro": jm.mean_kappa,
-                        "kappa_micro": None,
-                        "phi_micro": None,
-                        "mean_krippendorff_alpha": None,
-                        "cannot_assess_mode": None,
-                        "na_mode": None,
-                        "n_samples": None,
-                        "rmse": jm.score_rmse,
-                        "mae": jm.score_mae,
-                        "spearman": jm.score_spearman.coefficient,
-                        "kendall": jm.score_kendall.coefficient,
-                        "pearson": jm.score_pearson.coefficient,
-                        "bias": jm.bias.mean_bias,
-                        "adjacent_accuracy": None,
-                        "weighted_kappa": None,
-                        "phi": jm.phi,
-                        "fpr": None,
-                        "fnr": None,
-                        "is_degenerate": None,
-                        "krippendorff_alpha": None,
-                        "fleiss_kappa": None,
-                        **_coverage_cols(None),
-                    }
-                )
+                judge_row = {
+                    "level": "judge",
+                    "name": judge_id,
+                    "criterion_type": "all",
+                    "accuracy_micro": jm.criterion_accuracy,
+                    "accuracy_macro": None,
+                    "precision_micro": jm.criterion_precision,
+                    "recall_micro": jm.criterion_recall,
+                    "f1_micro": jm.criterion_f1,
+                    "mean_kappa_macro": jm.mean_kappa,
+                    "kappa_micro": None,
+                    "phi_micro": None,
+                    "mean_krippendorff_alpha": None,
+                    "cannot_assess_mode": None,
+                    "na_mode": None,
+                    "n_samples": None,
+                    "rmse": jm.score_rmse,
+                    "mae": jm.score_mae,
+                    "spearman": _coefficient(jm.score_spearman),
+                    "kendall": _coefficient(jm.score_kendall),
+                    "pearson": _coefficient(jm.score_pearson),
+                    "bias": jm.bias.mean_bias if jm.bias is not None else None,
+                    "adjacent_accuracy": None,
+                    "weighted_kappa": None,
+                    "phi": jm.phi,
+                    "fpr": None,
+                    "fnr": None,
+                    "is_degenerate": None,
+                    "krippendorff_alpha": None,
+                    "fleiss_kappa": None,
+                    **_coverage_cols(None),
+                }
+                if label_coverage:
+                    judge_row.update(judge_coverage=jm.coverage, n_pairs=jm.n_pairs)
+                rows.append(judge_row)
 
         return pd.DataFrame(rows)
 

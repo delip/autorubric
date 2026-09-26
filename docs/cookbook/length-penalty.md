@@ -75,7 +75,7 @@ from autorubric import LengthPenalty, LLMConfig
 from autorubric.graders import CriterionGrader
 
 grader = CriterionGrader(
-    llm_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
     length_penalty=LengthPenalty(
         free_budget=200,      # No penalty up to 200 words
         max_cap=400,          # Maximum penalty at 400+ words
@@ -125,7 +125,7 @@ import tiktoken
 encoder = tiktoken.encoding_for_model("gpt-4")
 
 grader = CriterionGrader(
-    llm_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
     length_penalty=LengthPenalty(
         free_budget=800,   # 800 tokens
         max_cap=1200,      # 1200 tokens
@@ -214,7 +214,7 @@ For RL training, you may want unnormalized scores with absolute penalties:
 
 ```python
 grader = CriterionGrader(
-    llm_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
     normalize=False,  # Return raw weighted sum
     length_penalty=LengthPenalty(
         free_budget=200,
@@ -244,7 +244,7 @@ When using extended thinking, penalize only the output, not the reasoning:
 
 ```python
 grader = CriterionGrader(
-    llm_config=LLMConfig(
+    judge_model_config=LLMConfig(
         model="anthropic/claude-sonnet-4-5-20250929",
         thinking="high",
     ),
@@ -442,7 +442,7 @@ async def main():
 
     # Grader with length penalty
     grader = CriterionGrader(
-        llm_config=LLMConfig(model="openai/gpt-4.1-mini", temperature=0.0),
+        judge_model_config=LLMConfig(model="openai/gpt-4.1-mini", temperature=0.0),
         length_penalty=LengthPenalty(
             free_budget=100,      # No penalty up to 100 words
             max_cap=250,          # Max penalty at 250+ words
@@ -453,7 +453,7 @@ async def main():
 
     # Grader without length penalty (for comparison)
     grader_no_penalty = CriterionGrader(
-        llm_config=LLMConfig(model="openai/gpt-4.1-mini", temperature=0.0)
+        judge_model_config=LLMConfig(model="openai/gpt-4.1-mini", temperature=0.0)
     )
 
     print("=" * 75)

@@ -102,3 +102,48 @@ class TestComputeLengthPenaltyWithPenaltyType:
         """Test default penalty_type is 'ALL'."""
         config = LengthPenalty(free_budget=5, max_cap=10)
         assert config.penalty_type == "ALL"
+
+
+class TestHasThinkingOutputSections:
+    """``_has_thinking_output_sections``: whether ``parse_thinking_output`` finds a section.
+
+    Callers that must not alter plain text (a decision model's ``submission`` state field)
+    use it to apply ``parse_thinking_output`` only when there is a section to recover.
+    """
+
+    SECTIONED = [
+        "<thinking>reasoning</thinking><output>answer</output>",
+        "<thinking>reasoning</thinking>\n<output>answer</output>",
+        "<output>answer</output>",
+        "<thinking>reasoning</thinking>remaining text",
+        "<THINKING>think</THINKING><OUTPUT>ans</OUTPUT>",
+        "preamble <output>answer</output> trailer",
+        "<thinking></thinking>",
+    ]
+    PLAIN = [
+        "plain text",
+        "",
+        "  padded plain text \n",
+        "a <thinking> tag that never closes",
+        "a stray </output> closing tag",
+        "<think>not a section marker</think>",
+        "<output>unclosed output",
+    ]
+
+    @pytest.mark.parametrize("text", SECTIONED)
+    def test_detects_a_section(self, text: str) -> None:
+        from autorubric.utils import _has_thinking_output_sections
+
+        assert _has_thinking_output_sections(text)
+
+    @pytest.mark.parametrize("text", PLAIN)
+    def test_plain_text_has_no_section(self, text: str) -> None:
+        from autorubric.utils import _has_thinking_output_sections
+
+        assert not _has_thinking_output_sections(text)
+
+    @pytest.mark.parametrize("text", PLAIN)
+    def test_without_a_section_parsing_returns_the_text_unchanged(self, text: str) -> None:
+        """No section found means ``parse_thinking_output`` has nothing to recover: it
+        returns the whole text, unstripped, as the output."""
+        assert parse_thinking_output(text) == {"thinking": "", "output": text}

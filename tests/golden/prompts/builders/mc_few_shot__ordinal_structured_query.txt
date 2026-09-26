@@ -1,0 +1,35 @@
+<question>
+How clear is the explanation?
+</question>
+
+<options>
+1. Very unclear
+2. Somewhat clear
+3. Very clear
+4. Cannot assess / not applicable
+</options>
+
+<examples>
+<example_1>
+<example_submission>Short, direct, and well ordered.</example_submission>
+<selected_option>3</selected_option>
+<selected_label>Very clear</selected_label>
+</example_1>
+<example_2>
+<example_submission>It is hot, or maybe not, depending.</example_submission>
+<selected_option>1</selected_option>
+<selected_label>Very unclear</selected_label>
+</example_2>
+<example_3>
+<example_submission>See the attached PDF.</example_submission>
+<selected_option>4</selected_option>
+<selected_label>Cannot assess / not applicable</selected_label>
+</example_3>
+</examples>
+
+<input>At what temperature does water boil?</input>
+
+<submission>
+<thinking>Recall the standard value at one atmosphere.</thinking>
+<output>Water boils at 100 °C at sea level.</output>
+</submission>

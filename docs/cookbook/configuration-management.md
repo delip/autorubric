@@ -265,7 +265,7 @@ rubric = Rubric.from_dict(rubric_criteria)
 
 # Create grader
 grader = CriterionGrader(
-    llm_config=llm_config,
+    judge_model_config=llm_config,
     few_shot_config=FewShotConfig(**exp_config.get("few_shot", {})),
 )
 
@@ -672,7 +672,7 @@ async def run_experiment_from_config(config_path: str):
     few_shot_config = FewShotConfig(**exp_config.get("few_shot", {})) if "few_shot" in exp_config else None
 
     grader = CriterionGrader(
-        llm_config=llm_config,
+        judge_model_config=llm_config,
         few_shot_config=few_shot_config,
     )
 

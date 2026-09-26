@@ -55,7 +55,7 @@ from autorubric import LLMConfig, evaluate
 from autorubric.graders import CriterionGrader
 
 grader = CriterionGrader(
-    llm_config=LLMConfig(model="openai/gpt-4.1-mini", temperature=0.0)
+    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini", temperature=0.0)
 )
 
 # Run evaluation
@@ -471,7 +471,7 @@ async def main():
 
     # Configure grader
     grader = CriterionGrader(
-        llm_config=LLMConfig(model="openai/gpt-4.1-mini", temperature=0.0)
+        judge_model_config=LLMConfig(model="openai/gpt-4.1-mini", temperature=0.0)
     )
 
     # Run evaluation

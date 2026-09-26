@@ -199,7 +199,7 @@ from autorubric import LLMConfig, evaluate
 from autorubric.graders import CriterionGrader
 
 grader = CriterionGrader(
-    llm_config=LLMConfig(
+    judge_model_config=LLMConfig(
         model="gemini/gemini-3-flash-preview",
         temperature=1.0,
         thinking="medium",
@@ -482,7 +482,7 @@ async def main():
 
     # Phase 2: Evaluate
     grader = CriterionGrader(
-        llm_config=LLMConfig(
+        judge_model_config=LLMConfig(
             model="gemini/gemini-3-flash-preview",
             temperature=1.0,
             thinking="medium",

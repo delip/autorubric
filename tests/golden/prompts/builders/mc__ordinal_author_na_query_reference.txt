@@ -1,0 +1,20 @@
+<question>
+How specific are the safety instructions?
+</question>
+
+<options>
+1. Vague
+2. Partly specific
+3. Fully specific
+4. Insufficient data (cannot assess / not applicable)
+</options>
+
+<input>At what temperature does water boil?</input>
+
+<reference_submission>
+At sea level, water boils at 100 °C (212 °F).
+</reference_submission>
+
+<submission>
+Water boils at 100 degrees Celsius at sea level.
+</submission>

@@ -160,7 +160,7 @@ async def test_binary_infrastructure_failure_cannot_assess_and_no_penalty(mock_l
         "autorubric.graders.criterion_grader.LLMClient",
         return_value=client,
     ):
-        grader = CriterionGrader(llm_config=mock_llm_config)
+        grader = CriterionGrader(judge_model_config=mock_llm_config)
         report = await rubric.grade("submission", grader=grader)
 
     assert report.report is not None
@@ -193,7 +193,7 @@ async def test_binary_infrastructure_failure_cannot_assess_and_no_penalty(mock_l
         "autorubric.graders.criterion_grader.LLMClient",
         return_value=baseline_client,
     ):
-        baseline_grader = CriterionGrader(llm_config=mock_llm_config)
+        baseline_grader = CriterionGrader(judge_model_config=mock_llm_config)
         baseline_report = await baseline_rubric.grade("submission", grader=baseline_grader)
 
     assert report.score == pytest.approx(baseline_report.score)
@@ -216,7 +216,7 @@ async def test_binary_parse_failure_cannot_assess(mock_llm_config):
         "autorubric.graders.criterion_grader.LLMClient",
         return_value=_client_raising(parse_exc),
     ):
-        grader = CriterionGrader(llm_config=mock_llm_config)
+        grader = CriterionGrader(judge_model_config=mock_llm_config)
         report = await rubric.grade("submission", grader=grader)
 
     assert report.report is not None
@@ -243,7 +243,7 @@ async def test_binary_unknown_failure_keeps_worst_case(mock_llm_config):
         "autorubric.graders.criterion_grader.LLMClient",
         return_value=_client_raising(RuntimeError("boom")),
     ):
-        grader = CriterionGrader(llm_config=mock_llm_config)
+        grader = CriterionGrader(judge_model_config=mock_llm_config)
         report = await rubric.grade("submission", grader=grader)
 
     assert report.report is not None
@@ -370,7 +370,7 @@ async def test_multi_choice_infrastructure_failure_is_na(mock_llm_config):
         return_value=_client_raising(litellm.Timeout("timed out", model="m", llm_provider="p")),
     ):
         # Disable shuffling for deterministic behavior.
-        grader = CriterionGrader(llm_config=mock_llm_config, shuffle_options=False)
+        grader = CriterionGrader(judge_model_config=mock_llm_config, shuffle_options=False)
         report = await rubric.grade("submission", grader=grader)
 
     assert report.report is not None
@@ -410,7 +410,7 @@ async def test_multi_choice_unknown_with_na_option_does_not_select_na(mock_llm_c
         "autorubric.graders.criterion_grader.LLMClient",
         return_value=_client_raising(RuntimeError("boom")),
     ):
-        grader = CriterionGrader(llm_config=mock_llm_config, shuffle_options=False)
+        grader = CriterionGrader(judge_model_config=mock_llm_config, shuffle_options=False)
         report = await rubric.grade("submission", grader=grader)
 
     assert report.report is not None
@@ -443,7 +443,7 @@ async def test_multi_choice_unknown_positive_weight_picks_lowest_value(mock_llm_
         "autorubric.graders.criterion_grader.LLMClient",
         return_value=_client_raising(RuntimeError("boom")),
     ):
-        grader = CriterionGrader(llm_config=mock_llm_config, shuffle_options=False)
+        grader = CriterionGrader(judge_model_config=mock_llm_config, shuffle_options=False)
         report = await rubric.grade("submission", grader=grader)
 
     assert report.report is not None
@@ -781,3 +781,275 @@ class TestVoteIsErrorProperty:
     )
     def test_is_error(self, vote_factory, error: str | None, expected: bool):
         assert vote_factory(error).is_error is expected
+
+
+# =============================================================================
+# An LLM judgment without an explanation is a parse failure
+# =============================================================================
+#
+# ``reason`` is ``str | None`` so that a judge that returns probabilities instead of text
+# can record "no explanation". An LLM judge always explains itself: a custom response
+# format that lets ``explanation`` be null must not turn that into a genuine verdict with
+# no reason. It is a malformed judgment, routed as a parse failure exactly as it was
+# while ``reason`` was a plain ``str`` (the report then failed validation).
+
+
+class _OptionalExplanationJudgment(BaseModel):
+    """Custom binary response format whose ``explanation`` may be null."""
+
+    criterion_status: CriterionVerdict
+    explanation: str | None = None
+
+
+class _OptionalExplanationMetaJudgment(_OptionalExplanationJudgment):
+    """Same, with the meta-evaluation ``affected_criteria`` field."""
+
+    affected_criteria: list[int] = []
+
+
+class _OptionalExplanationMultiChoiceJudgment(MultiChoiceJudgment):
+    """Custom multi-choice response format whose ``explanation`` may be null."""
+
+    explanation: str | None = None
+
+
+def _client_answering(answers: dict[str, BaseModel]) -> MagicMock:
+    """A mock client answering each criterion by the requirement found in its prompt."""
+
+    async def generate(*, user_prompt: str, **_: Any) -> GenerateResult:
+        for requirement, parsed in answers.items():
+            if f"\n{requirement}\n" in user_prompt:
+                return GenerateResult(
+                    content="{}",
+                    thinking=None,
+                    raw_response=None,
+                    usage=TokenUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+                    cost=0.001,
+                    parsed=parsed,
+                )
+        raise AssertionError(f"no answer for prompt: {user_prompt[:200]}")
+
+    client = MagicMock()
+    client.generate = AsyncMock(side_effect=generate)
+    return client
+
+
+QUALITY_OPTIONS = [
+    CriterionOption(label="Bad", value=0.0),
+    CriterionOption(label="Ok", value=0.5),
+    CriterionOption(label="Great", value=1.0),
+]
+
+
+@pytest.mark.asyncio
+async def test_binary_null_explanation_is_a_parse_failure(mock_llm_config):
+    """A null explanation → CANNOT_ASSESS with a ``parse`` error, excluded under SKIP."""
+    rubric = Rubric(
+        [
+            Criterion(weight=2.0, requirement="Mentions the capital"),
+            Criterion(weight=1.0, requirement="Uses full sentences"),
+        ]
+    )
+    answers: dict[str, BaseModel] = {
+        "Mentions the capital": _OptionalExplanationJudgment(
+            criterion_status=CriterionVerdict.UNMET, explanation=None
+        ),
+        "Uses full sentences": _OptionalExplanationJudgment(
+            criterion_status=CriterionVerdict.MET, explanation="ok"
+        ),
+    }
+    with patch(
+        "autorubric.graders.criterion_grader.LLMClient",
+        return_value=_client_answering(answers),
+    ):
+        grader = CriterionGrader(
+            judge_model_config=mock_llm_config,
+            binary_response_format=_OptionalExplanationJudgment,
+        )
+        report = await rubric.grade("submission", grader=grader)
+
+    assert report.report is not None
+    null_cr, ok_cr = report.report
+    assert null_cr.final_verdict == CriterionVerdict.CANNOT_ASSESS
+    assert null_cr.error is not None
+    assert null_cr.error.startswith("parse:")
+    vote_reason = null_cr.votes[0].reason
+    assert vote_reason is not None
+    assert vote_reason.startswith("Judge call failed (parse):")
+    assert ok_cr.final_verdict == CriterionVerdict.MET
+    assert ok_cr.error is None
+    assert ok_cr.final_reason == "default: ok"
+    # The abstained criterion leaves the denominator: 1 / 1.
+    assert report.score == pytest.approx(1.0)
+
+
+@pytest.mark.asyncio
+async def test_multi_choice_null_explanation_is_a_parse_failure(mock_llm_config):
+    """A null explanation → the NA option with a ``parse`` error, excluded under SKIP."""
+    rubric = Rubric(
+        [
+            Criterion(
+                name="quality",
+                requirement="How good is it?",
+                weight=1.0,
+                scale_type="ordinal",
+                options=QUALITY_OPTIONS,
+            ),
+            Criterion(weight=1.0, requirement="Uses full sentences"),
+        ]
+    )
+    answers: dict[str, BaseModel] = {
+        "How good is it?": _OptionalExplanationMultiChoiceJudgment(
+            selected_option=1, explanation=None
+        ),
+        "Uses full sentences": CriterionJudgment(
+            criterion_status=CriterionVerdict.MET, explanation="ok"
+        ),
+    }
+    with patch(
+        "autorubric.graders.criterion_grader.LLMClient",
+        return_value=_client_answering(answers),
+    ):
+        grader = CriterionGrader(
+            judge_model_config=mock_llm_config,
+            shuffle_options=False,
+            multi_choice_response_format=_OptionalExplanationMultiChoiceJudgment,
+        )
+        report = await rubric.grade("submission", grader=grader)
+
+    assert report.report is not None
+    mc_cr = report.report[0]
+    verdict = mc_cr.final_multi_choice_verdict
+    assert verdict is not None
+    assert verdict.na is True
+    assert mc_cr.error is not None
+    assert mc_cr.error.startswith("parse:")
+    vote_reason = mc_cr.multi_choice_votes[0].reason
+    assert vote_reason is not None
+    assert vote_reason.startswith("Judge call failed (parse):")
+    # The abstained criterion leaves the denominator: 1 / 1 (a genuine "Bad" would be 0.5).
+    assert report.score == pytest.approx(1.0)
+
+
+@pytest.mark.asyncio
+async def test_empty_explanation_stays_a_genuine_verdict(mock_llm_config):
+    """Only a missing explanation is malformed; an empty string is a genuine reason."""
+    rubric = Rubric([Criterion(weight=1.0, requirement="Uses full sentences")])
+    answers: dict[str, BaseModel] = {
+        "Uses full sentences": _OptionalExplanationJudgment(
+            criterion_status=CriterionVerdict.UNMET, explanation=""
+        ),
+    }
+    with patch(
+        "autorubric.graders.criterion_grader.LLMClient",
+        return_value=_client_answering(answers),
+    ):
+        grader = CriterionGrader(
+            judge_model_config=mock_llm_config,
+            binary_response_format=_OptionalExplanationJudgment,
+        )
+        report = await rubric.grade("submission", grader=grader)
+
+    assert report.report is not None
+    cr = report.report[0]
+    assert cr.final_verdict == CriterionVerdict.UNMET
+    assert cr.error is None
+    assert cr.votes[0].reason == ""
+    assert cr.final_reason == "default: "
+
+
+@pytest.mark.asyncio
+async def test_null_explanation_with_affected_criteria_keeps_its_tagged_reason(mock_llm_config):
+    """The check applies to the reason as stored, after the ``[Affects: ...]`` tag.
+
+    A null explanation with a non-empty ``affected_criteria`` has always been stored as
+    the string ``"None [Affects: #2]"`` and accepted as a genuine verdict; that stays so.
+    """
+    rubric = Rubric([Criterion(weight=1.0, requirement="Uses full sentences")])
+    answers: dict[str, BaseModel] = {
+        "Uses full sentences": _OptionalExplanationMetaJudgment(
+            criterion_status=CriterionVerdict.UNMET, explanation=None, affected_criteria=[2]
+        ),
+    }
+    with patch(
+        "autorubric.graders.criterion_grader.LLMClient",
+        return_value=_client_answering(answers),
+    ):
+        grader = CriterionGrader(
+            judge_model_config=mock_llm_config,
+            binary_response_format=_OptionalExplanationMetaJudgment,
+        )
+        report = await rubric.grade("submission", grader=grader)
+
+    assert report.report is not None
+    cr = report.report[0]
+    assert cr.final_verdict == CriterionVerdict.UNMET
+    assert cr.error is None
+    assert cr.votes[0].reason == "None [Affects: #2]"
+
+
+class _NoJudgmentFields(BaseModel):
+    """Custom binary response format with neither ``explanation`` nor ``criterion_status``."""
+
+    verdict_text: str = "met"
+
+
+class _VerdictOnlyJudgment(BaseModel):
+    """Custom binary response format without an ``explanation`` field."""
+
+    criterion_status: CriterionVerdict = CriterionVerdict.MET
+
+
+class _ExplanationOnlyJudgment(BaseModel):
+    """Custom binary response format without a ``criterion_status`` field."""
+
+    explanation: str | None = "because"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("parsed", "missing_field"),
+    [
+        (_NoJudgmentFields(), "explanation"),
+        (_VerdictOnlyJudgment(), "explanation"),
+        (_ExplanationOnlyJudgment(), "criterion_status"),
+        (_ExplanationOnlyJudgment(explanation=None), "criterion_status"),
+    ],
+    ids=["neither_field", "no_explanation", "no_verdict", "null_explanation_no_verdict"],
+)
+async def test_binary_judgment_missing_a_field_fails_on_the_first_one_read(
+    mock_llm_config, parsed: BaseModel, missing_field: str
+):
+    """The binary success path reads ``explanation``, then ``criterion_status``, and checks
+    for a null explanation only after both reads.
+
+    A judgment missing a field is an ``unknown`` failure (the conservative worst case) whose
+    error names the first missing field in that order. A null explanation does not preempt
+    a missing verdict: that judgment is still an ``unknown`` failure on ``criterion_status``,
+    not a ``parse`` failure. The error text is persisted (``CriterionReport.error``,
+    ``JudgeVote.error``, the vote reason, checkpoints), so the order is pinned.
+    """
+    rubric = Rubric([Criterion(weight=1.0, requirement="Uses full sentences")])
+    with patch(
+        "autorubric.graders.criterion_grader.LLMClient",
+        return_value=_client_answering({"Uses full sentences": parsed}),
+    ):
+        grader = CriterionGrader(
+            judge_model_config=mock_llm_config,
+            binary_response_format=type(parsed),
+        )
+        report = await rubric.grade("submission", grader=grader)
+
+    assert report.report is not None
+    cr = report.report[0]
+    vote = cr.votes[0]
+    assert vote.verdict == CriterionVerdict.UNMET
+    assert vote.error is not None
+    assert vote.error.startswith("unknown: ")
+    assert vote.error.endswith(f"has no attribute {missing_field!r}")
+    assert vote.reason is not None
+    assert vote.reason.startswith("Judge call failed (unknown): ")
+    assert vote.reason.endswith(f"has no attribute {missing_field!r}")
+    assert cr.final_verdict == CriterionVerdict.UNMET
+    # The worst case counts against the score; it is not excluded like an abstain.
+    assert report.score == pytest.approx(0.0)

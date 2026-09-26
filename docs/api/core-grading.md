@@ -27,7 +27,7 @@ rubric = Rubric.from_dict([
 rubric = Rubric.from_file("rubric.yaml")
 
 # Grade
-grader = CriterionGrader(llm_config=LLMConfig(model="openai/gpt-4.1-mini"))
+grader = CriterionGrader(judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"))
 result = await rubric.grade(to_grade="...", grader=grader)
 
 # result.score is `float | None` (None if the grade failed); guard before formatting.
@@ -51,6 +51,40 @@ Final score:
 $$
 \text{score} = \max\left(0, \min\left(1, \frac{\sum_{i=1}^{n} \mathbb{1}[\text{verdict}_i = \text{MET}] \cdot w_i}{\sum_{i=1}^{n} \max(0, w_i)}\right)\right)
 $$
+
+## Rubric Guidelines
+
+Guidelines are optional free text that applies to every criterion of a rubric: grading conventions, definitions, the audience, scale anchors. Pass them as the keyword-only `guidelines`:
+
+```python
+rubric = Rubric(
+    [
+        Criterion(name="thesis", weight=3, requirement="States a clear, arguable thesis"),
+        Criterion(name="evidence", weight=2, requirement="Supports claims with cited evidence"),
+    ],
+    guidelines="'Cited' means any attribution, not formal citation style.",
+)
+```
+
+Blank text (empty or whitespace only) means no guidelines and is stored as `None`. In a file, a rubric with guidelines is a dict; the list form still loads unchanged:
+
+```json
+{
+  "guidelines": "'Cited' means any attribution, not formal citation style.",
+  "criteria": [
+    {"name": "thesis", "weight": 3, "requirement": "States a clear, arguable thesis"}
+  ]
+}
+```
+
+`Rubric.from_dict`, `from_json`, `from_yaml` and `from_file` read this form, and `"guidelines"` also combines with the `"sections"` and `"rubric"` forms. A dataset writes a rubric in the dict form only when it has guidelines, and a per-item rubric carries its own.
+
+What each judge sees:
+
+- **LLM judges** get a `<guidelines>` block at the start of every per-criterion prompt, stating that the criterion text governs and the guidelines clarify how to apply it. It sits in the user prompt, so a custom `system_prompt` keeps it. A rubric without guidelines produces exactly the prompts it produced before guidelines existed.
+- **Decision models** get them once per request as `state["guidelines"]`; the framed questions add a sentence telling the model to apply them (see [Decision-Model Judges](../decision-models.md#rubric-guidelines-shared-context)).
+- **Custom graders** receive them when their `judge` accepts a `guidelines` keyword or `**kwargs`; otherwise grading proceeds without them and warns once per grader that it ignores rubric guidelines.
+- **Meta-rubric evaluation** shows them to the meta-judge as part of the rubric under review. **Rubric improvement** keeps them unchanged on every revised rubric; the revision LLM sees them but does not revise them.
 
 ---
 

@@ -14,12 +14,12 @@ from autorubric.graders import CriterionGrader, JudgeSpec, Grader
 
 # Single LLM mode
 grader = CriterionGrader(
-    llm_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
 )
 
 # With custom system prompt
 grader = CriterionGrader(
-    llm_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
     system_prompt="You are evaluating technical documentation...",
 )
 
@@ -34,7 +34,7 @@ grader = CriterionGrader(
 
 # Single LLM + few-shot
 grader = CriterionGrader(
-    llm_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
     training_data=train_data,
     few_shot_config=FewShotConfig(n_examples=3, balance_verdicts=True),
 )
@@ -43,11 +43,20 @@ grader = CriterionGrader(
 result = await rubric.grade(to_grade=response, grader=grader)
 ```
 
+`judge_model_config` sets up a single judge and `judges` sets up an ensemble. Pass exactly one of them.
+
+Either accepts a `DecisionModelConfig` as well as an `LLMConfig`: a decision-model judge grades each item with one request for the whole rubric. `escalation=EscalationConfig(...)` makes a grader with one decision-model judge a confidence cascade that escalates uncertain criteria to LLM judges. See [Decision Models](decision-models.md) and [Decision-Model Judges](../decision-models.md).
+
+!!! note "`llm_config` is deprecated"
+    `llm_config` is a deprecated alias of `judge_model_config`. It builds the same judge but emits a
+    `DeprecationWarning`. To migrate, rename the keyword; nothing else changes. Passing both raises
+    `ValueError`. `llm_config` will not be removed before the next major version.
+
 ## Grading Options
 
 ```python
 grader = CriterionGrader(
-    llm_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
 
     # Score normalization
     normalize=True,          # True: 0-1 range, False: raw weighted sum

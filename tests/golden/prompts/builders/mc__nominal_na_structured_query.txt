@@ -1,0 +1,17 @@
+<question>
+Which register best describes the answer?
+</question>
+
+<options>
+1. Formal
+2. Conversational
+3. Slang
+4. N/A
+</options>
+
+<input>At what temperature does water boil?</input>
+
+<submission>
+<thinking>Recall the standard value at one atmosphere.</thinking>
+<output>Water boils at 100 °C at sea level.</output>
+</submission>

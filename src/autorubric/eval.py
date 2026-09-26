@@ -36,6 +36,12 @@ from rich.progress import (
 )
 
 from autorubric.dataset import DataItem, RubricDataset
+from autorubric.decision import DecisionModelConfig, _url_host
+from autorubric.graders.criterion_grader import (
+    CriterionGrader,
+    EscalationConfig,
+    _escalation_names_checked,
+)
 from autorubric.types import (
     CriterionReport,
     EnsembleCriterionReport,
@@ -90,8 +96,14 @@ def _serialize_grader_config(grader: Grader) -> dict[str, Any]:
     """Serialize grader configuration for manifest storage.
 
     Captures key configuration for reproducibility without storing sensitive data.
-    For each judge this records ``judge_id``, ``model``, ``temperature`` (None when the
-    provider default is used), ``weight``, and ``max_parallel_requests``.
+    For each judge this records ``judge_id``, ``judge_kind`` (``"llm"`` or
+    ``"decision_model"``), ``model``, ``weight`` and ``max_parallel_requests``. An LLM judge
+    adds ``temperature`` (None when the provider default is used). A decision-model judge
+    adds ``binary_framing``, ``ordinal_framing``, ``decision_threshold`` and
+    ``api_base_host``, the host of the endpoint it was built against; the rest of its base
+    URL, its API key and its ``extra_headers`` are not recorded. A cascade adds
+    ``escalation``: its escalation judges (``judges``, LLM entries as above), ``threshold``
+    and ``per_criterion`` (None when not set); a grader without a cascade has no such key.
     Gracefully handles mocks and missing attributes.
     """
     config: dict[str, Any] = {
@@ -121,31 +133,31 @@ def _serialize_grader_config(grader: Grader) -> dict[str, Any]:
                         if isinstance(jid, str) and jcfg is not None:
                             jmodel = getattr(jcfg, "model", None)
                             if isinstance(jmodel, str):
-                                weight = getattr(j, "weight", 1.0)
-                                mpr = getattr(jcfg, "max_parallel_requests", None)
-                                temp = getattr(jcfg, "temperature", None)
-                                is_number = isinstance(temp, (int, float)) and not isinstance(
-                                    temp, bool
-                                )
-                                config["judges"].append(
-                                    {
-                                        "judge_id": jid,
-                                        "model": jmodel,
-                                        # None = provider default (temperature not sent).
-                                        "temperature": temp if is_number else None,
-                                        "weight": weight
-                                        if isinstance(weight, (int, float))
-                                        else 1.0,
-                                        "max_parallel_requests": mpr
-                                        if isinstance(mpr, int)
-                                        else None,
-                                    }
-                                )
+                                if isinstance(jcfg, DecisionModelConfig):
+                                    config["judges"].append(
+                                        _decision_model_judge_entry(grader, j, jid, jcfg)
+                                    )
+                                    continue
+                                config["judges"].append(_llm_judge_entry(j, jid, jmodel, jcfg))
                     aggregation = getattr(grader, "_aggregation", None)
                     if isinstance(aggregation, str):
                         config["aggregation"] = aggregation
     except (TypeError, AttributeError):
         pass  # Gracefully skip if attributes aren't proper objects
+
+    # Capture a cascade's escalation config (only a cascade has one)
+    escalation = getattr(grader, "_escalation", None)
+    if isinstance(escalation, EscalationConfig):
+        config["escalation"] = {
+            "judges": [
+                _llm_judge_entry(j, j.judge_id, j.llm_config.model, j.llm_config)
+                for j in escalation.judges
+            ],
+            "threshold": escalation.threshold,
+            "per_criterion": (
+                dict(escalation.per_criterion) if escalation.per_criterion is not None else None
+            ),
+        }
 
     # Capture few-shot config if present
     try:
@@ -199,6 +211,57 @@ def _serialize_grader_config(grader: Grader) -> dict[str, Any]:
         pass
 
     return config
+
+
+def _llm_judge_entry(judge: Any, judge_id: str, model: str, config: Any) -> dict[str, Any]:
+    """Manifest entry of an LLM judge (see ``_serialize_grader_config``).
+
+    ``temperature`` is None when the provider default is used (the temperature is not
+    sent); a ``weight`` or ``max_parallel_requests`` that is not a number (a mock) is
+    recorded as its default.
+    """
+    weight = getattr(judge, "weight", 1.0)
+    mpr = getattr(config, "max_parallel_requests", None)
+    temp = getattr(config, "temperature", None)
+    is_number = isinstance(temp, (int, float)) and not isinstance(temp, bool)
+    return {
+        "judge_id": judge_id,
+        "judge_kind": "llm",
+        "model": model,
+        "temperature": temp if is_number else None,
+        "weight": weight if isinstance(weight, (int, float)) else 1.0,
+        "max_parallel_requests": mpr if isinstance(mpr, int) else None,
+    }
+
+
+def _decision_model_judge_entry(
+    grader: Grader, judge: Any, judge_id: str, config: DecisionModelConfig
+) -> dict[str, Any]:
+    """Manifest entry of a decision-model judge (see ``_serialize_grader_config``).
+
+    ``api_base_host`` is the host (with any non-default port) of the base URL the judge's
+    client resolved at construction (``api_base``, else ``TYPESAFE_BASE_URL``, else the
+    SDK default); without such a client, the host of an explicit ``api_base``, else None.
+    The rest of the URL (its path; a base URL cannot hold credentials), the API key and
+    ``extra_headers`` are never recorded.
+    """
+    clients = getattr(grader, "_decision_clients", None)
+    client = clients.get(judge_id) if isinstance(clients, dict) else None
+    host = getattr(client, "host", None)
+    if not isinstance(host, str):
+        host = _url_host(config.api_base) if config.api_base is not None else None
+    weight = getattr(judge, "weight", 1.0)
+    return {
+        "judge_id": judge_id,
+        "judge_kind": "decision_model",
+        "model": config.model,
+        "weight": weight if isinstance(weight, (int, float)) else 1.0,
+        "max_parallel_requests": config.max_parallel_requests,
+        "binary_framing": config.binary_framing,
+        "ordinal_framing": config.ordinal_framing,
+        "decision_threshold": config.decision_threshold,
+        "api_base_host": host,
+    }
 
 
 def _serialize_eval_config(config: EvalConfig) -> dict[str, Any]:
@@ -824,7 +887,7 @@ class EvalRunner:
         >>>
         >>> dataset = RubricDataset.from_file("data.json")
         >>> grader = CriterionGrader(
-        ...     llm_config=LLMConfig(
+        ...     judge_model_config=LLMConfig(
         ...         model="openai/gpt-4",
         ...         max_parallel_requests=10,
         ...     )
@@ -852,10 +915,16 @@ class EvalRunner:
         self.grader = grader
         self.config = config or EvalConfig()
 
-        # Extract judge IDs if using ensemble grader
+        # Extract judge IDs for per-judge progress from a grader with ``_judges``: a
+        # CriterionGrader's every judge, a cascade's escalation judges included, or any other
+        # grader's ``_judges``
         self._judge_ids: list[str] = []
         if hasattr(grader, "_judges"):
-            self._judge_ids = [j.judge_id for j in grader._judges]
+            self._judge_ids = (
+                grader.judge_ids
+                if isinstance(grader, CriterionGrader)
+                else [j.judge_id for j in grader._judges]
+            )
 
         # Resolve experiment name
         self._experiment_name = self.config.experiment_name or _generate_experiment_name()
@@ -895,39 +964,44 @@ class EvalRunner:
                 judge_ids=self._judge_ids,
             )
 
-        try:
-            if progress:
-                progress.__enter__()
-                # Update progress to show already completed items
-                for _ in range(completed_count):
-                    progress.advance()
-
-            # Process remaining results as they complete
-            async for result in self._run_with_streaming(pending_items):
-                item_results.append(result)
-                completed_count += 1
-
-                # Persist result immediately
-                self._append_item_result(result)
-                self._update_manifest_indices(result.item_idx)
-
-                if result.error:
-                    errors.append((result.item_idx, result.error))
-                    if self.config.fail_fast:
-                        self._update_manifest_status("failed", error=result.error)
-                        raise RuntimeError(
-                            f"Evaluation failed at item {result.item_idx}: {result.error}"
-                        )
-
-                # Update progress
+        # A cascade's per-criterion escalation thresholds are keyed by criterion name, and
+        # with per-item rubrics a name absent from one item's rubric can be in another's:
+        # the names are checked once, here, against every item's rubric, and not again
+        # against each item's own rubric as it is graded.
+        with _escalation_names_checked(self.grader, self.dataset):
+            try:
                 if progress:
-                    elapsed = time.perf_counter() - start_time
-                    rate = completed_count / elapsed if elapsed > 0 else 0.0
-                    progress.advance(rate=rate)
+                    progress.__enter__()
+                    # Update progress to show already completed items
+                    for _ in range(completed_count):
+                        progress.advance()
 
-        finally:
-            if progress:
-                progress.__exit__(None, None, None)
+                # Process remaining results as they complete
+                async for result in self._run_with_streaming(pending_items):
+                    item_results.append(result)
+                    completed_count += 1
+
+                    # Persist result immediately
+                    self._append_item_result(result)
+                    self._update_manifest_indices(result.item_idx)
+
+                    if result.error:
+                        errors.append((result.item_idx, result.error))
+                        if self.config.fail_fast:
+                            self._update_manifest_status("failed", error=result.error)
+                            raise RuntimeError(
+                                f"Evaluation failed at item {result.item_idx}: {result.error}"
+                            )
+
+                    # Update progress
+                    if progress:
+                        elapsed = time.perf_counter() - start_time
+                        rate = completed_count / elapsed if elapsed > 0 else 0.0
+                        progress.advance(rate=rate)
+
+            finally:
+                if progress:
+                    progress.__exit__(None, None, None)
 
         # Sort results by item index
         item_results.sort(key=lambda r: r.item_idx)

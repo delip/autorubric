@@ -19,7 +19,7 @@ from autorubric.graders import CriterionGrader
 async def main():
     dataset = RubricDataset.from_file("essays.json")
     grader = CriterionGrader(
-        llm_config=LLMConfig(
+        judge_model_config=LLMConfig(
             model="openai/gpt-4.1-mini",
             max_parallel_requests=10,
         )

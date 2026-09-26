@@ -1,6 +1,14 @@
 from importlib.metadata import PackageNotFoundError, version
 
 from autorubric.dataset import DataItem, RubricDataset
+from autorubric.decision import DecisionModelConfig
+from autorubric.escalation import (
+    EscalationCurve,
+    EscalationPoint,
+    calibrate_escalation,
+    escalation_stats,
+    replay_escalation,
+)
 from autorubric.eval import (
     EvalConfig,
     EvalResult,
@@ -10,6 +18,7 @@ from autorubric.eval import (
     ItemResult,
     evaluate,
 )
+from autorubric.graders import EscalationConfig
 from autorubric.llm import (
     ErrorCategory,
     GenerateResult,
@@ -127,6 +136,15 @@ __all__ = [
     "ThinkingParam",
     "classify_grading_error",
     "generate",
+    # Decision-model judges
+    "DecisionModelConfig",
+    "EscalationConfig",
+    # Confidence cascades: offline replay, diagnostics and calibration
+    "EscalationCurve",
+    "EscalationPoint",
+    "calibrate_escalation",
+    "escalation_stats",
+    "replay_escalation",
     # Core types
     "AggregationStrategy",
     "CannotAssessConfig",

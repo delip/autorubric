@@ -31,6 +31,23 @@ def word_count(text: str) -> int:
     return len(text.split())
 
 
+# A <thinking> or <output> section: an opening marker, then its closing marker. Shared by
+# parse_thinking_output and _has_thinking_output_sections, so "has a section" means exactly
+# "parse_thinking_output finds one".
+_THINKING_SECTION = re.compile(r"<thinking>(.*?)</thinking>", re.DOTALL | re.IGNORECASE)
+_OUTPUT_SECTION = re.compile(r"<output>(.*?)</output>", re.DOTALL | re.IGNORECASE)
+
+
+def _has_thinking_output_sections(text: str) -> bool:
+    """Whether ``text`` holds a ``<thinking>`` or ``<output>`` section.
+
+    A section is an opening marker followed by its closing marker, case-insensitive. This
+    is exactly when ``parse_thinking_output`` recovers parts; without a section it returns
+    the whole text, unstripped, as the output.
+    """
+    return bool(_THINKING_SECTION.search(text) or _OUTPUT_SECTION.search(text))
+
+
 def parse_thinking_output(text: str) -> ThinkingOutputDict:
     """Parse thinking and output sections from text with XML-style markers.
 
@@ -54,11 +71,11 @@ def parse_thinking_output(text: str) -> ThinkingOutputDict:
         {'thinking': 'Think', 'output': 'Rest'}
     """
     # Try to extract thinking section
-    thinking_match = re.search(r"<thinking>(.*?)</thinking>", text, re.DOTALL | re.IGNORECASE)
+    thinking_match = _THINKING_SECTION.search(text)
     thinking = thinking_match.group(1).strip() if thinking_match else ""
 
     # Try to extract output section
-    output_match = re.search(r"<output>(.*?)</output>", text, re.DOTALL | re.IGNORECASE)
+    output_match = _OUTPUT_SECTION.search(text)
 
     if output_match:
         # Explicit output markers found
@@ -66,9 +83,7 @@ def parse_thinking_output(text: str) -> ThinkingOutputDict:
     elif thinking_match:
         # Has thinking but no output markers - treat rest as output
         # Remove the thinking section and use remainder
-        output = re.sub(
-            r"<thinking>.*?</thinking>", "", text, flags=re.DOTALL | re.IGNORECASE
-        ).strip()
+        output = _THINKING_SECTION.sub("", text).strip()
     else:
         # No markers at all - treat entire text as output
         output = text
@@ -116,6 +131,26 @@ def normalize_to_grade_input(to_grade: ToGradeInput) -> ThinkingOutputDict:
         )
 
     return ThinkingOutputDict(thinking=thinking, output=output)
+
+
+def _normalize_guidelines(guidelines: str | None) -> str | None:
+    """Return rubric guidelines in their stored form: the text, or ``None`` for none.
+
+    Blank text (empty or whitespace only) carries nothing to apply, so it means "no
+    guidelines", like an empty query or reference submission; it becomes ``None``, the
+    single "absent" value every consumer checks. Any other text is kept verbatim, never
+    stripped or rewritten. ``Rubric.guidelines`` stores guidelines in this form, and every
+    function that takes guidelines (``Grader.grade``, the LLM user-prompt builders, the
+    decision-model state) reads them through it, so blank guidelines mean none everywhere.
+
+    Raises:
+        TypeError: If ``guidelines`` is neither a ``str`` nor ``None``.
+    """
+    if guidelines is None:
+        return None
+    if not isinstance(guidelines, str):
+        raise TypeError(f"Rubric guidelines must be a str or None, got {type(guidelines).__name__}")
+    return guidelines if guidelines.strip() else None
 
 
 def compute_length_penalty(text: str | ThinkingOutputDict, config: LengthPenalty) -> float:
@@ -353,17 +388,24 @@ async def fill_ground_truth(
     Raises:
         ValueError: If dataset has no items.
 
+    Warns:
+        UserWarning: Once, before grading, when ``grader`` is a confidence cascade whose
+            ``EscalationConfig.per_criterion`` names a criterion no item's rubric has (as
+            ``evaluate`` does; with per-item rubrics a name may be in only some items'
+            rubrics).
+
     Example:
         >>> from autorubric import RubricDataset, LLMConfig
         >>> from autorubric.graders import CriterionGrader
         >>> from autorubric.utils import fill_ground_truth
         >>>
         >>> dataset = RubricDataset.from_file("unlabeled.json")
-        >>> grader = CriterionGrader(llm_config=LLMConfig(model="openai/gpt-4o"))
+        >>> grader = CriterionGrader(judge_model_config=LLMConfig(model="openai/gpt-4o"))
         >>> labeled = await fill_ground_truth(dataset, grader)
         >>> labeled.to_file("labeled.json")
     """
     from autorubric.dataset import RubricDataset
+    from autorubric.graders.criterion_grader import _escalation_names_checked
 
     if len(dataset) == 0:
         raise ValueError("Dataset has no items")
@@ -403,58 +445,63 @@ async def fill_ground_truth(
             except Exception as e:
                 return (idx, None, str(e))
 
-        # Create tasks with optional concurrency limit
-        if max_concurrent_items:
-            semaphore = asyncio.Semaphore(max_concurrent_items)
+        # A cascade's per-criterion escalation thresholds are keyed by criterion name, and
+        # with per-item rubrics a name absent from one item's rubric can be in another's:
+        # the names are checked once, here, against every item's rubric, and not again
+        # against each item's own rubric as it is graded.
+        with _escalation_names_checked(grader, dataset):
+            # Create tasks with optional concurrency limit
+            if max_concurrent_items:
+                semaphore = asyncio.Semaphore(max_concurrent_items)
 
-            async def limited_grade(
-                idx: int, item: DataItem
-            ) -> tuple[int, DataItem | None, str | None]:
-                async with semaphore:
-                    return await grade_item(idx, item)
+                async def limited_grade(
+                    idx: int, item: DataItem
+                ) -> tuple[int, DataItem | None, str | None]:
+                    async with semaphore:
+                        return await grade_item(idx, item)
 
-            tasks = [limited_grade(idx, item) for idx, item in items_to_grade]
-        else:
-            tasks = [grade_item(idx, item) for idx, item in items_to_grade]
+                tasks = [limited_grade(idx, item) for idx, item in items_to_grade]
+            else:
+                tasks = [grade_item(idx, item) for idx, item in items_to_grade]
 
-        # Execute with optional progress
-        if show_progress:
-            try:
-                from rich.console import Console
-                from rich.progress import (
-                    BarColumn,
-                    MofNCompleteColumn,
-                    Progress,
-                    SpinnerColumn,
-                    TextColumn,
-                )
+            # Execute with optional progress
+            if show_progress:
+                try:
+                    from rich.console import Console
+                    from rich.progress import (
+                        BarColumn,
+                        MofNCompleteColumn,
+                        Progress,
+                        SpinnerColumn,
+                        TextColumn,
+                    )
 
-                progress = Progress(
-                    SpinnerColumn(),
-                    TextColumn("[bold blue]Filling ground truth"),
-                    BarColumn(bar_width=40),
-                    MofNCompleteColumn(),
-                    console=Console(stderr=True),
-                )
+                    progress = Progress(
+                        SpinnerColumn(),
+                        TextColumn("[bold blue]Filling ground truth"),
+                        BarColumn(bar_width=40),
+                        MofNCompleteColumn(),
+                        console=Console(stderr=True),
+                    )
 
-                with progress:
-                    task_id = progress.add_task("Grading", total=len(tasks))
-                    for coro in asyncio.as_completed(tasks):
-                        idx, new_item, error = await coro
+                    with progress:
+                        task_id = progress.add_task("Grading", total=len(tasks))
+                        for coro in asyncio.as_completed(tasks):
+                            idx, new_item, error = await coro
+                            if new_item is not None:
+                                graded_items[idx] = new_item
+                            progress.update(task_id, advance=1)
+                except ImportError:
+                    # Fall back to no progress if rich is not available
+                    results = await asyncio.gather(*tasks)
+                    for idx, new_item, error in results:
                         if new_item is not None:
                             graded_items[idx] = new_item
-                        progress.update(task_id, advance=1)
-            except ImportError:
-                # Fall back to no progress if rich is not available
+            else:
                 results = await asyncio.gather(*tasks)
                 for idx, new_item, error in results:
                     if new_item is not None:
                         graded_items[idx] = new_item
-        else:
-            results = await asyncio.gather(*tasks)
-            for idx, new_item, error in results:
-                if new_item is not None:
-                    graded_items[idx] = new_item
 
     # Combine preserved and graded items, maintaining order
     all_items: dict[int, DataItem] = {**preserved_items, **graded_items}

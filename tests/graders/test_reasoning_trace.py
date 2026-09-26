@@ -72,7 +72,7 @@ async def test_binary_reasoning_reaches_vote(mock_llm_config):
 
     with patch("autorubric.graders.criterion_grader.LLMClient", return_value=client):
         report = await rubric.grade(
-            "submission", grader=CriterionGrader(llm_config=mock_llm_config)
+            "submission", grader=CriterionGrader(judge_model_config=mock_llm_config)
         )
 
     assert isinstance(report, EnsembleEvaluationReport)
@@ -92,7 +92,7 @@ async def test_multi_choice_reasoning_reaches_vote(mock_llm_config):
 
     with patch("autorubric.graders.criterion_grader.LLMClient", return_value=client):
         report = await rubric.grade(
-            "submission", grader=CriterionGrader(llm_config=mock_llm_config)
+            "submission", grader=CriterionGrader(judge_model_config=mock_llm_config)
         )
 
     assert isinstance(report, EnsembleEvaluationReport)

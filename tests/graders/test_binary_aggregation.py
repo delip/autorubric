@@ -25,7 +25,9 @@ CANNOT_ASSESS = CriterionVerdict.CANNOT_ASSESS
 
 
 def _grader(aggregation: AggregationStrategy) -> CriterionGrader:
-    return CriterionGrader(llm_config=LLMConfig(model="test-model"), aggregation=aggregation)
+    return CriterionGrader(
+        judge_model_config=LLMConfig(model="test-model"), aggregation=aggregation
+    )
 
 
 def _votes(*specs: tuple[CriterionVerdict, float]) -> list[JudgeVote]:
@@ -121,3 +123,19 @@ def test_binary_tie_falls_to_weight_sign_worst_case(
     votes = _votes(*votes_spec)
     verdict, _ = _grader(aggregation)._aggregate_votes(votes, weight=weight)
     assert verdict == expected
+
+
+def test_binary_worst_case_rule_is_defined_once_with_the_verdict_type() -> None:
+    """The binary worst-case rule lives in ``types`` next to ``CriterionVerdict``.
+
+    The grader's tie-breaking and ``unknown``-error paths use that same function, so any
+    other judge kind that resolves a binary tie (a decision model's answer exactly at its
+    ``decision_threshold``) cannot drift from ensemble tie-breaking.
+    """
+    from autorubric import types
+    from autorubric.graders import criterion_grader
+
+    assert criterion_grader._binary_worst_verdict is types._binary_worst_verdict
+    assert types._binary_worst_verdict(10.0) is UNMET
+    assert types._binary_worst_verdict(0.0) is UNMET
+    assert types._binary_worst_verdict(-10.0) is MET

@@ -392,7 +392,7 @@ class TestMultiChoiceAggregation:
 
         # Create a minimal grader to access aggregation methods
         grader = CriterionGrader(
-            llm_config=LLMConfig(model="openai/gpt-4"),
+            judge_model_config=LLMConfig(model="openai/gpt-4"),
             ordinal_aggregation="mean",
         )
 
@@ -436,7 +436,7 @@ class TestMultiChoiceAggregation:
         from autorubric.graders.criterion_grader import CriterionGrader
 
         grader = CriterionGrader(
-            llm_config=LLMConfig(model="openai/gpt-4"),
+            judge_model_config=LLMConfig(model="openai/gpt-4"),
             nominal_aggregation="mode",
         )
 
@@ -488,7 +488,7 @@ class TestMultiChoiceAggregation:
         from autorubric.graders.criterion_grader import CriterionGrader
 
         grader = CriterionGrader(
-            llm_config=LLMConfig(model="openai/gpt-4"),
+            judge_model_config=LLMConfig(model="openai/gpt-4"),
             ordinal_aggregation=strategy,
         )
 
@@ -517,7 +517,7 @@ class TestMultiChoiceAggregation:
         from autorubric import LLMConfig
         from autorubric.graders.criterion_grader import CriterionGrader
 
-        grader = CriterionGrader(llm_config=LLMConfig(model="openai/gpt-4"))
+        grader = CriterionGrader(judge_model_config=LLMConfig(model="openai/gpt-4"))
 
         # Two distinct options share the same value (0.5).
         criterion = Criterion(
@@ -619,7 +619,7 @@ class TestMultiChoiceAggregation:
         from autorubric import LLMConfig
         from autorubric.graders.criterion_grader import CriterionGrader
 
-        grader = CriterionGrader(llm_config=LLMConfig(model="openai/gpt-4"))
+        grader = CriterionGrader(judge_model_config=LLMConfig(model="openai/gpt-4"))
         votes = [
             _mcvote(f"j{i}", idx, label, value) for i, (idx, label, value) in enumerate(votes_spec)
         ]
@@ -636,7 +636,7 @@ class TestMultiChoiceAggregation:
         from autorubric import LLMConfig
         from autorubric.graders.criterion_grader import CriterionGrader
 
-        grader = CriterionGrader(llm_config=LLMConfig(model="openai/gpt-4"))
+        grader = CriterionGrader(judge_model_config=LLMConfig(model="openai/gpt-4"))
         criterion = Criterion(
             requirement="r",
             scale_type="ordinal",
@@ -659,7 +659,7 @@ class TestMultiChoiceAggregation:
         from autorubric import LLMConfig
         from autorubric.graders.criterion_grader import CriterionGrader
 
-        grader = CriterionGrader(llm_config=LLMConfig(model="openai/gpt-4"))
+        grader = CriterionGrader(judge_model_config=LLMConfig(model="openai/gpt-4"))
         # Non-monotonic values: lowest value (0.4) sits at the HIGHER index (1).
         criterion = Criterion(
             requirement="r",
@@ -681,7 +681,7 @@ class TestMultiChoiceAggregation:
         from autorubric import LLMConfig
         from autorubric.graders.criterion_grader import CriterionGrader
 
-        grader = CriterionGrader(llm_config=LLMConfig(model="openai/gpt-4"))
+        grader = CriterionGrader(judge_model_config=LLMConfig(model="openai/gpt-4"))
         criterion = self._make_nominal(weight=5.0)
         # Equal summed weight on idx 0 (A, 1.0) and idx 1 (B, 0.0); idx 0 seen first.
         votes = [
@@ -697,7 +697,7 @@ class TestMultiChoiceAggregation:
         from autorubric.graders.criterion_grader import CriterionGrader
 
         grader = CriterionGrader(
-            llm_config=LLMConfig(model="openai/gpt-4"),
+            judge_model_config=LLMConfig(model="openai/gpt-4"),
             nominal_aggregation="unanimous",
         )
 
@@ -724,7 +724,7 @@ class TestMultiChoiceAggregation:
         from autorubric.graders.criterion_grader import CriterionGrader
 
         grader = CriterionGrader(
-            llm_config=LLMConfig(model="openai/gpt-4"),
+            judge_model_config=LLMConfig(model="openai/gpt-4"),
             nominal_aggregation="unanimous",
         )
 
@@ -757,7 +757,7 @@ class TestMultiChoiceAggregation:
         from autorubric.graders.criterion_grader import CriterionGrader
 
         grader = CriterionGrader(
-            llm_config=LLMConfig(model="openai/gpt-4"),
+            judge_model_config=LLMConfig(model="openai/gpt-4"),
             nominal_aggregation="unanimous",
         )
 
@@ -786,7 +786,7 @@ class TestMultiChoiceAggregation:
         from autorubric import LLMConfig
         from autorubric.graders.criterion_grader import CriterionGrader
 
-        grader = CriterionGrader(llm_config=LLMConfig(model="openai/gpt-4"))
+        grader = CriterionGrader(judge_model_config=LLMConfig(model="openai/gpt-4"))
 
         votes = [
             MultiChoiceJudgeVote(
@@ -818,7 +818,7 @@ class TestMultiChoiceAggregation:
         from autorubric import LLMConfig
         from autorubric.graders.criterion_grader import CriterionGrader
 
-        grader = CriterionGrader(llm_config=LLMConfig(model="openai/gpt-4"))
+        grader = CriterionGrader(judge_model_config=LLMConfig(model="openai/gpt-4"))
 
         votes = [
             MultiChoiceJudgeVote(
@@ -850,7 +850,7 @@ class TestMultiChoiceAggregation:
         from autorubric import LLMConfig
         from autorubric.graders.criterion_grader import CriterionGrader
 
-        grader = CriterionGrader(llm_config=LLMConfig(model="openai/gpt-4"))
+        grader = CriterionGrader(judge_model_config=LLMConfig(model="openai/gpt-4"))
 
         votes = [
             MultiChoiceJudgeVote(
@@ -893,7 +893,7 @@ class TestOptionShuffling:
         from autorubric.graders.criterion_grader import CriterionGrader
 
         grader = CriterionGrader(
-            llm_config=LLMConfig(model="openai/gpt-4"),
+            judge_model_config=LLMConfig(model="openai/gpt-4"),
         )
         assert grader._shuffle_options is True
 
@@ -906,7 +906,7 @@ class TestSeedReproducibility:
         from autorubric import LLMConfig
         from autorubric.graders.criterion_grader import CriterionGrader
 
-        grader = CriterionGrader(llm_config=LLMConfig(model="openai/gpt-4"))
+        grader = CriterionGrader(judge_model_config=LLMConfig(model="openai/gpt-4"))
         assert isinstance(grader.seed, int)
         assert 0 <= grader.seed < 2**31
 
@@ -915,7 +915,7 @@ class TestSeedReproducibility:
         from autorubric import LLMConfig
         from autorubric.graders.criterion_grader import CriterionGrader
 
-        grader = CriterionGrader(llm_config=LLMConfig(model="openai/gpt-4"), seed=42)
+        grader = CriterionGrader(judge_model_config=LLMConfig(model="openai/gpt-4"), seed=42)
         assert grader.seed == 42
 
     def test_seed_produces_deterministic_shuffle(self):
@@ -986,7 +986,7 @@ class TestSeedReproducibility:
             else FewShotConfig(n_examples=2, seed=few_shot_seed)
         )
         grader = CriterionGrader(
-            llm_config=LLMConfig(model="openai/gpt-4"),
+            judge_model_config=LLMConfig(model="openai/gpt-4"),
             training_data=dataset,
             few_shot_config=few_shot_config,
             seed=42,

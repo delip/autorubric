@@ -1,6 +1,9 @@
 """Tests for RateLimitPool rate limiting infrastructure."""
 
 import asyncio
+import gc
+import threading
+import weakref
 
 import pytest
 
@@ -263,3 +266,137 @@ class TestRateLimitPoolConcurrency:
         # All should return the same semaphore (same provider)
         assert results[0] is results[1]
         assert results[1] is results[2]
+
+
+class TestRateLimitPoolEventLoops:
+    """An asyncio semaphore belongs to one event loop, so the pool keeps one per loop.
+
+    A semaphore binds to the loop on which it first makes a task wait, and waiting on it
+    from another loop raises ``RuntimeError``. Successive ``asyncio.run`` calls (one per
+    dataset, one per notebook cell) are separate loops, so each loop gets its own
+    semaphore for a key, while the key's limit, the strictest one requested, is shared.
+    """
+
+    def setup_method(self):
+        """Reset singleton before each test."""
+        RateLimitPool.reset_instance()
+
+    def teardown_method(self):
+        """Reset singleton after each test."""
+        RateLimitPool.reset_instance()
+
+    @staticmethod
+    async def _peak_concurrency(model: str, limit: int, n_tasks: int = 3) -> int:
+        """Run ``n_tasks`` tasks that each hold the key's semaphore briefly; the peak held."""
+        pool = RateLimitPool.get_instance()
+        active = peak = 0
+
+        async def task() -> None:
+            nonlocal active, peak
+            semaphore = await pool.get_semaphore(model, limit)
+            assert semaphore is not None
+            async with semaphore:
+                active += 1
+                peak = max(peak, active)
+                await asyncio.sleep(0.01)
+                active -= 1
+
+        await asyncio.gather(*(task() for _ in range(n_tasks)))
+        return peak
+
+    def test_successive_event_loops_can_each_wait_on_the_limit(self):
+        """Tasks that wait for the limit on a later loop are limited, not failed."""
+        assert asyncio.run(self._peak_concurrency("openai/gpt-4", 1)) == 1
+        assert asyncio.run(self._peak_concurrency("openai/gpt-4", 1)) == 1
+        assert asyncio.run(self._peak_concurrency("openai/gpt-4-turbo", 2, n_tasks=5)) == 1
+
+    def test_a_loop_left_open_keeps_its_semaphore_and_a_later_loop_gets_its_own(self):
+        """A loop that is not closed after its run (``run_until_complete`` on a loop the
+        caller keeps) still owns its semaphore, bound to it by a task that waited. A later
+        ``asyncio.run`` gets a semaphore of its own, and the open loop keeps using its own."""
+        loop = asyncio.new_event_loop()
+        try:
+            assert loop.run_until_complete(self._peak_concurrency("openai/gpt-4", 1)) == 1
+            assert asyncio.run(self._peak_concurrency("openai/gpt-4", 1)) == 1
+            assert loop.run_until_complete(self._peak_concurrency("openai/gpt-4", 1)) == 1
+        finally:
+            loop.close()
+
+    def test_loops_running_at_once_in_different_threads_each_get_their_own(self):
+        """The pool's maps are guarded by a thread lock, so loops running at the same time in
+        different threads share a key's limit, each waiting on its own semaphore."""
+        contended = threading.Event()
+        release = threading.Event()
+        outcome: dict[str, object] = {}
+
+        async def stay_running() -> None:
+            outcome["first"] = await self._peak_concurrency("openai/gpt-4", 1)
+            contended.set()
+            # This loop keeps running, its semaphore bound to it, while another contends.
+            await asyncio.to_thread(release.wait, 10)
+            outcome["again"] = await self._peak_concurrency("openai/gpt-4", 1)
+
+        def run_in_thread() -> None:
+            try:
+                asyncio.run(stay_running())
+            except BaseException as exc:  # reported by the assertion below
+                outcome["error"] = exc
+
+        thread = threading.Thread(target=run_in_thread, daemon=True)
+        thread.start()
+        try:
+            assert contended.wait(10)
+            assert asyncio.run(self._peak_concurrency("openai/gpt-4", 1)) == 1
+        finally:
+            release.set()
+            thread.join(10)
+        assert not thread.is_alive()
+        assert outcome == {"first": 1, "again": 1}
+
+    def test_one_semaphore_per_key_within_a_loop_and_a_new_one_per_loop(self):
+        async def get_two() -> tuple[asyncio.Semaphore | None, asyncio.Semaphore | None]:
+            pool = RateLimitPool.get_instance()
+            return (
+                await pool.get_semaphore("openai/gpt-4", 2),
+                await pool.get_semaphore("openai/gpt-4-turbo", 2),
+            )
+
+        first_a, first_b = asyncio.run(get_two())
+        second_a, second_b = asyncio.run(get_two())
+
+        assert first_a is first_b
+        assert second_a is second_b
+        assert first_a is not second_a
+
+    def test_a_stricter_limit_requested_on_another_loop_applies_to_every_loop(self):
+        loop = asyncio.new_event_loop()
+        try:
+            loose = loop.run_until_complete(
+                RateLimitPool.get_instance().get_semaphore("openai/gpt-4", 3)
+            )
+            assert loose is not None
+            asyncio.run(RateLimitPool.get_instance().get_semaphore("openai/gpt-4", 1))
+
+            assert RateLimitPool.get_instance().get_current_limit("openai/gpt-4") == 1
+            # The earlier loop's later requests get the strictest limit too.
+            assert loop.run_until_complete(self._peak_concurrency("openai/gpt-4", 3)) == 1
+        finally:
+            loop.close()
+
+    def test_the_pool_never_keeps_a_finished_loop_alive(self):
+        """A semaphore that made a task wait references its loop; the pool drops a closed
+        loop's semaphore instead of holding the loop for the life of the process."""
+        loops: list[weakref.ref[asyncio.AbstractEventLoop]] = []
+
+        async def contend() -> int:
+            loops.append(weakref.ref(asyncio.get_running_loop()))
+            return await self._peak_concurrency("openai/gpt-4", 1)
+
+        for _ in range(3):
+            assert asyncio.run(contend()) == 1
+        gc.collect()
+
+        assert [ref() is None for ref in loops] == [True, True, False]
+        asyncio.run(self._peak_concurrency("openai/gpt-4", 1))
+        gc.collect()
+        assert loops[-1]() is None

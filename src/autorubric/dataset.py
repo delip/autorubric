@@ -33,7 +33,9 @@ class DataItem:
             Used for computing evaluation metrics against LLM predictions.
         rubric: Optional per-item rubric. If provided, this rubric is used for grading
             instead of the dataset-level rubric. Useful for datasets where each item
-            has unique evaluation criteria (e.g., ResearcherBench).
+            has unique evaluation criteria (e.g., ResearcherBench). It replaces the
+            dataset-level rubric entirely, guidelines included: this rubric carries its
+            own ``guidelines`` (possibly none) and never inherits the dataset-level ones.
         reference_submission: Optional exemplar response for grading context. When
             present, helps calibrate the grader's expectations. Item-level takes
             precedence over dataset-level reference.
@@ -343,8 +345,13 @@ class RubricDataset:
     # Serialization
     # =========================================================================
 
-    def _serialize_rubric(self, rubric: Rubric) -> list[dict[str, Any]]:
-        """Serialize a Rubric to a list of criterion dicts."""
+    def _serialize_rubric(self, rubric: Rubric) -> list[dict[str, Any]] | dict[str, Any]:
+        """Serialize a Rubric to the form ``Rubric.from_dict`` reads back.
+
+        A rubric without guidelines is written as a list of criterion dicts, exactly as
+        before guidelines existed, so such files round-trip byte-identically. A rubric with
+        guidelines is written as ``{"guidelines": ..., "criteria": [...]}``.
+        """
         rubric_data = []
         for c in rubric.rubric:
             criterion_data: dict[str, Any] = {
@@ -360,7 +367,9 @@ class RubricDataset:
                 if c.aggregation is not None:
                     criterion_data["aggregation"] = c.aggregation
             rubric_data.append(criterion_data)
-        return rubric_data
+        if rubric.guidelines is None:
+            return rubric_data
+        return {"guidelines": rubric.guidelines, "criteria": rubric_data}
 
     def to_json(self, indent: int | None = 2) -> str:
         """Serialize the dataset to a JSON string.

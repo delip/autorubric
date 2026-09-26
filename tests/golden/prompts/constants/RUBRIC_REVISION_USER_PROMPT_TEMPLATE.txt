@@ -1,0 +1,40 @@
+You are revising an evaluation rubric to improve its quality and reliability.
+
+## Task Being Evaluated
+{task_prompt}
+
+## Current Rubric
+{original_criteria}
+
+## Issues Identified
+{issues_text}
+
+{validation_text}
+
+## Revision History
+{history_text}
+Do NOT reintroduce issues that were fixed in previous iterations.
+
+## Revision Guidelines
+1. Fix all identified issues while preserving the original intent of the rubric.
+2. Each criterion should assess ONE specific, observable quality.
+3. Use clear, unambiguous language without hedging words (avoid "generally", "somewhat", "might").
+4. Avoid generic criteria that could apply to any task — criteria should be specific to the task.
+5. Ensure criteria are distinct and don't overlap in what they measure.
+6. Keep weights between 5-15 based on importance to the task.
+7. Include negative criteria (negative weights) to counteract sycophantic MET-bias in LLM judges.
+8. Consider the positive criteria when determining what negative criteria to include and with what weights.
+9. For criteria that performed well in validation, preserve their wording closely.
+10. Use grading diagnostics (when provided) to identify criteria whose wording leads to incorrect verdicts — reword criteria that are too easily MET or too harshly UNMET.
+11. Keep the number of criteria reasonable, within +/- 30-100% of the original count.
+12. Ensure the revised rubric covers every assessment dimension present in the original. A criterion may be reworded, split, or merged, but do not silently drop what it measures — only remove a dimension if it is fully redundant with another criterion in the revised rubric. If the task prompt asks to "write", "draft", "compose", or similar, writing-quality dimensions must be preserved.
+
+## Output Format
+Return ONLY a valid JSON array of criteria objects. Each object must have "weight" (integer) and "requirement" (string) fields, and optionally a "name" (string) field. No other text or explanation.
+
+Example:
+[
+  {{"weight": 10, "name": "factual_accuracy", "requirement": "States that the boiling point of water at sea level is 100 degrees Celsius (212 degrees Fahrenheit)"}},
+  {{"weight": 8, "requirement": "Includes at least two real-world applications of the concept"}},
+  {{"weight": -5, "name": "incorrect_formula", "requirement": "Presents an incorrect mathematical formula for the relationship"}}
+]

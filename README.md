@@ -47,7 +47,7 @@ from autorubric import Rubric, LLMConfig
 from autorubric.graders import CriterionGrader
 
 async def main():
-    grader = CriterionGrader(llm_config=LLMConfig(model="openai/gpt-5.1-mini"))
+    grader = CriterionGrader(judge_model_config=LLMConfig(model="openai/gpt-5.1-mini"))
 
     rubric = Rubric.from_dict([
         {"weight": 10.0, "requirement": "States NMC cell-level energy density in the 250-300 Wh/kg range"},
@@ -159,6 +159,7 @@ When writing or editing code that uses AutoRubric:
 | Per-criterion explanations | Every verdict includes the judge's reasoning                             |
 | 100+ LLM providers         | OpenAI, Anthropic, Google, Azure, Groq, Ollama, and more via LiteLLM     |
 | Ensemble judging           | Combine multiple LLM judges with configurable aggregation strategies     |
+| Decision-model judges      | One request per item with TypeSafe's Jev or a compatible model, alone or as a cheap first pass with an LLM fallback (`pip install 'autorubric[typesafe]'`) |
 | Few-shot calibration       | Provide labeled examples to improve grading consistency                  |
 | Multi-choice criteria      | Ordinal and nominal scales beyond binary met/unmet verdicts              |
 | Batch evaluation           | High-throughput `EvalRunner` with checkpointing and resumption           |
