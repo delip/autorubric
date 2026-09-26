@@ -159,7 +159,7 @@ models = [
 results = []
 for model_id, name in models:
     grader = CriterionGrader(
-        judge_model_config=LLMConfig(model=model_id, temperature=0.0)
+        judge_model_config=LLMConfig(model=model_id)
     )
 
     result = await evaluate(dataset, grader, show_progress=False)
@@ -216,9 +216,6 @@ grader = CriterionGrader(
 
         # Rate limiting to avoid throttling
         max_parallel_requests=20,
-
-        # Low temperature for consistency
-        temperature=0.0,
     )
 )
 
@@ -488,7 +485,7 @@ async def compare_models(dataset: RubricDataset):
     results = []
     for model_id, name in models:
         grader = CriterionGrader(
-            judge_model_config=LLMConfig(model=model_id, temperature=0.0)
+            judge_model_config=LLMConfig(model=model_id)
         )
 
         start = time.perf_counter()
@@ -522,7 +519,6 @@ async def benchmark_caching(dataset: RubricDataset):
     grader = CriterionGrader(
         judge_model_config=LLMConfig(
             model="openai/gpt-4.1-mini",
-            temperature=0.0,
             cache_enabled=True,
             cache_dir=".benchmark_cache",
         )

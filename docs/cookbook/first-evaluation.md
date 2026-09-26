@@ -79,7 +79,6 @@ from autorubric.graders import CriterionGrader
 grader = CriterionGrader(
     judge_model_config=LLMConfig(
         model="openai/gpt-4.1-mini",  # or "anthropic/claude-sonnet-4-5-20250929"
-        temperature=0.0,  # Low temperature for more consistent grades; omit for the provider default
     )
 )
 ```
@@ -366,7 +365,6 @@ async def main():
     grader = CriterionGrader(
         judge_model_config=LLMConfig(
             model="openai/gpt-4.1-mini",
-            temperature=0.0,
         )
     )
 

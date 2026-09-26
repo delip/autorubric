@@ -23,7 +23,6 @@ Create reusable LLM configurations:
 ```yaml
 # configs/llm/production.yaml
 model: openai/gpt-4.1-mini
-temperature: 0.0
 max_tokens: 1024
 cache_enabled: true
 cache_dir: .cache/autorubric
@@ -39,7 +38,7 @@ from autorubric import LLMConfig
 config = LLMConfig.from_yaml("configs/llm/production.yaml")
 ```
 
-Setting `temperature` explicitly keeps it the same across machines and library versions; when it is omitted, the provider's default applies (see [Temperature](../api/llm.md#temperature)).
+The config leaves `temperature` unset, so the provider's default applies (see [Temperature](../api/llm.md#temperature)). Add a `temperature` line only if you need to pin a specific value across machines and library versions.
 
 !!! tip "YAML over JSON for human-edited configs"
     Prefer YAML for configuration files that team members edit by hand. YAML supports inline
@@ -51,18 +50,15 @@ Setting `temperature` explicitly keeps it the same across machines and library v
 ```yaml
 # configs/llm/development.yaml
 model: openai/gpt-4.1-mini
-temperature: 0.0
 cache_enabled: true
 cache_dir: .cache/dev
 
 # configs/llm/staging.yaml
 model: openai/gpt-4.1
-temperature: 0.0
 max_parallel_requests: 10
 
 # configs/llm/production.yaml
 model: openai/gpt-4.1
-temperature: 0.0
 max_parallel_requests: 50
 prompt_caching: true
 ```
@@ -227,7 +223,6 @@ description: "Evaluate peer review quality with improved rubric"
 
 llm:
   model: openai/gpt-4.1-mini
-  temperature: 0.0
   max_parallel_requests: 20
 
 rubric_file: configs/rubrics/paper_review_v2.json
@@ -417,13 +412,11 @@ def create_config_structure():
     llm_configs = {
         "development": {
             "model": "openai/gpt-4.1-mini",
-            "temperature": 0.0,
             "cache_enabled": True,
             "cache_dir": ".cache/dev",
         },
         "production": {
             "model": "openai/gpt-4.1-mini",
-            "temperature": 0.0,
             "cache_enabled": True,
             "cache_dir": ".cache/prod",
             "max_parallel_requests": 20,
@@ -500,7 +493,6 @@ def create_config_structure():
         "description": "Evaluate peer review quality",
         "llm": {
             "model": "openai/gpt-4.1-mini",
-            "temperature": 0.0,
             "max_parallel_requests": 20,
         },
         "rubric_file": "configs/rubrics/paper_review.json",
