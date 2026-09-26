@@ -6,6 +6,8 @@ LLM client configuration, caching, and generation utilities.
 
 AutoRubric uses LiteLLM for multi-provider LLM support. The `LLMConfig` class provides centralized configuration, while `LLMClient` handles request execution with caching, rate limiting, and retry logic.
 
+For a guided introduction see [LLM Judges](../cookbook/llm-judges.md).
+
 ## Quick Example
 
 ```python

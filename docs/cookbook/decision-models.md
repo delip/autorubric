@@ -2,6 +2,8 @@
 
 A decision model is a judge that answers typed questions with probabilities instead of generating text. AutoRubric supports TypeSafe's Jev and any other served model that speaks the same System One protocol. You can use one as a standalone judge, as a member of a mixed ensemble, or as the cheap first stage of a confidence cascade that sends only its uncertain criteria to an LLM.
 
+Decision models are one of AutoRubric's two kinds of judges; the other is the [LLM judge](llm-judges.md). [Choosing a judge kind](llm-judges.md#choosing-a-judge-kind) compares them.
+
 ## What a decision model does
 
 An LLM judge makes one call per criterion. A decision model grades an item with **one request for the whole rubric**:
@@ -263,7 +265,7 @@ grader = CriterionGrader(
 
 **Calibration costs one full LLM grading** of the calibration items: the LLM run needs a vote on every criterion, whichever criteria a threshold would escalate. Calibrate on a sample of the items the cascade is meant to grade.
 
-See the [cookbook recipe](cookbook/cascade-grading.md) for the full workflow.
+See the [cookbook recipe](cascade-grading.md) for the full workflow.
 
 ## What decision models cannot do
 
@@ -298,4 +300,4 @@ rubric = Rubric(
 - **Decision models** receive them once per request as `state["guidelines"]`, billed once like the rest of the state, so they cost almost nothing. The framed questions (`"noul_framed"`, binary `"choice"`) add one sentence telling the model to apply them, with the criterion text governing; the bare `"noul"` framing and multi-choice questions see them only through the state.
 - **LLM judges** receive them in a `<guidelines>` block at the start of every per-criterion prompt.
 
-See [Rubric guidelines](api/core-grading.md#rubric-guidelines) for the file format and the full rules.
+See [Rubric guidelines](../api/core-grading.md#rubric-guidelines) for the file format and the full rules.

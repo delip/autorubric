@@ -216,6 +216,7 @@ If the response had contained factual errors (that criterion MET), the score wou
 
 ## Going Further
 
+- [LLM Judges](llm-judges.md) and [Decision-Model Judges](decision-models.md) - The two kinds of judges you can grade with
 - [Managing Datasets](managing-datasets.md) - Organize multiple items for batch evaluation
 - [Ensemble Judging](ensemble-judging.md) - Use multiple LLMs for more reliable verdicts
 - [API Reference: Core Grading](../api/core-grading.md) - Full `Rubric` and grading documentation

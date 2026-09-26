@@ -8,7 +8,7 @@ A decision model answers typed questions with probabilities instead of generatin
 
 The decision-model client needs the optional TypeSafe SDK: `pip install 'autorubric[typesafe]'`.
 
-For a guided introduction see [Decision-Model Judges](../decision-models.md); for the end-to-end calibration workflow see the [cascade recipe](../cookbook/cascade-grading.md).
+For a guided introduction see [Decision-Model Judges](../cookbook/decision-models.md); for the end-to-end calibration workflow see the [cascade recipe](../cookbook/cascade-grading.md).
 
 ## Quick Example
 

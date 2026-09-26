@@ -4,7 +4,7 @@ Let a decision model grade every criterion and send only its uncertain criteria 
 
 ## The Scenario
 
-You grade thousands of short answers a week against a ten-criterion rubric. An LLM judge is accurate enough, but it makes one call per criterion and re-sends the answer each time, so the bill grows with every criterion. TypeSafe's Jev, a [decision model](../decision-models.md), grades the whole rubric in one request for a small fraction of the price, and it reports how confident it is. You want Jev to handle the criteria it is sure about and the LLM to handle the rest, at the LLM's accuracy and a lower price. You have a few hundred labelled answers to check that the trade holds.
+You grade thousands of short answers a week against a ten-criterion rubric. An LLM judge is accurate enough, but it makes one call per criterion and re-sends the answer each time, so the bill grows with every criterion. TypeSafe's Jev, a [decision model](decision-models.md), grades the whole rubric in one request for a small fraction of the price, and it reports how confident it is. You want Jev to handle the criteria it is sure about and the LLM to handle the rest, at the LLM's accuracy and a lower price. You have a few hundred labelled answers to check that the trade holds.
 
 ## What You'll Learn
 
@@ -132,7 +132,8 @@ For each item, Jev answers every criterion in one request; the criteria whose ju
 
 ## Going Further
 
-- [Decision-Model Judges](../decision-models.md): framings, confidence, what escalates, per-criterion thresholds
+- [Decision-Model Judges](decision-models.md): framings, confidence, what escalates, per-criterion thresholds
+- [LLM Judges](llm-judges.md): configuring the fallback judge, and how the two judge kinds compare
 - [Judge Validation](judge-validation.md): agreement metrics against human labels
 - [Cost Optimization](cost-optimization.md): response caching and model choice
 - [API Reference: Decision Models](../api/decision-models.md)

@@ -123,6 +123,7 @@ Graders evaluate responses against rubrics. The `CriterionGrader` is the main gr
 - **Single LLM**: One judge model
 - **Ensemble**: Multiple judges with aggregation
 - **Few-shot**: Calibration with labeled examples
+- **Decision model**: A probabilistic judge that grades the whole rubric in one request
 
 ```python
 from autorubric import LLMConfig
@@ -140,6 +141,8 @@ grader = CriterionGrader(
     aggregation="majority",
 )
 ```
+
+See [LLM Judges](cookbook/llm-judges.md) and [Decision-Model Judges](cookbook/decision-models.md) for the two kinds of judges.
 
 ### Verdicts
 
@@ -248,5 +251,6 @@ async def batch_eval():
 
 - **[API Reference](api/index.md)**: Complete documentation of all classes and functions
 - **[Cookbook](cookbook/index.md)**: Practical examples and recipes
+- **[LLM Judges](cookbook/llm-judges.md)** and **[Decision-Model Judges](cookbook/decision-models.md)**: The two kinds of judges and how to choose between them
 - **[Ensemble Judging](api/ensemble.md)**: Reduce bias with multiple judges
 - **[Metrics](api/metrics.md)**: Measure agreement with ground truth

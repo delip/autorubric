@@ -26,6 +26,11 @@ flowchart LR
     F --> H[EnsembleCriterionReport]
 ```
 
+!!! note "Explanations come from LLM judges"
+    A [decision model](decision-models.md) returns probabilities rather than text, so its vote's
+    `reason` is `None`. In an ensemble that mixes both kinds, `final_reason` joins only the
+    explanations that exist. This recipe uses LLM judges throughout.
+
 ### Step 1: Grade and Access Explanations
 
 Every grading result contains a `report` — a list of `EnsembleCriterionReport` objects, each with a `final_reason` field (`grade()` always returns an ensemble report, even for a single judge):

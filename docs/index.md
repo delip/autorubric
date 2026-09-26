@@ -92,7 +92,8 @@ AutoRubric is built on research findings about effective LLM-as-a-judge evaluati
 | Guide | Description |
 |-------|-------------|
 | **[Quickstart](quickstart.md)** | Get up and running with installation, configuration, and your first evaluation |
-| **[Decision-Model Judges](decision-models.md)** | Probabilistic judges that grade a whole rubric in one request, and confidence cascades |
+| **[LLM Judges](cookbook/llm-judges.md)** | Judges that take one criterion per call and explain each verdict, from 100+ providers |
+| **[Decision-Model Judges](cookbook/decision-models.md)** | Probabilistic judges that grade a whole rubric in one request, and confidence cascades |
 | **[Cookbook](cookbook/index.md)** | Practical examples and recipes for common evaluation scenarios |
 | **[API Reference](api/index.md)** | Complete API documentation with all classes, functions, and types |
 
