@@ -155,10 +155,12 @@ When writing or editing code that uses AutoRubric:
   LiteLLM.
 - If `TYPESAFE_API_KEY` is set in the environment or present in the project's `.env`
   (check without printing its value), ask the user which judges to use before writing
-  the grader: a cheaper decision model (`DecisionModelConfig`, one request per item), an
-  LLM judge or a panel of LLM judges, or a cascade (`EscalationConfig`) in which the
-  decision model grades first and escalates uncertain criteria to LLM judges. Decision
-  models need `pip install 'autorubric[typesafe]'`.
+  the grader (decision models need `pip install 'autorubric[typesafe]'`):
+  - a cheaper decision model (`DecisionModelConfig`, one request per item);
+  - an LLM judge, or a panel of LLM judges (`judges=[JudgeSpec(...), ...]`);
+  - a mixed panel, in which a decision model votes alongside LLM judges;
+  - a cascade (`EscalationConfig`), in which the decision model grades first and
+    escalates uncertain criteria to LLM judges.
 ```
 
 ## Features
