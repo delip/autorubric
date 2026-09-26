@@ -232,7 +232,8 @@ async def compare_thinking_modes():
         to_grade=security_report, grader=grader_thinking, query=query
     )
 
-    # result.score is `float | None` (None if the grade failed); render None as "n/a".
+    # result.score is `float | None` (None if the grade failed or no criterion was left to
+    # score); render None as "n/a".
     def fmt(x):
         return f"{x:.2f}" if x is not None else "n/a"
 
@@ -513,7 +514,8 @@ async def main():
             query="Evaluate this security vulnerability report for technical accuracy."
         )
 
-        # .score is `float | None` (None if the grade failed); render None as "n/a".
+        # .score is `float | None` (None if the grade failed or no criterion was left to
+        # score); render None as "n/a".
         def fmt(x):
             return f"{x:.2f}" if x is not None else "n/a"
 

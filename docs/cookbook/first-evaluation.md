@@ -135,8 +135,9 @@ result = asyncio.run(main())
 The `EnsembleEvaluationReport` contains the overall score and per-criterion breakdown:
 
 ```python
-# Overall score: `float | None` — 0.0 to 1.0, or None if the grade failed.
-print(f"Score: {result.score:.2f}" if result.score is not None else "Score: n/a (grade failed)")
+# Overall score: `float | None` — 0.0 to 1.0, or None if the grade failed or no criterion
+# was left to score (every criterion was CANNOT_ASSESS).
+print(f"Score: {result.score:.2f}" if result.score is not None else "Score: n/a")
 
 # Check token usage and cost
 if result.token_usage:
@@ -384,8 +385,9 @@ async def main():
         )
 
         print(f"\n--- Ticket {i}: {ticket['description']} ---")
-        # result.score is `float | None` (None if the grade failed).
-        print(f"Score: {result.score:.2f}" if result.score is not None else "Score: n/a (grade failed)")
+        # result.score is `float | None` (None if the grade failed or no criterion was
+        # left to score).
+        print(f"Score: {result.score:.2f}" if result.score is not None else "Score: n/a")
 
         if result.completion_cost:
             total_cost += result.completion_cost

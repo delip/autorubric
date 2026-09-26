@@ -87,7 +87,7 @@ result = await runner.run()
 
 ### Ground-Truth Mode
 
-When `validation_data` items have `ground_truth` verdicts, the loop computes expected scores from the rubric weights and measures Spearman ρ against the actual graded scores.
+When `validation_data` items have `ground_truth` verdicts, the loop computes expected scores from the rubric weights and measures Spearman ρ against the actual graded scores (`1 − MAE` with fewer than three items). An item with no score to compare is left out: its graded score is `None` because no criterion was left to score, or its expected score is `None` because every ground-truth label abstains. With no item left, the metric is `None` (not measured). A grade that failed, such as one whose every judge call failed, stops the loop with `RuntimeError`.
 
 ```python
 # Items with ground_truth → ground-truth mode
@@ -102,7 +102,7 @@ result = await improve_rubric(
 
 ### Multi-Judge Mode
 
-When items lack `ground_truth`, provide an ensemble of judges to measure inter-judge agreement:
+When items lack `ground_truth`, provide an ensemble of judges to measure inter-judge agreement. A sample whose grade failed (every judge call failed, say) measured no agreement and is left out, though its cost still counts:
 
 ```python
 from autorubric.graders import JudgeSpec
@@ -128,9 +128,11 @@ The improvement loop supports two strategies for guiding rubric revision:
 | **`meta_rubric`** (default) | Revise based on meta-rubric quality issues | Meta-rubric quality score |
 | **`held_out`** | Revise based on per-criterion grading errors on held-out data | Mean per-criterion accuracy |
 
+The loop stops with `RuntimeError` when a meta-rubric quality evaluation has no score: the evaluation failed, or the meta-judge could assess none of the meta-rubric's criteria, leaving nothing to score. The error says which.
+
 ### Held-Out Strategy
 
-The `held_out` strategy optimizes the rubric against grading errors on held-out data. Instead of using a meta-rubric to identify structural issues, it grades the validation items, compares per-criterion verdicts against ground truth, and uses the resulting error analysis (false positives, false negatives, disagreement exemplars) to guide revision. This requires `validation_data` with `ground_truth` verdicts.
+The `held_out` strategy optimizes the rubric against grading errors on held-out data. Instead of using a meta-rubric to identify structural issues, it grades the validation items, compares per-criterion verdicts against ground truth, and uses the resulting error analysis (false positives, false negatives, disagreement exemplars) to guide revision. This requires `validation_data` with `ground_truth` verdicts. An item whose grade failed has no usable verdict: it joins the denominator of each criterion's coverage and abstention rate, lowering both, and adds to no tally or kappa.
 
 ```python
 result = await improve_rubric(

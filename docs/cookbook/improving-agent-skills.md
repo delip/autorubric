@@ -245,9 +245,11 @@ async def run_improvement_loop(rubric, papers, agent_client, eval_grader,
         graded = await grade_reviews(rubric, eval_grader, reviews, papers)
 
         pass_rates = compute_pass_rates(graded, criteria_names)
-        # `score` is float | None (None on a failed/error report, never a fabricated
-        # 0.0), so average only over reports that produced a real score.
+        # `score` is float | None (None on a failed/error report or when no criterion was
+        # left to score, never a fabricated 0.0), so average only over real scores.
         scores = [g["score"] for g in graded if g["score"] is not None]
+        if not scores:
+            raise RuntimeError("No review got a score: check the reports' errors")
         mean_score = sum(scores) / len(scores)
         iterations.append({
             "iteration": i, "skill": current_skill,
@@ -578,8 +580,11 @@ async def run_improvement_loop(rubric, papers, agent_client, eval_grader,
         graded = await grade_reviews(rubric, eval_grader, reviews, papers)
 
         pass_rates = compute_pass_rates(graded, criteria_names)
-        # `score` is float | None (None on a failed/error report); average over real ones.
+        # `score` is float | None (None on a failed/error report or when no criterion was
+        # left to score); average over real ones.
         scores = [g["score"] for g in graded if g["score"] is not None]
+        if not scores:
+            raise RuntimeError("No review got a score: check the reports' errors")
         mean_score = sum(scores) / len(scores)
 
         iterations.append({
@@ -653,6 +658,8 @@ async def main():
     criteria_names = [c.name for c in rubric.rubric]
     gold_pass_rates = compute_pass_rates(gold_graded, criteria_names)
     gold_scores = [g["score"] for g in gold_graded if g["score"] is not None]
+    if not gold_scores:
+        raise RuntimeError("No review got a score: check the reports' errors")
     gold_mean = sum(gold_scores) / len(gold_scores)
 
     output = {

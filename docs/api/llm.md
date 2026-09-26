@@ -225,7 +225,7 @@ Type alias for thinking parameter (level or budget).
 
 ## classify_grading_error
 
-Classify an exception raised while grading a single criterion into an [`ErrorCategory`](#errorcategory). The grading pipeline uses the result to route a failed judge call: `infrastructure` and `parse` errors are treated as abstentions (mapped to `CANNOT_ASSESS` / `na=True` and excluded from scoring under the default `SKIP` strategy), while `unknown` errors fall back to a conservative worst-case verdict.
+Classify an exception raised while grading a single criterion into an [`ErrorCategory`](#errorcategory). The grading pipeline uses the result to route a failed judge call: `infrastructure` and `parse` errors are treated as abstentions (mapped to `CANNOT_ASSESS` / `na=True` and excluded from scoring under the default `SKIP` strategy), while `unknown` errors fall back to a conservative worst-case verdict. These verdicts only stand in for failed calls: an item whose every criterion's judgment failed has no score, and its report's `error` begins `Every criterion's judgment failed:`.
 
 ::: autorubric.classify_grading_error
     options:

@@ -88,7 +88,8 @@ def explanation(cr):
 
 
 def format_feedback(result):
-    # result.score is `float | None` (None if the grade failed); render None as "n/a".
+    # result.score is `float | None` (None if the grade failed or no criterion was left to
+    # score); render None as "n/a".
     score_line = f"Overall Score: {result.score:.0%}\n" if result.score is not None else "Overall Score: n/a\n"
     lines = [score_line]
 
@@ -218,7 +219,8 @@ def explanation(cr):
 
 def format_feedback(result):
     """Format grading result as student-readable feedback."""
-    # result.score is `float | None` (None if the grade failed); render None as "n/a".
+    # result.score is `float | None` (None if the grade failed or no criterion was left to
+    # score); render None as "n/a".
     score_line = f"Overall Score: {result.score:.0%}\n" if result.score is not None else "Overall Score: n/a\n"
     lines = [score_line]
 

@@ -478,7 +478,8 @@ async def main():
         )
 
         print(f"\n--- Item {i+1}: {item.description} ---")
-        # result.score is `float | None` (None if the grade failed).
+        # result.score is `float | None` (None if the grade failed or no criterion was left
+        # to score).
         print(f"Score: {result.score:.2f}" if result.score is not None else "Score: n/a")
 
         # Compare predicted vs ground truth

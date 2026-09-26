@@ -82,21 +82,22 @@ class EscalationPoint(BaseModel):
     ``calibrate_escalation`` one per threshold of a sweep. Given to ``replay_escalation``, a
     point replays a cascade at its ``threshold`` and ``per_criterion`` thresholds.
 
-    **Pairs and accuracy.** A pair is one criterion of one successfully graded item. A pair
-    is *labelled* when its item has ground truth for the criterion that does not abstain:
-    a binary label other than ``CANNOT_ASSESS``, or a multi-choice label that is not an NA
-    option. An accuracy is the share of a set of labelled pairs, binary and multi-choice
-    pooled, on which a prediction equals the label: the verdict of a binary criterion, the
-    selected option of a multi-choice one. As ``compute_metrics`` measures one criterion
-    under its default handling (``cannot_assess="exclude"``, ``na_mode="exclude"``:
+    **Pairs and accuracy.** A pair is one criterion of one item whose grading did not raise,
+    even one whose every criterion's judgment failed. A pair is *labelled* when its item has
+    ground truth for the criterion that does not abstain: a binary label other than
+    ``CANNOT_ASSESS``, or a multi-choice label that is not an NA option. An accuracy is the
+    share of a set of labelled pairs, binary and multi-choice pooled, on which a prediction
+    equals the label: the verdict of a binary criterion, the selected option of a
+    multi-choice one. As ``compute_metrics`` measures one criterion under its default
+    handling (``cannot_assess="exclude"``, ``na_mode="exclude"``:
     ``CriterionMetrics.accuracy``, ``exact_accuracy``), an abstention (``CANNOT_ASSESS``, an
     NA option) is not a prediction, so a pair on which the predictor abstained counts in
     neither the numerator nor the denominator. (The run-level ``criterion_accuracy`` of
-    ``compute_metrics`` pools otherwise. On its per-criterion path, for items that share
-    one rubric, it reads the binary pairs alone when there are any, else the multi-choice
-    pairs with an NA prediction or label counted as one more option. On its pooled path,
-    for items with different rubrics, it reads the pairs of every scale, leaves out a
-    pair whose prediction abstains, and counts one whose label abstains as a miss.)
+    ``compute_metrics`` pools otherwise. On its per-criterion path, for items that share one
+    rubric, it reads the binary pairs alone when there are any, else the multi-choice pairs
+    with an NA prediction or label counted as one more option. On its pooled path, for items
+    with different rubrics, it reads the pairs of every scale, leaves out a pair whose
+    prediction abstains, and counts one whose label abstains as a miss.)
 
     - The decision model is measured as ``compute_metrics(..., per_judge=True)`` measures a
       judge: on its own votes, superseded ones included, leaving out a failed judgment (a
@@ -107,7 +108,9 @@ class EscalationPoint(BaseModel):
     - The fallback's predictions are the escalated pairs' final verdicts, which the
       escalation judges' votes alone decide, read as ``compute_metrics`` reads a run's: a
       final verdict that abstains is no prediction; one that the judges' failures decided
-      (the worst case of an ``unknown`` failure) is one, as it is in the run's metrics.
+      (the worst case of an ``unknown`` failure) is one, as it is in the run's metrics on
+      an item with a criterion judged. (``metric`` leaves out an item whose every
+      criterion's judgment failed, as errored; these accuracies keep its pairs.)
     - The *deferred* pairs are the escalated labelled pairs the decision model answered:
       it escalated them for a confidence below the threshold. ``dm_accuracy_escalated``
       and ``fallback_accuracy_escalated`` are both measured on the deferred pairs whose
@@ -432,8 +435,9 @@ def replay_escalation(
             recorded submissions differ) graded against the same criteria (as graded, NA
             options included); if ``dm_result`` does not come from one decision-model judge
             (every vote carries ``probabilities`` and a ``confidence``, unless its judgment
-            failed); if ``llm_result`` has an item that failed, a criterion missing one of
-            its judges' votes, a decision model's vote, or judges that differ between
+            failed); if ``llm_result`` has an item whose grading raised (it has no votes;
+            one whose every judgment failed keeps them), a criterion missing one of its
+            judges' votes, a decision model's vote, or judges that differ between
             items; or if a ``judge_id`` names both the decision model and an LLM judge.
 
     Warns:

@@ -1123,10 +1123,10 @@ class EnsembleEvaluationReport(BaseModel):
         cannot_assess_count: Number of criteria with CANNOT_ASSESS final verdict.
         token_usage: Total token usage across all judges.
         completion_cost: Total cost across all judges.
-        error: Error message if grading failed: no judge results, or "Every judgment
-            failed: ..." when each criterion's verdict stands in for failed calls (each keeps
-            its own error). When set, ``score``, ``raw_score`` and ``llm_raw_score`` are
-            ``None``.
+        error: Error message if grading failed: no judge results, or "Every criterion's
+            judgment failed: ..." when each criterion's verdict stands in for failed calls
+            (each keeps its own error). When set, ``score``, ``raw_score`` and
+            ``llm_raw_score`` are ``None``.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)

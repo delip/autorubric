@@ -235,8 +235,9 @@ for item_result in eval_result.item_results:
             break
 
 for cond, results in conditions.items():
-    # report.score is `float | None` (None if an item's grade failed); average only
-    # the defined scores so a failed grade can't crash the mean.
+    # report.score is `float | None` (None if an item's grade failed or no criterion was
+    # left to score); average only the defined scores so a missing one can't crash the
+    # mean.
     valid = [r.report.score for r in results if r.report.score is not None]
     mean_score = sum(valid) / len(valid) if valid else None
     print(f"{cond}: {mean_score:.2f}" if mean_score is not None else f"{cond}: n/a")
@@ -515,8 +516,9 @@ async def main():
 
     scores = {}
     for cond, results in conditions.items():
-        # report.score is `float | None` (None if an item's grade failed); average only
-        # the defined scores so a failed grade can't crash the mean.
+        # report.score is `float | None` (None if an item's grade failed or no criterion
+        # was left to score); average only the defined scores so a missing one can't crash
+        # the mean.
         valid = [r.report.score for r in results if r.report.score is not None]
         mean_score = sum(valid) / len(valid) if valid else None
         scores[cond] = mean_score

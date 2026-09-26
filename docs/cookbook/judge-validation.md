@@ -97,6 +97,11 @@ print(f"Recall (MET):        {pct(metrics.criterion_recall)}")
 print(f"F1 Score:            {num(metrics.criterion_f1)}")
 ```
 
+Items whose grading failed are left out of every metric. That includes an item whose every
+judge call failed, which has no score. `metrics.warnings` says how many were left out, and
+`metrics.coverage_stats.n_errored` counts them (see
+[Errored Items and Score Pairs](../api/metrics.md#errored-items-and-score-pairs)).
+
 ### Interpreting the Metrics
 
 | Metric | What It Measures | Good Value |
@@ -215,7 +220,10 @@ print(f"  95% CI: [{kappa_ci[0]:.3f}, {kappa_ci[1]:.3f}]" if kappa_ci is not Non
 
 ### Step 7: Score Correlation
 
-Check how well predicted scores correlate with ground truth scores:
+Check how well predicted scores correlate with ground truth scores. Scores are paired only on
+items where both are defined: an item with nothing left to score (the judge answered
+`CANNOT_ASSESS` on every criterion), or whose ground truth is `CANNOT_ASSESS` on every
+criterion, still counts in the verdict metrics above but has no score pair.
 
 ```python
 print(f"\nScore Correlation:")

@@ -127,7 +127,7 @@ print(vote.verdict, vote.probabilities, vote.confidence, vote.reason)
 
 `probabilities` is keyed by verdict for binary criteria (`"MET"`, `"UNMET"`, and `"CANNOT_ASSESS"` for the `"choice"` framing), and by the original option index as a string (`"0"`, `"1"`, ...) for multi-choice criteria.
 
-**Failures.** A failed request abstains every criterion of that item for that judge, and each records the `error`: `infrastructure` for authentication, rate-limit, timeout, connection and server errors, `parse` for a request the endpoint rejected. An answer that is missing or of the wrong type abstains only its own criterion, as a `parse` error. Under the default `CannotAssessStrategy.SKIP` abstentions are left out of the score.
+**Failures.** A failed request abstains every criterion of that item for that judge, and each records the `error`: `infrastructure` for authentication, rate-limit, timeout, connection and server errors, `parse` for a request the endpoint rejected. An answer that is missing or of the wrong type abstains only its own criterion, as a `parse` error. Under the default `CannotAssessStrategy.SKIP` abstentions are left out of the score. A failed request leaves the decision model with nothing judged on that item, so its `judge_scores` entry there is `None`. When no other judge answered either, the item has no score under any strategy: its report's `error` begins `Every criterion's judgment failed:`, and an `EvalRunner` run counts it as failed. A request that the endpoint answered, and billed, without a usable answer for any criterion fails the item the same way, and its cost still counts in the run's totals.
 
 ## Mixed ensembles
 
@@ -197,7 +197,8 @@ for cr in report.report:
 - A kept criterion has the decision model's vote as its only vote.
 - An escalated criterion has `escalated=True`. Its vote list starts with the decision model's vote, marked `superseded=True`, followed by the escalation judges' votes. Its final verdict and `final_reason` come from the escalation judges' votes alone.
 - The superseded vote is recorded, never aggregated, and never used as a fallback. If every escalation vote abstains or fails, the criterion abstains and its `error` says why.
-- `judge_scores` holds the decision model's own score over the whole rubric (its superseded verdicts included) and `None` for every escalation judge, which never judges a whole rubric.
+- `judge_scores` holds the decision model's own score over the whole rubric (its superseded verdicts included) and `None` for every escalation judge, which never judges a whole rubric. On an item where the decision model's request failed, every criterion escalates and its entry is `None` too; the item is then scored from the escalation judges' verdicts.
+- When every criterion escalated and every escalation call failed, the item has no score and its report's `error` begins `Every criterion's judgment failed:`, even where the decision model judged every criterion (its `judge_scores` entry then keeps its score). An `EvalRunner` run counts the item as failed, and its cost still counts in the totals.
 
 **Metrics on a cascade run.** `compute_metrics(result, dataset, per_judge=True)` measures:
 
@@ -245,7 +246,7 @@ hybrid = replay_escalation(dm_test, llm_test, best)  # an EvalResult; no calls
 print(compute_metrics(hybrid, test).summary())
 ```
 
-- **`replay_escalation(dm_result, llm_result, escalation)`** builds, without a single call, the `EvalResult` a live cascade would have produced: each criterion keeps the decision model's recorded vote or is superseded by the LLM run's votes, by the live cascade's escalation rule. `escalation` is a threshold or an `EscalationPoint`. The result works with `compute_metrics`, `escalation_stats` and every other metric. Its cost and time are estimates, because per-criterion LLM cost is not recorded: each item's LLM cost is pro-rated by the share of its criteria that escalated. The length penalty is not re-applied.
+- **`replay_escalation(dm_result, llm_result, escalation)`** builds, without a single call, the `EvalResult` a live cascade would have produced: each criterion keeps the decision model's recorded vote or is superseded by the LLM run's votes, by the live cascade's escalation rule. `escalation` is a threshold or an `EscalationPoint`. An item whose decision-model request failed escalates every criterion, as it does live; only an item whose decision-model grading raised stays failed. The result works with `compute_metrics`, `escalation_stats` and every other metric. Its cost and time are estimates, because per-criterion LLM cost is not recorded: each item's LLM cost is pro-rated by the share of its criteria that escalated. The length penalty is not re-applied.
 - **`calibrate_escalation(dataset, dm_result, llm_result)`** replays the cascade at every threshold of a sweep (by default 0.00, 0.02, ..., 1.00) and returns an `EscalationCurve` of `EscalationPoint`s. `metric` picks what to optimize: the name of a `MetricsResult` attribute, or a function of the `MetricsResult`. With `per_criterion=True`, each named criterion with at least `min_pairs_per_criterion` labelled pairs gets a threshold of its own.
 - **`EscalationCurve.best(max_escalation_rate=None, tolerance=0.0)`** returns the least-escalating point whose metric is within `tolerance` of the best metric under the escalation budget. `tolerance` is in the metric's units: `tolerance=0.005` trades up to half a point of accuracy for fewer LLM calls. This is the "same accuracy for less money" choice.
 

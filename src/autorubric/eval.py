@@ -561,11 +561,11 @@ class EvalResult:
     experiment_dir: Path | None = None
 
     def get_scores(self) -> list[float]:
-        """Extract scores from all successful results.
+        """Extract the scores of the items that have one.
 
-        A grade-FAILURE has no score (``report.score is None``); such results are
-        skipped. This subsumes the item-level ``error`` filter and also drops a
-        report-level error that carried no item-level error.
+        A report has no score (``report.score is None``) when its grade failed or when no
+        criterion was left to score (e.g. every criterion abstained under ``SKIP``); such
+        results are skipped, as is any failed item (``error`` set).
         """
         return [
             r.report.score

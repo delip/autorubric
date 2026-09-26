@@ -21,6 +21,20 @@ A rubric without guidelines produces exactly the artifacts it did before guideli
 - **Revision prompt.** The loop never revises guidelines. The revision LLM still sees them, read-only, because correctness needs it: the issues and diagnostics it must act on come from judges that saw the guidelines and can refer to them, and a criterion revised blind could contradict them — a conflict the criterion text wins when grading. `_with_guidelines_block` puts `RUBRIC_REVISION_GUIDELINES_BLOCK` (`prompts.py`; the guidelines verbatim, then "They are fixed and not part of your output: revise only the criteria, and keep them consistent with the guidelines.") at the start of the user prompt, for both strategies and for custom `revision_user_prompt_template`s; the system prompt is unchanged.
 - **Byte identity.** Without guidelines every meta-judge and revision prompt is unchanged. `tests/meta/test_meta_prompt_goldens.py` pins them: `tests/golden/meta/without_guidelines.json` was captured from the unmodified library, `with_guidelines.json` pins the guidelines case.
 
+### Validation and Items With No Score
+
+In ground-truth mode the loop compares each validation item's graded score with its expected score. `compute_expected_scores(validation_data) -> list[float | None]` is each item's `Rubric.compute_score(ground_truth)` under the dataset rubric, `None` where the ground truth leaves nothing to score (every label abstains under `SKIP`). `validate_ground_truth(rubric, validation_data, expected_scores: Sequence[float | None], grader, ...)` grades every item and (#18):
+
+- raises `RuntimeError("Ground-truth validation grading failed for item <i> (no score): <error>")` on a failed grade (report `error` set, e.g. `"Every criterion's judgment failed: ..."`), since a correlation or MAE over a fabricated fallback would be meaningless (`test_a_failed_grade_stops_the_validation`);
+- leaves out of the comparison an item with no score to compare — nothing left to score in its grade (`score` `None`, no `error`) or in its ground truth (expected score `None`) — and out of `_item_reports`, which stays aligned with the returned `(rubric_score, expected_score)` pairs that `format_ground_truth_for_prompt` reads;
+- returns Spearman ρ over three or more compared items (`None` for a constant array), `1 − MAE` over one or two, and `None` ("not measured", as `pareto_accept`/`_check_convergence` read it) when no item was compared (`TestValidateGroundTruthWithoutAScore` in `tests/meta/test_improve.py`).
+
+`_capture` still records every item, so the ground-truth `validation_samples` of `iter-{NN}.json` hold `rubric_score`, `expected_score` and `gap` as `null` where undefined (`gap` whenever either score is).
+
+In multi-judge mode, `validate_agreement` leaves out a sample whose grade failed (report `error` set): its stand-in votes agree with one another but measured nothing, so neither `mean_agreement` nor its criteria's `agreement` enter the means; its cost still counts (`TestValidateAgreementFailedGrades`).
+
+Without a quality score the loop cannot go on, and `ImprovementRunner` says why: a failed meta-rubric quality evaluation (report `error` set) raises `RuntimeError("Meta-rubric quality evaluation failed (no score): <error>")`; one whose every meta-criterion abstained under `SKIP` (no score since #18, no error) raises `RuntimeError("Meta-rubric quality evaluation has no score: the meta-judge could assess none of the meta-rubric's criteria, so nothing was left to score")` (`test_a_quality_evaluation_without_a_score_stops_the_run_and_says_why`).
+
 ### Held-Out Validation Diagnostics
 
 `validate_held_out()` grades held-out items and compares per-criterion verdicts against ground truth. Beyond accuracy / FP-rate / FN-rate, each `CriterionErrorReport` carries:
@@ -31,6 +45,8 @@ A rubric without guidelines produces exactly the artifacts it did before guideli
 - `confusion_matrix` — a 2x2 MET/UNMET `ConfusionMatrix` (reused from `autorubric.metrics`, rows=true cols=pred, `labels=["MET","UNMET"]`) over the usable verdicts; `None` when there are no usable samples (so a constructed all-zero matrix never masquerades as data).
 
 `HeldOutValidationResult` records `cannot_assess` (the handling mode in effect), plus `mean_coverage` / `mean_ca_rate` rolled up from the per-criterion values via `_mean_or_none` (None-skipping).
+
+**Failed grades.** An item whose grade failed (report `error` set, e.g. `"Every criterion's judgment failed: ..."`) has no usable verdict: as an errored item in `compute_metrics`, it counts in each criterion's raw denominator, so `coverage` and `ca_rate` drop, and in no tally, abstention count, kappa or exemplar (`TestHeldOutFailedGrades` in `tests/meta/test_held_out_diagnostics.py`).
 
 **Abstention handling.** `ImprovementConfig.cannot_assess: CannotAssessMode` (default `"exclude"`, preserving the prior silent-exclude behavior) threads from the held-out runner into `validate_held_out`, which passes it as `mode=` to `filter_cannot_assess`. `"exclude"` drops abstained pairs from the confusion tallies; `"as_unmet"` folds CANNOT_ASSESS into UNMET; `"as_category"` keeps it as a distinct label. Regardless of mode, `coverage` and `ca_rate` are measured over the raw, pre-exclusion denominator — numerically aligned with `CoverageStats`.
 

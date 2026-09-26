@@ -341,7 +341,8 @@ async def compare_rubrics():
 
     print("\nSCORE COMPARISON")
     print("-" * 40)
-    # .score is `float | None` (None if the grade failed); guard before formatting / diffing.
+    # .score is `float | None` (None if the grade failed or no criterion was left to
+    # score); guard before formatting / diffing.
     flawed, improved = flawed_result.score, improved_result.score
     print(f"  Flawed:   {flawed:.2f}" if flawed is not None else "  Flawed:   n/a")
     print(f"  Improved: {improved:.2f}" if improved is not None else "  Improved: n/a")
@@ -424,7 +425,8 @@ async def compare_variants():
         )
         results[name] = result
 
-    # Comparison table. result.score is `float | None` (None if the grade failed).
+    # Comparison table. result.score is `float | None` (None if the grade failed or no
+    # criterion was left to score).
     print(f"{'Variant':<20} {'Score':>8} {'Criteria':>10}")
     print("-" * 40)
     for name, result in results.items():
@@ -456,15 +458,16 @@ async def validate_rubric(rubric_path: str, task_path: str, threshold: float = 0
         output_html_path="rubric_validation_report.html"
     )
 
-    # result.score is `float | None` — None if the grade failed. Treat a missing
-    # score as a gate failure rather than letting the comparison raise TypeError.
+    # result.score is `float | None` — None if the grade failed or no criterion was left
+    # to score. Treat a missing score as a gate failure rather than letting the
+    # comparison raise TypeError.
     score = result.score
-    print(f"Rubric quality score: {score:.2f}" if score is not None else "Rubric quality score: n/a (grade failed)")
+    print(f"Rubric quality score: {score:.2f}" if score is not None else "Rubric quality score: n/a")
     print(f"Threshold: {threshold:.2f}")
     print(f"Report: rubric_validation_report.html")
 
     if score is None or score < threshold:
-        shown = f"{score:.2f}" if score is not None else "n/a (grade failed)"
+        shown = f"{score:.2f}" if score is not None else "n/a"
         print(f"FAILED: Score {shown} below threshold {threshold:.2f}")
         sys.exit(1)
     else:
@@ -665,7 +668,8 @@ async def main():
     print("=" * 60)
     print("SCORE COMPARISON")
     print("=" * 60)
-    # .score is `float | None` (None if the grade failed); render None as a right-aligned "n/a".
+    # .score is `float | None` (None if the grade failed or no criterion was left to
+    # score); render None as a right-aligned "n/a".
     def cell(x):
         return f"{x:>12.2f}" if x is not None else f"{'n/a':>12}"
 

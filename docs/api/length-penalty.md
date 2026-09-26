@@ -42,6 +42,7 @@ else:
     penalty = penalty_at_cap * (frac ** exponent)
 
 final_score = max(0.0, base_score - penalty)
+# A report with no base score (a failed grade, or no criterion left to score) is unchanged.
 ```
 
 ## Custom Count Functions
