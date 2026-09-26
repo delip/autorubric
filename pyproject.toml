@@ -87,6 +87,18 @@ select = ["E", "F", "I", "UP"]
 "examples/*" = ["E501"]
 "researcher_bench/*" = ["E501"]
 
+[tool.uv]
+# Rebuild the editable install when VERSION changes, so `autorubric.__version__` follows it:
+# hatchling reads the version from that file (tool.hatch.version). Cache keys given here
+# replace uv's defaults, so those are listed too.
+cache-keys = [
+    { file = "pyproject.toml" },
+    { file = "setup.py" },
+    { file = "setup.cfg" },
+    { dir = "src" },
+    { file = "VERSION" },
+]
+
 [tool.hatch.version]
 path = "VERSION"
 pattern = "(?P<version>.+)"
