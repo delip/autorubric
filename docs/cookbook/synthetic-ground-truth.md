@@ -25,7 +25,7 @@ flowchart LR
 - Using `fill_ground_truth()` to generate synthetic labels
 - Choosing strong models for ground truth generation
 - The `force` parameter for re-generating labels
-- Filtering items with generation errors
+- Finding and retrying items that failed to label
 - Evaluating cheaper models against synthetic ground truth
 
 ## The Solution
@@ -116,9 +116,8 @@ labeled_dataset = await fill_ground_truth(
     show_progress=True
 )
 
-# Check results
-labeled_count = sum(1 for item in labeled_dataset if item.ground_truth is not None)
-print(f"Items labeled: {labeled_count}/{len(labeled_dataset)}")
+# Check results: items that fail to label are left out of labeled_dataset
+print(f"Items labeled: {len(labeled_dataset)}/{len(dataset)}")
 ```
 
 !!! warning "Cost Consideration"
@@ -126,33 +125,55 @@ print(f"Items labeled: {labeled_count}/{len(labeled_dataset)}")
     For large datasets, this can be expensive. Consider labeling a
     representative sample rather than the entire dataset.
 
-### Step 3: Handle Partial Labels and Errors
+### Step 3: Retry Items That Failed to Label
 
-Some items may fail to label. Filter or retry:
+`fill_ground_truth()` returns only the items it could label. When grading an
+item raises an error, or its report can't be turned into a label for every
+criterion, the item is left out of the result rather than returned with
+`ground_truth=None`. Every item that does come back has a label for each
+criterion, so a result shorter than your dataset means some items failed.
+
+To retry just those items, label a dataset made of the missing ones and merge
+the results back in the original order:
 
 ```python
-# Check for unlabeled items
-unlabeled = [item for item in labeled_dataset if item.ground_truth is None]
-if unlabeled:
-    print(f"Failed to label {len(unlabeled)} items")
+n_failed = len(dataset) - len(labeled_dataset)
+if n_failed:
+    print(f"Failed to label {n_failed} items")
 
-    # Retry with force=True to regenerate
-    labeled_dataset = await fill_ground_truth(
-        labeled_dataset,
+    def with_items(items):
+        """A copy of `dataset` that holds only `items`."""
+        return RubricDataset(
+            prompt=dataset.prompt,
+            rubric=dataset.rubric,
+            items=items,
+            name=dataset.name,
+            reference_submission=dataset.reference_submission,
+        )
+
+    # Match items by submission text (this assumes each submission is unique)
+    labeled_submissions = {item.submission for item in labeled_dataset}
+    missing = [item for item in dataset if item.submission not in labeled_submissions]
+
+    # The missing items have no ground_truth, so the default force=False labels them all
+    retried = await fill_ground_truth(
+        with_items(missing),
         grader=strong_grader,
-        force=True,  # Re-generate even if ground_truth exists
         show_progress=True
     )
 
-# Or filter to only labeled items for downstream use
-clean_items = [item for item in labeled_dataset if item.ground_truth is not None]
+    # Merge in the original order; items that failed again stay out
+    by_submission = {item.submission: item for item in [*labeled_dataset, *retried]}
+    labeled_dataset = with_items(
+        [by_submission[item.submission] for item in dataset if item.submission in by_submission]
+    )
+    print(f"Items labeled after retry: {len(labeled_dataset)}/{len(dataset)}")
 ```
 
-!!! note "Partial label strategies"
-    You do not need to label every criterion for every item. Labeling a
-    representative subset of items fully is more cost-effective than labeling
-    all items partially, because full labels per item give you reliable
-    per-criterion metrics for that subset.
+!!! warning "Don't retry with `force=True`"
+    `force=True` re-grades every item, including the ones that already have
+    labels, so you pay to label them all again. An item whose re-grade fails
+    is left out of the result even if it had a label before.
 
 ### Step 4: Save the Labeled Dataset
 
@@ -274,6 +295,7 @@ GPT-4-mini (prod)         89.0%      0.762   $0.0124
 - **`fill_ground_truth()`** automates label generation with any grader
 - **Use powerful models** for ground truth (GPT-4, Claude Opus/Sonnet)
 - **`force=True`** regenerates labels for already-labeled items
+- **Failed items are left out** of the result, so retry only the missing ones
 - **Save labeled datasets** to avoid regenerating expensive labels
 - **Compare model costs** against accuracy when choosing production models
 - **Synthetic labels have limitations**—validate a sample when possible
@@ -510,8 +532,8 @@ async def main():
         show_progress=True
     )
 
-    labeled_count = sum(1 for item in labeled_dataset if item.ground_truth is not None)
-    print(f"\nLabeled: {labeled_count}/{len(labeled_dataset)} items")
+    # Items that fail to label are left out of labeled_dataset
+    print(f"\nLabeled: {len(labeled_dataset)}/{len(dataset)} items")
 
     # Save labeled dataset
     labeled_dataset.to_file("product_descriptions_labeled.json")
