@@ -43,11 +43,13 @@ pip install autorubric
 
 ```python
 import asyncio
-from autorubric import Rubric, LLMConfig
+from autorubric import Rubric, LLMConfig, DecisionModelConfig
 from autorubric.graders import CriterionGrader
 
 async def main():
-    grader = CriterionGrader(judge_model_config=LLMConfig(model="openai/gpt-5.1-mini"))
+    grader = CriterionGrader(judge_model_config=LLMConfig(model="openai/gpt-5.6-luna"))
+    # Or let a decision model grade the whole rubric in one request (pip install 'autorubric[typesafe]'):
+    # grader = CriterionGrader(judge_model_config=DecisionModelConfig(model="jev-latest"))
 
     rubric = Rubric.from_dict([
         {"weight": 10.0, "requirement": "States NMC cell-level energy density in the 250-300 Wh/kg range"},
@@ -140,15 +142,17 @@ When writing or editing code that uses AutoRubric:
   the real API, not prior memory or guesswork.
 - The grading APIs are async: `await` `Rubric.grade`, `Grader.grade`, and `EvalRunner`,
   and treat `result.score` as `float | None` (guard before formatting).
-- Use the feature that fits the task: weighted (±) criteria, `CriterionGrader`, ensemble
-  judging with aggregation strategies, multi-choice (ordinal/nominal) criteria, batch
-  `EvalRunner` with checkpointing, agreement metrics and bootstrap CIs, YAML configs, or
-  meta-rubric improvement.
+- Use the feature that fits the task: weighted (±) criteria, `CriterionGrader` with LLM
+  judges (`LLMConfig`) or decision-model judges (`DecisionModelConfig`), ensemble judging
+  with aggregation strategies, confidence cascades (`EscalationConfig`), multi-choice
+  (ordinal/nominal) criteria, batch `EvalRunner` with checkpointing, agreement metrics and
+  bootstrap CIs, YAML configs, or meta-rubric improvement.
 - Verify exact signatures and types against the API reference
   (https://autorubric.org/docs/api/) and reuse patterns from the cookbook
   (https://autorubric.org/docs/cookbook/).
 - Ensure provider keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, …) are set; AutoRubric
-  reaches 100+ providers via LiteLLM.
+  reaches 100+ providers via LiteLLM. Decision-model judges need the `typesafe` extra
+  (`pip install 'autorubric[typesafe]'`) and `TYPESAFE_API_KEY`.
 ```
 
 ## Features
@@ -166,7 +170,7 @@ When writing or editing code that uses AutoRubric:
 | Metrics & validation       | Agreement metrics, bootstrap confidence intervals, distribution analysis |
 | Length penalty             | Configurable penalty for overly long responses                           |
 | Thinking/reasoning support | Budget-controlled extended thinking for supported models                 |
-| Response caching           | Disk-based caching to avoid redundant LLM calls                          |
+| Response caching           | Disk-based caching to avoid redundant LLM and decision-model calls       |
 | Dataset support            | Structured datasets with per-item rubrics, prompts, and ground truth     |
 | YAML configuration         | Define rubrics, LLM configs, and datasets in YAML                        |
 | Meta-rubric evaluation     | Evaluate and automatically improve rubric quality                        |

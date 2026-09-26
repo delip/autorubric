@@ -528,7 +528,7 @@
 <span class="keyword">from</span> autorubric.graders <span class="keyword">import</span> CriterionGrader
 
 <span class="keyword">async def</span> <span class="function">main</span>():
-    grader = CriterionGrader(judge_model_config=LLMConfig(model=<span class="string">"openai/gpt-5.1-mini"</span>))
+    grader = CriterionGrader(judge_model_config=LLMConfig(model=<span class="string">"openai/gpt-5.6-luna"</span>))
     <span class="comment"># Or let a decision model grade the whole rubric in one request (pip install 'autorubric[typesafe]'):</span>
     <span class="comment"># grader = CriterionGrader(judge_model_config=DecisionModelConfig(model="jev-latest"))</span>
 
