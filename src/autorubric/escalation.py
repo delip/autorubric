@@ -57,7 +57,7 @@ from autorubric.graders.criterion_grader import (
 )
 from autorubric.metrics import MetricsResult, compute_metrics
 from autorubric.metrics._helpers import resolve_ground_truth
-from autorubric.scoring import score_reports
+from autorubric.scoring import _every_judgment_failed, score_reports
 from autorubric.types import (
     CannotAssessConfig,
     Criterion,
@@ -386,9 +386,10 @@ def replay_escalation(
     positive, as in a live report), and its ``duration_seconds`` its decision-model
     duration plus its LLM duration pro-rated the same way. The run's total duration is the
     decision-model run's total plus the LLM run's, pro-rated by the share of the LLM run's
-    pairs that were escalated; an item whose decision-model grading failed escalates none
-    of its pairs, as a live cascade sends it to no LLM judge. These are estimates, which
-    ``escalation_stats`` sums into ``cost_usd`` and ``compute_seconds``. The result says so
+    pairs that were escalated; an item whose decision-model grading raised (it has no
+    votes) escalates none of its pairs, as a live cascade sends it to no LLM judge. These
+    are estimates, which ``escalation_stats`` sums into ``cost_usd`` and
+    ``compute_seconds``. The result says so
     in its ``experiment_name``, its descriptive field (``"replay of decision-model run
     '<name>' and LLM run '<name>' (estimated cost and time)"``), since a replay is not an
     experiment on disk (``experiment_dir`` is ``None``). It carries no ``token_usage``,
@@ -397,8 +398,10 @@ def replay_escalation(
     **Length penalty.** It is not re-applied: compare replayed scores with runs graded
     without one. Criterion-level metrics are unaffected.
 
-    An item whose grading failed in ``dm_result`` stays failed, as it would in a live
-    cascade, whose decision model grades first.
+    An item whose grading raised in ``dm_result`` (it has no votes) stays failed, as it
+    would in a live cascade, whose decision model grades first. An item every
+    decision-model judgment of which failed is replayed like any other: its failed votes
+    escalate, as a live cascade escalates them.
 
     Args:
         dm_result: A run of one decision-model judge alone (e.g.
@@ -487,7 +490,7 @@ def replay_escalation(
         )
     config = cannot_assess_config if cannot_assess_config is not None else CannotAssessConfig()
 
-    def score(reports: list[CriterionReport], normalized: bool) -> float:
+    def score(reports: list[CriterionReport], normalized: bool) -> float | None:
         return score_reports(reports, config, normalized)
 
     item_results: list[ItemResult] = []
@@ -572,7 +575,7 @@ def _paired_items(
                 f"item {idx} is not the same item in dm_result and llm_result: its "
                 "submissions differ"
             )
-        if dm_item.error is None:
+        if _has_votes(dm_item):
             judge_id = _checked_dm_judge_id(dm_item)
             if dm_judge_id is None:
                 dm_judge_id = judge_id
@@ -641,11 +644,19 @@ def _is_decision_model_vote(vote: JudgeVote | MultiChoiceJudgeVote) -> bool:
     )
 
 
+def _has_votes(item_result: ItemResult) -> bool:
+    """Whether grading the item recorded per-criterion results (the judges' votes), even if
+    every judgment failed. Only an item whose grading raised (or that no judge result
+    reached) has none: ``ItemResult.error`` alone does not say, since an item every
+    judgment of which failed carries an error too, with its failed votes."""
+    return bool(item_result.report.report)
+
+
 def _checked_llm_judge_ids(item_result: ItemResult) -> list[str]:
     """An ``llm_result`` item's judge ids, checked: graded, by LLM judges alone, with every
     judge's vote on every criterion."""
     idx = item_result.item_idx
-    if item_result.error is not None:
+    if not _has_votes(item_result):
         raise ValueError(
             f"llm_result has no votes on item {idx}: grading it failed ({item_result.error}); "
             "a replay needs the LLM judges' votes on every criterion of every item"
@@ -713,17 +724,20 @@ def _replayed_item(
     llm_item: ItemResult,
     threshold: float,
     per_criterion: Mapping[str, float] | None,
-    score: Callable[[list[CriterionReport], bool], float],
+    score: Callable[[list[CriterionReport], bool], float | None],
     normalize: bool,
 ) -> tuple[ItemResult, int, int]:
     """One item as a live cascade would have graded it, with the number of its criteria
     that were escalated and the number the LLM run judged (every criterion of the item).
 
-    A live cascade sends an item whose decision-model grading failed to no LLM judge, so
-    none of its criteria are escalated, though the LLM run judged them all.
+    A live cascade sends an item whose decision-model grading raised (it has no votes) to
+    no LLM judge, so none of its criteria are escalated, though the LLM run judged them
+    all. Failed decision-model votes escalate, as they do live.
     """
     item = _recorded_item(dm_item, llm_item)
-    if dm_item.error is not None:
+    # A decision-model grading that raised left no votes: a live cascade would have failed
+    # the item too. Votes that all failed are replayed: a live cascade escalates them.
+    if not _has_votes(dm_item):
         failed = ItemResult(
             item_idx=dm_item.item_idx,
             item=item,
@@ -749,9 +763,12 @@ def _replayed_item(
             reports.append(dm_cr)
     share = n_escalated / len(reports) if reports else 0.0
 
-    # The decision model's score over its own verdicts; each LLM judge's is None by role.
+    # The decision model's score over its own verdicts (None when its request failed: it
+    # judged nothing), as a live cascade scores it; each LLM judge's is None by role.
     (dm_judge_id,) = dm_report.judge_scores
-    judge_scores: dict[str, float | None] = {dm_judge_id: score(judged, normalize)}
+    judge_scores: dict[str, float | None] = {
+        dm_judge_id: None if _every_judgment_failed(judged) else score(judged, normalize)
+    }
     judge_scores.update(dict.fromkeys(llm_report.judge_scores))
     llm_cost = llm_report.completion_cost
     cost = sum(
@@ -772,6 +789,8 @@ def _replayed_item(
         item=item,
         report=report,
         duration_seconds=dm_item.duration_seconds + llm_item.duration_seconds * share,
+        # As EvalRunner records it: an item no judge judged fails like one that raised.
+        error=report.error,
     )
     return replayed, n_escalated, len(reports)
 
@@ -867,8 +886,9 @@ def escalation_stats(
     (item, criterion) pairs, so it works on datasets whose items have different rubrics,
     where ``compute_metrics`` has no per-criterion table. The pairs and accuracies are
     defined in ``EscalationPoint``. Like ``compute_metrics``, it covers the items both in
-    ``result`` and in ``dataset``; items whose grading failed have no pairs, but their
-    grading time counts in ``compute_seconds``.
+    ``result`` and in ``dataset``; items whose grading raised have no pairs (an item every
+    judgment of which failed keeps its pairs: its decision model's failures escalated),
+    but their grading time counts in ``compute_seconds``.
 
     The point's ``threshold`` and ``per_criterion`` are ``None`` (an ``EvalResult`` does
     not record its grader's configuration), as is its ``calibration_fingerprint``.
@@ -948,7 +968,7 @@ def _cascade_pairs(
     cascade's shape) and its label in ``dataset`` (``None`` when it has none, as
     ``_labels``)."""
     for item_result in items:
-        if item_result.error is not None:
+        if not _has_votes(item_result):
             continue
         idx = item_result.item_idx
         _, reports = _ensemble_report(item_result, "result")

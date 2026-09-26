@@ -159,8 +159,9 @@ async def test_judge_can_select_injected_na_option(mock_llm_config):
     assert cr.final_multi_choice_verdict.na is True
     assert cr.final_multi_choice_verdict.selected_index == 3
     assert not cr.is_error
-    # Excluded from scoring under the default SKIP strategy.
-    assert report.score == 0.0
+    # Excluded from scoring under the default SKIP strategy, which leaves nothing to
+    # score: no score, and no error, since nothing failed (#18).
+    assert report.score is None and report.error is None
 
 
 @pytest.mark.asyncio
@@ -244,7 +245,9 @@ async def test_infra_failure_points_at_genuine_injected_na(mock_llm_config):
     assert mcv.value == 0.0
     assert cr.is_error
     assert cr.error is not None and cr.error.startswith("infrastructure:")
-    assert report.score == 0.0
+    # Its only criterion failed, so nothing judged the item: it has no score (#18).
+    assert report.score is None
+    assert report.error is not None and report.error.startswith("Every judgment failed")
 
 
 @pytest.mark.asyncio
@@ -306,8 +309,9 @@ async def test_forced_choice_infra_error_is_genuine_abstain(mock_llm_config):
     assert cr.is_error
     assert cr.error is not None and cr.error.startswith("infrastructure:")
     assert cr.is_na is True
-    # Single abstained criterion → excluded under SKIP → empty denominator → 0.0.
-    assert report.score == 0.0
+    # Its only criterion failed, so nothing judged the item: it has no score (#18).
+    assert report.score is None
+    assert report.error is not None and report.error.startswith("Every judgment failed")
 
 
 @pytest.mark.asyncio

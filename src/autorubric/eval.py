@@ -370,7 +370,17 @@ class EvalConfig:
 
 @dataclass
 class ItemResult:
-    """Result for a single evaluated item."""
+    """Result for a single evaluated item.
+
+    Attributes:
+        item_idx: The item's index in the dataset.
+        item: The dataset item.
+        report: The grader's report; an error report, with no score, when grading failed.
+        duration_seconds: Time spent grading the item.
+        error: Why grading the item failed: the exception it raised, or the ``error`` of a
+            report that failed without raising (e.g. every judgment of the item failed).
+            ``None`` for an item that was graded.
+    """
 
     item_idx: int
     item: DataItem
@@ -1242,6 +1252,12 @@ class EvalRunner:
             logger.warning(f"Error grading item {idx}: {e}")
             report = self._create_error_report(str(e))
             error = str(e)
+        else:
+            # A grade can fail without raising: its report carries the error (e.g. every
+            # judgment of the item failed). The item fails like one whose grading raised.
+            if report.error is not None:
+                logger.warning(f"Error grading item {idx}: {report.error}")
+                error = report.error
 
         duration = time.perf_counter() - start
 

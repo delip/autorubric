@@ -300,13 +300,24 @@ def test_skip_denominator_excludes_na_positive_weight():
     assert result != pytest.approx(0.0)
 
 
-def test_skip_all_na_returns_zero():
-    """SKIP with every criterion abstaining -> no positive weight -> 0.0."""
+def test_skip_all_na_leaves_nothing_to_score():
+    """SKIP with every criterion abstaining leaves nothing to score: the score is undefined
+    (None), normalized or raw, never a fabricated 0.0."""
     reports = [
         binary_report(10.0, CriterionVerdict.CANNOT_ASSESS),
-        binary_report(5.0, CriterionVerdict.CANNOT_ASSESS),
+        mc_na_report(5.0, STANDARD_OPTIONS),
     ]
-    assert score_reports(reports, SKIP) == pytest.approx(0.0)
+    assert score_reports(reports, SKIP) is None
+    assert score_reports(reports, SKIP, normalize=False) is None
+
+
+@pytest.mark.parametrize("config", [ZERO, PARTIAL, FAIL], ids=["zero", "partial", "fail"])
+def test_other_strategies_keep_abstentions_in_the_score(config):
+    """ZERO, PARTIAL and FAIL keep abstentions in the score, so all-abstaining reports
+    still have one."""
+    reports = [binary_report(10.0, CriterionVerdict.CANNOT_ASSESS)]
+    assert score_reports(reports, config) is not None
+    assert score_reports(reports, config, normalize=False) is not None
 
 
 def test_skip_mixed_binary_and_mc_na_denominator():
@@ -383,6 +394,14 @@ def test_negative_weight_only_fallback_clamps_at_zero():
     assert score_reports(reports, SKIP) == pytest.approx(0.0)
 
 
-def test_no_weight_at_all_returns_zero():
-    """Empty reports / all-abstained -> 0.0 (no positive or negative weight)."""
-    assert score_reports([], SKIP) == pytest.approx(0.0)
+def test_no_reports_leave_nothing_to_score():
+    assert score_reports([], SKIP) is None
+    assert score_reports([], SKIP, normalize=False) is None
+
+
+def test_zero_weight_criteria_are_scored():
+    """A zero-weight criterion is scored, though it moves nothing: its score is 0.0, not
+    undefined. Only a report set with no criterion left to score has no score."""
+    reports = [binary_report(0.0, CriterionVerdict.MET)]
+    assert score_reports(reports, SKIP) == pytest.approx(0.0)
+    assert score_reports(reports, SKIP, normalize=False) == pytest.approx(0.0)

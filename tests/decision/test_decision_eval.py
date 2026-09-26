@@ -13,7 +13,6 @@ The real ``DecisionModelClient`` runs on the recording fake SDK client of ``conf
 from __future__ import annotations
 
 import json
-import math
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -316,15 +315,15 @@ class _LLMFailingItem2:
 
 
 @pytest.mark.asyncio
-async def test_a_failed_request_scores_like_an_llm_grader_whose_calls_all_failed(
+async def test_a_failed_request_fails_like_an_llm_grader_whose_calls_all_failed(
     fake_sdk, graders, tmp_path
 ):
     """One request per item: a request that fails after its retries fails every criterion of
-    the item, each with an infrastructure abstention. The report is the one an LLM grader
-    builds when every call of the item fails (the scoring core's 0.0 over no scored
-    criterion, an ``error`` on every criterion report), and ``compute_metrics`` treats it
-    exactly as it has always treated that LLM report: the item is scored, not counted as
-    errored, so the two runs have identical metrics."""
+    the item, each with an infrastructure abstention. Nothing judged the item, so its report
+    is the one an LLM grader builds when every call of the item fails: no score, and an
+    ``error`` saying every judgment failed, beside each criterion's own. ``EvalRunner``
+    records the item as failed, and ``compute_metrics`` leaves it out of both runs alike, so
+    the two runs have identical metrics (#18)."""
     fake_sdk.response = response()
     grader = CriterionGrader(judge_model_config=dm())
     graders.append(grader)
@@ -359,20 +358,20 @@ async def test_a_failed_request_scores_like_an_llm_grader_whose_calls_all_failed
 
     failed = next(r for r in result.item_results if r.item_idx == 2)
     llm_failed = next(r for r in llm_result.item_results if r.item_idx == 2)
-    assert failed.error is None and failed.report.error is None
-    assert failed.report.score == llm_failed.report.score == 0.0
-    assert all(cr.error.startswith("infrastructure: ") for cr in failed.report.report)
-    assert all(cr.error.startswith("infrastructure: ") for cr in llm_failed.report.report)
+    for item in (failed, llm_failed):
+        assert item.report.score is None and item.report.raw_score is None
+        assert item.error is not None and item.error == item.report.error
+        assert item.error.startswith("Every judgment failed: infrastructure: ")
+        assert all(cr.error.startswith("infrastructure: ") for cr in item.report.report)
 
     metrics = result.compute_metrics(data)
     assert metrics.model_dump_json() == llm_result.compute_metrics(data).model_dump_json()
-    assert metrics.n_items == 4
-    assert metrics.coverage_stats is not None and metrics.coverage_stats.n_errored == 0
-    assert not any("grading errored" in warning for warning in metrics.warnings)
-    # Item 2's 0.0 is paired with its ground-truth score, as for any scored item.
-    true_score = data.compute_weighted_score(GROUND_TRUTH[0])
-    assert metrics.score_rmse == pytest.approx(math.sqrt(true_score**2 / 4))
-    assert metrics.criterion_accuracy == pytest.approx(1.0)  # its abstentions are excluded
+    assert metrics.n_items == 3
+    assert metrics.coverage_stats is not None and metrics.coverage_stats.n_errored == 1
+    assert any("grading errored" in warning for warning in metrics.warnings)
+    # Only the answered items are paired, and each matches its ground truth.
+    assert metrics.score_rmse == pytest.approx(0.0)
+    assert metrics.criterion_accuracy == pytest.approx(1.0)
 
 
 @pytest.mark.asyncio

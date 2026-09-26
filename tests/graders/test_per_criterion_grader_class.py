@@ -90,8 +90,9 @@ async def test_per_criterion_grader_handles_invalid_json(sample_rubric, mock_llm
             assert criterion_report.error is not None
             assert criterion_report.error.startswith("parse:")
 
-        # All criteria excluded from the denominator under default SKIP -> 0.0.
-        assert report.score == 0.0
+        # Every criterion failed, so nothing judged the item: it has no score (#18).
+        assert report.score is None
+        assert report.error is not None and report.error.startswith("Every judgment failed")
 
 
 @pytest.mark.asyncio
@@ -352,15 +353,11 @@ async def test_parse_failure_no_bias_with_negative_heavy_rubric(mock_llm_config)
         grader = CriterionGrader(judge_model_config=mock_llm_config)
         result = await rubric.grade("Test input", grader=grader)
 
-        # With conservative defaults:
-        # - Positive (weight=1.0): UNMET = 0 points
-        # - Negative (weight=-1.0): MET = -1 point each (3 total = -3)
-        # weighted_sum = 0 + (-1) + (-1) + (-1) = -3
-        # total_positive = 1.0
-        # score = max(0, -3/1) = 0.0
-        assert result.score == 0.0
+        # Every criterion failed, so nothing judged the item: it has no score (#18).
+        assert result.score is None and result.error is not None
 
-        # Verify verdicts
+        # The conservative worst cases still stand in for the failed calls: positive
+        # criteria UNMET, negative criteria MET.
         verdicts = {r.criterion.requirement: r.final_verdict for r in result.report}
         assert verdicts["Is helpful"] == CriterionVerdict.UNMET
         assert verdicts["Contains factual errors"] == CriterionVerdict.MET
@@ -369,8 +366,9 @@ async def test_parse_failure_no_bias_with_negative_heavy_rubric(mock_llm_config)
 
 
 @pytest.mark.asyncio
-async def test_parse_failure_all_negative_rubric_returns_zero(mock_llm_config):
-    """All-negative rubric with parse failures should return 0.0 (worst case)."""
+async def test_parse_failure_all_negative_rubric_has_no_score(mock_llm_config):
+    """All-negative rubric whose every call failed: the worst cases stand in, but nothing
+    judged the item, so it has no score (#18)."""
     rubric = Rubric(
         [
             Criterion(weight=-1.0, requirement="Contains errors"),
@@ -388,9 +386,9 @@ async def test_parse_failure_all_negative_rubric_returns_zero(mock_llm_config):
         grader = CriterionGrader(judge_model_config=mock_llm_config)
         result = await rubric.grade("Test", grader=grader)
 
-        # All negative criteria default to MET (errors assumed present)
-        # This gives the worst possible score for an all-negative rubric
-        assert result.score == 0.0
+        # All negative criteria default to MET (errors assumed present), yet nothing was
+        # judged: no score.
+        assert result.score is None and result.error is not None
         assert all(r.final_verdict == CriterionVerdict.MET for r in result.report)
 
 

@@ -271,12 +271,17 @@ async def main():
         item = item_result.item
 
         # Compute true score
+        # Either score is None when there is nothing to score (see Rubric.compute_score).
         true_score = dataset.compute_weighted_score(item.ground_truth)
-        score_error = abs(result.score - true_score) if result.score is not None else None
+        score_error = (
+            abs(result.score - true_score)
+            if result.score is not None and true_score is not None
+            else None
+        )
 
         print(f"\nItem {item_result.item_idx + 1}: {item.description}")
         print(f"  Predicted Score: {fmt(result.score, '.3f')}")
-        print(f"  Actual Score:    {true_score:.3f}")
+        print(f"  Actual Score:    {fmt(true_score, '.3f')}")
         print(f"  Error:           {fmt(score_error, '.3f')}")
 
         if result.report:

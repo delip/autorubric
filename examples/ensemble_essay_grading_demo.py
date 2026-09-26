@@ -137,8 +137,13 @@ async def main():
         item = item_result.item
         report = item_result.report
 
+        # Either score is None when there is nothing to score (see Rubric.compute_score).
         true_score = dataset.compute_weighted_score(item.ground_truth)
-        score_error = abs(report.score - true_score) if report.score is not None else None
+        score_error = (
+            abs(report.score - true_score)
+            if report.score is not None and true_score is not None
+            else None
+        )
 
         ensemble_str = f"{report.score:.3f}" if report.score is not None else "N/A"
         error_str = f"{score_error:.3f}" if score_error is not None else "N/A"
@@ -147,7 +152,8 @@ async def main():
         )
 
         print(f"\nItem {item_result.item_idx + 1}: {item.description}")
-        print(f"  Scores: Ensemble={ensemble_str} | Actual={true_score:.3f} | Error={error_str}")
+        actual_str = f"{true_score:.3f}" if true_score is not None else "N/A"
+        print(f"  Scores: Ensemble={ensemble_str} | Actual={actual_str} | Error={error_str}")
         print(f"  Agreement: {agreement_str}")
 
         # Show per-judge scores

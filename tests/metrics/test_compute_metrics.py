@@ -592,9 +592,10 @@ class TestErroredReportExcludedFromScoreAggregation:
         assert m_err.score_rmse == pytest.approx(m_good.score_rmse)
         assert m_err.bias.mean_bias == pytest.approx(m_good.bias.mean_bias)
 
-    def test_errored_item_still_counts_for_per_criterion(self):
-        """Per-criterion verdict handling is unchanged: the errored report's verdicts
-        still contribute (only the score-level arrays exclude it)."""
+    def test_an_error_report_is_an_errored_item(self):
+        """A report that carries an error is a failed grade, with or without an item-level
+        error: its item is left out of every metric, its verdicts too, counted as errored
+        and warned about (#18)."""
         dataset = create_mock_dataset()
         predictions = [
             [CriterionVerdict.MET, CriterionVerdict.MET],
@@ -605,7 +606,7 @@ class TestErroredReportExcludedFromScoreAggregation:
         eval_with_error = self._eval_with_one_errored_report(dataset, predictions)
 
         m = compute_metrics(eval_with_error, dataset)
-        # All 4 items have ground truth, so n_items (items_with_ground_truth) is 4.
-        assert m.n_items == 4
-        # Per-criterion accuracy still sees the errored item's verdicts (perfect preds).
+        assert m.n_items == 3
+        assert m.coverage_stats is not None and m.coverage_stats.n_errored == 1
+        assert any("grading errored" in warning for warning in m.warnings)
         assert m.criterion_accuracy == 1.0
