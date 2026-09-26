@@ -850,7 +850,7 @@ def _ensemble_evaluation_report(
     )
 
 
-class CriterionGrader(Grader):
+class CriterionGrader(Grader[EnsembleEvaluationReport]):
     """Unified criterion-based grader with compositional few-shot and ensemble support.
 
     This grader evaluates each criterion independently and supports:

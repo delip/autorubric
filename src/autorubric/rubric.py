@@ -11,6 +11,7 @@ from pydantic import ValidationError
 
 from autorubric.graders import Grader
 from autorubric.graders.base import (
+    ReportT,
     _accepts_guidelines,
     _takes_guidelines,
     _warn_ignores_guidelines,
@@ -22,7 +23,6 @@ from autorubric.types import (
     Criterion,
     CriterionReport,
     CriterionVerdict,
-    EvaluationReport,
     MultiChoiceVerdict,
     ToGradeInput,
 )
@@ -141,10 +141,10 @@ class Rubric:
     async def grade(
         self,
         to_grade: ToGradeInput,
-        grader: Grader,
+        grader: Grader[ReportT],
         query: str | None = None,
         reference_submission: str | None = None,
-    ) -> EvaluationReport:
+    ) -> ReportT:
         """Grade text against this rubric using a grader.
 
         The rubric's guidelines, when it has them, go to the grader as
