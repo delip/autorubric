@@ -607,6 +607,7 @@ class TestErroredReportExcludedFromScoreAggregation:
 
         m = compute_metrics(eval_with_error, dataset)
         assert m.n_items == 3
-        assert m.coverage_stats is not None and m.coverage_stats.n_errored == 1
+        # Its pair of each of the two criteria is an errored pair.
+        assert m.coverage_stats is not None and m.coverage_stats.n_errored == 2
         assert any("grading errored" in warning for warning in m.warnings)
         assert m.criterion_accuracy == 1.0

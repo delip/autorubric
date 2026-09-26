@@ -97,7 +97,8 @@ class EscalationPoint(BaseModel):
     rubric, it reads the binary pairs alone when there are any, else the multi-choice pairs
     with an NA prediction or label counted as one more option. On its pooled path, for items
     with different rubrics, it reads the pairs of every scale, leaves out a pair whose
-    prediction abstains, and counts one whose label abstains as a miss.)
+    prediction abstains, and counts one whose label abstains as a miss. On either path, a
+    criterion whose judgment failed is no pair.)
 
     - The decision model is measured as ``compute_metrics(..., per_judge=True)`` measures a
       judge: on its own votes, superseded ones included, leaving out a failed judgment (a
@@ -107,15 +108,14 @@ class EscalationPoint(BaseModel):
       to measure, or to compare the fallback's with.
     - The fallback's predictions are the escalated pairs' final verdicts, which the
       escalation judges' votes alone decide, read as ``compute_metrics`` reads a run's: a
-      final verdict that abstains is no prediction; one that the judges' failures decided
-      (the worst case of an ``unknown`` failure) is one, as it is in the run's metrics on
-      an item with a criterion judged. (``metric`` leaves out an item whose every
-      criterion's judgment failed, as errored; these accuracies keep its pairs.)
+      final verdict that abstains is no prediction, and neither is one that stands in for
+      the judges' failed calls (such as the worst case of an ``unknown`` failure), which
+      the run's metrics leave out too.
     - The *deferred* pairs are the escalated labelled pairs the decision model answered:
       it escalated them for a confidence below the threshold. ``dm_accuracy_escalated``
       and ``fallback_accuracy_escalated`` are both measured on the deferred pairs whose
-      final verdict does not abstain, where both judges made a prediction, so they compare
-      the two judges on the same pairs.
+      final verdict is a prediction, where both judges made one, so they compare the two
+      judges on the same pairs.
 
     Attributes:
         threshold: The confidence threshold below which a criterion is escalated. ``None``
@@ -129,14 +129,15 @@ class EscalationPoint(BaseModel):
         dm_accuracy_kept: The decision model's accuracy on the pairs it kept. A cascade can
             pay only if its confidence separates these from the pairs it defers.
         dm_accuracy_escalated: The decision model's accuracy on the deferred pairs whose
-            final verdict does not abstain.
+            final verdict is a prediction (it neither abstains nor stands in for failed
+            calls).
         fallback_accuracy_escalated: The accuracy of the final verdicts, which the fallback
             LLM judges decide, on the same pairs. On them, escalating rather than keeping
             the decision model's verdicts gains right verdicts exactly when this beats
             ``dm_accuracy_escalated``: the condition for a cascade to pay. The deferred
-            pairs whose final verdict abstains are not among them; they leave a metric
-            that leaves abstentions out (such as ``criterion_accuracy``), which rises when
-            the decision model was wrong on them.
+            pairs whose final verdict abstains, or stands in for failed calls, are not
+            among them; they leave a metric that leaves them out (such as
+            ``criterion_accuracy``), which rises when the decision model was wrong on them.
         metric: The chosen metric of the whole run, from ``compute_metrics(result,
             dataset)``.
         cost_usd: The run's cost: the sum of its items' ``completion_cost``, ``None`` when
@@ -1046,7 +1047,10 @@ def _vote_prediction(vote: JudgeVote | MultiChoiceJudgeVote) -> CriterionVerdict
 
 
 def _final_prediction(report: EnsembleCriterionReport) -> CriterionVerdict | int | None:
-    """A criterion's final verdict as a prediction; ``None`` when it abstains."""
+    """A criterion's final verdict as a prediction; ``None`` when it abstains or stands in
+    for failed judge calls (``is_error``), as ``compute_metrics`` reads it."""
+    if report.is_error:
+        return None
     if report.criterion.is_multi_choice:
         final = report.final_multi_choice_verdict
         return None if final is None or final.na else final.selected_index
@@ -1161,21 +1165,21 @@ def calibrate_escalation(
     - *The same selection rule, on the run's metric.* The fit starts from the global
       threshold that ``EscalationCurve.best``'s rule, at its defaults (no budget, no
       tolerance), picks on the sweep alone. Each fitted criterion's threshold in turn, in
-      order of first appearance, is then the threshold of the sweep that the same rule
-      picks on the whole run's ``metric``, with the global threshold and the thresholds
-      already fitted held where they are. A criterion's threshold decides whether its own
-      pairs escalate and nothing else, so each fit is made on that criterion's pairs, by
-      what they do to ``metric``, as ``metric`` counts them. ``criterion_accuracy`` (whose
-      pooling on each of ``compute_metrics``' paths ``EscalationPoint`` describes), for
-      one, leaves out an escalated pair whose final verdict abstains, but for an NA
-      verdict it counts as an option (in a rubric without binary criteria, on the
-      per-criterion path); a criterion it does not read (a multi-choice criterion in a
+      order of first appearance, is then the threshold of the sweep that the same rule picks
+      on the whole run's ``metric``, with the global threshold and the thresholds already
+      fitted held where they are. A criterion's threshold decides whether its own pairs
+      escalate and nothing else, so each fit is made on that criterion's pairs, by what they
+      do to ``metric``, as ``metric`` counts them. ``criterion_accuracy`` (whose pooling on
+      each of ``compute_metrics``' paths ``EscalationPoint`` describes), for one, leaves out
+      an escalated pair whose final verdict abstains or stands in for failed calls, but for
+      a genuine NA verdict it counts as an option (in a rubric without binary criteria, on
+      the per-criterion path); a criterion it does not read (a multi-choice criterion in a
       rubric with binary criteria, on the per-criterion path) escalates as little as the
       sweep lets it, while on the pooled path it reads every criterion. No fit lowers the
-      metric, so the point at the start's
-      global threshold measures at least as high with the fits as without them, and so
-      does the point ``best`` picks at its defaults. If ``metric`` is undefined at every
-      threshold of the sweep, there is no start, and the call fits nothing and warns.
+      metric, so the point at the start's global threshold measures at least as high with
+      the fits as without them, and so does the point ``best`` picks at its defaults. If
+      ``metric`` is undefined at every threshold of the sweep, there is no start, and the
+      call fits nothing and warns.
     - *The points.* Each point is one global threshold of the sweep plus the fitted
       thresholds, the same at every point: its ``threshold`` and ``per_criterion``, exactly
       what ``replay_escalation(dm_result, llm_result, point)`` replays and what a live

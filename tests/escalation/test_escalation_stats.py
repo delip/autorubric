@@ -101,7 +101,12 @@ def vote(
 
 
 def criterion_report(
-    criterion: Criterion, votes: list[Any], answer: Any, *, escalated: bool = False
+    criterion: Criterion,
+    votes: list[Any],
+    answer: Any,
+    *,
+    escalated: bool = False,
+    error: str | None = None,
 ) -> EnsembleCriterionReport:
     if criterion.options is None:
         return EnsembleCriterionReport(
@@ -110,6 +115,7 @@ def criterion_report(
             final_reason=None,
             votes=votes,
             escalated=escalated,
+            error=error,
         )
     idx = [o.label for o in criterion.options].index(answer)
     option = criterion.options[idx]
@@ -126,6 +132,7 @@ def criterion_report(
         ),
         multi_choice_votes=votes,
         escalated=escalated,
+        error=error,
     )
 
 
@@ -139,7 +146,11 @@ def escalated(
     fallback: Any,
     *,
     dm_error: str | None = None,
+    fallback_error: str | None = None,
 ) -> EnsembleCriterionReport:
+    """An escalated criterion. With ``fallback_error``, the escalation judge's call failed:
+    ``fallback`` is its stand-in verdict, and the criterion carries the error, as the grader
+    aggregates it."""
     dm_vote = vote(
         criterion,
         dm_answer,
@@ -147,8 +158,10 @@ def escalated(
         error=dm_error,
         superseded=True,
     )
-    fallback_vote = vote(criterion, fallback, judge="escalation")
-    return criterion_report(criterion, [dm_vote, fallback_vote], fallback, escalated=True)
+    fallback_vote = vote(criterion, fallback, judge="escalation", error=fallback_error)
+    return criterion_report(
+        criterion, [dm_vote, fallback_vote], fallback, escalated=True, error=fallback_error
+    )
 
 
 def item_result(
@@ -513,6 +526,35 @@ class TestTheDeferredPairs:
         assert point.escalation_rate == 3 / 6
         assert (point.dm_accuracy_escalated, point.fallback_accuracy_escalated) == (1 / 2, 1.0)
 
+    def test_a_deferred_pair_whose_escalation_calls_failed_is_in_neither(self):
+        """A final verdict that stands in for the escalation judges' failed calls is no
+        prediction, even the worst case of an ``unknown`` failure that equals the label, so
+        the pair leaves both accuracies, as ``compute_metrics`` leaves it out of ``metric``."""
+        data = RubricDataset(prompt="Q", rubric=Rubric([A, B]), name="failed fallback")
+        for _ in range(3):
+            data.add_item("answer", "item", ground_truth=[UNMET, UNMET])
+        crashed = "unknown: RuntimeError: boom"
+        # The decision model deferred a on every item: right on 0 and 1, wrong on 2. The
+        # fallback's call crashed on 0, whose worst case (UNMET) equals the truth, and it
+        # answered right on 1 and 2.
+        result = eval_result(
+            [
+                item_result(
+                    i,
+                    [escalated(A, dm_answer, UNMET, fallback_error=error), kept(B, UNMET)],
+                    cost=None,
+                    seconds=1,
+                )
+                for i, (dm_answer, error) in enumerate(
+                    [(UNMET, crashed), (UNMET, None), (MET, None)]
+                )
+            ]
+        )
+        point = escalation_stats(result, data)
+        assert point.escalation_rate == 3 / 6
+        # Items 1 and 2: the decision model is right on one, the fallback on both.
+        assert (point.dm_accuracy_escalated, point.fallback_accuracy_escalated) == (1 / 2, 1.0)
+
 
 # =============================================================================
 # Live cascades and their replays
@@ -538,14 +580,14 @@ class TestLiveAndReplayedRuns:
         assert live.escalation_rate == 15 / 35
         # All 15 are labelled. The decision model failed or abstained on 7 (item 2's tone,
         # item 3's myth, all of item 4), which escalate at any threshold: neither judge is
-        # measured on them. It deferred the other 8, of which 7 have a final verdict that
-        # does not abstain: the terse item's tone, whose LLM call was rate limited, ends in
-        # the NA option and is left out; its sentences, whose LLM call crashed, ends in the
-        # worst case (UNMET, as the truth) and counts. On those 7 the decision model is
-        # right on 4 (the tone of items 0, 3 and 6, item 1's light) and so is the fallback
-        # (the tone of items 0 and 3, item 1's clarity, the terse item's sentences).
-        assert live.dm_accuracy_escalated == 4 / 7
-        assert live.fallback_accuracy_escalated == 4 / 7
+        # measured on them. It deferred the other 8, of which 6 have a final verdict that is
+        # a prediction. The terse item's two LLM calls failed, so their final verdicts only
+        # stand in for them and are left out: its tone, whose call was rate limited, ends in
+        # the NA option; its sentences, whose call crashed, in the worst case (UNMET, as the
+        # truth). On those 6 the decision model is right on 4 (the tone of items 0, 3 and 6,
+        # item 1's light) and the fallback on 3 (the tone of items 0 and 3, item 1's clarity).
+        assert live.dm_accuracy_escalated == 4 / 6
+        assert live.fallback_accuracy_escalated == 3 / 6
         assert live.cost_usd == pytest.approx(runs.live.total_completion_cost)
         assert live.compute_seconds == pytest.approx(
             sum(r.duration_seconds for r in runs.live.item_results)

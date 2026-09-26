@@ -1434,7 +1434,9 @@ async def validate_held_out(
             distinct label. Coverage and the abstention rate are always measured over
             the raw, pre-exclusion per-criterion denominator (numerically aligned
             with ``CoverageStats``). An item whose grade failed (its report has an
-            ``error``, e.g. every judgment failed) counts in that denominator only.
+            ``error``, e.g. every judgment failed), or a criterion whose judgment failed
+            on an item otherwise graded, counts in that denominator only: its stand-in
+            verdict is neither an abstention nor a prediction, in any mode.
         on_item_complete: Callback invoked after each item is graded.
         _capture: When provided, per-item results are appended for artifact persistence.
 
@@ -1446,7 +1448,7 @@ async def validate_held_out(
             evaluation judges must be LLMs (checked before any call).
     """
     _reject_decision_model_grader(grader)
-    from autorubric.metrics._compute import _kappa_or_none, _mean_or_none
+    from autorubric.metrics._compute import _judgment_failed, _kappa_or_none, _mean_or_none
     from autorubric.metrics._helpers import extract_verdicts_from_report, filter_cannot_assess
 
     num_criteria = len(rubric.rubric)
@@ -1485,6 +1487,7 @@ async def validate_held_out(
         total_cost += result.completion_cost or 0.0
 
         llm_verdicts = extract_verdicts_from_report(result, num_criteria)
+        judgments = result.report or []
 
         gt_verdicts: list[CriterionVerdict] = []
         for gt_val in item.ground_truth:  # type: ignore[union-attr]
@@ -1498,10 +1501,13 @@ async def validate_held_out(
             # observation for the criterion, regardless of how the abstention is
             # later handled.
             n_paired[c_idx] += 1
-            if result.error is not None:
-                # A failed grade (e.g. every judgment failed) has no usable verdict: as
-                # an errored item in compute_metrics, it counts in the raw denominator
-                # (coverage drops) and in no tally, kappa or exemplar (#18).
+            if result.error is not None or (
+                c_idx < len(judgments) and _judgment_failed(judgments[c_idx])
+            ):
+                # A failed grade (e.g. every judgment failed), or a criterion whose judgment
+                # failed, has no usable verdict: its stand-in is no judgment. As an errored
+                # item or a failed cell in compute_metrics, it counts in the raw denominator
+                # (coverage drops) and in no abstention count, tally, kappa or exemplar.
                 continue
             if (
                 llm_verdicts[c_idx] == CriterionVerdict.CANNOT_ASSESS

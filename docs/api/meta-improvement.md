@@ -132,7 +132,7 @@ The loop stops with `RuntimeError` when a meta-rubric quality evaluation has no 
 
 ### Held-Out Strategy
 
-The `held_out` strategy optimizes the rubric against grading errors on held-out data. Instead of using a meta-rubric to identify structural issues, it grades the validation items, compares per-criterion verdicts against ground truth, and uses the resulting error analysis (false positives, false negatives, disagreement exemplars) to guide revision. This requires `validation_data` with `ground_truth` verdicts. An item whose grade failed has no usable verdict: it joins the denominator of each criterion's coverage and abstention rate, lowering both, and adds to no tally or kappa.
+The `held_out` strategy optimizes the rubric against grading errors on held-out data. Instead of using a meta-rubric to identify structural issues, it grades the validation items, compares per-criterion verdicts against ground truth, and uses the resulting error analysis (false positives, false negatives, disagreement exemplars) to guide revision. This requires `validation_data` with `ground_truth` verdicts. An item whose grade failed has no usable verdict: it joins the denominator of each criterion's coverage and abstention rate, lowering both, and adds to no tally or kappa. A criterion whose judge call failed on an item otherwise graded is treated the same way for that criterion, so a failed call never counts as an abstention or as a disagreement.
 
 ```python
 result = await improve_rubric(

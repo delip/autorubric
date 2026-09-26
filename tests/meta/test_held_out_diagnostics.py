@@ -500,3 +500,70 @@ class TestHeldOutFailedGrades:
             assert cr.coverage == 0.5
             assert cr.ca_rate == 0.0
             assert not cr.disagreement_exemplars
+
+    @staticmethod
+    def _with_failed_criterion(
+        verdicts: list[CriterionVerdict], failed_idx: int, error: str
+    ) -> EnsembleEvaluationReport:
+        """A report whose criterion ``failed_idx`` stands in for a failed judge call: its only
+        vote and the criterion carry ``error``, as the grader aggregates them."""
+        report = _report(verdicts)
+        crs = list(report.report or [])
+        cr = crs[failed_idx]
+        vote = cr.votes[0].model_copy(update={"error": error})
+        crs[failed_idx] = cr.model_copy(update={"error": error, "votes": [vote]})
+        return report.model_copy(update={"report": crs})
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("cannot_assess", ["exclude", "as_unmet", "as_category"])
+    async def test_a_criterion_whose_judgment_failed_counts_only_in_its_coverage_denominator(
+        self, cannot_assess
+    ) -> None:
+        """The second item's intro call was rate limited, and CANNOT_ASSESS stands in. It is no
+        abstention of the judge's, in any mode: as a failed cell in ``compute_metrics``, it
+        counts in the intro's raw denominator only, so coverage drops and ``ca_rate`` does
+        not rise. The conclusion was judged on both items."""
+        rubric = _two_criterion_rubric()
+        met = [CriterionVerdict.MET, CriterionVerdict.MET]
+        ds = _dataset([met, met])
+        partly_failed = self._with_failed_criterion(
+            [CriterionVerdict.CANNOT_ASSESS, CriterionVerdict.MET], 0, "infrastructure: 429"
+        )
+
+        with patch.object(
+            rubric, "grade", new_callable=AsyncMock, side_effect=[_report(met), partly_failed]
+        ):
+            result = await validate_held_out(
+                rubric,
+                ds,
+                _mock_grader(),
+                task_prompt="Write an essay",
+                cannot_assess=cannot_assess,
+            )
+
+        intro, conclusion = result.per_criterion
+        assert (intro.n_samples, intro.coverage, intro.ca_rate) == (1, 0.5, 0.0)
+        assert (conclusion.n_samples, conclusion.coverage, conclusion.ca_rate) == (2, 1.0, 0.0)
+
+    @pytest.mark.asyncio
+    async def test_a_criterion_whose_call_crashed_is_no_disagreement(self) -> None:
+        """The second item's intro call crashed, and the worst case (UNMET) stands in against
+        a MET label. It is no judgment, so it is no false negative, and its "Judge call
+        failed" reason is no disagreement exemplar for the revision to learn from."""
+        rubric = _two_criterion_rubric()
+        met = [CriterionVerdict.MET, CriterionVerdict.MET]
+        ds = _dataset([met, met])
+        partly_failed = self._with_failed_criterion(
+            [CriterionVerdict.UNMET, CriterionVerdict.MET], 0, "unknown: RuntimeError: boom"
+        )
+
+        with patch.object(
+            rubric, "grade", new_callable=AsyncMock, side_effect=[_report(met), partly_failed]
+        ):
+            result = await validate_held_out(
+                rubric, ds, _mock_grader(), task_prompt="Write an essay"
+            )
+
+        intro = result.per_criterion[0]
+        assert (intro.n_samples, intro.accuracy, intro.coverage) == (1, 1.0, 0.5)
+        assert not intro.disagreement_exemplars

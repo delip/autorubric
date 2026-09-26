@@ -463,6 +463,7 @@ def test_bootstrap_ci_empty_returns_none():
     res = _compute_bootstrap_ci(
         [],  # per_criterion_pred
         [],  # per_criterion_true
+        [],  # per_criterion_failed
         [],  # criterion_types
         [],  # effective_criteria
         "exclude",  # cannot_assess
@@ -484,6 +485,7 @@ def test_bootstrap_ci_empty_verdicts_nonempty_scores_n1_rmse():
     res = _compute_bootstrap_ci(
         [],  # per_criterion_pred (empty verdict axis)
         [],
+        [],  # per_criterion_failed
         [],
         [],
         "exclude",

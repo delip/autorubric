@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import math
 import warnings
-from typing import TYPE_CHECKING, Any, Literal
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any, Literal, TypeVar
 
 import numpy as np
 from scipy import stats
@@ -24,7 +25,6 @@ from sklearn.metrics import (
     recall_score,
 )
 
-from ..scoring import _every_judgment_failed
 from ..types import Criterion, CriterionVerdict
 from ._helpers import (
     classify_criteria,
@@ -85,7 +85,12 @@ if TYPE_CHECKING:
     from ..dataset import RubricDataset
     from ..eval import EvalResult, ItemResult
     from ..rubric import Rubric
-    from ..types import EnsembleEvaluationReport, EvaluationReport
+    from ..types import (
+        CriterionReport,
+        EnsembleCriterionReport,
+        EnsembleEvaluationReport,
+        EvaluationReport,
+    )
 
 
 def _criterion_votes(cr: Any) -> list[Any]:
@@ -108,18 +113,41 @@ def _judge_failed_every_vote(
     return bool(votes) and all(vote.is_error for vote in votes)
 
 
+def _judgment_failed(
+    criterion_report: CriterionReport | EnsembleCriterionReport | dict[str, Any],
+) -> bool:
+    """Whether a criterion report's verdict stands in for failed judge calls rather than a
+    judgment: its ``is_error`` (for an ``EnsembleCriterionReport``, every vote aggregated on
+    the criterion failed), or, for a legacy dict-shaped report, its ``"error"``."""
+    if isinstance(criterion_report, dict):
+        return criterion_report.get("error") is not None
+    return criterion_report.is_error
+
+
 def _is_errored_item(item_result: ItemResult) -> bool:
     """Whether an item has no usable judgment: its grading raised (``ItemResult.error``),
     its report is an error report (``error`` set), or every criterion's verdict stands in
-    for failed judge calls (``_every_judgment_failed``). The last is how an item nothing
-    judged is recognized in a run saved before such reports carried an ``error`` (or from
-    a grader that does not set one), so its metrics match a current run's (#18).
+    for failed judge calls (``_judgment_failed``, as ``_every_judgment_failed`` reads a
+    grader's reports). The last is how an item nothing judged is recognized in a run saved
+    before such reports carried an ``error`` (or from a grader that does not set one), so
+    its metrics match a current run's (#18). On any other item, a criterion whose judgment
+    failed is a failed cell: ``compute_metrics`` leaves it out of the criterion-level
+    metrics.
     """
     report = item_result.report
+    judgments = report.report or []
     return (
         item_result.error is not None
         or report.error is not None
-        or _every_judgment_failed(report.report or [])
+        or (bool(judgments) and all(_judgment_failed(cr) for cr in judgments))
+    )
+
+
+def _failed_judgments_warning(n_failed: int) -> str:
+    """The warning for ``n_failed`` failed criteria of graded (not errored) items."""
+    return (
+        f"{n_failed} criterion judgment(s) on graded items failed and were left out of the "
+        "criterion-level metrics."
     )
 
 
@@ -712,9 +740,31 @@ def _compute_correlation(x: list[float], y: list[float], method: str) -> Correla
     )
 
 
+_Cell = TypeVar("_Cell")
+
+
+def _judged_cells(
+    per_criterion: list[list[_Cell]],
+    per_criterion_failed: list[list[bool]],
+    items: Sequence[int] | None = None,
+) -> list[list[_Cell]]:
+    """Each criterion's cells on ``items`` (every item in order by default; the bootstrap
+    passes a resample), without the cells whose judgment failed.
+
+    ``per_criterion`` and ``per_criterion_failed`` are criteria x items and item-aligned, so
+    the same ``items`` select the same items for every criterion before each criterion drops
+    its own failed cells.
+    """
+    return [
+        [cells[i] for i in (range(len(cells)) if items is None else items) if not failed[i]]
+        for cells, failed in zip(per_criterion, per_criterion_failed, strict=True)
+    ]
+
+
 def _compute_bootstrap_ci(
-    per_criterion_pred: list[list[CriterionVerdict | int]],
+    per_criterion_pred: list[list[CriterionVerdict | int | None]],
     per_criterion_true: list[list[CriterionVerdict | int]],
+    per_criterion_failed: list[list[bool]],
     criterion_types: list[str],
     effective_criteria: list[Criterion],
     cannot_assess: CannotAssessMode,
@@ -732,10 +782,13 @@ def _compute_bootstrap_ci(
 
     - A verdict-item axis drives ``accuracy_ci`` (← ``criterion_accuracy``) and ``kappa_ci``
       (← ``mean_kappa``, the mean of per-criterion kappas, ordinal quadratic-weighted). Each
-      replicate resamples items with a single shared index applied across all criteria, then
-      recomputes those statistics via the SAME single-source helpers
-      (``_per_criterion_kappas`` + ``_criterion_level_scalars``), so the CIs track the reported
-      point estimates and cannot drift.
+      replicate resamples items with a single shared index applied across all criteria, drops
+      each criterion's resampled failed cells (``per_criterion_failed``: a failed judgment is
+      no prediction, as in the point estimates), then recomputes those statistics via the
+      SAME single-source helpers (``_per_criterion_kappas`` + ``_criterion_level_scalars``),
+      so the CIs track the reported point estimates and cannot drift. The arrays are
+      criteria x items and item-aligned, and NA-normalized (no ``None``) except in failed
+      cells, which may hold the ``None`` of a forced-choice stand-in and are never read.
     - An independent score-item axis drives ``rmse_ci`` over the per-item cumulative scores
       (the scored subset; ``rmse`` is defined for n≥1, so a single scored item yields a
       degenerate ``(v, v)`` interval rather than ``None``).
@@ -763,17 +816,29 @@ def _compute_bootstrap_ci(
         warnings.filterwarnings("ignore", message="A single label was found")
         warnings.filterwarnings("ignore", message="invalid value encountered")
         for _ in range(n_bootstrap):
-            # Verdict-item axis: resample items (shared index across all criteria), then
-            # recompute the SAME criterion_accuracy + mean_kappa the aggregate reports.
+            # Verdict-item axis: resample items (shared index across all criteria), drop each
+            # criterion's failed cells, then recompute the SAME criterion_accuracy +
+            # mean_kappa the aggregate reports.
             if n_items > 0:
-                idx_v = rng.choice(n_items, size=n_items, replace=True)
-                rs_pred = [[col[i] for i in idx_v] for col in per_criterion_pred]
-                rs_true = [[col[i] for i in idx_v] for col in per_criterion_true]
+                idx_v = rng.choice(n_items, size=n_items, replace=True).tolist()
+                rs_pred = _judged_cells(per_criterion_pred, per_criterion_failed, idx_v)
+                rs_true = _judged_cells(per_criterion_true, per_criterion_failed, idx_v)
+                # Only failed cells can hold a None prediction, and they were just dropped, so
+                # the static type matches the helpers' expected list[CriterionVerdict | int].
                 kappas = _per_criterion_kappas(
-                    rs_pred, rs_true, criterion_types, effective_criteria, cannot_assess, na_mode
+                    rs_pred,  # type: ignore[arg-type]
+                    rs_true,
+                    criterion_types,
+                    effective_criteria,
+                    cannot_assess,
+                    na_mode,
                 )
                 accuracy, _p, _r, _f1, mean_kappa, _phi, _mk = _criterion_level_scalars(
-                    rs_pred, rs_true, criterion_types, cannot_assess, precomputed_kappas=kappas
+                    rs_pred,  # type: ignore[arg-type]
+                    rs_true,
+                    criterion_types,
+                    cannot_assess,
+                    precomputed_kappas=kappas,
                 )
                 # Append only defined values; a degenerate replicate contributes nothing (so an
                 # all-degenerate axis → empty samples → None CI, never a fabricated 0.0).
@@ -986,8 +1051,10 @@ def _per_criterion_kappas(
     Each entry may be ``None`` (degenerate single-class) — ``_mean_or_none`` drops ``None`` when
     averaging into ``mean_kappa``.
 
-    The arrays are criteria x items, NA-normalized (no ``None``) and item-aligned; pass a
-    resampled (bootstrap) or per-judge slice to recompute the same kappas on that subset.
+    The arrays are criteria x cells, NA-normalized (no ``None``), with each criterion's
+    predictions aligned 1:1 with its ground truth; they hold judged cells only (a failed
+    judgment is no prediction). Pass a resampled (bootstrap) or per-judge slice to recompute
+    the same kappas on that subset.
 
     Args:
         per_criterion_pred: criteria x items predictions (binary ``CriterionVerdict``,
@@ -1143,7 +1210,9 @@ def _compute_judge_metrics(
     label/MET-vs-rest data; multi-choice criteria contribute exact-match accuracy and
     (weighted/unweighted) kappa exactly as the aggregate does (reusing the same
     per-criterion functions). Only cells with a genuine (present, error-free) judge vote and
-    a correctly-typed ground truth are included. A ``judge_missing`` cell (the judge cast no
+    a correctly-typed ground truth are included; the aggregate likewise leaves out a
+    criterion whose judgment failed, so the two agree for a one-judge ensemble, where a
+    failed vote is a failed criterion. A ``judge_missing`` cell (the judge cast no
     vote on that criterion of that item, e.g. a cascade escalation judge on a criterion that
     was not escalated) counts neither as a prediction nor as an abstention; its slots hold
     layout placeholders only. A ``superseded`` vote is present: it is the judge's prediction.
@@ -1336,7 +1405,9 @@ def _compute_per_item_pooled_metrics(
     multi-choice ``option.value``) and an exact-selection match; we pool both within each
     scale type. Categorical metrics that need a shared option space (weighted/nominal kappa,
     per-option, N×N confusion) are omitted; only binary points get a 2×2 confusion + Cohen
-    kappa + phi (MET/UNMET is universal). Abstentions (CANNOT_ASSESS / NA) are excluded.
+    kappa + phi (MET/UNMET is universal). Abstentions (CANNOT_ASSESS / NA) are excluded. A
+    criterion whose judgment failed (``_judgment_failed``) is neither a point nor an
+    abstention, as on the per-criterion path.
 
     Raises ``ValueError`` when no item is left (every one errored), and when graded items
     leave no rubric point to pool (no prediction could be paired with its ground truth):
@@ -1353,6 +1424,7 @@ def _compute_per_item_pooled_metrics(
     bin_pred: list[int] = []
     n_items = 0
     n_errored_items = 0  # GT-bearing items with no usable judgment, as on the other path
+    n_failed_judgments = 0  # failed criteria of items not errored, as on the other path
 
     for idx in common_indices:
         item = dataset.items[idx]
@@ -1384,7 +1456,12 @@ def _compute_per_item_pooled_metrics(
             result_warnings.append(f"Item {idx}: {e}")
             continue
 
+        judgments = report.report or []
         for c_idx, crit in enumerate(criteria):
+            if c_idx < len(judgments) and _judgment_failed(judgments[c_idx]):
+                # Its verdict stands in for failed judge calls: no prediction to pool.
+                n_failed_judgments += 1
+                continue
             pv = pred_all[c_idx]
             tv = true_all[c_idx]
             if crit.is_binary:
@@ -1437,6 +1514,8 @@ def _compute_per_item_pooled_metrics(
             f"{n_errored_items} item(s) with ground truth were excluded from metrics because "
             "grading errored; their verdicts and scores do not contribute."
         )
+    if n_failed_judgments > 0:
+        result_warnings.append(_failed_judgments_warning(n_failed_judgments))
 
     # Assemble per-scale pooled metrics.
     pooled_by_scale: list[PooledScaleMetrics] = []
@@ -1547,14 +1626,25 @@ def compute_metrics(
     Supports binary, ordinal, and nominal (multi-choice) criteria.
 
     An item with no usable judgment is an errored item: it is left out of every metric,
-    counted in ``CoverageStats.n_errored`` and warned about. That is an item whose grading
-    raised, whose report is an error report, or every criterion's verdict of which stands
-    in for failed judge calls (how an item whose every judgment failed shows in a run saved before
-    such reports carried an ``error``). Score-level metrics pair an item's score with its
-    ground truth's score where both are defined: an item with nothing left to score, or
-    whose ground truth leaves nothing to score, keeps its verdicts in the criterion-level
-    metrics but has no score pair. Per judge likewise: a judge every vote of which on an
-    item failed has no score for that item, whatever its ``judge_scores`` entry says.
+    counted in ``CoverageStats.n_errored`` (each of its pairs) and warned about. That is an
+    item whose grading raised, whose report is an error report, or every criterion's verdict
+    of which stands in for failed judge calls (how an item whose every judgment failed shows
+    in a run saved before such reports carried an ``error``). On any other item, a criterion
+    whose judgment failed (its report's ``is_error``; for an ensemble, every vote aggregated
+    on it failed) is a failed cell: its verdict (an abstention for an infrastructure or parse
+    failure, the worst case for an unknown one) stands in for no judgment, so it is neither a
+    prediction nor an abstention, whatever ``cannot_assess`` and ``na_mode`` say. It is left
+    out of the criterion-level metrics (per criterion and aggregate, ``na_stats``,
+    ``cannot_assess_stats`` and the bootstrap), never gives a criterion its NA option, is
+    counted as an errored pair in ``CoverageStats.n_errored`` and is warned about. The
+    per-judge metrics leave out a failed vote likewise, so those of a one-judge ensemble
+    agree with the aggregate.
+
+    Score-level metrics pair an item's score with its ground truth's score where both are
+    defined: an item with nothing left to score, or whose ground truth leaves nothing to
+    score, keeps its verdicts in the criterion-level metrics but has no score pair. Per
+    judge likewise: a judge every vote of which on an item failed has no score for that
+    item, whatever its ``judge_scores`` entry says.
 
     Args:
         eval_result: The evaluation result from EvalRunner.
@@ -1573,7 +1663,9 @@ def compute_metrics(
             ``superseded`` vote) is measured on its escalated subset:
             ``JudgeMetrics.coverage == "escalated"``, ``n_pairs`` is the subset's size and
             the score-level fields are ``None``.
-        cannot_assess: How to handle CANNOT_ASSESS verdicts (binary criteria):
+        cannot_assess: How to handle CANNOT_ASSESS verdicts (binary criteria). A failed
+            judgment's stand-in CANNOT_ASSESS is no verdict and is left out in every mode.
+
             - "exclude": Skip pairs where either is CANNOT_ASSESS (default)
             - "as_unmet": Treat CANNOT_ASSESS as UNMET
             - "as_category": Keep CANNOT_ASSESS as a distinct third class. Accuracy and
@@ -1582,7 +1674,8 @@ def compute_metrics(
               precision/recall/f1 remain MET-vs-rest.
         na_mode: How to handle NA options (multi-choice criteria). Mirrors
             ``cannot_assess`` for binary — NA on multi-choice is the structural
-            analog of CANNOT_ASSESS on binary:
+            analog of CANNOT_ASSESS on binary (a failed judgment's stand-in NA, or its
+            selection of no option, is likewise left out in every mode):
 
             - "exclude": Skip pairs where either is NA (default).
             - "as_unmet": Remap NA to the score-minimizing non-NA option,
@@ -1706,9 +1799,15 @@ def compute_metrics(
     # For multi-choice: list[int] (option indices). A predicted index may transiently be
     # None for a genuine multi-choice error-abstain; it is normalized to the
     # effective NA index right after the effective criteria are built, so consumers below
-    # only ever see CriterionVerdict | int.
+    # only ever see CriterionVerdict | int (a failed cell may keep its None: none reads it).
     per_criterion_pred: list[list[CriterionVerdict | int | None]] = [[] for _ in range(n_criteria)]
     per_criterion_true: list[list[CriterionVerdict | int]] = [[] for _ in range(n_criteria)]
+    # Failed-cell mask, item-aligned with the lists above: True where the criterion's judgment
+    # failed on the item (its verdict stands in for failed judge calls). Such a cell is kept
+    # in place, so the bootstrap can resample whole items, and left out of every
+    # criterion-level metric below (``_judged_cells``): it is neither a prediction nor an
+    # abstention, in every cannot_assess and na_mode.
+    per_criterion_failed: list[list[bool]] = [[] for _ in range(n_criteria)]
 
     # Overall scores
     all_pred_scores: list[float] = []
@@ -1794,20 +1893,26 @@ def compute_metrics(
             continue
 
         # Store per-criterion data
+        judgments = report.report or []
         for c_idx in range(n_criteria):
             pred_val = pred_all[c_idx]
             true_val = true_all[c_idx]
 
             # Handle None predictions (failed extraction). Binary None -> UNMET (the
-            # conservative default). A multi-choice None is a GENUINE error-abstain (no NA
-            # option, forced-choice): leave it as None here and normalize it to the
+            # conservative default). A multi-choice None selects no option (a forced-choice
+            # abstention, no NA option): leave it as None here and normalize it to the
             # effective criterion's NA index after the effective criteria are built below,
-            # so it is recognized as NA instead of being silently counted as option 0.
+            # so it is recognized as NA instead of being silently counted as option 0. The
+            # grader emits one only as the stand-in of a failed call: that cell is marked
+            # failed below and read by no metric.
             if pred_val is None and criterion_types[c_idx] == "binary":
                 pred_val = CriterionVerdict.UNMET
 
             per_criterion_pred[c_idx].append(pred_val)
             per_criterion_true[c_idx].append(true_val)
+            per_criterion_failed[c_idx].append(
+                c_idx < len(judgments) and _judgment_failed(judgments[c_idx])
+            )
 
         # The item's true score: its ground truth's weighted score under the item's effective
         # rubric (== the global rubric when one is set, so this is a no-op there, and
@@ -1973,8 +2078,10 @@ def compute_metrics(
     # range for the author rubric used above — and emits selected_index=None when it had to
     # abstain with no NA option. We normalize only when an out-of-range OR a None prediction
     # is actually observed, so forced-choice runs without abstains are unaffected and never
-    # gain a spurious NA column. ``with_guaranteed_na_option`` is the same pure helper the
-    # grader uses, so the two layers cannot drift.
+    # gain a spurious NA column. Only a judgment some metric reads is observed: a failed
+    # cell's stand-in (the NA option, or no option at all) is no prediction, so it never adds
+    # the NA option, and neither does a judge's failed vote. ``with_guaranteed_na_option`` is
+    # the same pure helper the grader uses, so the two layers cannot drift.
     effective_criteria = list(criteria)
     for c_idx in range(n_criteria):
         if criterion_types[c_idx] == "binary":
@@ -1985,17 +2092,29 @@ def compute_metrics(
         def _needs_na(v: object, n_author: int = n_author) -> bool:
             return (isinstance(v, int) and v >= n_author) or v is None
 
-        observed = any(_needs_na(v) for v in per_criterion_pred[c_idx])
+        observed = any(
+            _needs_na(v)
+            for v, failed in zip(
+                per_criterion_pred[c_idx], per_criterion_failed[c_idx], strict=True
+            )
+            if not failed
+        )
         if not observed:
             # Also consider per-judge multi-choice cells: a single judge may have
             # abstained (None) or picked the injected NA while the aggregate verdict
             # did not, so the effective criterion still needs an NA option for the
             # per-judge normalization to recognize that cell. A missing cell's None is a
-            # placeholder, not an abstain, so it never triggers the reconstruction.
+            # placeholder, not an abstain, and a failed vote is no judgment (the judge's
+            # metrics leave it out), so neither triggers the reconstruction.
             observed = any(
-                c_idx < len(row) and not missing_row[c_idx] and _needs_na(row[c_idx])
+                c_idx < len(row)
+                and not missing_row[c_idx]
+                and error_row[c_idx] is None
+                and _needs_na(row[c_idx])
                 for jid, rows in judge_mc_preds.items()
-                for row, missing_row in zip(rows, judge_missing[jid], strict=True)
+                for row, missing_row, error_row in zip(
+                    rows, judge_missing[jid], judge_errors[jid], strict=True
+                )
             )
         if observed:
             effective_criteria[c_idx] = author_c.with_guaranteed_na_option()
@@ -2003,7 +2122,8 @@ def compute_metrics(
     # Normalize any remaining None multi-choice predictions (genuine error-abstains) to
     # the effective criterion's NA index, so every downstream consumer sees only ints and the
     # abstain is recognized as NA (FP/FN, na_kappa, filtering) under every na_mode. The
-    # reconstruction above guarantees a NA option exists for any criterion that had a None.
+    # reconstruction above guarantees a NA option exists for any criterion that had a None
+    # in a judged cell; a failed cell may keep its None, as no metric reads it.
     for c_idx in range(n_criteria):
         if criterion_types[c_idx] == "binary":
             continue
@@ -2029,6 +2149,14 @@ def compute_metrics(
                 if na_idx is None:
                     continue
                 item_row[c_idx] = na_idx
+
+    # The judged cells: every criterion-level metric below (per criterion, the aggregate
+    # scalars, coverage, NA and CANNOT_ASSESS stats) reads these, never a failed cell, whose
+    # stand-in verdict is neither a prediction nor an abstention in any mode. The bootstrap
+    # resamples the item-aligned arrays and drops the failed cells itself.
+    judged_pred = _judged_cells(per_criterion_pred, per_criterion_failed)
+    judged_true = _judged_cells(per_criterion_true, per_criterion_failed)
+    n_failed_cells = [sum(failed) for failed in per_criterion_failed]
 
     # Compute per-criterion metrics by type
     per_criterion: list[CriterionMetricsUnion] = []
@@ -2059,8 +2187,8 @@ def compute_metrics(
     for c_idx in range(n_criteria):
         criterion = criteria[c_idx]
         c_type = criterion_types[c_idx]
-        pred_data = per_criterion_pred[c_idx]
-        true_data = per_criterion_true[c_idx]
+        pred_data = judged_pred[c_idx]
+        true_data = judged_true[c_idx]
 
         if c_type == "binary":
             # Binary criterion metrics
@@ -2209,7 +2337,7 @@ def compute_metrics(
     # per-judge paths cannot drift. accuracy/mean_kappa reproduce the prior expressions
     # exactly; the only behavior change is multi-choice-only precision/recall/f1 going
     # 0.0 → None (the binary MET-vs-rest metric is genuinely undefined without a MET
-    # class). per_criterion_pred has been normalized to ints (no None) by here, so its
+    # class). The judged cells have been normalized to ints (no None) by here, so their
     # static type matches the helper's expected list[CriterionVerdict | int].
     (
         criterion_accuracy,
@@ -2220,8 +2348,8 @@ def compute_metrics(
         criterion_phi,
         micro_kappa,
     ) = _criterion_level_scalars(
-        per_criterion_pred,  # type: ignore[arg-type]
-        per_criterion_true,
+        judged_pred,  # type: ignore[arg-type]
+        judged_true,
         list(criterion_types),
         cannot_assess,
         precomputed_kappas=criterion_kappas,
@@ -2244,20 +2372,24 @@ def compute_metrics(
 
     # Coverage / error diagnostics — only meaningful under the ``exclude`` handling modes,
     # where abstentions (CANNOT_ASSESS / NA) and grading errors drop a paired observation
-    # from the agreement denominator. Under ``as_unmet`` / ``as_category`` nothing is
-    # union-excluded, so coverage would be trivially 1.0 and we leave these ``None``. The raw
+    # from the agreement denominator. Under ``as_unmet`` / ``as_category`` no abstention is
+    # union-excluded (only errored pairs are), so we leave these ``None``. The raw
     # denominator counts every GT-bearing item (including those lost to a grading error), so
-    # error_rate and the abstain rates share one consistent denominator.
+    # error_rate and the abstain rates share one consistent denominator. A pair lost to a
+    # grading error is an errored pair: a criterion's pair on an errored item, or a failed
+    # cell. The abstain counts read the judged cells only, so a failed cell counts as
+    # errored, never as an abstention (of its stand-in verdict or of its ground truth).
     coverage_stats: CoverageStats | None = None
     coverage_mode = cannot_assess == "exclude" and na_mode == "exclude"
     if coverage_mode:
         n_total_raw = items_with_ground_truth + n_errored_items
         agg_judge_abstain = 0
         agg_gt_abstain = 0
+        agg_errored = 0
         for c_idx in range(n_criteria):
             c_type = criterion_types[c_idx]
-            raw_pred = per_criterion_pred[c_idx]
-            raw_true = per_criterion_true[c_idx]
+            raw_pred = judged_pred[c_idx]
+            raw_true = judged_true[c_idx]
             if c_type == "binary":
                 CA = CriterionVerdict.CANNOT_ASSESS
                 judge_abstain = sum(1 for v in raw_pred if v == CA)
@@ -2268,37 +2400,32 @@ def compute_metrics(
                 }
                 judge_abstain = sum(1 for v in raw_pred if isinstance(v, int) and v in na_idx_set)
                 gt_abstain = sum(1 for v in raw_true if isinstance(v, int) and v in na_idx_set)
+            n_errored = n_errored_items + n_failed_cells[c_idx]
             agg_judge_abstain += judge_abstain
             agg_gt_abstain += gt_abstain
+            agg_errored += n_errored
             cstats = _build_coverage_stats(
                 n_total=n_total_raw,
                 n_covered=per_criterion[c_idx].n_samples,
                 judge_abstain=judge_abstain,
                 gt_abstain=gt_abstain,
-                n_errored=n_errored_items,
+                n_errored=n_errored,
             )
             per_criterion[c_idx] = per_criterion[c_idx].model_copy(
                 update={"coverage_stats": cstats}
             )
 
-        # Aggregate rollup: coverage pools the per-criterion *pairs* (raw pair count summed
-        # over criteria; covered = sum of per-criterion covered counts), so the coverage /
-        # abstain fractions reflect the full paired sample. ``n_errored``, by contrast, is an
-        # *item* count (an errored item has no usable verdicts at all) — reported as the raw
-        # item count for an intuitive read, matching the per-criterion value; its ``error_rate``
-        # is the fraction of raw ground-truth-bearing items lost to a grading error.
-        agg_total = n_total_raw * n_criteria
-        agg_covered = sum(cm.n_samples for cm in per_criterion)
-        agg_coverage = agg_covered / agg_total if agg_total else None
-        coverage_stats = CoverageStats(
-            n_total=agg_total,
-            n_covered=agg_covered,
-            coverage=agg_coverage,
-            judge_abstain_rate=(agg_judge_abstain / agg_total if agg_total else None),
-            gt_abstain_rate=(agg_gt_abstain / agg_total if agg_total else None),
-            union_exclusion_rate=(1 - agg_coverage if agg_coverage is not None else None),
-            n_errored=n_errored_items,
-            error_rate=(n_errored_items / n_total_raw if n_total_raw else None),
+        # Aggregate rollup: pools the per-criterion *pairs* (raw pair count summed over
+        # criteria; covered, abstained and errored = the sums of the per-criterion counts),
+        # so every fraction, error_rate included, reflects the full paired sample. For a run
+        # whose only errors are errored items, error_rate is the fraction of raw
+        # ground-truth-bearing items lost to a grading error.
+        coverage_stats = _build_coverage_stats(
+            n_total=n_total_raw * n_criteria,
+            n_covered=sum(cm.n_samples for cm in per_criterion),
+            judge_abstain=agg_judge_abstain,
+            gt_abstain=agg_gt_abstain,
+            n_errored=agg_errored,
         )
 
     if n_errored_items > 0:
@@ -2306,6 +2433,8 @@ def compute_metrics(
             f"{n_errored_items} item(s) with ground truth were excluded from metrics because "
             "grading errored; their verdicts and scores do not contribute."
         )
+    if sum(n_failed_cells) > 0:
+        result_warnings.append(_failed_judgments_warning(sum(n_failed_cells)))
 
     # Score-level metrics
     score_rmse = float(np.sqrt(mean_squared_error(all_true_scores, all_pred_scores)))
@@ -2339,13 +2468,14 @@ def compute_metrics(
 
     # Bootstrap CIs (optional) — item-level resample over ANY rubric type (binary /
     # multi-choice / mixed). Per-metric None when its resample axis is empty / degenerate.
-    # per_criterion_pred has been normalized to ints (no None) by the effective-criteria pass
-    # above, so its static type matches the helper's list[CriterionVerdict | int].
+    # It resamples the item-aligned arrays (one index shared by every criterion) and drops
+    # each replicate's failed cells, as the point estimates above leave them out.
     bootstrap_results = None
     if bootstrap:
         bootstrap_results = _compute_bootstrap_ci(
-            per_criterion_pred,  # type: ignore[arg-type]
+            per_criterion_pred,
             per_criterion_true,
+            per_criterion_failed,
             list(criterion_types),
             effective_criteria,
             cannot_assess,
@@ -2404,7 +2534,8 @@ def compute_metrics(
     # criteria that define an NA option, paired pred-vs-truth. Reuses the
     # same chance-corrected statistic as the rest of the framework's
     # prediction-vs-ground-truth agreement metrics (binary `kappa`, ordinal
-    # `weighted_kappa`, nominal `kappa`). Returns None when undefined.
+    # `weighted_kappa`, nominal `kappa`). Returns None when undefined. Judged cells only: a
+    # failed cell's stand-in NA is no answer, and its pair counts on neither side.
     na_stats = None
     if n_ordinal > 0 or n_nominal > 0:
         na_pred_bool: list[bool] = []
@@ -2416,7 +2547,7 @@ def compute_metrics(
             na_indices = {i for i, opt in enumerate(criterion.options) if opt.na}
             if not na_indices:
                 continue
-            for p, t in zip(per_criterion_pred[c_idx], per_criterion_true[c_idx]):
+            for p, t in zip(judged_pred[c_idx], judged_true[c_idx]):
                 if isinstance(p, int) and isinstance(t, int):
                     p_is_na = p in na_indices
                     t_is_na = t in na_indices
@@ -2453,8 +2584,9 @@ def compute_metrics(
     # multi-choice NA (epistemic MET-vs-UNMET abstention rather than "no applicable
     # option"), so it is tracked by a separate stats type (CannotAssessStats) even though
     # both share the SKIP scoring path. Counts are mode-independent: read from the raw
-    # per-criterion verdicts (set at the top of this function), never the
-    # cannot_assess-filtered lists. Returns None when there are no binary criteria.
+    # per-criterion verdicts of the judged cells (set at the top of this function), never
+    # the cannot_assess-filtered lists; a failed cell's stand-in CANNOT_ASSESS is no answer,
+    # and its pair counts on neither side. Returns None when there are no binary criteria.
     cannot_assess_stats = None
     if n_binary > 0:
         ca_pred_bool: list[bool] = []
@@ -2467,7 +2599,7 @@ def compute_metrics(
         for c_idx in range(n_criteria):
             if criterion_types[c_idx] != "binary":
                 continue
-            for p, t in zip(per_criterion_pred[c_idx], per_criterion_true[c_idx]):
+            for p, t in zip(judged_pred[c_idx], judged_true[c_idx]):
                 if isinstance(p, CriterionVerdict) and isinstance(t, CriterionVerdict):
                     p_is_ca = p == CA
                     t_is_ca = t == CA

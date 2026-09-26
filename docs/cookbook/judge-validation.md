@@ -98,8 +98,10 @@ print(f"F1 Score:            {num(metrics.criterion_f1)}")
 ```
 
 Items whose grading failed are left out of every metric. That includes an item whose every
-judge call failed, which has no score. `metrics.warnings` says how many were left out, and
-`metrics.coverage_stats.n_errored` counts them (see
+judge call failed, which has no score. A criterion whose judge call failed on an item that was
+otherwise graded is left out of the verdict metrics too, since its verdict only stands in for
+the failed call. `metrics.warnings` says how many items and criterion judgments were left out,
+and `metrics.coverage_stats.n_errored` counts the (item, criterion) pairs they cost (see
 [Errored Items and Score Pairs](../api/metrics.md#errored-items-and-score-pairs)).
 
 ### Interpreting the Metrics
