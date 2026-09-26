@@ -1,12 +1,14 @@
 """Tests for autorubric.dataset module."""
 
+import base64
 import json
+import pickle
 import tempfile
 from pathlib import Path
 
 import pytest
 
-from autorubric import Criterion, CriterionVerdict, Rubric
+from autorubric import Criterion, CriterionOption, CriterionVerdict, Rubric
 from autorubric.dataset import DataItem, RubricDataset
 
 # =============================================================================
@@ -951,3 +953,257 @@ class TestPerItemPrompt:
         assert len(dataset) == 2
         assert dataset.get_item_prompt(0) == "Prompt for question 1"
         assert dataset.get_item_prompt(1) == "Prompt for question 2"
+
+
+# =============================================================================
+# Ground Truth Reasons Tests
+# =============================================================================
+
+LEGACY_PICKLE = Path(__file__).resolve().parents[1] / "golden" / "legacy" / "pickled_results.json"
+
+
+class TestDataItemGroundTruthReasons:
+    """Tests for DataItem.ground_truth_reasons (one reason or None per ground truth value)."""
+
+    def test_existing_positional_construction_has_no_reasons(self):
+        """The field comes last, so the six existing fields keep their positions."""
+        rubric = Rubric([Criterion(weight=1.0, requirement="R1")])
+        item = DataItem("Text", "Desc", [CriterionVerdict.MET], rubric, "Reference", "Prompt")
+
+        assert item.ground_truth == [CriterionVerdict.MET]
+        assert item.rubric is rubric
+        assert (item.reference_submission, item.prompt) == ("Reference", "Prompt")
+        assert item.ground_truth_reasons is None
+
+    def test_item_pickled_before_reasons_existed_has_none(self):
+        """A DataItem pickled by an earlier release reads the field's class-level default."""
+        fixture = json.loads(LEGACY_PICKLE.read_text(encoding="utf-8"))
+        dataset = pickle.loads(base64.b64decode(fixture["pickle_b64"]))["dataset"]
+
+        assert dataset.items
+        # The pickle predates the field: no item stores a value of its own.
+        assert all("ground_truth_reasons" not in vars(item) for item in dataset.items)
+        assert [item.ground_truth_reasons for item in dataset.items] == [None] * len(dataset)
+
+    @pytest.mark.parametrize(
+        ("ground_truth", "ground_truth_reasons", "expected_error"),
+        [
+            # Reasons explain ground truth values, so there must be some
+            (None, ["Cites the source."], "Ground truth reasons require ground truth"),
+            # One reason (or None) per ground truth value
+            (
+                [CriterionVerdict.MET, "Very satisfied"],
+                ["Cites the source."],
+                "Ground truth reasons have 1 values, but ground truth has 2 values",
+            ),
+            # A reason is text or None
+            (
+                [CriterionVerdict.MET, "Very satisfied"],
+                ["Cites the source.", 5],
+                "Ground truth reasons must be str or None, got int",
+            ),
+            # A string is not a list of reasons, even one of the right length
+            (
+                [CriterionVerdict.MET, "Very satisfied"],
+                "ab",
+                "Ground truth reasons must be a list, got str",
+            ),
+        ],
+    )
+    def test_invalid_reasons_are_rejected(self, ground_truth, ground_truth_reasons, expected_error):
+        """DataItem rejects reasons that do not align with its ground truth."""
+        with pytest.raises(ValueError, match=expected_error):
+            DataItem(
+                submission="Test",
+                description="Test",
+                ground_truth=ground_truth,
+                ground_truth_reasons=ground_truth_reasons,
+            )
+
+
+class TestRubricDatasetGroundTruthReasons:
+    """Tests for ground truth reasons through RubricDataset."""
+
+    @pytest.mark.parametrize("stratify", [True, False])
+    def test_split_train_test_keeps_each_items_reasons(self, sample_rubric: Rubric, stratify):
+        """Both splits keep every item's reasons, stratified or not."""
+        met, unmet = CriterionVerdict.MET, CriterionVerdict.UNMET
+        labels = {
+            "A": ([met, met, unmet], ["Accurate.", "Clear.", None]),
+            "B": ([unmet, met, unmet], None),
+            "C": ([met, unmet, met], [None, None, "States a wrong date."]),
+            "D": ([met, unmet, unmet], ["Accurate.", None, None]),
+        }
+        dataset = RubricDataset(
+            prompt="Test",
+            rubric=sample_rubric,
+            items=[
+                DataItem(
+                    submission=submission,
+                    description=submission,
+                    ground_truth=ground_truth,
+                    ground_truth_reasons=reasons,
+                )
+                for submission, (ground_truth, reasons) in labels.items()
+            ],
+        )
+
+        train, test = dataset.split_train_test(n_train=2, stratify=stratify, seed=0)
+
+        assert len(train) == 2
+        assert {item.submission: item.ground_truth_reasons for item in [*train, *test]} == {
+            "A": ["Accurate.", "Clear.", None],
+            "B": None,
+            "C": [None, None, "States a wrong date."],
+            "D": ["Accurate.", None, None],
+        }
+
+    def test_add_item_with_ground_truth_reasons(self, sample_rubric: Rubric):
+        """add_item keeps the reasons it is given beside the ground truth."""
+        dataset = RubricDataset(prompt="Test", rubric=sample_rubric)
+        dataset.add_item(
+            submission="Text",
+            description="Desc",
+            ground_truth=[CriterionVerdict.MET, CriterionVerdict.UNMET, CriterionVerdict.UNMET],
+            ground_truth_reasons=["Accurate.", None, "No errors."],
+        )
+
+        assert dataset[0].ground_truth_reasons == ["Accurate.", None, "No errors."]
+
+    def test_add_item_rejects_reasons_misaligned_with_ground_truth(self, sample_rubric: Rubric):
+        """add_item refuses reasons that do not align with the ground truth and adds nothing."""
+        dataset = RubricDataset(prompt="Test", rubric=sample_rubric)
+        with pytest.raises(
+            ValueError, match="Ground truth reasons have 2 values, but ground truth has 3 values"
+        ):
+            dataset.add_item(
+                submission="Text",
+                description="Desc",
+                ground_truth=[
+                    CriterionVerdict.MET,
+                    CriterionVerdict.UNMET,
+                    CriterionVerdict.UNMET,
+                ],
+                ground_truth_reasons=["Accurate.", None],
+            )
+
+        assert len(dataset) == 0
+
+    @staticmethod
+    def _labeled_dataset() -> RubricDataset:
+        """Two items on a binary + multi-choice rubric, the first with reasons."""
+        rubric = Rubric(
+            [
+                Criterion(name="sources", weight=1.0, requirement="Cites a source"),
+                Criterion(
+                    name="tone",
+                    weight=1.0,
+                    requirement="Which tone fits best?",
+                    scale_type="nominal",
+                    options=[
+                        CriterionOption(label="Formal", value=1.0),
+                        CriterionOption(label="Casual", value=0.0),
+                    ],
+                ),
+            ]
+        )
+        dataset = RubricDataset(prompt="Explain the claim", rubric=rubric, name="reasons")
+        dataset.add_item(
+            submission="Per Smith (2020), the claim holds.",
+            description="Cited, formal",
+            ground_truth=[CriterionVerdict.MET, "Formal"],
+            prompt="Explain the claim formally",
+            ground_truth_reasons=["Names Smith (2020).", None],
+        )
+        dataset.add_item(
+            submission="trust me lol",
+            description="Uncited, casual",
+            ground_truth=[CriterionVerdict.UNMET, "Casual"],
+        )
+        return dataset
+
+    def test_to_json_writes_reasons_right_after_ground_truth_only_when_set(self):
+        """Only an item with reasons gains the key, placed right after ground_truth."""
+        items = json.loads(self._labeled_dataset().to_json())["items"]
+
+        assert list(items[0]) == [
+            "submission",
+            "description",
+            "ground_truth",
+            "ground_truth_reasons",
+            "prompt",
+        ]
+        assert items[0]["ground_truth_reasons"] == ["Names Smith (2020).", None]
+        assert list(items[1]) == ["submission", "description", "ground_truth"]
+
+    @pytest.mark.parametrize("via_file", [False, True])
+    def test_round_trip_keeps_reasons(self, via_file, tmp_path):
+        """Reasons, None entries included, survive a JSON or file round trip."""
+        dataset = self._labeled_dataset()
+        if via_file:
+            path = tmp_path / "dataset.json"
+            dataset.to_file(path)
+            loaded = RubricDataset.from_file(path)
+        else:
+            loaded = RubricDataset.from_json(dataset.to_json())
+
+        assert [item.ground_truth_reasons for item in loaded] == [
+            ["Names Smith (2020).", None],
+            None,
+        ]
+        assert loaded.to_json() == dataset.to_json()
+
+    def test_from_json_reads_reasons(self):
+        """from_json reads each item's reasons, null entries as None."""
+        payload = {
+            "prompt": "Explain the claim",
+            "rubric": [{"name": "sources", "weight": 1.0, "requirement": "Cites a source"}],
+            "items": [
+                {
+                    "submission": "Per Smith (2020).",
+                    "description": "D1",
+                    "ground_truth": ["MET"],
+                    "ground_truth_reasons": ["Names Smith (2020)."],
+                },
+                {
+                    "submission": "trust me lol",
+                    "description": "D2",
+                    "ground_truth": ["UNMET"],
+                    "ground_truth_reasons": [None],
+                },
+                {"submission": "Unlabeled.", "description": "D3", "ground_truth": None},
+            ],
+        }
+
+        loaded = RubricDataset.from_json(json.dumps(payload))
+
+        assert [item.ground_truth_reasons for item in loaded] == [
+            ["Names Smith (2020)."],
+            [None],
+            None,
+        ]
+
+    @pytest.mark.parametrize(
+        ("item_payload", "expected_error"),
+        [
+            (
+                {"ground_truth": None, "ground_truth_reasons": ["Names a source."]},
+                "Ground truth reasons require ground truth",
+            ),
+            (
+                {"ground_truth": ["MET"], "ground_truth_reasons": ["Names a source.", None]},
+                "Ground truth reasons have 2 values, but ground truth has 1 values",
+            ),
+        ],
+    )
+    def test_from_json_rejects_reasons_misaligned_with_ground_truth(
+        self, item_payload, expected_error
+    ):
+        """A dataset file whose reasons do not align with its ground truth fails to load."""
+        payload = {
+            "prompt": "Explain the claim",
+            "rubric": [{"name": "sources", "weight": 1.0, "requirement": "Cites a source"}],
+            "items": [{"submission": "S", "description": "D", **item_payload}],
+        }
+        with pytest.raises(ValueError, match=expected_error):
+            RubricDataset.from_json(json.dumps(payload))

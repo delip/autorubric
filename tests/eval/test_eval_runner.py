@@ -21,6 +21,7 @@ from autorubric import (
     evaluate,
 )
 from autorubric.dataset import DataItem, RubricDataset
+from autorubric.eval import _compute_dataset_hash
 from autorubric.llm import LLMConfig
 from autorubric.types import (
     AggregatedMultiChoiceVerdict,
@@ -1415,3 +1416,112 @@ class TestManifestJudgeConfig:
             assert "temperature" in judges["default"]
             assert judges["default"]["temperature"] is None
             assert judges["explicit"]["temperature"] == 0.0
+
+
+# -----------------------------------------------------------------------------
+# Fresh starts in an existing experiment directory
+# -----------------------------------------------------------------------------
+
+
+def _two_item_dataset(like: RubricDataset) -> RubricDataset:
+    """A different dataset with the same rubric."""
+    dataset = RubricDataset(prompt=like.prompt, rubric=like.rubric, name=like.name)
+    for submission in ("Another explanation.", "One more explanation."):
+        dataset.add_item(
+            submission=submission,
+            description="Other response",
+            ground_truth=[CriterionVerdict.MET, CriterionVerdict.UNMET],
+        )
+    return dataset
+
+
+def _checkpoint(experiment_dir: Path) -> tuple[dict, list[dict]]:
+    manifest = json.loads((experiment_dir / "manifest.json").read_text(encoding="utf-8"))
+    items_path = experiment_dir / "items.jsonl"
+    lines = items_path.read_text(encoding="utf-8").splitlines() if items_path.exists() else []
+    return manifest, [json.loads(line) for line in lines if line.strip()]
+
+
+class TestFreshStartInExistingExperiment:
+    """A run that starts over in an existing experiment directory holds only its own items."""
+
+    @pytest.mark.asyncio
+    async def test_rerun_without_resume_holds_only_the_new_run(self, sample_dataset):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            for _ in range(2):
+                await evaluate(
+                    dataset=sample_dataset,
+                    grader=create_mock_grader(),
+                    show_progress=False,
+                    experiment_name="rerun",
+                    experiments_dir=tmp_dir,
+                    resume=False,
+                )
+
+            experiment_dir = Path(tmp_dir) / "rerun"
+            _, items = _checkpoint(experiment_dir)
+            assert sorted(item["item_idx"] for item in items) == [0, 1, 2]
+            assert len(EvalResult.from_experiment(experiment_dir).item_results) == 3
+
+    @pytest.mark.asyncio
+    async def test_resume_after_a_dataset_change_starts_a_fresh_checkpoint(self, sample_dataset):
+        changed = _two_item_dataset(sample_dataset)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            for dataset in (sample_dataset, changed):
+                await evaluate(
+                    dataset=dataset,
+                    grader=create_mock_grader(),
+                    show_progress=False,
+                    experiment_name="changed",
+                    experiments_dir=tmp_dir,
+                    resume=True,
+                )
+
+            manifest, items = _checkpoint(Path(tmp_dir) / "changed")
+            assert manifest["dataset_hash"] == _compute_dataset_hash(changed)
+            assert manifest["total_items"] == 2
+            assert sorted(manifest["completed_indices"]) == [0, 1]
+            assert sorted(item["item_idx"] for item in items) == [0, 1]
+
+    @pytest.mark.asyncio
+    async def test_resume_without_a_manifest_starts_a_fresh_checkpoint(self, sample_dataset):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            experiment_dir = Path(tmp_dir) / "no-manifest"
+            experiment_dir.mkdir()
+            (experiment_dir / "items.jsonl").write_text('{"stale": true}\n', encoding="utf-8")
+
+            await evaluate(
+                dataset=sample_dataset,
+                grader=create_mock_grader(),
+                show_progress=False,
+                experiment_name="no-manifest",
+                experiments_dir=tmp_dir,
+                resume=True,
+            )
+
+            manifest, items = _checkpoint(experiment_dir)
+            assert manifest["dataset_hash"] == _compute_dataset_hash(sample_dataset)
+            assert sorted(item["item_idx"] for item in items) == [0, 1, 2]
+
+    @pytest.mark.asyncio
+    async def test_resume_with_the_same_dataset_keeps_completed_items(self, sample_dataset):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            await evaluate(
+                dataset=sample_dataset,
+                grader=create_mock_grader(),
+                show_progress=False,
+                experiment_name="resumed",
+                experiments_dir=tmp_dir,
+            )
+            regrader = create_mock_grader()
+            await evaluate(
+                dataset=sample_dataset,
+                grader=regrader,
+                show_progress=False,
+                experiment_name="resumed",
+                experiments_dir=tmp_dir,
+            )
+
+            assert regrader.grade.await_count == 0
+            _, items = _checkpoint(Path(tmp_dir) / "resumed")
+            assert sorted(item["item_idx"] for item in items) == [0, 1, 2]

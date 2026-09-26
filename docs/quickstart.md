@@ -31,7 +31,7 @@ export ANTHROPIC_API_KEY=your_key_here
 export GEMINI_API_KEY=your_key_here
 ```
 
-AutoRubric automatically loads environment variables from `.env` files.
+When it is imported, AutoRubric loads the nearest `.env` file at or above your working directory, so a `.env` in your project directory works from scripts and notebooks alike. Variables already set in your environment take precedence.
 
 ### Supported Providers
 
@@ -241,8 +241,9 @@ async def batch_eval():
     result = await evaluate(dataset, grader, show_progress=True)
 
     print(f"Evaluated {result.successful_items}/{result.total_items}")
-    # total_completion_cost is `float | None` (None when no per-item cost is
-    # available, e.g. all-cached responses), so guard before formatting.
+    # total_completion_cost is `float | None` (None when no item has a known cost,
+    # e.g. for a model LiteLLM cannot price), so guard before formatting. Responses
+    # served from the cache report the cost recorded when they were generated.
     cost = result.total_completion_cost
     print(f"Total cost: ${cost:.4f}" if cost is not None else "Total cost: n/a")
 ```

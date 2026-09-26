@@ -21,7 +21,7 @@ flowchart LR
 - Creating rubrics with `Rubric.from_dict()`
 - Configuring an LLM judge with `LLMConfig` and `CriterionGrader`
 - Grading responses with `rubric.grade()`
-- Interpreting `EvaluationReport` results
+- Interpreting `EnsembleEvaluationReport` results
 - Understanding positive and negative criteria weights
 
 ## The Solution
@@ -132,7 +132,7 @@ result = asyncio.run(main())
 
 ### Step 4: Interpret the Results
 
-The `EvaluationReport` contains the overall score and per-criterion breakdown:
+The `EnsembleEvaluationReport` contains the overall score and per-criterion breakdown:
 
 ```python
 # Overall score: `float | None` — 0.0 to 1.0, or None if the grade failed.
@@ -146,15 +146,17 @@ if result.completion_cost:
 
 # Per-criterion breakdown
 for criterion in result.report:
-    # Get the verdict (MET, UNMET, or CANNOT_ASSESS).
-    # final_verdict is None for failed/multi-choice criteria, so guard it.
+    # Get the verdict (MET, UNMET, or CANNOT_ASSESS). It is None only for multi-choice
+    # criteria, which carry final_multi_choice_verdict instead, so guard it. A failed
+    # judge call still yields a verdict (CANNOT_ASSESS, or the worst case for an unknown
+    # error); criterion.error records the failure.
     verdict = criterion.final_verdict.value if criterion.final_verdict else "n/a"
 
     # The criterion's name and weight live on the nested criterion
     name = criterion.criterion.name or "unnamed"
     weight = criterion.criterion.weight
 
-    # The judge's explanation
+    # The judge's explanation, prefixed with its judge_id ("default" for a single judge)
     reason = criterion.final_reason
 
     print(f"\n[{verdict}] {name} (weight: {weight})")
@@ -167,16 +169,16 @@ Sample output:
 Score: 1.00
 
 [MET] addresses_issue (weight: 10.0)
-  Reason: The response directly addresses the WiFi connectivity issue reported after the Windows update.
+  Reason: default: The response directly addresses the WiFi connectivity issue reported after the Windows update.
 
 [MET] provides_solution (weight: 8.0)
-  Reason: Clear step-by-step solutions are provided: resetting the network adapter and running the troubleshooter.
+  Reason: default: Clear step-by-step solutions are provided: resetting the network adapter and running the troubleshooter.
 
 [MET] professional_tone (weight: 5.0)
-  Reason: The response is courteous, empathetic, and maintains professional language throughout.
+  Reason: default: The response is courteous, empathetic, and maintains professional language throughout.
 
 [UNMET] factual_errors (weight: -15.0)
-  Reason: The technical instructions are accurate for Windows troubleshooting.
+  Reason: default: The technical instructions are accurate for Windows troubleshooting.
 ```
 
 ### Understanding the Score

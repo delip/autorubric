@@ -7,7 +7,7 @@ import sys
 import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
-from typing import Any, cast
+from typing import Any, Generic, TypeVar, cast
 
 from autorubric.types import (
     Criterion,
@@ -130,7 +130,11 @@ def _warn_ignores_guidelines(grader: object) -> None:
         instance_dict["_guidelines_warned"] = True
 
 
-class Grader(ABC):
+ReportT = TypeVar("ReportT", bound=EvaluationReport | EnsembleEvaluationReport)
+"""The report type a grader's ``aggregate``, and so its ``grade``, returns."""
+
+
+class Grader(ABC, Generic[ReportT]):
     """Base class for LLM-backed grading implementations.
 
     All graders require an LLMConfig for the LLM client. Subclasses must
@@ -185,7 +189,7 @@ class Grader(ABC):
         pass
 
     @abstractmethod
-    async def aggregate(self, judge_results: Any, *, normalize: bool = True) -> EvaluationReport:
+    async def aggregate(self, judge_results: Any, *, normalize: bool = True) -> ReportT:
         """Transform judge results into an EvaluationReport.
 
         Args:
@@ -205,7 +209,7 @@ class Grader(ABC):
         reference_submission: str | None = None,
         *,
         guidelines: str | None = None,
-    ) -> EvaluationReport:
+    ) -> ReportT:
         """Grade the submission against the rubric.
 
         This is the main entry point for the grader.
@@ -287,30 +291,7 @@ class Grader(ABC):
             if self.normalize:
                 adjusted_score = max(0.0, adjusted_score)
 
-            # Return the same report type with adjusted score
-            if isinstance(report, EnsembleEvaluationReport):
-                return EnsembleEvaluationReport(
-                    score=adjusted_score,
-                    raw_score=report.raw_score,
-                    llm_raw_score=report.llm_raw_score,
-                    report=report.report,
-                    judge_scores=report.judge_scores,
-                    mean_agreement=report.mean_agreement,
-                    cannot_assess_count=report.cannot_assess_count,
-                    token_usage=report.token_usage,
-                    completion_cost=report.completion_cost,
-                    error=report.error,
-                )
-            else:
-                return EvaluationReport(
-                    score=adjusted_score,
-                    raw_score=report.raw_score,
-                    llm_raw_score=report.llm_raw_score,
-                    report=report.report,
-                    cannot_assess_count=report.cannot_assess_count,
-                    error=report.error,
-                    token_usage=report.token_usage,
-                    completion_cost=report.completion_cost,
-                )
+            # The same report, of the same type, with the adjusted score
+            return report.model_copy(update={"score": adjusted_score})
 
         return report

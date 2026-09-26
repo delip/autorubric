@@ -10,7 +10,7 @@ You're evaluating product review summaries with multi-choice quality scales. You
 
 - Using `CriterionGrader(seed=...)` to pin all non-LLM randomness
 - How the master seed coordinates option shuffling and few-shot selection
-- Inspecting `shuffle_order` in criterion reports
+- Inspecting `shuffle_order` on each judge's vote
 - How seeds are persisted in experiment checkpoints
 - Comparing runs with identical seeds to isolate rubric changes
 
@@ -22,7 +22,7 @@ flowchart LR
     MS --> FS[Few-Shot Seed]
     SS --> |per item × criterion × judge| RNG[Seeded RNG]
     RNG --> SO[shuffle_order]
-    SO --> CR[CriterionReport]
+    SO --> CR[MultiChoiceJudgeVote]
     MS --> MF[manifest.json]
 ```
 
@@ -57,8 +57,8 @@ The master seed controls two sources of randomness:
 
 | Source | Without Seed | With Seed |
 |--------|-------------|-----------|
-| **Option shuffling** | Different permutation every call | Deterministic per (item, criterion, judge) |
-| **Few-shot example selection** | Random sampling | Reproducible stratified sampling |
+| **Option shuffling** | Deterministic per (item, criterion, judge) within one grader, but differs between graders (each auto-generates its own seed) | Deterministic per (item, criterion, judge), identical in every grader with the same seed |
+| **Few-shot example selection** | Fixed for the grader's lifetime, but differs between graders | Identical in every grader with the same seed |
 
 LLM sampling (temperature, top-p) is **not** affected—it depends on provider-level randomness. The seed pins everything you control on the client side.
 
@@ -124,7 +124,7 @@ async def main():
         report = item_result.report
         if report.report:
             for cr in report.report:
-                # The aggregate report never sets shuffle_order; it is recorded on
+                # The aggregate report has no shuffle_order; it is recorded on
                 # each per-judge vote. For a single judge, read vote 0.
                 if cr.multi_choice_votes:
                     shuffle_order = cr.multi_choice_votes[0].shuffle_order
@@ -225,7 +225,7 @@ If you set `FewShotConfig(seed=99)` explicitly, the master seed does not overrid
 | Auto-generation | Omitting `seed` auto-generates one; access via `grader.seed` |
 | Scope | Controls option shuffling and few-shot selection; does not affect LLM sampling |
 | Concurrency-safe | Per-call RNG derived from `(seed, content_hash, criterion_idx, judge_id)` |
-| Persistence | `shuffle_order` in `CriterionReport`, `master_seed` in experiment manifest |
+| Persistence | `shuffle_order` on each `MultiChoiceJudgeVote`, `master_seed` in experiment manifest |
 
 ## Going Further
 

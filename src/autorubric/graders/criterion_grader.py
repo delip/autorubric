@@ -9,6 +9,7 @@ import hashlib
 import itertools
 import logging
 import math
+import numbers
 import random
 import warnings
 from collections import Counter
@@ -65,7 +66,7 @@ from autorubric.types import (
 from autorubric.utils import _normalize_guidelines
 
 if TYPE_CHECKING:
-    from autorubric.dataset import RubricDataset
+    from autorubric.dataset import DataItem, RubricDataset
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +91,21 @@ def _derive_shuffle_rng(
 # selection. Few-shot examples are a fixed property of (criterion, judge), not of the
 # item being graded, so the per-call item content is intentionally not part of the key.
 FEW_SHOT_DOMAIN = "few_shot"
+
+# The judge_id a grader built with ``judge_model_config`` gives its one judge. That judge's
+# LLM client keeps the plain response-cache key; every other LLM judge caches under its
+# judge_id, so judges polling one model keep their own answers (see ``LLMClient``).
+_SINGLE_JUDGE_ID = "default"
+
+
+def _ground_truth_reason(item: DataItem, criterion_idx: int) -> str | None:
+    """A training item's written reason for its ground truth on a criterion, if it has one.
+
+    The reason rides along with the few-shot example drawn from the item; it never
+    affects which items are drawn.
+    """
+    reasons = item.ground_truth_reasons
+    return reasons[criterion_idx] if reasons is not None else None
 
 
 _ESCALATION_NAMES_CHECKED: ContextVar[bool] = ContextVar("_ESCALATION_NAMES_CHECKED", default=False)
@@ -225,6 +241,29 @@ def _top_tied_keys(scores: Mapping[int, float]) -> list[int]:
     return [i for i, s in scores.items() if s == top]
 
 
+def _check_judge_weight(weight: object, judge_id: object) -> None:
+    """Refuse a judge weight that is not a positive, finite real number (no ``bool``).
+
+    Aggregation sums judge weights (``weighted``, ``weighted_mean``, ``weighted_mode``)
+    and compares their sums with zero (``unanimous``, ``any``), so a zero, negative or
+    non-finite weight would silently change verdicts: a zero-weight UNMET vote could not
+    block ``unanimous``, and weights of +1 and -1 could cancel out.
+
+    Raises:
+        ValueError: If ``weight`` is not a positive, finite number.
+    """
+    if (
+        isinstance(weight, bool)
+        or not isinstance(weight, numbers.Real)
+        or not math.isfinite(weight)
+        or weight <= 0
+    ):
+        raise ValueError(
+            f"Judge {judge_id!r} has weight {weight!r}; a judge weight must be a positive, "
+            "finite number"
+        )
+
+
 @dataclass
 class JudgeSpec:
     """Specification for a single judge in an ensemble.
@@ -246,7 +285,8 @@ class JudgeSpec:
             ``DecisionModelConfig`` (the stored field; also readable and writable as the
             ``judge_model_config`` property).
         judge_id: Unique identifier for this judge (e.g., "gpt-4", "claude-sonnet").
-        weight: Voting weight for weighted aggregation (default 1.0).
+        weight: Voting weight for weighted aggregation (default 1.0); a positive, finite
+            number.
 
     Example:
         >>> gemini = LLMConfig(model="gemini/gemini-3-flash-preview")
@@ -294,11 +334,13 @@ class JudgeSpec:
             llm_config: The judge's model configuration, positionally or by the stored
                 field name. Mutually exclusive with ``judge_model_config``.
             judge_id: Unique identifier for this judge.
-            weight: Voting weight for weighted aggregation (default 1.0).
+            weight: Voting weight for weighted aggregation (default 1.0); a positive,
+                finite number.
             judge_model_config: The judge's model configuration (preferred keyword).
 
         Raises:
-            ValueError: If both ``judge_model_config`` and ``llm_config`` are passed.
+            ValueError: If both ``judge_model_config`` and ``llm_config`` are passed, or if
+                ``weight`` is not a positive, finite number.
             TypeError: If the configuration or ``judge_id`` is missing.
         """
         if judge_model_config is not dataclasses.MISSING:
@@ -322,6 +364,7 @@ class JudgeSpec:
                 f"JudgeSpec.__init__() missing {len(missing)} required {kind}{plural}: "
                 + " and ".join(missing)
             )
+        _check_judge_weight(weight, judge_id)
         self.llm_config = llm_config
         self.judge_id = judge_id
         self.weight = weight
@@ -835,7 +878,7 @@ def _ensemble_evaluation_report(
     )
 
 
-class CriterionGrader(Grader):
+class CriterionGrader(Grader[EnsembleEvaluationReport]):
     """Unified criterion-based grader with compositional few-shot and ensemble support.
 
     This grader evaluates each criterion independently and supports:
@@ -998,7 +1041,9 @@ class CriterionGrader(Grader):
             training_data: Dataset for few-shot examples. If provided, enables few-shot
                 prompting for the LLM judges; examples are selected for, and sent to, LLM
                 judges only, never to a decision-model judge, whose request is exactly what
-                it would be without them.
+                it would be without them. An example shows its item's ground truth for the
+                criterion and, when ``few_shot_config.include_reason`` is True, the item's
+                written reason for it (``DataItem.ground_truth_reasons``), if any.
             few_shot_config: Configuration for few-shot example selection (LLM judges only).
             system_prompt: Custom system prompt for binary criteria. Applies to LLM judges
                 only (a decision model's request has no system prompt); in a mixed ensemble
@@ -1113,7 +1158,9 @@ class CriterionGrader(Grader):
         self._judges: list[JudgeSpec]
         if judge_model_config is not None:
             self._judges = [
-                JudgeSpec(judge_model_config=judge_model_config, judge_id="default", weight=1.0)
+                JudgeSpec(
+                    judge_model_config=judge_model_config, judge_id=_SINGLE_JUDGE_ID, weight=1.0
+                )
             ]
         else:
             assert judges is not None
@@ -1250,11 +1297,19 @@ class CriterionGrader(Grader):
         self._clients: dict[str, LLMClient] = {}
         self._decision_clients: dict[str, DecisionModelClient] = {}
         for judge in all_judges:
+            # A spec is mutable, so check the weight it has now, not only the one it was built with
+            _check_judge_weight(judge.weight, judge.judge_id)
             config = judge.llm_config
+            # Each judge of an ensemble or cascade caches under its own id, so judges sending
+            # identical requests never read one another's answers; the lone judge keeps the
+            # plain key, and with it the caches of earlier single-judge runs.
+            namespace = None if judge.judge_id == _SINGLE_JUDGE_ID else judge.judge_id
             if isinstance(config, DecisionModelConfig):
-                self._decision_clients[judge.judge_id] = DecisionModelClient(config)
+                self._decision_clients[judge.judge_id] = DecisionModelClient(
+                    config, cache_namespace=namespace
+                )
             else:
-                self._clients[judge.judge_id] = LLMClient(config)
+                self._clients[judge.judge_id] = LLMClient(config, cache_namespace=namespace)
 
         # Pre-compute few-shot examples if training data provided
         # Note: For multi-choice, examples are stored as (submission, selected_index, reason)
@@ -1338,7 +1393,11 @@ class CriterionGrader(Grader):
     def _select_examples_for_criterion(
         self, criterion_idx: int, judge_id: str
     ) -> list[FewShotExample]:
-        """Select stratified examples for a specific criterion and judge."""
+        """Select stratified examples for a specific criterion and judge.
+
+        Each example carries its item's reason for this criterion
+        (``DataItem.ground_truth_reasons``), if it has one; reasons never affect the draw.
+        """
         if self._training_data is None:
             return []
 
@@ -1377,7 +1436,7 @@ class CriterionGrader(Grader):
                 FewShotExample(
                     submission=item.submission,
                     verdict=item.ground_truth[criterion_idx],  # type: ignore
-                    reason=None,
+                    reason=_ground_truth_reason(item, criterion_idx),
                 )
                 for item in all_items[:n_examples]
             ]
@@ -1447,7 +1506,7 @@ class CriterionGrader(Grader):
             transform=lambda item: FewShotExample(
                 submission=item.submission,
                 verdict=item.ground_truth[criterion_idx],  # type: ignore
-                reason=None,
+                reason=_ground_truth_reason(item, criterion_idx),
             ),
             identity=lambda item: item.submission,
         )
@@ -1471,7 +1530,9 @@ class CriterionGrader(Grader):
 
         Groups training items by their selected option index and balances
         across options when configured. Ground truth labels are converted
-        to 0-based option indices.
+        to 0-based option indices. Each example carries its item's reason for
+        this criterion (``DataItem.ground_truth_reasons``), if it has one;
+        reasons never affect the draw.
         """
         if self._training_data is None:
             return []
@@ -1510,7 +1571,11 @@ class CriterionGrader(Grader):
                 groups=sorted_groups,
                 n_examples=n_examples,
                 rng=rng,
-                transform=lambda pair: (pair[0].submission, pair[1], None),
+                transform=lambda pair: (
+                    pair[0].submission,
+                    pair[1],
+                    _ground_truth_reason(pair[0], criterion_idx),
+                ),
                 identity=lambda pair: pair[0].submission,
             )
         else:
@@ -1521,7 +1586,7 @@ class CriterionGrader(Grader):
             ]
             rng.shuffle(all_pairs)
             return [
-                (item.submission, resolved_idx, None)
+                (item.submission, resolved_idx, _ground_truth_reason(item, criterion_idx))
                 for item, resolved_idx in all_pairs[:n_examples]
             ]
 

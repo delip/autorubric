@@ -4,7 +4,7 @@ Dataset management classes for organizing evaluation data with optional ground t
 
 ## Overview
 
-The `RubricDataset` class provides structured storage for evaluation datasets, including submissions, optional ground truth verdicts, per-item rubrics, and reference submissions. Datasets can be serialized to JSON/YAML for sharing and reproducibility.
+The `RubricDataset` class provides structured storage for evaluation datasets, including submissions, optional ground truth verdicts, per-item rubrics, and reference submissions. Datasets serialize to JSON (`to_json`/`to_file`, and back with `from_json`/`from_file`) for sharing and reproducibility.
 
 ## Quick Example
 

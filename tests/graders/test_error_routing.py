@@ -289,7 +289,7 @@ async def test_ensemble_mixed_one_failure_keeps_successful_verdict():
     client_b = MagicMock()
     client_b.generate = AsyncMock(return_value=_ok_binary_result(CriterionVerdict.MET))
 
-    def fake_client(config: LLMConfig) -> MagicMock:
+    def fake_client(config: LLMConfig, *, cache_namespace: str | None = None) -> MagicMock:
         return client_a if config.model == "judge-a-model" else client_b
 
     with patch(
@@ -322,7 +322,7 @@ async def test_ensemble_all_judges_fail_cannot_assess_and_flagged():
     client_a = _client_raising(litellm.Timeout("a down", model="m", llm_provider="p"))
     client_b = _client_raising(litellm.RateLimitError("b down", model="m", llm_provider="p"))
 
-    def fake_client(config: LLMConfig) -> MagicMock:
+    def fake_client(config: LLMConfig, *, cache_namespace: str | None = None) -> MagicMock:
         return client_a if config.model == "judge-a-model" else client_b
 
     with patch(
@@ -482,7 +482,7 @@ async def test_ensemble_multi_choice_vote_carries_error():
     client_b = MagicMock()
     client_b.generate = AsyncMock(return_value=_ok_mc_result(2))
 
-    def fake_client(config: LLMConfig) -> MagicMock:
+    def fake_client(config: LLMConfig, *, cache_namespace: str | None = None) -> MagicMock:
         return client_a if config.model == "judge-a-model" else client_b
 
     with patch(
@@ -537,7 +537,7 @@ async def test_ensemble_multi_choice_all_judges_fail_error_flagged():
     client_a = _client_raising(litellm.Timeout("a down", model="m", llm_provider="p"))
     client_b = _client_raising(litellm.RateLimitError("b down", model="m", llm_provider="p"))
 
-    def fake_client(config: LLMConfig) -> MagicMock:
+    def fake_client(config: LLMConfig, *, cache_namespace: str | None = None) -> MagicMock:
         return client_a if config.model == "judge-a-model" else client_b
 
     with patch(
@@ -600,7 +600,7 @@ async def test_ensemble_forced_choice_all_fail_clean_abstain():
     client_a = _client_raising(litellm.Timeout("a down", model="m", llm_provider="p"))
     client_b = _client_raising(litellm.RateLimitError("b down", model="m", llm_provider="p"))
 
-    def fake_client(config: LLMConfig) -> MagicMock:
+    def fake_client(config: LLMConfig, *, cache_namespace: str | None = None) -> MagicMock:
         return client_a if config.model == "judge-a-model" else client_b
 
     with patch(
@@ -649,7 +649,7 @@ async def test_error_survives_serialization_round_trip(mock_llm_config):
     client_a = _client_raising(litellm.Timeout("a down", model="m", llm_provider="p"))
     client_b = _client_raising(litellm.RateLimitError("b down", model="m", llm_provider="p"))
 
-    def fake_client(config: LLMConfig) -> MagicMock:
+    def fake_client(config: LLMConfig, *, cache_namespace: str | None = None) -> MagicMock:
         return client_a if config.model == "judge-a-model" else client_b
 
     with patch(
@@ -702,7 +702,7 @@ async def test_none_abstain_survives_serialization_round_trip():
     client_a = _client_raising(litellm.Timeout("a down", model="m", llm_provider="p"))
     client_b = _client_raising(litellm.RateLimitError("b down", model="m", llm_provider="p"))
 
-    def fake_client(config: LLMConfig) -> MagicMock:
+    def fake_client(config: LLMConfig, *, cache_namespace: str | None = None) -> MagicMock:
         return client_a if config.model == "judge-a-model" else client_b
 
     with patch(

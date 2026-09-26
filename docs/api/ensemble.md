@@ -47,7 +47,9 @@ for cr in result.report:
 
 ## Keyword Form
 
-`JudgeSpec` takes the judge's config, its `judge_id`, and an optional `weight`, in that order. When
+`JudgeSpec` takes the judge's config, its `judge_id`, and an optional `weight`, in that order. A
+weight must be a positive, finite number (default `1.0`); zero, negative, NaN and infinite weights
+raise `ValueError`, because the weighted and threshold strategies sum and compare judge weights. When
 you pass the config by keyword, call it `judge_model_config`:
 
 ```python
@@ -72,8 +74,9 @@ it emits a `FutureWarning` naming the repeated ids. A repeated `judge_id` will r
 in the next major version. A cascade already rejects repeats (see
 [Decision Models](../cookbook/decision-models.md)).
 
-To poll one model several times, give each copy its own id. Each copy then also gets its own
-option shuffle:
+To poll one model several times, LLM or decision model, give each copy its own id. Each copy then
+gets its own response-cache entries with `cache_enabled=True`, so a rerun replays each copy's own
+answers, and each copy of an LLM judge also gets its own option shuffle:
 
 ```python
 judges = [JudgeSpec(LLMConfig(model="openai/gpt-4.1-mini"), f"gpt-{i}") for i in range(3)]
@@ -83,15 +86,21 @@ judges = [JudgeSpec(LLMConfig(model="openai/gpt-4.1-mini"), f"gpt-{i}") for i in
 
 | Strategy | Description |
 |----------|-------------|
-| `majority` | > 50% of judges must vote MET |
+| `majority` | Head count of MET vs UNMET votes; the larger count wins |
 | `weighted` | Weighted vote using judge weights |
-| `unanimous` | All judges must vote MET |
+| `unanimous` | All non-abstaining judges must vote MET |
 | `any` | Any judge voting MET results in MET |
 
 These apply to **binary** criteria only and are independent of multi-choice aggregation
 (`ordinal_aggregation` / `nominal_aggregation`). Conceptually, binary `unanimous` ≡ the
 **min** over the {0, 1} option values and `any` ≡ the **max**; the ordinal analogs are the
 `min` / `max` strategies (see the [multi-choice cookbook](../cookbook/multi-choice-rubrics.md)).
+
+Every strategy counts only MET and UNMET votes. CANNOT_ASSESS votes, including those of judge
+calls that failed with an API or parse error, are set aside first, and a criterion whose votes
+all abstain is CANNOT_ASSESS. A `majority` or `weighted` tie goes to the verdict that scores
+lowest for the criterion's weight sign: UNMET for a positive (or zero) weight, MET for a
+negative one.
 
 ---
 

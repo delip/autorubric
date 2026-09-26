@@ -96,7 +96,7 @@ grader = CriterionGrader(judge_model_config=config, seed=42)
 grader = CriterionGrader(judge_model_config=config, shuffle_options=False)
 ```
 
-The shuffle order for each criterion is recorded in `CriterionReport.shuffle_order` and persisted in experiment checkpoints.
+The shuffle order each judge saw is recorded on its vote, `MultiChoiceJudgeVote.shuffle_order` (in the criterion's `multi_choice_votes`), and persisted in experiment checkpoints.
 
 ## Ground Truth Format
 

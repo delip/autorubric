@@ -10,7 +10,7 @@ You're evaluating security vulnerability assessment reports. These require deep 
 
 - Enabling extended thinking with `ThinkingConfig`
 - Using thinking levels (LOW, MEDIUM, HIGH) vs explicit token budgets
-- Accessing reasoning traces: report-level `CriterionReport.reasoning` for grading results, `GenerateResult.thinking` for direct `LLMClient.generate` calls
+- Accessing reasoning traces: each judge's vote's `reasoning` (`JudgeVote.reasoning` in `cr.votes`, `MultiChoiceJudgeVote.reasoning` in `cr.multi_choice_votes`) for grading results, `GenerateResult.thinking` for direct `LLMClient.generate` calls
 - Balancing reasoning depth against latency and cost
 
 ## The Solution
@@ -21,7 +21,7 @@ flowchart LR
     B --> C[Thinking Tokens<br/>internal reasoning]
     C --> D[Output Tokens<br/>verdict + justification]
     D --> E[CriterionGrader<br/>parses response]
-    E --> F[EvaluationReport]
+    E --> F[EnsembleEvaluationReport]
 ```
 
 ### Step 1: Define Technical Evaluation Criteria
@@ -189,6 +189,16 @@ async def main():
 
 result = asyncio.run(main())
 ````
+
+Each judge's reasoning trace is on its vote, next to its explanation:
+
+```python
+for cr in result.report:
+    for vote in cr.votes or cr.multi_choice_votes:  # binary / multi-choice criteria
+        print(f"{cr.criterion.name} ({vote.judge_id}): {vote.reason}")
+        if vote.reasoning:  # None when the provider returns no trace
+            print(vote.reasoning)
+```
 
 ### Step 5: Compare With and Without Thinking
 

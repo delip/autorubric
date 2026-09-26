@@ -252,7 +252,7 @@ def make_grader(log: CallLog) -> Iterator[Any]:
     def build(**kwargs: Any) -> CriterionGrader:
         with patch(
             "autorubric.graders.criterion_grader.LLMClient",
-            side_effect=lambda config: ScriptedLLMClient(log, config),
+            side_effect=lambda config, *, cache_namespace=None: ScriptedLLMClient(log, config),
         ):
             grader = CriterionGrader(**kwargs)
         built.append(grader)

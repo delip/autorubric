@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import itertools
 import json
 import sys
 from collections.abc import Iterator
@@ -25,7 +26,7 @@ from unittest.mock import patch
 import httpx2
 import pytest
 import typesafe_sdk
-from typesafe_sdk import SystemOneResponse
+from typesafe_sdk import Noul, SystemOneResponse
 
 from autorubric import (
     CannotAssessConfig,
@@ -580,6 +581,73 @@ class TestOneRequestPerItem:
         assert len(fake_sdk.calls) == 1
         assert again.model_dump() == first.model_dump()
         assert again.token_usage == first.token_usage == TokenUsage(1234, 7, 1241)
+
+
+# =============================================================================
+# Response-cache keys: each judge of an ensemble or cascade has its own
+# =============================================================================
+
+
+def _key(client: DecisionModelClient) -> str:
+    return client._cache_key(
+        {"submission": SUBMISSION}, {"c0": Noul(instructions="Mentions light")}
+    )
+
+
+class TestJudgeCacheKeys:
+    """Decision-model judges of an ensemble or cascade keep their own response-cache entries.
+
+    As for LLM judges (``tests/graders/test_judge_cache_keys.py``): judges of one decision
+    model send identical requests, so without a per-judge key a rerun would replay one
+    judge's answers to all of them. A lone judge (``judge_id="default"``) keeps the plain
+    key, so its existing caches stay valid.
+    """
+
+    @pytest.mark.asyncio
+    async def test_rerun_of_repeated_judges_reads_each_judges_own_answer(
+        self, fake_sdk, make_grader, monkeypatch, tmp_path
+    ):
+        replies = itertools.cycle([response({"c0": noul(p)}) for p in (0.9, 0.2, 0.3)])
+
+        async def respond() -> SystemOneResponse:
+            return next(replies)
+
+        monkeypatch.setattr(fake_sdk, "respond", respond)
+        config = dm(cache_enabled=True, cache_dir=tmp_path / "cache")
+        runs = []
+        for _ in range(2):
+            sent_before = len(fake_sdk.calls)
+            grader = make_grader(judges=[JudgeSpec(config, f"jev-{i}") for i in range(3)])
+            report = await Rubric([LIGHT]).grade(SUBMISSION, grader=grader, query=QUERY)
+            votes = {
+                vote.judge_id: (vote.verdict, vote.confidence) for vote in report.report[0].votes
+            }
+            runs.append((votes, len(fake_sdk.calls) - sent_before))
+
+        (first_votes, first_sent), (rerun_votes, rerun_sent) = runs
+        assert first_sent == 3
+        assert sorted(verdict.value for verdict, _ in first_votes.values()) == [
+            "MET",
+            "UNMET",
+            "UNMET",
+        ]
+        assert len({confidence for _, confidence in first_votes.values()}) == 3
+        assert rerun_sent == 0
+        assert rerun_votes == first_votes
+
+    def test_a_lone_judge_keeps_the_plain_cache_key(self, make_grader):
+        config = dm()
+        lone = make_grader(judge_model_config=config)._decision_clients["default"]
+
+        assert _key(lone) == _key(DecisionModelClient(config))
+
+    def test_ensemble_judges_of_one_model_have_their_own_cache_keys(self, make_grader):
+        config = dm()
+        grader = make_grader(judges=[JudgeSpec(config, "a"), JudgeSpec(config, "b")])
+        keys = {judge_id: _key(client) for judge_id, client in grader._decision_clients.items()}
+
+        assert keys["a"] != keys["b"]
+        assert _key(DecisionModelClient(config)) not in keys.values()
 
 
 # =============================================================================

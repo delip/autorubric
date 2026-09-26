@@ -20,7 +20,7 @@ import diskcache
 import litellm
 import openai
 import yaml
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 from pydantic import BaseModel, ValidationError
 from rich.console import Console
 from rich.panel import Panel
@@ -37,8 +37,9 @@ from autorubric.rate_limit import RateLimitPool
 if TYPE_CHECKING:
     from autorubric.types import TokenUsage
 
-# Load environment variables from .env file (idempotent - safe to call multiple times)
-load_dotenv()
+# Load the nearest .env at or above the working directory, in scripts and notebooks alike;
+# variables already set in the environment take precedence.
+load_dotenv(find_dotenv(usecwd=True))
 
 logger = logging.getLogger(__name__)
 
@@ -478,13 +479,14 @@ class LLMConfig:
             - OpenAI: Reasoning for o-series and GPT-5 models
             - Gemini: Thinking mode (2.5+, 3.0+ models)
             - DeepSeek: Reasoning content
-        prompt_caching: Enable prompt caching for supported models (default: True).
-            When enabled, automatically detects if the model supports caching via
-            litellm.supports_prompt_caching() and applies provider-specific config:
-            - Anthropic: Adds cache_control to system messages + beta header
-            - OpenAI/Deepseek: Automatic for prompts ≥1024 tokens (no extra config)
-            - Bedrock: Supported for all models
-            Set to False to disable prompt caching entirely.
+        prompt_caching: Mark the system prompt for Anthropic's prompt cache (default: True).
+            Applies only to model ids that start with ``anthropic/`` or ``claude``: the
+            system message is sent with ``cache_control: {"type": "ephemeral"}``. Prompt
+            caching is generally available, so no beta header is added, and an
+            ``anthropic-beta`` value in ``extra_headers`` is sent unchanged. Other model
+            ids, Claude models served through Bedrock or Vertex AI included, are sent
+            unchanged. Providers that cache long prompts on their own (OpenAI, DeepSeek) do
+            so whatever this setting is.
         seed: Random seed for reproducible outputs (OpenAI, some other providers).
         extra_headers: Additional HTTP headers for provider-specific features.
         extra_params: Additional provider-specific parameters passed to LiteLLM.
@@ -645,11 +647,15 @@ class LLMClient:
     Uses diskcache for efficient, thread-safe response caching.
     """
 
-    def __init__(self, config: LLMConfig):
+    def __init__(self, config: LLMConfig, *, cache_namespace: str | None = None):
         """Initialize LLM client.
 
         Args:
             config: LLMConfig instance. The model field is required.
+            cache_namespace: Keeps this client's response-cache entries apart from those of
+                other clients that send identical requests, such as several judges polling
+                one model, whose answers are independent samples. It becomes part of the
+                cache key; ``None`` (the default) leaves the key exactly as without it.
 
         Raises:
             ValueError: If config.model is not specified.
@@ -658,6 +664,7 @@ class LLMClient:
             raise ValueError("LLMConfig.model is required and cannot be empty")
 
         self.config = config
+        self._cache_namespace = cache_namespace
         self._cache: diskcache.Cache | None = None
 
         if self.config.cache_enabled:
@@ -684,7 +691,8 @@ class LLMClient:
         """Generate a unique cache key for the request.
 
         Includes sampling parameters so that different configurations
-        (temperature, thinking, top_p, seed) produce distinct cache entries.
+        (temperature, thinking, top_p, seed) produce distinct cache entries, and the
+        client's ``cache_namespace`` when it has one.
 
         Args:
             model: Model identifier sent with the request.
@@ -709,6 +717,8 @@ class LLMClient:
             f":thinking={thinking_str}"
             f":seed={self.config.seed}"
         )
+        if self._cache_namespace is not None:
+            content += f":namespace={self._cache_namespace}"
         return hashlib.sha256(content.encode()).hexdigest()
 
     def _get_retry_decorator(self) -> Any:
@@ -867,9 +877,6 @@ class LLMClient:
 
         # Extra headers configuration
         extra_headers = dict(self.config.extra_headers)
-        if use_prompt_caching:
-            # Anthropic prompt caching requires beta header
-            extra_headers["anthropic-beta"] = "prompt-caching-2024-07-31"
         if extra_headers:
             params["extra_headers"] = extra_headers
 

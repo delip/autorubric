@@ -99,6 +99,11 @@ Main grader with support for single LLM, ensemble, and few-shot modes.
 
 Abstract base class for grader implementations.
 
+`Grader` is generic in the report type it returns. `CriterionGrader` is a
+`Grader[EnsembleEvaluationReport]`, so a type checker types `await rubric.grade(..., grader=grader)`
+as `EnsembleEvaluationReport`. A custom grader declares its own, for example
+`class MyGrader(Grader[EvaluationReport])`; one that names no type still works.
+
 ::: autorubric.graders.Grader
     options:
       show_source: true

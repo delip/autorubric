@@ -172,7 +172,8 @@ if n_failed:
 !!! warning "Don't retry with `force=True`"
     `force=True` re-grades every item, including the ones that already have
     labels, so you pay to label them all again. An item whose re-grade fails
-    is left out of the result even if it had a label before.
+    is left out of the result even if it had a label before, and a re-graded
+    item loses its `ground_truth_reasons`, written for the labels it replaces.
 
 ### Step 4: Save the Labeled Dataset
 
@@ -204,7 +205,7 @@ from autorubric import evaluate
 # Production model (cheaper, faster)
 production_grader = CriterionGrader(
     judge_model_config=LLMConfig(
-        model="openai/gpt-4.1-mini",  # or "gemini/gemini-2.0-flash"
+        model="openai/gpt-4.1-mini",  # or "gemini/gemini-2.5-flash"
     )
 )
 

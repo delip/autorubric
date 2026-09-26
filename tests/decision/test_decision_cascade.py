@@ -255,7 +255,7 @@ def make_grader(fake_sdk: Any, llm_log: list[LLMCall]) -> Iterator[Any]:
     def build(*, scripts: dict[str, dict[str, Any]] | None = None, **kwargs: Any) -> Any:
         scripts = scripts or {}
 
-        def client(config: LLMConfig) -> ScriptedLLM:
+        def client(config: LLMConfig, *, cache_namespace: str | None = None) -> ScriptedLLM:
             script = {**DEFAULT_LLM_ANSWERS, **scripts.get(config.model, {})}
             return ScriptedLLM(config.model, script, llm_log)
 
