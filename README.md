@@ -39,6 +39,13 @@ A Python library for evaluating text outputs against weighted criteria using AI 
 pip install autorubric
 ```
 
+For [decision-model judges](https://autorubric.org/docs/cookbook/decision-models/), install the TypeSafe extra and set its key:
+
+```bash
+pip install 'autorubric[typesafe]'
+export TYPESAFE_API_KEY=your_key_here
+```
+
 ## Quick Example
 
 ```python
