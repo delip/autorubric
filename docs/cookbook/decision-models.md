@@ -218,7 +218,7 @@ For inter-judge agreement, Fleiss' κ needs every judge to vote on a criterion, 
 | `metric` | The chosen metric over the whole run (default `criterion_accuracy`) |
 | `cost_usd`, `compute_seconds` | Summed cost and grading time |
 
-A cascade can only pay if `dm_accuracy_kept` is high and `fallback_accuracy_escalated` beats `dm_accuracy_escalated`. `escalation_stats` pools pairs, so it also works on datasets whose items have different rubrics. Accuracies are `None` when their subset has no labelled pairs.
+A cascade can only pay if `dm_accuracy_kept` is high and `fallback_accuracy_escalated` beats `dm_accuracy_escalated`. `escalation_stats` pools pairs, so it also works on datasets whose items have different rubrics. Accuracies are `None` when their subset has no labelled pairs. An abstention, or a verdict that stands in for a failed judge call, is no prediction: its pair counts in `escalation_rate` but in no accuracy.
 
 ## Offline calibration and replay
 
