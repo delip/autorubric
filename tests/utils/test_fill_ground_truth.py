@@ -398,3 +398,106 @@ async def test_fill_ground_truth_returns_new_dataset(binary_rubric, binary_crite
     # Should be different objects
     assert result is not dataset
     assert result.items[0] is not original_item
+
+
+@pytest.mark.asyncio
+async def test_fill_ground_truth_queries_with_per_item_prompt(binary_rubric, binary_criteria):
+    """Each item is graded against its own prompt, falling back to the dataset prompt."""
+    dataset = RubricDataset(
+        prompt="Evaluate the response",
+        rubric=binary_rubric,
+        items=[
+            DataItem(submission="Response 1", description="Item 1", prompt="Summarize the paper"),
+            DataItem(submission="Response 2", description="Item 2"),
+        ],
+        name="test",
+    )
+
+    mock_grader = MagicMock()
+    queries: dict[str, str] = {}
+
+    async def mock_grade(to_grade, grader, query, reference_submission=None):
+        queries[to_grade] = query
+        return create_mock_ensemble_binary_report(
+            [CriterionVerdict.MET, CriterionVerdict.MET], binary_criteria
+        )
+
+    with patch.object(binary_rubric, "grade", side_effect=mock_grade):
+        await fill_ground_truth(dataset, mock_grader, show_progress=False)
+
+    assert queries == {
+        "Response 1": "Summarize the paper",
+        "Response 2": "Evaluate the response",
+    }
+
+
+@pytest.mark.asyncio
+async def test_fill_ground_truth_preserves_graded_item_fields(binary_criteria):
+    """A graded item keeps every per-item field; only ground_truth is filled in."""
+    item_rubric = Rubric(binary_criteria)
+    dataset = RubricDataset(
+        prompt="Evaluate the response",
+        items=[
+            DataItem(
+                submission="Response 1",
+                description="Item 1",
+                rubric=item_rubric,
+                reference_submission="Reference answer",
+                prompt="Summarize the paper",
+            ),
+        ],
+        name="test",
+    )
+
+    mock_grader = MagicMock()
+
+    async def mock_grade(to_grade, grader, query, reference_submission=None):
+        return create_mock_ensemble_binary_report(
+            [CriterionVerdict.MET, CriterionVerdict.UNMET], binary_criteria
+        )
+
+    with patch.object(item_rubric, "grade", side_effect=mock_grade):
+        result = await fill_ground_truth(dataset, mock_grader, show_progress=False)
+
+    assert result.items == [
+        DataItem(
+            submission="Response 1",
+            description="Item 1",
+            ground_truth=[CriterionVerdict.MET, CriterionVerdict.UNMET],
+            rubric=item_rubric,
+            reference_submission="Reference answer",
+            prompt="Summarize the paper",
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_fill_ground_truth_dataset_with_only_per_item_prompts(binary_rubric, binary_criteria):
+    """A dataset with no global prompt (every item has its own) can be labeled."""
+    dataset = RubricDataset(
+        rubric=binary_rubric,
+        items=[
+            DataItem(submission="Response 1", description="Item 1", prompt="Prompt A"),
+            DataItem(submission="Response 2", description="Item 2", prompt="Prompt B"),
+        ],
+        name="test",
+    )
+
+    mock_grader = MagicMock()
+    queries: dict[str, str] = {}
+
+    async def mock_grade(to_grade, grader, query, reference_submission=None):
+        queries[to_grade] = query
+        return create_mock_ensemble_binary_report(
+            [CriterionVerdict.MET, CriterionVerdict.MET], binary_criteria
+        )
+
+    with patch.object(binary_rubric, "grade", side_effect=mock_grade):
+        result = await fill_ground_truth(dataset, mock_grader, show_progress=False)
+
+    assert queries == {"Response 1": "Prompt A", "Response 2": "Prompt B"}
+    assert [item.prompt for item in result.items] == ["Prompt A", "Prompt B"]
+    assert [item.ground_truth for item in result.items] == [
+        [CriterionVerdict.MET, CriterionVerdict.MET],
+        [CriterionVerdict.MET, CriterionVerdict.MET],
+    ]
