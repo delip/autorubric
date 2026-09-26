@@ -13,9 +13,6 @@ from pathlib import Path
 
 import pytest
 
-# The ty executable installed beside this interpreter (ty.exe on Windows), if any.
-TY = shutil.which("ty", path=str(Path(sys.executable).parent))
-
 MODULE = """
 from typing import Any, assert_type
 
@@ -47,13 +44,15 @@ async def check(rubric: Rubric) -> None:
 
 
 def test_grade_returns_the_graders_report_type(tmp_path: Path) -> None:
-    if TY is None:
+    # The ty executable installed beside this interpreter (ty.exe on Windows), if any.
+    ty = shutil.which("ty", path=str(Path(sys.executable).parent)) or ""
+    if not ty:
         pytest.skip("the ty type checker is not installed in this environment")
     module = tmp_path / "report_types.py"
     module.write_text(MODULE, encoding="utf-8")
 
     completed = subprocess.run(
-        [TY, "check", "--python", sys.executable, "--output-format", "concise", str(module)],
+        [ty, "check", "--python", sys.executable, "--output-format", "concise", str(module)],
         capture_output=True,
         text=True,
     )

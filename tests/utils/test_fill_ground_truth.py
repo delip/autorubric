@@ -2,15 +2,19 @@
 
 from unittest.mock import MagicMock, patch
 
+import litellm
 import pytest
+from litellm import ModelResponse
 
 from autorubric import (
     Criterion,
     CriterionOption,
     CriterionVerdict,
+    LLMConfig,
     Rubric,
 )
 from autorubric.dataset import DataItem, RubricDataset
+from autorubric.graders import CriterionGrader, JudgeSpec
 from autorubric.types import (
     AggregatedMultiChoiceVerdict,
     CriterionReport,
@@ -567,3 +571,117 @@ async def test_fill_ground_truth_keeps_reasons_of_items_it_does_not_grade(
     assert result.items[0].ground_truth == [CriterionVerdict.MET, CriterionVerdict.UNMET]
     assert result.items[0].ground_truth_reasons == ["States the right date.", None]
     assert result.items[1].ground_truth == new_gt
+
+
+# =============================================================================
+# Failed judge calls are never saved as labels (#22)
+# =============================================================================
+
+MET_JSON = '{"criterion_status": "MET", "explanation": "ok"}'
+
+
+def _llm_response(content: str) -> ModelResponse:
+    return ModelResponse(
+        model="gpt-4.1-mini",
+        choices=[
+            {
+                "message": {"role": "assistant", "content": content},
+                "finish_reason": "stop",
+                "index": 0,
+            }
+        ],
+        usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+    )
+
+
+def _failure(category: str, model: str) -> BaseException | None:
+    """An exception a judge call fails with in ``category``; None for a parse failure, which
+    is a response that does not parse."""
+    if category == "infrastructure":
+        return litellm.APIConnectionError(
+            message="Connection error.", llm_provider="openai", model=model
+        )
+    if category == "unknown":
+        return RuntimeError("boom")
+    return None
+
+
+def _one_item(rubric: Rubric) -> RubricDataset:
+    return RubricDataset(
+        prompt="Evaluate the response",
+        rubric=rubric,
+        items=[DataItem(submission="Response 1", description="Item 1")],
+        name="test",
+    )
+
+
+def _llm_grader(**kwargs) -> CriterionGrader:
+    if "judges" not in kwargs:
+        kwargs["judge_model_config"] = LLMConfig(model="openai/gpt-4.1-mini", max_retries=1)
+    return CriterionGrader(**kwargs)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("category", ["infrastructure", "parse", "unknown"])
+async def test_verdicts_standing_in_for_failed_judge_calls_are_not_labels(mixed_rubric, category):
+    """For a failed call the grader stands in a verdict (CANNOT_ASSESS or the NA option;
+    the worst case for an unknown failure) so that scoring can go on. It is no judgment, so
+    the item is left out, like any item that fails to label."""
+
+    async def acompletion(**params):
+        error = _failure(category, params["model"])
+        if error is not None:
+            raise error
+        return _llm_response("not json")
+
+    grader = _llm_grader()
+    with patch("litellm.acompletion", side_effect=acompletion):
+        report = await mixed_rubric.grade(
+            to_grade="Response 1", grader=grader, query="Evaluate the response"
+        )
+        labeled = await fill_ground_truth(_one_item(mixed_rubric), grader, show_progress=False)
+
+    assert isinstance(report, EnsembleEvaluationReport) and report.report is not None
+    assert [(cr.error or "").split(":")[0] for cr in report.report] == [category, category]
+    assert len(labeled) == 0
+
+
+@pytest.mark.asyncio
+async def test_an_item_with_one_failed_criterion_is_left_out(mixed_rubric):
+    """A label covers every criterion, so one failed judge call leaves the whole item out."""
+
+    async def acompletion(**params):
+        if "<options>" in str(params["messages"]):  # the multi-choice criterion
+            raise RuntimeError("boom")
+        return _llm_response(MET_JSON)
+
+    with patch("litellm.acompletion", side_effect=acompletion):
+        labeled = await fill_ground_truth(
+            _one_item(mixed_rubric), _llm_grader(), show_progress=False
+        )
+
+    assert len(labeled) == 0
+
+
+@pytest.mark.asyncio
+async def test_a_panel_with_a_genuine_vote_still_labels_the_item(binary_rubric):
+    """A criterion's report records an error only when every vote failed: a judge that
+    answered decides the label, as it decides the grade."""
+
+    async def acompletion(**params):
+        if params["model"].endswith("gpt-4.1"):  # the judge that is down
+            raise litellm.APIConnectionError(
+                message="Connection error.", llm_provider="openai", model=params["model"]
+            )
+        return _llm_response(MET_JSON)
+
+    grader = _llm_grader(
+        judges=[
+            JudgeSpec(LLMConfig(model="openai/gpt-4.1", max_retries=1), "down"),
+            JudgeSpec(LLMConfig(model="openai/gpt-4.1-mini", max_retries=1), "up"),
+        ]
+    )
+    with patch("litellm.acompletion", side_effect=acompletion):
+        labeled = await fill_ground_truth(_one_item(binary_rubric), grader, show_progress=False)
+
+    assert [item.ground_truth for item in labeled] == [[CriterionVerdict.MET, CriterionVerdict.MET]]

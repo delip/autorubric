@@ -127,10 +127,15 @@ print(f"Items labeled: {len(labeled_dataset)}/{len(dataset)}")
 ### Step 3: Retry Items That Failed to Label
 
 `fill_ground_truth()` returns only the items it could label. When grading an
-item raises an error, or its report can't be turned into a label for every
-criterion, the item is left out of the result rather than returned with
-`ground_truth=None`. Every item that does come back has a label for each
-criterion, so a result shorter than your dataset means some items failed.
+item raises an error, when every judge call for one of its criteria fails, or
+when its report can't otherwise be turned into a label for every criterion, the
+item is left out of the result rather than returned with `ground_truth=None`.
+For a failed call a grader stands in a verdict so that it can still score the
+item (`CANNOT_ASSESS`, the not-applicable option, or the worst case), but that
+stand-in is never saved as a label. In a panel, a criterion that at least one
+judge answered is labelled from the answers. Every item that does come back has
+a label for each criterion, so a result shorter than your dataset means some
+items failed.
 
 To retry just those items, label a dataset made of the missing ones and merge
 the results back in the original order:
