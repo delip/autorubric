@@ -481,12 +481,12 @@ class LLMConfig:
             - DeepSeek: Reasoning content
         prompt_caching: Mark the system prompt for Anthropic's prompt cache (default: True).
             Applies only to model ids that start with ``anthropic/`` or ``claude``: the
-            system message is sent with ``cache_control: {"type": "ephemeral"}`` and the
-            ``anthropic-beta: prompt-caching-2024-07-31`` header, which replaces any
-            ``anthropic-beta`` value in ``extra_headers``. Other model ids, Claude models
-            served through Bedrock or Vertex AI included, are sent unchanged. Providers
-            that cache long prompts on their own (OpenAI, DeepSeek) do so whatever this
-            setting is.
+            system message is sent with ``cache_control: {"type": "ephemeral"}``. Prompt
+            caching is generally available, so no beta header is added, and an
+            ``anthropic-beta`` value in ``extra_headers`` is sent unchanged. Other model
+            ids, Claude models served through Bedrock or Vertex AI included, are sent
+            unchanged. Providers that cache long prompts on their own (OpenAI, DeepSeek) do
+            so whatever this setting is.
         seed: Random seed for reproducible outputs (OpenAI, some other providers).
         extra_headers: Additional HTTP headers for provider-specific features.
         extra_params: Additional provider-specific parameters passed to LiteLLM.
@@ -877,9 +877,6 @@ class LLMClient:
 
         # Extra headers configuration
         extra_headers = dict(self.config.extra_headers)
-        if use_prompt_caching:
-            # Anthropic prompt caching requires beta header
-            extra_headers["anthropic-beta"] = "prompt-caching-2024-07-31"
         if extra_headers:
             params["extra_headers"] = extra_headers
 

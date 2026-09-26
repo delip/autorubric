@@ -653,3 +653,58 @@ class TestCacheNamespace:
             )
             == expected
         )
+
+
+class TestAnthropicPromptCaching:
+    """Anthropic prompt caching marks the system prompt and leaves ``anthropic-beta`` alone.
+
+    Prompt caching is generally available, so the marker (``cache_control``) is all it
+    needs; a beta header would only override one the user set in ``extra_headers``.
+    """
+
+    @staticmethod
+    async def _sent_params(config: LLMConfig) -> dict:
+        from litellm import ModelResponse
+
+        sent: dict = {}
+
+        async def fake_acompletion(**params):
+            sent.update(params)
+            return ModelResponse(
+                model="claude-sonnet-4-5-20250929",
+                choices=[
+                    {
+                        "message": {"role": "assistant", "content": "ok"},
+                        "finish_reason": "stop",
+                        "index": 0,
+                    }
+                ],
+                usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+            )
+
+        with patch("litellm.acompletion", side_effect=fake_acompletion):
+            await LLMClient(config).generate("System", "User")
+        return sent
+
+    @pytest.mark.asyncio
+    async def test_the_system_prompt_is_marked_for_caching(self):
+        sent = await self._sent_params(LLMConfig(model="anthropic/claude-sonnet-4-5-20250929"))
+
+        assert sent["messages"][0]["content"][0]["cache_control"] == {"type": "ephemeral"}
+
+    @pytest.mark.asyncio
+    async def test_a_users_anthropic_beta_header_is_sent_unchanged(self):
+        config = LLMConfig(
+            model="anthropic/claude-sonnet-4-5-20250929",
+            extra_headers={"anthropic-beta": "context-1m-2025-08-07"},
+        )
+
+        sent = await self._sent_params(config)
+
+        assert sent["extra_headers"] == {"anthropic-beta": "context-1m-2025-08-07"}
+
+    @pytest.mark.asyncio
+    async def test_prompt_caching_adds_no_beta_header(self):
+        sent = await self._sent_params(LLMConfig(model="anthropic/claude-sonnet-4-5-20250929"))
+
+        assert "anthropic-beta" not in sent.get("extra_headers", {})
