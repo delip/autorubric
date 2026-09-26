@@ -13,7 +13,12 @@ import pytest
 
 from autorubric.dataset import RubricDataset
 from autorubric.eval import EvalResult, EvalTimingStats, ItemResult
-from autorubric.metrics import compute_metrics, extract_all_verdicts_from_report
+from autorubric.metrics import (
+    CriterionMetrics,
+    OrdinalCriterionMetrics,
+    compute_metrics,
+    extract_all_verdicts_from_report,
+)
 from autorubric.metrics._compute import (
     _compute_adjacent_accuracy,
     _compute_bootstrap_ci,
@@ -27,6 +32,7 @@ from autorubric.rubric import Rubric
 from autorubric.types import (
     AggregatedMultiChoiceVerdict,
     Criterion,
+    CriterionOption,
     CriterionReport,
     CriterionVerdict,
     EnsembleCriterionReport,
@@ -205,6 +211,123 @@ def test_kappa_or_none(y1, y2, weights, expected):
     else:
         assert k is not None
         assert k == expected
+
+
+_SKLEARN_KAPPA_WARNINGS = ("A single label was found", "invalid value encountered")
+
+
+def _sklearn_kappa_warnings(caught: list[warnings.WarningMessage]) -> list[str]:
+    """The messages of sklearn's warnings about a kappa on one label, among ``caught``."""
+    return [
+        str(w.message)
+        for w in caught
+        if any(text in str(w.message) for text in _SKLEARN_KAPPA_WARNINGS)
+    ]
+
+
+@pytest.mark.parametrize(
+    ("y1", "y2", "weights"),
+    [([0, 0, 0], [0, 0, 0], None), ([0, 0], [0, 0], "quadratic"), ([True] * 2, [True] * 2, None)],
+)
+def test_kappa_on_one_label_is_none_without_warnings(y1, y2, weights):
+    """With one label across both sides, chance agreement is total and kappa is 0/0: None,
+    without sklearn's single-label and NaN warnings, which would only repeat it."""
+    kwargs = {} if weights is None else {"weights": weights}
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        assert _kappa_or_none(y1, y2, **kwargs) is None
+    assert [str(w.message) for w in caught] == []
+
+
+def test_kappa_with_two_labels_across_constant_sides_is_defined():
+    """Each side constant but the two labels different: chance agreement is 0, and so is
+    kappa. It is defined, so the one-label guard must look at both sides together."""
+    assert _kappa_or_none([0, 0], [1, 1]) == 0.0
+
+
+def _scored(report, score: float):
+    return report.model_copy(update={"score": score, "raw_score": score})
+
+
+def test_compute_metrics_reports_a_single_class_criterion_without_sklearn_warnings():
+    """A criterion whose truth and predictions are all MET has no kappa, and a run without
+    CANNOT_ASSESS no CANNOT_ASSESS kappa. compute_metrics reports both as None, flags the
+    criterion degenerate and warns about it itself, so sklearn's warnings are not raised."""
+    always = Criterion(name="always", weight=1.0, requirement="always met")
+    varies = Criterion(name="varies", weight=1.0, requirement="sometimes met")
+    met, unmet = CriterionVerdict.MET, CriterionVerdict.UNMET
+    truth = [[met, met], [met, unmet], [met, met], [met, unmet]]
+    predicted = [[met, met], [met, unmet], [met, unmet], [met, unmet]]
+    ds = RubricDataset(prompt="p", rubric=Rubric([always, varies]), name="x")
+    for gt in truth:
+        ds.add_item(submission="s", description="d", ground_truth=gt)
+    item_results = [
+        ItemResult(
+            item_idx=i,
+            item=ds.items[i],
+            report=_scored(_binary_report(p, [always, varies]), sum(v == met for v in p) / 2),
+            duration_seconds=0.1,
+        )
+        for i, p in enumerate(predicted)
+    ]
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        metrics = compute_metrics(_eval_result(item_results), ds)
+
+    assert _sklearn_kappa_warnings(caught) == []
+    degenerate, varied = metrics.per_criterion
+    assert isinstance(degenerate, CriterionMetrics) and isinstance(varied, CriterionMetrics)
+    assert (degenerate.kappa, degenerate.is_degenerate) == (None, True)
+    assert varied.kappa is not None
+    assert metrics.cannot_assess_stats is not None
+    assert metrics.cannot_assess_stats.ca_kappa is None
+    assert any("Degenerate (single-class)" in w for w in metrics.warnings)
+
+
+def test_compute_metrics_reports_an_unused_na_option_without_sklearn_warnings():
+    """No item picks, or is labelled, the NA option, so the NA kappa has one label: None,
+    without sklearn's warnings. The criterion's own kappa is defined."""
+    graded = Criterion(
+        name="graded",
+        weight=1.0,
+        requirement="graded",
+        scale_type="ordinal",
+        options=[
+            CriterionOption(label="Low", value=0.0),
+            CriterionOption(label="Mid", value=0.5),
+            CriterionOption(label="High", value=1.0),
+            CriterionOption(label="N/A", value=0.0, na=True),
+        ],
+    )
+    truth = ["Low", "High", "Mid", "High"]
+    picks = [0, 2, 1, 1]
+    ds = RubricDataset(prompt="p", rubric=Rubric([graded]), name="x")
+    for label in truth:
+        ds.add_item(submission="s", description="d", ground_truth=[label])
+    item_results = [
+        ItemResult(
+            item_idx=i,
+            item=ds.items[i],
+            report=_scored(
+                _multi_criterion_ensemble_report([graded], [[("j", pick)]], ["j"]),
+                graded.options[pick].value,  # type: ignore[index]
+            ),
+            duration_seconds=0.1,
+        )
+        for i, pick in enumerate(picks)
+    ]
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        metrics = compute_metrics(_eval_result(item_results), ds)
+
+    assert _sklearn_kappa_warnings(caught) == []
+    (graded_metrics,) = metrics.per_criterion
+    assert isinstance(graded_metrics, OrdinalCriterionMetrics)
+    assert graded_metrics.weighted_kappa is not None
+    assert metrics.na_stats is not None
+    assert metrics.na_stats.na_kappa is None
 
 
 # =============================================================================
