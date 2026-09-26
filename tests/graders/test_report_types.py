@@ -6,13 +6,15 @@ runs the project's type checker (``ty``) on a small module, because the annotati
 the feature; nothing changes at runtime.
 """
 
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
-TY = Path(sys.executable).parent / "ty"
+# The ty executable installed beside this interpreter (ty.exe on Windows), if any.
+TY = shutil.which("ty", path=str(Path(sys.executable).parent))
 
 MODULE = """
 from typing import Any, assert_type
@@ -45,13 +47,13 @@ async def check(rubric: Rubric) -> None:
 
 
 def test_grade_returns_the_graders_report_type(tmp_path: Path) -> None:
-    if not TY.exists():
+    if TY is None:
         pytest.skip("the ty type checker is not installed in this environment")
     module = tmp_path / "report_types.py"
     module.write_text(MODULE, encoding="utf-8")
 
     completed = subprocess.run(
-        [str(TY), "check", "--python", sys.executable, "--output-format", "concise", str(module)],
+        [TY, "check", "--python", sys.executable, "--output-format", "concise", str(module)],
         capture_output=True,
         text=True,
     )
