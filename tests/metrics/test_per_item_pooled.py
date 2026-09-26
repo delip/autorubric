@@ -136,6 +136,30 @@ class TestHeterogeneousBinaryPooling:
         assert binary.n_abstain == 1
         assert binary.exact_accuracy == pytest.approx(1.0)
 
+    def test_no_point_left_is_refused_with_its_cause(self):
+        """Every prediction on the graded items abstained: no rubric point is left to pool, so
+        every pooled metric is undefined. compute_metrics refuses and says why, as the
+        per-criterion path does without score pairs, rather than report a fabricated 0.0
+        RMSE and MAE."""
+        r0 = Rubric.from_dict([{"name": "a", "weight": 10.0, "requirement": "Requirement A"}])
+        r1 = Rubric.from_dict([{"name": "b", "weight": 10.0, "requirement": "Requirement B"}])
+        ds = RubricDataset(prompt="p", rubric=None, name="hetero")
+        ds.add_item(
+            submission="s0", description="i0", rubric=r0, ground_truth=[CriterionVerdict.MET]
+        )
+        ds.add_item(
+            submission="s1", description="i1", rubric=r1, ground_truth=[CriterionVerdict.UNMET]
+        )
+        ev = _eval_result(
+            [
+                _binary_report([CriterionVerdict.CANNOT_ASSESS], r0),
+                _binary_report([CriterionVerdict.CANNOT_ASSESS], r1),
+            ],
+            ds,
+        )
+        with pytest.raises(ValueError, match="No valid rubric points found"):
+            ev.compute_metrics(ds)
+
 
 class TestHeterogeneousMixedScales:
     def test_all_scale_types_pooled(self):
