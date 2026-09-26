@@ -110,11 +110,22 @@ recomputed from such a run leave that item out too, and read a judge's score on 
 every one of its calls failed as `None`.
 
 Errored items are reported in `warnings` ("... excluded from metrics because grading errored
-..."), and counted in `coverage_stats.n_errored` (under the default `exclude` modes; a dataset
-whose items have different rubrics, reported through `pooled_by_scale`, has no
-`coverage_stats`). If every item with ground truth is errored, `compute_metrics` raises
-`ValueError("No valid items with ground truth found")`. An item with only some criteria failed
-is not errored: its failed criteria's stand-in verdicts count like any other verdict.
+..."), and each of their pairs, one per criterion, is counted in `coverage_stats.n_errored`
+(under the default `exclude` modes; a dataset whose items have different rubrics, reported
+through `pooled_by_scale`, has no `coverage_stats`). If every item with ground truth is
+errored, `compute_metrics` raises `ValueError("No valid items with ground truth found")`.
+
+An item with only some criteria failed is not errored. Each criterion whose judgment failed on
+it is a **failed cell**: its stand-in verdict (`CANNOT_ASSESS` or the NA option for an API or
+parse error, the worst case for any other failure) is neither a prediction nor an abstention,
+whatever `cannot_assess` and `na_mode` say. A failed cell is left out of the criterion-level
+metrics, per criterion and in the aggregate, of `na_stats`, `cannot_assess_stats` and the
+bootstrap intervals, and never gives a criterion its NA option. It counts as an errored pair in
+`coverage_stats.n_errored`, and a second warning ("... criterion judgment(s) on graded items
+failed and were left out of the criterion-level metrics.") says how many there were. Per-judge
+metrics leave out a failed vote in the same way, so the per-judge metrics of a one-judge
+ensemble equal the aggregate. The item keeps its score, which the grader computed from its
+judged criteria and the stand-ins, so it still has a score pair.
 
 The score-level metrics (`score_rmse`, `score_mae`, the correlations, `bias` and the bootstrap
 `rmse_ci`) pair an item's score with its ground-truth score only where both are defined. An
@@ -150,7 +161,7 @@ errored, with a score or without.
 | `mean_krippendorff_alpha` | Macro mean of the per-criterion Krippendorff's α (inter-judge). `float | None`. |
 | `cannot_assess_mode` / `na_mode` | How CANNOT_ASSESS / NA were handled when the metrics were computed (`exclude` / `as_unmet` / `as_category`). Frozen on the result and round-tripped by `to_file` so a serialized number is never ambiguous among the estimands. |
 | `n_samples` | Total paired observations contributing to the aggregate metrics. `int | None`. |
-| `coverage_stats` | Under the `exclude` mode, how much of the raw paired sample survived abstention/error exclusion (`CoverageStats | None`). Counts `n_total` (raw pre-exclusion denominator), `n_covered` (== per-criterion `n_samples`), and `n_errored` (errored items, see [Errored Items and Score Pairs](#errored-items-and-score-pairs)); rates `coverage`, `judge_abstain_rate`, `gt_abstain_rate`, `union_exclusion_rate`, `error_rate` are each `float | None` (`None` when `n_total == 0`). |
+| `coverage_stats` | Under the `exclude` mode, how much of the raw paired sample survived abstention/error exclusion (`CoverageStats | None`). Counts `n_total` (raw pre-exclusion denominator), `n_covered` (== per-criterion `n_samples`), and `n_errored` (pairs lost to grading errors: each pair of an errored item, and each failed cell; see [Errored Items and Score Pairs](#errored-items-and-score-pairs)); rates `coverage`, `judge_abstain_rate`, `gt_abstain_rate`, `union_exclusion_rate`, `error_rate` are each `float | None` (`None` when `n_total == 0`). |
 | `per_criterion` | Per-criterion metrics breakdown (polymorphic: `CriterionMetrics`, `OrdinalCriterionMetrics`, `NominalCriterionMetrics`). Their per-criterion numeric fields (`accuracy`, `precision`, `recall`, `f1`, `kappa`, `weighted_kappa`, `adjacent_accuracy`, per-option metrics) are likewise `float | None` when undefined. |
 | `score_rmse` | RMSE of cumulative scores (always a `float`), over the items whose score and ground-truth score are both defined (see [Errored Items and Score Pairs](#errored-items-and-score-pairs)). |
 | `score_mae` | MAE of cumulative scores (always a `float`), over the same items as `score_rmse`. |
@@ -315,7 +326,7 @@ Statistics for CANNOT_ASSESS handling in binary criteria — the binary parallel
 
 ## CoverageStats
 
-How much of the raw paired sample survived abstention/error exclusion. Built only under the `exclude` handling mode (under `as_unmet` / `as_category` no observation is dropped, so coverage would be trivially `1.0` and these stats are left `None`). `n_total` is the raw pre-exclusion denominator, `n_covered` equals the per-criterion `n_samples`, and `n_errored` counts the [errored items](#errored-items-and-score-pairs); every rate (`coverage`, `judge_abstain_rate`, `gt_abstain_rate`, `union_exclusion_rate`, `error_rate`) is `float | None`, `None` when its denominator is zero.
+How much of the raw paired sample survived abstention/error exclusion. Built only under the `exclude` handling mode (under `as_unmet` / `as_category` no observation is dropped, so coverage would be trivially `1.0` and these stats are left `None`). `n_total` is the raw pre-exclusion denominator, `n_covered` equals the per-criterion `n_samples`, and `n_errored` counts the pairs lost to grading errors: each pair of an [errored item](#errored-items-and-score-pairs), and each failed cell, so `error_rate` is `n_errored / n_total`. The aggregate sums the per-criterion counts, so its `n_total` and `n_errored` count (item, criterion) pairs. Every rate (`coverage`, `judge_abstain_rate`, `gt_abstain_rate`, `union_exclusion_rate`, `error_rate`) is `float | None`, `None` when its denominator is zero.
 
 ::: autorubric.metrics.CoverageStats
     options:
