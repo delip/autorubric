@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import re
 import warnings
 from typing import TYPE_CHECKING
@@ -330,7 +331,9 @@ async def fill_ground_truth(
 
     Uses the provided grader to evaluate each item and extracts the verdicts
     to populate ground_truth. This is useful for creating synthetic ground
-    truth labels when manual annotation is impractical.
+    truth labels when manual annotation is impractical. Each item is graded
+    with its effective prompt, rubric, and reference submission (per-item
+    values take precedence over the dataset's).
 
     Args:
         dataset: The dataset to fill ground truth for.
@@ -342,9 +345,10 @@ async def fill_ground_truth(
             None = grade all items in parallel (default).
 
     Returns:
-        A new RubricDataset with ground_truth filled in. Items that fail to
-        grade are excluded from the returned dataset. Items with existing
-        ground_truth (when force=False) are included unchanged.
+        A new RubricDataset with ground_truth filled in. Graded items keep all
+        their other fields. Items that fail to grade are excluded from the
+        returned dataset. Items with existing ground_truth (when force=False)
+        are included unchanged.
 
     Raises:
         ValueError: If dataset has no items.
@@ -359,7 +363,7 @@ async def fill_ground_truth(
         >>> labeled = await fill_ground_truth(dataset, grader)
         >>> labeled.to_file("labeled.json")
     """
-    from autorubric.dataset import DataItem, RubricDataset
+    from autorubric.dataset import RubricDataset
 
     if len(dataset) == 0:
         raise ValueError("Dataset has no items")
@@ -388,17 +392,13 @@ async def fill_ground_truth(
                 report = await effective_rubric.grade(
                     to_grade=item.submission,
                     grader=grader,
-                    query=dataset.prompt,
+                    query=dataset.get_item_prompt(idx),
                     reference_submission=reference,
                 )
                 gt = _extract_ground_truth_from_report(report, effective_rubric.rubric)
-                new_item = DataItem(
-                    submission=item.submission,
-                    description=item.description,
-                    ground_truth=gt,
-                    rubric=item.rubric,  # Preserve per-item rubric
-                    reference_submission=item.reference_submission,  # Preserve reference
-                )
+                # Copy every per-item field (rubric, prompt, reference, ...); only
+                # ground_truth changes.
+                new_item = dataclasses.replace(item, ground_truth=gt)
                 return (idx, new_item, None)
             except Exception as e:
                 return (idx, None, str(e))
