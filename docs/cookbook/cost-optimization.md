@@ -37,7 +37,7 @@ from autorubric import LLMConfig
 from autorubric.graders import CriterionGrader
 
 grader = CriterionGrader(
-    llm_config=LLMConfig(
+    judge_model_config=LLMConfig(
         model="openai/gpt-4.1-mini",
         cache_enabled=True,           # Enable disk caching
         cache_dir=".autorubric_cache", # Cache location
@@ -114,7 +114,7 @@ For Anthropic models, prompt caching reduces costs for repeated system prompts:
 
 ```python
 grader = CriterionGrader(
-    llm_config=LLMConfig(
+    judge_model_config=LLMConfig(
         model="anthropic/claude-sonnet-4-5-20250929",
         prompt_caching=True,  # Enable Anthropic prompt caching (default)
     )
@@ -159,7 +159,7 @@ models = [
 results = []
 for model_id, name in models:
     grader = CriterionGrader(
-        llm_config=LLMConfig(model=model_id, temperature=0.0)
+        judge_model_config=LLMConfig(model=model_id, temperature=0.0)
     )
 
     result = await evaluate(dataset, grader, show_progress=False)
@@ -202,7 +202,7 @@ Combine strategies for optimal cost:
 ```python
 # Production configuration
 grader = CriterionGrader(
-    llm_config=LLMConfig(
+    judge_model_config=LLMConfig(
         # Cost-effective model
         model="openai/gpt-4.1-mini",
 
@@ -488,7 +488,7 @@ async def compare_models(dataset: RubricDataset):
     results = []
     for model_id, name in models:
         grader = CriterionGrader(
-            llm_config=LLMConfig(model=model_id, temperature=0.0)
+            judge_model_config=LLMConfig(model=model_id, temperature=0.0)
         )
 
         start = time.perf_counter()
@@ -520,7 +520,7 @@ async def benchmark_caching(dataset: RubricDataset):
     print("=" * 60)
 
     grader = CriterionGrader(
-        llm_config=LLMConfig(
+        judge_model_config=LLMConfig(
             model="openai/gpt-4.1-mini",
             temperature=0.0,
             cache_enabled=True,

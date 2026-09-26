@@ -57,6 +57,7 @@ Advanced patterns for specific needs.
 |--------|--------|-------------------|
 | [Per-Item Rubrics](per-item-rubrics.md) | Coding Interviews | Different rubrics for different items |
 | [Cost Optimization](cost-optimization.md) | News Fact-Checking | Caching and model selection strategies |
+| [Cheap First-Pass Grading with Jev and an LLM Fallback](cascade-grading.md) | Short-Answer Grading | Calibrating and deploying a decision-model cascade |
 | [Configuration Management](configuration-management.md) | Academic Papers | Sharing reproducible configs across teams |
 | [Evaluating Agent Skills](agent-skill-evaluation.md) | Peer Review | Skill evaluation with with/without-skill comparison |
 | [Improving Agent Skills](improving-agent-skills.md) | Peer Review | Automated skill refinement using rubric feedback |

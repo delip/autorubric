@@ -118,7 +118,7 @@ def build_grader(
     if USE_ENSEMBLE:
         judges = [
             JudgeSpec(
-                llm_config=LLMConfig(
+                judge_model_config=LLMConfig(
                     model=m,
                     temperature=1.0,
                     max_parallel_requests=5,
@@ -149,7 +149,7 @@ def build_grader(
             thinking=None,
         )
         grader = CriterionGrader(
-            llm_config=llm_config,
+            judge_model_config=llm_config,
             normalize=True,
             training_data=training_data,
             few_shot_config=few_shot_config,

@@ -35,7 +35,7 @@ from autorubric import LLMConfig
 from autorubric.graders import CriterionGrader
 
 grader = CriterionGrader(
-    llm_config=LLMConfig(model="openai/gpt-4.1-mini", temperature=0.3),
+    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini", temperature=0.3),
     seed=42,
 )
 
@@ -46,7 +46,7 @@ If you omit `seed`, one is auto-generated and accessible via `grader.seed`. This
 
 ```python
 grader = CriterionGrader(
-    llm_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
 )
 print(f"Auto seed: {grader.seed}")  # e.g. 1738294021
 ```
@@ -150,11 +150,11 @@ Run the same evaluation twice with the same seed:
 ```python
 async def verify_reproducibility():
     grader_a = CriterionGrader(
-        llm_config=LLMConfig(model="openai/gpt-4.1-mini", temperature=0.3),
+        judge_model_config=LLMConfig(model="openai/gpt-4.1-mini", temperature=0.3),
         seed=42,
     )
     grader_b = CriterionGrader(
-        llm_config=LLMConfig(model="openai/gpt-4.1-mini", temperature=0.3),
+        judge_model_config=LLMConfig(model="openai/gpt-4.1-mini", temperature=0.3),
         seed=42,
     )
 
@@ -205,7 +205,7 @@ When using few-shot examples, the master seed automatically flows to `FewShotCon
 from autorubric import FewShotConfig
 
 grader = CriterionGrader(
-    llm_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
     training_data=train_data,
     few_shot_config=FewShotConfig(n_examples=3),
     seed=42,  # Also governs example selection
@@ -320,7 +320,7 @@ async def main():
 
     # Create a seeded grader
     grader = CriterionGrader(
-        llm_config=LLMConfig(model="openai/gpt-4.1-mini", temperature=0.3),
+        judge_model_config=LLMConfig(model="openai/gpt-4.1-mini", temperature=0.3),
         seed=42,
     )
     print(f"Master seed: {grader.seed}")

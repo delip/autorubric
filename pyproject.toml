@@ -41,8 +41,17 @@ dependencies = [
     "krippendorff>=0.8.2",
 ]
 
+[project.optional-dependencies]
+# Decision-model judges (TypeSafe's Jev and other System One-compatible endpoints).
+# 0.7.1 is the first SDK release that redacts credentials from transport errors.
+# httpx2 is the SDK's HTTP stack (part of its public API); base URLs are parsed with it.
+# h11 writes its HTTP/1.1 requests; extra headers are checked with it.
+typesafe = ["typesafe-sdk>=0.7.1", "httpx2>=2.0.0", "h11>=0.16"]
+
 [dependency-groups]
 dev = [
+    # The test suite exercises the decision-model client against the real SDK types.
+    "autorubric[typesafe]",
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
     "ruff==0.14.1",

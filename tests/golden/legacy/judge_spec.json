@@ -1,0 +1,33 @@
+{
+  "asdict_keys": [
+    "llm_config",
+    "judge_id",
+    "weight"
+  ],
+  "field_defaults": {
+    "judge_id": null,
+    "llm_config": null,
+    "weight": 1.0
+  },
+  "field_names": [
+    "llm_config",
+    "judge_id",
+    "weight"
+  ],
+  "hash_is_none": true,
+  "match_args": [
+    "llm_config",
+    "judge_id",
+    "weight"
+  ],
+  "pickle_b64": "gASV4wEAAAAAAACMI2F1dG9ydWJyaWMuZ3JhZGVycy5jcml0ZXJpb25fZ3JhZGVylIwJSnVkZ2VTcGVjlJOUKYGUfZQojApsbG1fY29uZmlnlIwOYXV0b3J1YnJpYy5sbG2UjAlMTE1Db25maWeUk5QpgZR9lCiMBW1vZGVslIwMZ29sZGVuLW1vZGVslIwLdGVtcGVyYXR1cmWUTowKbWF4X3Rva2Vuc5ROjAV0b3BfcJROjAd0aW1lb3V0lEdATgAAAAAAAIwLbWF4X3JldHJpZXOUSwOMDnJldHJ5X21pbl93YWl0lEc/8AAAAAAAAIwOcmV0cnlfbWF4X3dhaXSUR0BOAAAAAAAAjBVtYXhfcGFyYWxsZWxfcmVxdWVzdHOUSwOMDWNhY2hlX2VuYWJsZWSUiYwJY2FjaGVfZGlylIwRLmF1dG9ydWJyaWNfY2FjaGWUjAljYWNoZV90dGyUTowHYXBpX2tleZROjAhhcGlfYmFzZZROjAh0aGlua2luZ5ROjA5wcm9tcHRfY2FjaGluZ5SIjARzZWVklE6MDWV4dHJhX2hlYWRlcnOUfZSMDGV4dHJhX3BhcmFtc5R9lHVijAhqdWRnZV9pZJSMBmdlbWluaZSMBndlaWdodJRHQAAAAAAAAAB1Yi4=",
+  "pickle_protocol": 4,
+  "replaced_stub_repr": "JudgeSpec(llm_config='other-config', judge_id='judge-a', weight=1.5)",
+  "stub_asdict": {
+    "judge_id": "judge-a",
+    "llm_config": "stub-config",
+    "weight": 0.5
+  },
+  "stub_equals_positional_copy": true,
+  "stub_repr": "JudgeSpec(llm_config='stub-config', judge_id='judge-a', weight=0.5)"
+}

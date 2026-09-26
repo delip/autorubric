@@ -1387,9 +1387,9 @@ class TestManifestJudgeConfig:
 
         mock_grader = create_mock_grader()
         mock_grader._judges = [
-            JudgeSpec(llm_config=LLMConfig(model="judge-default"), judge_id="default"),
+            JudgeSpec(judge_model_config=LLMConfig(model="judge-default"), judge_id="default"),
             JudgeSpec(
-                llm_config=LLMConfig(model="judge-explicit", temperature=0.0),
+                judge_model_config=LLMConfig(model="judge-explicit", temperature=0.0),
                 judge_id="explicit",
             ),
         ]

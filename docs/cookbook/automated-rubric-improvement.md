@@ -212,11 +212,11 @@ from autorubric.graders import JudgeSpec
 
 judges = [
     JudgeSpec(
-        llm_config=LLMConfig(model="openai/gpt-4.1-mini"),
+        judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
         judge_id="gpt4-mini",
     ),
     JudgeSpec(
-        llm_config=LLMConfig(model="gemini/gemini-2.5-flash"),
+        judge_model_config=LLMConfig(model="gemini/gemini-2.5-flash"),
         judge_id="gemini-flash",
     ),
 ]

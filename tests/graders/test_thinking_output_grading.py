@@ -70,7 +70,7 @@ class TestInputFormats:
             "autorubric.graders.criterion_grader.LLMClient",
             return_value=mock_client,
         ):
-            grader = CriterionGrader(llm_config=mock_llm_config)
+            grader = CriterionGrader(judge_model_config=mock_llm_config)
 
             result = await rubric.grade(
                 {"thinking": "reasoning...", "output": "answer"}, grader=grader
@@ -89,7 +89,7 @@ class TestInputFormats:
             "autorubric.graders.criterion_grader.LLMClient",
             return_value=mock_client,
         ):
-            grader = CriterionGrader(llm_config=mock_llm_config)
+            grader = CriterionGrader(judge_model_config=mock_llm_config)
 
             result = await rubric.grade(
                 "<thinking>reasoning</thinking><output>answer</output>", grader=grader
@@ -107,7 +107,7 @@ class TestInputFormats:
             "autorubric.graders.criterion_grader.LLMClient",
             return_value=mock_client,
         ):
-            grader = CriterionGrader(llm_config=mock_llm_config)
+            grader = CriterionGrader(judge_model_config=mock_llm_config)
 
             result = await rubric.grade("plain response", grader=grader)
 
@@ -128,7 +128,7 @@ class TestLengthPenaltyWithPenaltyType:
             return_value=mock_client,
         ):
             grader = CriterionGrader(
-                llm_config=mock_llm_config,
+                judge_model_config=mock_llm_config,
                 length_penalty=LengthPenalty(
                     free_budget=5, max_cap=10, penalty_at_cap=0.5, penalty_type="OUTPUT_ONLY"
                 ),
@@ -152,7 +152,7 @@ class TestLengthPenaltyWithPenaltyType:
             return_value=mock_client,
         ):
             grader = CriterionGrader(
-                llm_config=mock_llm_config,
+                judge_model_config=mock_llm_config,
                 length_penalty=LengthPenalty(
                     free_budget=5, max_cap=10, penalty_at_cap=0.5, penalty_type="THINKING_ONLY"
                 ),
@@ -176,7 +176,7 @@ class TestLengthPenaltyWithPenaltyType:
             return_value=mock_client,
         ):
             grader = CriterionGrader(
-                llm_config=mock_llm_config,
+                judge_model_config=mock_llm_config,
                 length_penalty=LengthPenalty(
                     free_budget=5,
                     max_cap=10,
@@ -200,7 +200,7 @@ class TestLengthPenaltyWithPenaltyType:
             return_value=mock_client,
         ):
             grader = CriterionGrader(
-                llm_config=mock_llm_config,
+                judge_model_config=mock_llm_config,
                 normalize=False,
                 length_penalty=LengthPenalty(
                     free_budget=5, max_cap=10, penalty_at_cap=50.0, penalty_type="OUTPUT_ONLY"

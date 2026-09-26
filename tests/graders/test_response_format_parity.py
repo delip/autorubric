@@ -70,7 +70,7 @@ async def test_multi_choice_custom_response_format_is_passed_to_client():
     generate_mock = AsyncMock(return_value=_gen_result(parsed))
 
     grader = CriterionGrader(
-        llm_config=LLMConfig(model="test-model"),
+        judge_model_config=LLMConfig(model="test-model"),
         multi_choice_response_format=_MCAffected,
         shuffle_options=False,
     )
@@ -90,7 +90,7 @@ async def test_multi_choice_default_no_affects_tag():
     generate_mock = AsyncMock(return_value=_gen_result(parsed))
 
     grader = CriterionGrader(
-        llm_config=LLMConfig(model="test-model"),
+        judge_model_config=LLMConfig(model="test-model"),
         shuffle_options=False,
     )
 
@@ -116,7 +116,7 @@ async def test_binary_affects_still_injected_after_refactor():
     generate_mock = AsyncMock(return_value=_gen_result(parsed))
 
     grader = CriterionGrader(
-        llm_config=LLMConfig(model="test-model"),
+        judge_model_config=LLMConfig(model="test-model"),
         binary_response_format=MetaCriterionJudgment,
     )
 

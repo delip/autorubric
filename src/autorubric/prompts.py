@@ -5,19 +5,38 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from autorubric.types import Criterion, CriterionOption
+from autorubric.utils import _normalize_guidelines
 
 if TYPE_CHECKING:
     from autorubric.types import FewShotExample
 
-GRADER_SYSTEM_PROMPT_DEFAULT = """\
+# ============================================================================
+# Binary Verdict Definitions
+# ============================================================================
+# One source for what each binary verdict means. GRADER_SYSTEM_PROMPT_DEFAULT states them
+# at its verdict lines, and any other framing of a binary criterion reuses these exact
+# texts, so the LLM prompt and other judge framings cannot drift apart.
+
+MET_DEFINITION = "The thing described in the criterion IS present in the submission"
+UNMET_DEFINITION = "The thing described in the criterion IS NOT present in the submission"
+CANNOT_ASSESS_DEFINITION = "Insufficient evidence to determine either way (use rarely)"
+
+# For a negative criterion (one describing an active error), MET means the error is made.
+NEGATIVE_MET_DEFINITION = "The submission advocates, states, or recommends the problematic thing"
+NEGATIVE_UNMET_DEFINITION = (
+    "The submission does NOT make this error, OR mentions it only to warn against it"
+)
+
+GRADER_SYSTEM_PROMPT_DEFAULT = (
+    f"""\
 You are an expert evaluation judge. Your task is to determine whether a single criterion is \
 satisfied by a given submission. Be precise, evidence-based, and consistent.
 
 You will receive a <criterion_type> (positive or negative), a <criterion>, and a <submission> to \
 evaluate. Your verdict must be one of:
-- "MET": The thing described in the criterion IS present in the submission
-- "UNMET": The thing described in the criterion IS NOT present in the submission
-- "CANNOT_ASSESS": Insufficient evidence to determine either way (use rarely)
+- "MET": {MET_DEFINITION}
+- "UNMET": {UNMET_DEFINITION}
+- "CANNOT_ASSESS": {CANNOT_ASSESS_DEFINITION}
 
 Evaluate this criterion independently. Do not let overall submission quality influence your \
 judgment — a well-written submission can fail a criterion, and a poorly-written one can satisfy it.
@@ -32,8 +51,8 @@ POSITIVE CRITERIA describe desired traits, requirements, or content that should 
 - UNMET: The submission does not contain or satisfy the requirement
 
 NEGATIVE CRITERIA describe active errors or mistakes.
-- MET: The submission advocates, states, or recommends the problematic thing
-- UNMET: The submission does NOT make this error, OR mentions it only to warn against it
+- MET: {NEGATIVE_MET_DEFINITION}
+- UNMET: {NEGATIVE_UNMET_DEFINITION}
 
 What does NOT count as MET for negative criteria:
 - "Option A is often confused with B, but it's actually B" -> NOT stating it's A (UNMET)
@@ -100,7 +119,10 @@ Use this as context to calibrate your expectations, but evaluate the actual <sub
 its own merits against the criterion requirements. The reference is for context, not strict \
 comparison.
 
-RESPONSE FORMAT:
+"""
+    # The response format and examples hold literal JSON braces, so this part is a plain
+    # string rather than part of the f-string above.
+    """RESPONSE FORMAT:
 Respond with valid JSON:
 {"criterion_status": "MET" or "UNMET" or "CANNOT_ASSESS", "explanation": "..."}
 
@@ -138,6 +160,42 @@ Submission: "The sample shows some crystalline features, possibly igneous, but i
 {"criterion_status": "UNMET", "explanation": "The submission does not commit to a classification, hedging between igneous and metamorphic without making a definitive determination."}
 
 Return only raw JSON starting with {, no back-ticks, no 'json' prefix."""
+)
+
+
+# ============================================================================
+# Rubric Guidelines
+# ============================================================================
+
+# Starts every LLM judge user prompt (binary and multi-choice, with or without few-shot
+# examples) when the rubric has guidelines; ``{guidelines}`` is the guidelines, verbatim.
+# The trailing blank line separates it from the rest of the prompt, as the builders separate
+# every block. Being the same for every criterion of an item, it extends the prefix a
+# provider's automatic prompt caching can reuse across the item's calls. The precedence rule
+# lives in the block, not in the system prompts, so prompts without guidelines stay
+# byte-identical (and their response caches valid), and a custom system prompt still gets it.
+GUIDELINES_BLOCK = """\
+<guidelines>
+{guidelines}
+
+These guidelines apply to every criterion. The criterion text governs; the guidelines clarify how to apply it.
+</guidelines>
+
+"""
+
+
+def _guidelines_block(guidelines: str | None) -> str:
+    """The ``GUIDELINES_BLOCK`` a user prompt starts with, or ``""`` for no guidelines.
+
+    Blank guidelines are no guidelines (``_normalize_guidelines``).
+
+    Raises:
+        TypeError: If ``guidelines`` is neither a ``str`` nor ``None``.
+    """
+    guidelines = _normalize_guidelines(guidelines)
+    if guidelines is None:
+        return ""
+    return GUIDELINES_BLOCK.format(guidelines=guidelines)
 
 
 def build_user_prompt(
@@ -145,9 +203,28 @@ def build_user_prompt(
     to_grade: str,
     query: str | None = None,
     reference_submission: str | None = None,
+    *,
+    guidelines: str | None = None,
 ) -> str:
-    """Build the user prompt for single-criterion evaluation."""
+    """Build the user prompt for single-criterion evaluation.
+
+    Args:
+        criterion: The criterion to evaluate against.
+        to_grade: The submission text to evaluate.
+        query: Optional input/query that prompted the submission.
+        reference_submission: Optional exemplar response for grading context.
+        guidelines: Optional rubric guidelines. When set (not blank), the prompt starts
+            with ``GUIDELINES_BLOCK``; otherwise the prompt is exactly what it is without
+            them.
+
+    Returns:
+        The user prompt.
+
+    Raises:
+        TypeError: If ``guidelines`` is neither a ``str`` nor ``None``.
+    """
     criterion_type = "negative" if criterion.weight < 0 else "positive"
+    guidelines_text = _guidelines_block(guidelines)
     query_text = f"<input>{query}</input>\n\n" if query else ""
     reference_text = (
         f"<reference_submission>\n{reference_submission}\n</reference_submission>\n\n"
@@ -155,7 +232,7 @@ def build_user_prompt(
         else ""
     )
 
-    return f"""<criterion_type>
+    return f"""{guidelines_text}<criterion_type>
 {criterion_type}
 </criterion_type>
 
@@ -175,6 +252,8 @@ def build_few_shot_user_prompt(
     query: str | None = None,
     include_reason: bool = False,
     reference_submission: str | None = None,
+    *,
+    guidelines: str | None = None,
 ) -> str:
     """Build user prompt with few-shot examples for single-criterion evaluation.
 
@@ -185,11 +264,16 @@ def build_few_shot_user_prompt(
         query: Optional input/query that prompted the submission.
         include_reason: If True, include reason in example format (if available).
         reference_submission: Optional exemplar response for grading context.
+        guidelines: Optional rubric guidelines, as in ``build_user_prompt``.
 
     Returns:
         Formatted user prompt with examples section.
+
+    Raises:
+        TypeError: If ``guidelines`` is neither a ``str`` nor ``None``.
     """
     criterion_type = "negative" if criterion.weight < 0 else "positive"
+    guidelines_text = _guidelines_block(guidelines)
     query_text = f"<input>{query}</input>\n\n" if query else ""
     examples_text = _format_few_shot_examples(examples, include_reason)
     reference_text = (
@@ -198,7 +282,7 @@ def build_few_shot_user_prompt(
         else ""
     )
 
-    return f"""<criterion_type>
+    return f"""{guidelines_text}<criterion_type>
 {criterion_type}
 </criterion_type>
 
@@ -414,6 +498,8 @@ def build_multi_choice_user_prompt(
     to_grade: str,
     query: str | None = None,
     reference_submission: str | None = None,
+    *,
+    guidelines: str | None = None,
 ) -> str:
     """Build the user prompt for multi-choice criterion evaluation.
 
@@ -422,16 +508,19 @@ def build_multi_choice_user_prompt(
         to_grade: The submission text to evaluate.
         query: Optional input/query that prompted the submission.
         reference_submission: Optional exemplar response for grading context.
+        guidelines: Optional rubric guidelines, as in ``build_user_prompt``.
 
     Returns:
         Formatted user prompt with question and numbered options.
 
     Raises:
         ValueError: If criterion has no options (is binary).
+        TypeError: If ``guidelines`` is neither a ``str`` nor ``None``.
     """
     if criterion.options is None:
         raise ValueError("Cannot build multi-choice prompt for binary criterion")
 
+    guidelines_text = _guidelines_block(guidelines)
     query_text = f"<input>{query}</input>\n\n" if query else ""
     reference_text = (
         f"<reference_submission>\n{reference_submission}\n</reference_submission>\n\n"
@@ -442,7 +531,7 @@ def build_multi_choice_user_prompt(
     # Format options as numbered list (1-indexed for human readability)
     options_text = _render_options(criterion.options)
 
-    return f"""<question>
+    return f"""{guidelines_text}<question>
 {criterion.requirement}
 </question>
 
@@ -462,6 +551,8 @@ def build_multi_choice_few_shot_user_prompt(
     query: str | None = None,
     include_reason: bool = False,
     reference_submission: str | None = None,
+    *,
+    guidelines: str | None = None,
 ) -> str:
     """Build user prompt with few-shot examples for multi-choice criterion.
 
@@ -472,16 +563,19 @@ def build_multi_choice_few_shot_user_prompt(
         query: Optional input/query that prompted the submission.
         include_reason: If True, include reason in example format.
         reference_submission: Optional exemplar response for grading context.
+        guidelines: Optional rubric guidelines, as in ``build_user_prompt``.
 
     Returns:
         Formatted user prompt with examples section.
 
     Raises:
         ValueError: If criterion has no options (is binary).
+        TypeError: If ``guidelines`` is neither a ``str`` nor ``None``.
     """
     if criterion.options is None:
         raise ValueError("Cannot build multi-choice prompt for binary criterion")
 
+    guidelines_text = _guidelines_block(guidelines)
     query_text = f"<input>{query}</input>\n\n" if query else ""
     reference_text = (
         f"<reference_submission>\n{reference_submission}\n</reference_submission>\n\n"
@@ -495,7 +589,7 @@ def build_multi_choice_few_shot_user_prompt(
     # Format examples
     examples_text = _format_multi_choice_examples(criterion, examples, include_reason)
 
-    return f"""<question>
+    return f"""{guidelines_text}<question>
 {criterion.requirement}
 </question>
 
@@ -561,6 +655,47 @@ Each example includes:
 - <reason>: (Optional) Explanation for the selection
 
 Apply consistent standards across the examples and the submission you are evaluating."""
+
+
+# ============================================================================
+# Decision-Model Framing
+# ============================================================================
+# The fixed text a decision model receives around a binary criterion under the framed
+# binary framings ("noul_framed", "choice"); the verdicts it offers carry the binary verdict
+# definitions above. Framed instructions are a task sentence, then a context sentence for
+# each optional state field the judgment depends on, in state order (guidelines, then the
+# reference submission), then DECISION_MODEL_CRITERION_PREFIX followed by the criterion
+# requirement, verbatim and last, so no fixed text can be read as part of it. With no
+# optional field this is "Determine whether this criterion is satisfied by the
+# `submission`. Criterion: <requirement>". Backticked names are keys of the decision-model
+# state.
+
+# Task sentence when the state holds the whole submission.
+DECISION_MODEL_TASK_INSTRUCTION = (
+    "Determine whether this criterion is satisfied by the `submission`."
+)
+
+# Task sentence when the state splits a structured submission into `thinking` and `output`:
+# only the output is judged, the thinking is context. This approximates the LLM judge's
+# rule, which evaluates only <output> unless a criterion is about the reasoning itself.
+DECISION_MODEL_THINKING_OUTPUT_TASK_INSTRUCTION = (
+    "Determine whether this criterion is satisfied by the `output`; the `thinking` is context only."
+)
+
+# Context sentence when the state holds the rubric's guidelines; the precedence rule of the
+# LLM judge's GUIDELINES_BLOCK: the criterion text governs, the guidelines clarify it.
+DECISION_MODEL_GUIDELINES_INSTRUCTION = "Apply the `guidelines`; the criterion text governs."
+
+# Context sentence when the state holds a reference submission; the same usage rule the LLM
+# judge's REFERENCE SUBMISSION section states. ``{judged}`` is the judged state field:
+# "submission", or "output" for a structured submission.
+DECISION_MODEL_REFERENCE_INSTRUCTION = (
+    "Use the `reference_submission` only to calibrate expectations; judge the `{judged}` on "
+    "its own merits, not by its resemblance to the reference."
+)
+
+# Label before the verbatim criterion requirement, which always ends the instructions.
+DECISION_MODEL_CRITERION_PREFIX = "Criterion: "
 
 
 # ============================================================================
@@ -630,6 +765,23 @@ Example:
   {{"weight": 8, "requirement": "Includes at least two real-world applications of the concept"}},
   {{"weight": -5, "name": "incorrect_formula", "requirement": "Presents an incorrect mathematical formula for the relationship"}}
 ]"""
+
+# Starts the revision user prompt of either improvement strategy (default or custom
+# template) when the rubric has guidelines; without them the prompt is unchanged. The loop
+# never revises guidelines, it carries them unchanged onto every revised rubric. The
+# revision LLM still sees them: the issues and diagnostics it acts on come from judges that
+# saw them, and criteria revised without them could contradict them, a conflict the
+# criterion text wins when grading. ``{guidelines}`` is the rubric's guidelines, verbatim.
+RUBRIC_REVISION_GUIDELINES_BLOCK = """\
+<guidelines>
+{guidelines}
+
+These are the rubric's guidelines. They apply to every criterion when grading: the criterion \
+text governs, and the guidelines clarify how to apply it. They are fixed and not part of your \
+output: revise only the criteria, and keep them consistent with the guidelines.
+</guidelines>
+
+"""
 
 
 # ============================================================================

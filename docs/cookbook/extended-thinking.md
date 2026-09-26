@@ -70,7 +70,7 @@ from autorubric.graders import CriterionGrader
 
 # Option 1: Use a thinking level
 grader = CriterionGrader(
-    llm_config=LLMConfig(
+    judge_model_config=LLMConfig(
         model="anthropic/claude-sonnet-4-5-20250929",
         thinking="high",  # LOW, MEDIUM, or HIGH
     )
@@ -78,7 +78,7 @@ grader = CriterionGrader(
 
 # Option 2: Specify exact token budget
 grader = CriterionGrader(
-    llm_config=LLMConfig(
+    judge_model_config=LLMConfig(
         model="anthropic/claude-sonnet-4-5-20250929",
         thinking=8000,  # 8000 thinking tokens
     )
@@ -88,7 +88,7 @@ grader = CriterionGrader(
 from autorubric.llm import ThinkingConfig, ThinkingLevel
 
 grader = CriterionGrader(
-    llm_config=LLMConfig(
+    judge_model_config=LLMConfig(
         model="anthropic/claude-sonnet-4-5-20250929",
         thinking=ThinkingConfig(
             level=ThinkingLevel.HIGH,
@@ -198,7 +198,7 @@ Test whether extended thinking improves accuracy:
 async def compare_thinking_modes():
     # Without thinking
     grader_basic = CriterionGrader(
-        llm_config=LLMConfig(
+        judge_model_config=LLMConfig(
             model="anthropic/claude-sonnet-4-5-20250929",
             thinking=None,  # No extended thinking
         )
@@ -206,7 +206,7 @@ async def compare_thinking_modes():
 
     # With high thinking
     grader_thinking = CriterionGrader(
-        llm_config=LLMConfig(
+        judge_model_config=LLMConfig(
             model="anthropic/claude-sonnet-4-5-20250929",
             thinking="high",
         )
@@ -256,7 +256,7 @@ When using extended thinking with length penalty, you may want to penalize only 
 from autorubric import LengthPenalty
 
 grader = CriterionGrader(
-    llm_config=LLMConfig(
+    judge_model_config=LLMConfig(
         model="anthropic/claude-sonnet-4-5-20250929",
         thinking="high",
     ),
@@ -467,7 +467,7 @@ async def main():
 
     # Grader without extended thinking
     grader_basic = CriterionGrader(
-        llm_config=LLMConfig(
+        judge_model_config=LLMConfig(
             model="openai/gpt-4.1-mini",
             temperature=0.0,
         )
@@ -475,7 +475,7 @@ async def main():
 
     # Grader with extended thinking
     grader_thinking = CriterionGrader(
-        llm_config=LLMConfig(
+        judge_model_config=LLMConfig(
             model="anthropic/claude-sonnet-4-5-20250929",
             thinking="high",
         )

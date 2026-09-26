@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import sys
 from dataclasses import asdict, dataclass, field, fields
 from enum import Enum
 from pathlib import Path, PurePath
@@ -70,6 +71,17 @@ def classify_grading_error(exc: BaseException) -> ErrorCategory:
     failures (``json.JSONDecodeError`` -> ``ValueError``, ``pydantic.ValidationError``)
     do not.
 
+    Decision-model failures raised by the optional TypeSafe SDK (``typesafe-sdk``) are
+    routed by the SDK's own exception types, ahead of the ``ValueError`` rule:
+
+    - ``TypeSafeAPIResponseValidationError`` (the endpoint's answer did not validate),
+      ``TypeSafeBadRequestError`` (400) and ``TypeSafeUnprocessableEntityError`` (422, e.g.
+      a request over the model's input limit) are ``"parse"``: the endpoint answered, but
+      no usable answer came back for the request that was built.
+    - Every other ``TypeSafeError`` is ``"infrastructure"``: authentication, permission,
+      not found, rate limit, server errors, and connection failures and timeouts (which
+      subclass ``TypeSafeError`` directly, not ``TypeSafeAPIError``).
+
     Args:
         exc: The exception raised during a judge call.
 
@@ -79,9 +91,34 @@ def classify_grading_error(exc: BaseException) -> ErrorCategory:
     """
     if isinstance(exc, openai.APIError):
         return "infrastructure"
+    typesafe_category = _classify_typesafe_error(exc)
+    if typesafe_category is not None:
+        return typesafe_category
     if isinstance(exc, (ValidationError, ValueError)):
         return "parse"
     return "unknown"
+
+
+def _classify_typesafe_error(exc: BaseException) -> ErrorCategory | None:
+    """Category of a TypeSafe SDK exception, or None when ``exc`` is not one.
+
+    The SDK is optional and is looked up, never imported: one of its exceptions can exist
+    only after ``typesafe_sdk`` was imported, so this costs nothing when the SDK is absent
+    or unused.
+    """
+    sdk = sys.modules.get("typesafe_sdk")
+    if sdk is None or not isinstance(exc, sdk.TypeSafeError):
+        return None
+    if isinstance(
+        exc,
+        (
+            sdk.TypeSafeAPIResponseValidationError,
+            sdk.TypeSafeBadRequestError,
+            sdk.TypeSafeUnprocessableEntityError,
+        ),
+    ):
+        return "parse"
+    return "infrastructure"
 
 
 # ============================================================================
@@ -420,7 +457,8 @@ class LLMConfig:
         retry_min_wait: Minimum wait between retries (seconds).
         retry_max_wait: Maximum wait between retries (seconds).
         max_parallel_requests: Maximum concurrent requests to this model's provider.
-            When set, a global per-provider semaphore limits parallel requests.
+            When set, a global per-provider semaphore limits parallel requests. The limit
+            applies within one event loop; each ``asyncio.run`` call has its own.
             None (default) means unlimited parallel requests.
         cache_enabled: Default caching behavior (can be overridden per-request).
         cache_dir: Directory for response cache.
@@ -588,6 +626,19 @@ class LLMConfig:
             yaml.dump(data, f, Dumper=_LLMConfigDumper, default_flow_style=False, sort_keys=False)
 
 
+def _open_response_cache(cache_dir: str | Path) -> diskcache.Cache:
+    """Open the on-disk response cache at ``cache_dir``, creating the directory if needed.
+
+    The one place the response store is opened: LLM responses (``LLMClient``) and
+    decision-model responses (``autorubric.decision``) share it whenever their configs
+    name the same ``cache_dir``. Keys never collide, because each client hashes its own
+    request description with SHA-256.
+    """
+    path = Path(cache_dir)
+    path.mkdir(parents=True, exist_ok=True)
+    return diskcache.Cache(directory=str(path))
+
+
 class LLMClient:
     """Unified LLM client with retries, caching, and structured output support.
 
@@ -614,9 +665,7 @@ class LLMClient:
 
     def _init_cache(self) -> None:
         """Initialize diskcache instance."""
-        cache_dir = Path(self.config.cache_dir)
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        self._cache = diskcache.Cache(directory=str(cache_dir))
+        self._cache = _open_response_cache(self.config.cache_dir)
 
     def _ensure_cache(self) -> diskcache.Cache:
         """Ensure cache is initialized, creating it if needed."""

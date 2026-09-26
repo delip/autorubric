@@ -71,7 +71,7 @@ convert CO2 into glucose. The overall equation is:
 
     # Configure grader
     grader = CriterionGrader(
-        llm_config=LLMConfig(model="claude-sonnet-4-20250514"),
+        judge_model_config=LLMConfig(model="claude-sonnet-4-20250514"),
     )
 
     # Evaluate each submission

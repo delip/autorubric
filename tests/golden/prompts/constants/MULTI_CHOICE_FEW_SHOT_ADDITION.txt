@@ -1,0 +1,14 @@
+
+
+FEW-SHOT EXAMPLES:
+You may be provided with labeled examples in an <examples> section. These demonstrate
+how similar submissions were evaluated for the same question. Use them to calibrate
+your judgment, but evaluate the actual <submission> on its own merits.
+
+Each example includes:
+- <example_submission>: A submission that was previously evaluated
+- <selected_option>: The option number that was selected
+- <selected_label>: The text of the selected option
+- <reason>: (Optional) Explanation for the selection
+
+Apply consistent standards across the examples and the submission you are evaluating.

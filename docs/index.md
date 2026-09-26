@@ -23,6 +23,7 @@ AutoRubric provides a structured, research-backed approach to evaluating LLM out
 - **Rubric-based evaluation**: Define weighted criteria with explicit requirements
 - **Multi-provider support**: Works with OpenAI, Anthropic, Google, Azure, Groq, Ollama, and 100+ providers via LiteLLM
 - **Ensemble judging**: Combine multiple LLM judges to reduce bias and improve robustness
+- **Decision-model judges**: Grade a whole rubric in one request with a probabilistic decision model such as TypeSafe's Jev, alone, in an ensemble, or as a cheap first pass with an LLM fallback
 - **Few-shot learning**: Calibrate judges with labeled examples
 - **Multi-choice criteria**: Support for ordinal and nominal scales beyond binary verdicts
 - **Structured outputs**: Type-safe responses with detailed per-criterion reports
@@ -52,7 +53,7 @@ from autorubric.graders import CriterionGrader
 
 async def main():
     # Configure LLM judge
-    grader = CriterionGrader(llm_config=LLMConfig(model="openai/gpt-4.1-mini"))
+    grader = CriterionGrader(judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"))
 
     # Define evaluation rubric
     rubric = Rubric.from_dict([
@@ -91,6 +92,7 @@ AutoRubric is built on research findings about effective LLM-as-a-judge evaluati
 | Guide | Description |
 |-------|-------------|
 | **[Quickstart](quickstart.md)** | Get up and running with installation, configuration, and your first evaluation |
+| **[Decision-Model Judges](decision-models.md)** | Probabilistic judges that grade a whole rubric in one request, and confidence cascades |
 | **[Cookbook](cookbook/index.md)** | Practical examples and recipes for common evaluation scenarios |
 | **[API Reference](api/index.md)** | Complete API documentation with all classes, functions, and types |
 

@@ -49,7 +49,7 @@ async def main():
 
     # Create grader with CANNOT_ASSESS handling
     grader = CriterionGrader(
-        llm_config=llm_config,
+        judge_model_config=llm_config,
         normalize=True,
         cannot_assess_config=CannotAssessConfig(
             strategy=CannotAssessStrategy.SKIP,  # Exclude unassessable from scoring

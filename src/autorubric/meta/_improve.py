@@ -50,6 +50,7 @@ from rich.table import Table
 from rich.text import Text
 
 from autorubric.dataset import RubricDataset
+from autorubric.decision import DecisionModelConfig
 from autorubric.graders import CriterionGrader
 from autorubric.graders.criterion_grader import JudgeSpec
 from autorubric.llm import LLMClient, LLMConfig
@@ -62,7 +63,12 @@ from autorubric.types import (
     TokenUsage,
 )
 
-from ._evaluate import evaluate_rubric_in_context, evaluate_rubric_standalone
+from ._evaluate import (
+    _not_an_llm,
+    _reject_decision_model_judges,
+    evaluate_rubric_in_context,
+    evaluate_rubric_standalone,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -223,6 +229,43 @@ class ImprovementResult:
     total_completion_cost: float | None
 
 
+def _check_eval_llm(eval_llm: object) -> None:
+    """Reject an ``ImprovementConfig.eval_llm`` that is, or includes, a decision model.
+
+    Raises:
+        ValueError: If ``eval_llm`` is a ``DecisionModelConfig`` or a list holding a
+            ``JudgeSpec`` of one (the message names that judge).
+    """
+    if isinstance(eval_llm, list):
+        _reject_decision_model_judges(eval_llm, "ImprovementConfig.eval_llm judge")
+    elif isinstance(eval_llm, DecisionModelConfig):
+        raise _not_an_llm("ImprovementConfig.eval_llm")
+
+
+def _check_revision_llm(revision_llm: object) -> None:
+    """Reject an ``ImprovementConfig.revision_llm`` that is a decision model.
+
+    Raises:
+        ValueError: If ``revision_llm`` is a ``DecisionModelConfig``.
+    """
+    if isinstance(revision_llm, DecisionModelConfig):
+        raise _not_an_llm("ImprovementConfig.revision_llm")
+
+
+def _reject_decision_model_grader(grader: object) -> None:
+    """Reject a grader with a decision-model judge: validation judges must be LLMs.
+
+    The judges are read as ``_serialize_grader_config`` reads them, from the ``_judges``
+    list a ``CriterionGrader`` keeps; a grader without one is left as it is.
+
+    Raises:
+        ValueError: If a judge of ``grader`` is a decision model.
+    """
+    judges = getattr(grader, "_judges", None)
+    if isinstance(judges, list):
+        _reject_decision_model_judges(judges, "the grader's judge")
+
+
 @dataclass
 class ImprovementConfig:
     """Configuration for the rubric improvement process.
@@ -233,7 +276,13 @@ class ImprovementConfig:
               meta-rubric evaluation).
             - ``list[JudgeSpec]``: ensemble (required for multi-judge mode;
               meta-rubric evaluation uses the first judge's config).
-        revision_llm: LLM configuration for rubric revision.
+            Every judge must be an LLM: meta-rubric evaluation and rubric revision
+            work from the judges' written explanations, which a decision model
+            (``DecisionModelConfig``) does not produce, so a decision-model judge
+            raises ``ValueError`` at construction.
+        revision_llm: LLM configuration for rubric revision. It writes the revised
+            rubric, so it must be an LLM; a decision model raises ``ValueError`` at
+            construction.
         mode: Evaluation mode - "standalone" or "in_context".
         strategy: Improvement strategy - "meta_rubric" (default) optimizes
             against structural meta-rubric quality; "held_out" optimizes
@@ -304,6 +353,24 @@ class ImprovementConfig:
     convergence_fn: ConvergenceFn | None = None
     revision_system_prompt: str | None = None
     revision_user_prompt_template: str | None = None
+
+    def __post_init__(self) -> None:
+        """Reject decision models, which can fill none of the loop's roles.
+
+        Raises:
+            ValueError: If ``eval_llm`` is, or includes, a decision model, or
+                ``revision_llm`` is one.
+        """
+        self._reject_decision_models()
+
+    def _reject_decision_models(self) -> None:
+        """Raise ``ValueError`` if ``eval_llm`` or ``revision_llm`` holds a decision model.
+
+        Run at construction (so also by ``dataclasses.replace``) and again when an
+        ``ImprovementRunner`` starts, because a field can be reassigned in between.
+        """
+        _check_eval_llm(self.eval_llm)
+        _check_revision_llm(self.revision_llm)
 
 
 # ============================================================================
@@ -697,7 +764,9 @@ def extract_issues(report: EnsembleEvaluationReport) -> list[IssueDetail]:
                     requirement=criterion_report.criterion.requirement,
                     weight=weight,
                     is_antipattern=weight < 0,
-                    feedback=criterion_report.final_reason,
+                    # final_reason is None only when no judge gave an explanation, which
+                    # never happens for LLM meta-judges; feedback stays a plain string.
+                    feedback=criterion_report.final_reason or "",
                 )
             )
 
@@ -811,7 +880,12 @@ async def validate_ground_truth(
     Returns:
         Tuple of (correlation_metric, per_item_pairs, total_cost) where
         per_item_pairs is a list of (rubric_score, expected_score) tuples.
+
+    Raises:
+        ValueError: If a judge of ``grader`` is a decision model: the improvement loop's
+            evaluation judges must be LLMs (checked before any call).
     """
+    _reject_decision_model_grader(grader)
     from scipy.stats import spearmanr
 
     rubric_scores: list[float] = []
@@ -935,7 +1009,12 @@ def _format_error_criteria(
             sign = "+" if weight > 0 else ""
             verdict_str = verdict.value
             name = ecr.criterion.name or ecr.criterion.requirement[:40]
-            lines.append(f"    [w={sign}{weight}, {verdict_str}] {name}: {ecr.final_reason}")
+            line = f"    [w={sign}{weight}, {verdict_str}] {name}"
+            # A criterion whose judges gave no explanation has final_reason None: omit
+            # the ": reason" suffix instead of rendering "None".
+            if ecr.final_reason is not None:
+                line += f": {ecr.final_reason}"
+            lines.append(line)
 
     return lines
 
@@ -1085,7 +1164,12 @@ async def validate_agreement(
         Tuple of (mean_agreement, per_criterion_agreement, total_cost). The mean
         is None when there was nothing to measure (no sample yielded a usable
         ensemble report with a measured agreement) -- never a fabricated 0.0.
+
+    Raises:
+        ValueError: If a judge is a decision model: the improvement loop's evaluation
+            judges must be LLMs (checked before any call).
     """
+    _reject_decision_model_judges(judges, "judge")
     grader = CriterionGrader(judges=judges, aggregation="majority")
 
     all_agreements: list[float] = []
@@ -1165,6 +1249,61 @@ def pareto_accept(
     return True, None
 
 
+def _rubric_criteria_data(rubric: Rubric) -> list[dict[str, Any]]:
+    """The criteria as the revision prompts and the loop's artifacts record them.
+
+    Each criterion keeps its ``weight`` and ``requirement``, and its ``name`` when it has
+    one.
+    """
+    return [
+        {
+            "weight": c.weight,
+            "requirement": c.requirement,
+            **({"name": c.name} if c.name else {}),
+        }
+        for c in rubric.rubric
+    ]
+
+
+def _rubric_artifact_data(rubric: Rubric) -> list[dict[str, Any]] | dict[str, Any]:
+    """A rubric as the loop's artifacts record it, in a form ``Rubric.from_dict`` reads.
+
+    The list of criteria, as before guidelines existed, for a rubric without guidelines;
+    ``{"guidelines": ..., "criteria": [...]}`` for one with them.
+    """
+    criteria = _rubric_criteria_data(rubric)
+    if rubric.guidelines is None:
+        return criteria
+    return {"guidelines": rubric.guidelines, "criteria": criteria}
+
+
+def _with_guidelines_block(rubric: Rubric, user_prompt: str) -> str:
+    """Start a revision user prompt with the rubric's guidelines, when it has them.
+
+    The revision LLM revises criteria only, but it sees the guidelines as fixed context:
+    the issues and diagnostics it acts on come from judges that saw them, and a criterion
+    revised without them could contradict them. Without guidelines the prompt is returned
+    unchanged.
+    """
+    if rubric.guidelines is None:
+        return user_prompt
+    from autorubric.prompts import RUBRIC_REVISION_GUIDELINES_BLOCK
+
+    return RUBRIC_REVISION_GUIDELINES_BLOCK.format(guidelines=rubric.guidelines) + user_prompt
+
+
+def _revised_rubric(criteria_data: Any, rubric: Rubric) -> Rubric:
+    """Build the revised rubric from the revision LLM's criteria.
+
+    The LLM writes criteria only, so the input rubric's guidelines carry over unchanged;
+    otherwise every later iteration would grade without them.
+
+    Raises:
+        ValueError: If ``criteria_data`` is not a valid list of criteria.
+    """
+    return Rubric(Rubric.validate_and_create_criteria(criteria_data), guidelines=rubric.guidelines)
+
+
 async def revise_rubric(
     rubric: Rubric,
     task_prompt: str | None,
@@ -1178,6 +1317,10 @@ async def revise_rubric(
     _capture: dict | None = None,
 ) -> tuple[Rubric, float | None]:
     """Use an LLM to revise the rubric based on evaluation feedback and validation data.
+
+    The LLM revises the criteria only. The rubric's guidelines, when it has them, are
+    fixed: the user prompt starts with them (``RUBRIC_REVISION_GUIDELINES_BLOCK``, whatever
+    the template), and the revised rubric carries them unchanged.
 
     Args:
         rubric: Current rubric to revise.
@@ -1195,7 +1338,12 @@ async def revise_rubric(
 
     Returns:
         Tuple of (revised Rubric, completion cost or None).
+
+    Raises:
+        ValueError: If ``config.revision_llm`` is a decision model, which cannot write a
+            revised rubric (checked before any call).
     """
+    _check_revision_llm(config.revision_llm)
     from autorubric.prompts import (
         RUBRIC_REVISION_SYSTEM_PROMPT,
         RUBRIC_REVISION_USER_PROMPT_TEMPLATE,
@@ -1210,24 +1358,17 @@ async def revise_rubric(
         or RUBRIC_REVISION_USER_PROMPT_TEMPLATE
     )
 
-    original_criteria = json.dumps(
-        [
-            {
-                "weight": c.weight,
-                "requirement": c.requirement,
-                **({"name": c.name} if c.name else {}),
-            }
-            for c in rubric.rubric
-        ],
-        indent=2,
-    )
+    original_criteria = json.dumps(_rubric_criteria_data(rubric), indent=2)
 
-    user_prompt = effective_user_template.format(
-        task_prompt=task_prompt or "(No specific task — standalone evaluation)",
-        original_criteria=original_criteria,
-        issues_text=format_issues_for_prompt(issues),
-        validation_text=validation_text,
-        history_text=history_text,
+    user_prompt = _with_guidelines_block(
+        rubric,
+        effective_user_template.format(
+            task_prompt=task_prompt or "(No specific task — standalone evaluation)",
+            original_criteria=original_criteria,
+            issues_text=format_issues_for_prompt(issues),
+            validation_text=validation_text,
+            history_text=history_text,
+        ),
     )
 
     client = LLMClient(config.revision_llm)
@@ -1247,7 +1388,7 @@ async def revise_rubric(
         raise ValueError(f"Could not find JSON array in LLM response: {text[:200]}")
 
     criteria_data = json.loads(text[start:end])
-    return Rubric.from_dict(criteria_data), revision_cost
+    return _revised_rubric(criteria_data, rubric), revision_cost
 
 
 async def validate_held_out(
@@ -1280,7 +1421,12 @@ async def validate_held_out(
 
     Returns:
         HeldOutValidationResult with per-criterion error analysis.
+
+    Raises:
+        ValueError: If a judge of ``grader`` is a decision model: the improvement loop's
+            evaluation judges must be LLMs (checked before any call).
     """
+    _reject_decision_model_grader(grader)
     from autorubric.metrics._compute import _kappa_or_none, _mean_or_none
     from autorubric.metrics._helpers import extract_verdicts_from_report, filter_cannot_assess
 
@@ -1566,7 +1712,9 @@ async def revise_rubric_held_out(
     """Revise rubric based on held-out grading diagnostics.
 
     Uses held-out-specific prompt templates that enforce structural constraints
-    (same number of criteria in same order).
+    (same number of criteria in same order). Guidelines are handled as in
+    ``revise_rubric``: shown to the LLM as fixed context and carried unchanged onto the
+    revised rubric.
 
     Args:
         rubric: Current rubric to revise.
@@ -1580,7 +1728,12 @@ async def revise_rubric_held_out(
 
     Returns:
         Tuple of (revised Rubric, completion cost or None).
+
+    Raises:
+        ValueError: If ``config.revision_llm`` is a decision model, which cannot write a
+            revised rubric (checked before any call).
     """
+    _check_revision_llm(config.revision_llm)
     from autorubric.prompts import (
         HELD_OUT_REVISION_SYSTEM_PROMPT,
         HELD_OUT_REVISION_USER_PROMPT_TEMPLATE,
@@ -1595,24 +1748,17 @@ async def revise_rubric_held_out(
         or HELD_OUT_REVISION_USER_PROMPT_TEMPLATE
     )
 
-    original_criteria = json.dumps(
-        [
-            {
-                "weight": c.weight,
-                "requirement": c.requirement,
-                **({"name": c.name} if c.name else {}),
-            }
-            for c in rubric.rubric
-        ],
-        indent=2,
-    )
+    original_criteria = json.dumps(_rubric_criteria_data(rubric), indent=2)
 
-    user_prompt = effective_user_template.format(
-        task_prompt=task_prompt or "(No specific task — standalone evaluation)",
-        original_criteria=original_criteria,
-        diagnostics_text=diagnostics_text,
-        history_text=history_text,
-        num_criteria=len(rubric.rubric),
+    user_prompt = _with_guidelines_block(
+        rubric,
+        effective_user_template.format(
+            task_prompt=task_prompt or "(No specific task — standalone evaluation)",
+            original_criteria=original_criteria,
+            diagnostics_text=diagnostics_text,
+            history_text=history_text,
+            num_criteria=len(rubric.rubric),
+        ),
     )
 
     client = LLMClient(config.revision_llm)
@@ -1632,7 +1778,7 @@ async def revise_rubric_held_out(
         raise ValueError(f"Could not find JSON array in LLM response: {text[:200]}")
 
     criteria_data = json.loads(text[start:end])
-    revised = Rubric.from_dict(criteria_data)
+    revised = _revised_rubric(criteria_data, rubric)
 
     valid, error = validate_criteria_structure(rubric, revised)
     if not valid:
@@ -1747,10 +1893,16 @@ def _match_issue_to_criteria(issue: IssueDetail, rubric: Rubric) -> list[int]:
 
 
 def _get_eval_llm_config(eval_llm: LLMConfig | list[JudgeSpec]) -> LLMConfig:
-    """Extract a single LLMConfig from eval_llm for meta-rubric evaluation."""
-    if isinstance(eval_llm, list):
-        return eval_llm[0].llm_config
-    return eval_llm
+    """Extract a single LLMConfig from eval_llm for meta-rubric evaluation.
+
+    Raises:
+        ValueError: If ``eval_llm`` is, or includes, a decision model (``ImprovementConfig``
+            rejects one at construction; this guards an ``eval_llm`` reassigned afterwards).
+    """
+    _check_eval_llm(eval_llm)
+    config = eval_llm[0].llm_config if isinstance(eval_llm, list) else eval_llm
+    assert not isinstance(config, DecisionModelConfig)  # rejected just above
+    return config
 
 
 async def _evaluate_quality(
@@ -1839,17 +1991,9 @@ def _check_convergence(
 
 
 def _save_rubric(rubric: Rubric, path: Path) -> None:
-    """Save rubric criteria to a JSON file."""
-    criteria = [
-        {
-            "weight": c.weight,
-            "requirement": c.requirement,
-            **({"name": c.name} if c.name else {}),
-        }
-        for c in rubric.rubric
-    ]
+    """Save a rubric to a JSON file, in the form ``_rubric_artifact_data`` gives."""
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(criteria, f, indent=2)
+        json.dump(_rubric_artifact_data(rubric), f, indent=2)
 
 
 def _serialize_iteration(iter_result: IterationResult) -> dict:
@@ -1913,14 +2057,7 @@ def _serialize_iteration(iter_result: IterationResult) -> dict:
             "total_tokens": tu.total_tokens,
         }
 
-    rubric_criteria = [
-        {
-            "weight": c.weight,
-            "requirement": c.requirement,
-            **({"name": c.name} if c.name else {}),
-        }
-        for c in iter_result.rubric.rubric
-    ]
+    rubric_criteria = _rubric_criteria_data(iter_result.rubric)
 
     result: dict = {
         "iteration": iter_result.iteration,
@@ -1993,8 +2130,12 @@ class ImprovementRunner:
             plus all iteration details.
 
         Raises:
-            ValueError: If task_prompt is required but not provided.
+            ValueError: If task_prompt is required but not provided, or if the config's
+                ``eval_llm`` or ``revision_llm`` holds a decision model (checked again
+                here, before any call, as a field may have been reassigned since the
+                config was built).
         """
+        self.config._reject_decision_models()
         if self.config.strategy == "held_out":
             return await self._run_held_out()
         return await self._run_meta_rubric()
@@ -2040,7 +2181,7 @@ class ImprovementRunner:
             if isinstance(config.eval_llm, list):
                 validation_grader = CriterionGrader(judges=config.eval_llm)
             else:
-                validation_grader = CriterionGrader(llm_config=config.eval_llm)
+                validation_grader = CriterionGrader(judge_model_config=config.eval_llm)
             n_validation_items = len(config.validation_data.items)
 
         # Set up progress display
@@ -2340,20 +2481,9 @@ class ImprovementRunner:
 
         # --- summary.json ---
         if artifacts_dir:
-
-            def _rubric_to_criteria_list(rubric: Rubric) -> list[dict]:
-                return [
-                    {
-                        "weight": c.weight,
-                        "requirement": c.requirement,
-                        **({"name": c.name} if c.name else {}),
-                    }
-                    for c in rubric.rubric
-                ]
-
             summary = {
-                "original_rubric": _rubric_to_criteria_list(original_rubric),
-                "final_rubric": _rubric_to_criteria_list(best_rubric),
+                "original_rubric": _rubric_artifact_data(original_rubric),
+                "final_rubric": _rubric_artifact_data(best_rubric),
                 "task_prompt": self.task_prompt,
                 "convergence_reason": convergence_reason,
                 "best_iteration": best_iteration,
@@ -2495,7 +2625,7 @@ class ImprovementRunner:
         if isinstance(config.eval_llm, list):
             validation_grader = CriterionGrader(judges=config.eval_llm)
         else:
-            validation_grader = CriterionGrader(llm_config=config.eval_llm)
+            validation_grader = CriterionGrader(judge_model_config=config.eval_llm)
 
         n_items = len(config.validation_data.items)
 
@@ -2676,21 +2806,10 @@ class ImprovementRunner:
 
         # --- summary.json ---
         if artifacts_dir:
-
-            def _rubric_to_criteria_list(rubric: Rubric) -> list[dict]:
-                return [
-                    {
-                        "weight": c.weight,
-                        "requirement": c.requirement,
-                        **({"name": c.name} if c.name else {}),
-                    }
-                    for c in rubric.rubric
-                ]
-
             summary = {
                 "strategy": "held_out",
-                "original_rubric": _rubric_to_criteria_list(original_rubric),
-                "final_rubric": _rubric_to_criteria_list(best_rubric),
+                "original_rubric": _rubric_artifact_data(original_rubric),
+                "final_rubric": _rubric_artifact_data(best_rubric),
                 "task_prompt": self.task_prompt,
                 "convergence_reason": convergence_reason,
                 "best_iteration": best_iteration,

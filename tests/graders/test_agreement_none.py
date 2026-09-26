@@ -15,7 +15,7 @@ from autorubric.llm import LLMConfig
 @pytest.mark.asyncio
 async def test_empty_rubric_mean_agreement_is_none() -> None:
     """Aggregating judges with zero criteria yields ``mean_agreement is None``."""
-    grader = CriterionGrader(llm_config=LLMConfig(model="test-model"))
+    grader = CriterionGrader(judge_model_config=LLMConfig(model="test-model"))
     judge_results = [JudgeCriterionResults(judge_id="j1", weight=1.0, criterion_results=[])]
 
     report = await grader.aggregate(judge_results)

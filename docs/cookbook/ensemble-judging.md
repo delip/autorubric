@@ -62,17 +62,17 @@ from autorubric.graders import CriterionGrader, JudgeSpec
 grader = CriterionGrader(
     judges=[
         JudgeSpec(
-            llm_config=LLMConfig(model="openai/gpt-4.1"),
+            judge_model_config=LLMConfig(model="openai/gpt-4.1"),
             judge_id="gpt4",
             weight=1.0  # Equal voting weight
         ),
         JudgeSpec(
-            llm_config=LLMConfig(model="anthropic/claude-sonnet-4-5-20250929"),
+            judge_model_config=LLMConfig(model="anthropic/claude-sonnet-4-5-20250929"),
             judge_id="claude",
             weight=1.0
         ),
         JudgeSpec(
-            llm_config=LLMConfig(model="gemini/gemini-2.5-flash"),
+            judge_model_config=LLMConfig(model="gemini/gemini-2.5-flash"),
             judge_id="gemini",
             weight=1.0
         ),
@@ -367,12 +367,18 @@ dataset = RubricDataset(
 # An ensemble of >=2 judges is required for inter-judge agreement to be defined.
 grader = CriterionGrader(
     judges=[
-        JudgeSpec(llm_config=LLMConfig(model="openai/gpt-4.1-mini"), judge_id="gpt4-mini"),
         JudgeSpec(
-            llm_config=LLMConfig(model="anthropic/claude-sonnet-4-5-20250929"),
+            judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
+            judge_id="gpt4-mini",
+        ),
+        JudgeSpec(
+            judge_model_config=LLMConfig(model="anthropic/claude-sonnet-4-5-20250929"),
             judge_id="claude-sonnet",
         ),
-        JudgeSpec(llm_config=LLMConfig(model="gemini/gemini-2.5-flash"), judge_id="gemini-flash"),
+        JudgeSpec(
+            judge_model_config=LLMConfig(model="gemini/gemini-2.5-flash"),
+            judge_id="gemini-flash",
+        ),
     ],
     aggregation="majority",
 )
@@ -573,17 +579,17 @@ async def main():
     grader = CriterionGrader(
         judges=[
             JudgeSpec(
-                llm_config=LLMConfig(model="openai/gpt-4.1-mini"),
+                judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
                 judge_id="gpt4-mini",
                 weight=1.0
             ),
             JudgeSpec(
-                llm_config=LLMConfig(model="anthropic/claude-sonnet-4-5-20250929"),
+                judge_model_config=LLMConfig(model="anthropic/claude-sonnet-4-5-20250929"),
                 judge_id="claude-sonnet",
                 weight=1.0
             ),
             JudgeSpec(
-                llm_config=LLMConfig(model="gemini/gemini-2.5-flash"),
+                judge_model_config=LLMConfig(model="gemini/gemini-2.5-flash"),
                 judge_id="gemini-flash",
                 weight=1.0
             ),

@@ -23,10 +23,13 @@ Example:
     >>> metrics = result.compute_metrics(dataset, bootstrap=True)
     >>> print(f"Accuracy 95% CI: {metrics.bootstrap.accuracy_ci}")
     >>>
-    >>> # With per-judge breakdown (for ensemble)
+    >>> # With per-judge breakdown (for an ensemble or a cascade)
     >>> metrics = result.compute_metrics(dataset, per_judge=True)
     >>> for judge_id, jm in metrics.per_judge.items():
-    ...     print(f"{judge_id}: RMSE={jm.score_rmse:.4f}")
+    ...     # Score fields are None for a judge with no whole-rubric score, such as a
+    ...     # cascade's escalation judge (jm.coverage == "escalated").
+    ...     rmse = "n/a" if jm.score_rmse is None else f"{jm.score_rmse:.4f}"
+    ...     print(f"{judge_id}: RMSE={rmse}")
 """
 
 # Result types

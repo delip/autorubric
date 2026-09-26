@@ -55,7 +55,7 @@ from autorubric.graders import CriterionGrader
 
 async def main():
     # 1. Configure the LLM judge
-    grader = CriterionGrader(llm_config=LLMConfig(model="openai/gpt-4.1-mini"))
+    grader = CriterionGrader(judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"))
 
     # 2. Define your evaluation rubric
     rubric = Rubric.from_dict([
@@ -129,7 +129,7 @@ from autorubric import LLMConfig
 from autorubric.graders import CriterionGrader, JudgeSpec
 
 # Single LLM
-grader = CriterionGrader(llm_config=LLMConfig(model="openai/gpt-4.1-mini"))
+grader = CriterionGrader(judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"))
 
 # Ensemble with multiple judges
 grader = CriterionGrader(
@@ -228,7 +228,7 @@ async def batch_eval():
 
     # Configure grader with rate limiting
     grader = CriterionGrader(
-        llm_config=LLMConfig(
+        judge_model_config=LLMConfig(
             model="openai/gpt-4.1-mini",
             max_parallel_requests=10,
         )

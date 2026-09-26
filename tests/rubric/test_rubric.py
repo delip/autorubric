@@ -71,7 +71,7 @@ async def test_rubric():
         "autorubric.graders.criterion_grader.LLMClient",
         return_value=mock_client,
     ):
-        grader = CriterionGrader(llm_config=mock_config)
+        grader = CriterionGrader(judge_model_config=mock_config)
 
         for idx, dataset_item in enumerate(MOCK_DATASET):
             correctness_criteria = [

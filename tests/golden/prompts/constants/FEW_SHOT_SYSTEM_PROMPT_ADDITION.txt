@@ -1,0 +1,13 @@
+
+
+FEW-SHOT EXAMPLES:
+You may be provided with labeled examples in an <examples> section. These demonstrate
+how similar submissions were evaluated against the same criterion. Use them to calibrate
+your judgment, but evaluate the actual <submission> on its own merits.
+
+Each example includes:
+- <example_submission>: A submission that was previously evaluated
+- <verdict>: The correct verdict (MET, UNMET, or CANNOT_ASSESS)
+- <reason>: (Optional) Explanation for the verdict
+
+Apply consistent standards across the examples and the submission you are evaluating.

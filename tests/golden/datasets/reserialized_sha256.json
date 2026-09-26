@@ -1,0 +1,46 @@
+{
+  "examples/data/charm100.json": {
+    "reserialized_sha256": "a5df015955269220d853135d54097d1a25e155d1590f67ad51ff084408236c51",
+    "source_sha256": "b0ac1a0b9d5eca2c2d4a9c5d56f11759e8c29cf88d75b524f5f2ba300b08db3c"
+  },
+  "examples/data/essay_grading_dataset.json": {
+    "reserialized_sha256": "a71c3f90796530963d2cc7ba8c5c99568eedd9db8569ad7c263eec9bc6c4fa47",
+    "source_sha256": "fb008953c841e984ee506a95d781f486ba82a2c0dab58f5561f246912d5426b7"
+  },
+  "examples/data/hashemi_etal_2024_dataset.json": {
+    "reserialized_sha256": "06faf1b9fcd72a912ddedaaf9467c6f797ee736bc00d70fd4338aa72108d0ec8",
+    "source_sha256": "06faf1b9fcd72a912ddedaaf9467c6f797ee736bc00d70fd4338aa72108d0ec8"
+  },
+  "examples/data/peer_review_skill_eval.json": {
+    "reserialized_sha256": "fda1033118b25fde0b8b3d2f3057d25fd670950d23219b66aa05b9a4365aaca3",
+    "source_sha256": "31987e8964b98c68375fa0bd83659aa9be1abd2f76c446786df58bdacc5e5faa"
+  },
+  "examples/data/ricechem/q1.json": {
+    "reserialized_sha256": "3682ef50458090f10e4430330de981f2312bb7adf06acffd93f7f8c4176bc316",
+    "source_sha256": "3682ef50458090f10e4430330de981f2312bb7adf06acffd93f7f8c4176bc316"
+  },
+  "examples/data/ricechem/q2.json": {
+    "reserialized_sha256": "8291e5d7d0959742f74e1bd6b2cac270deaf976ec07aa911f3e9ef70d687cab1",
+    "source_sha256": "8291e5d7d0959742f74e1bd6b2cac270deaf976ec07aa911f3e9ef70d687cab1"
+  },
+  "examples/data/ricechem/q3.json": {
+    "reserialized_sha256": "589451220ab9eb5db3796bcbfe238525f5fcab8ff98118da43192488561d6fd1",
+    "source_sha256": "589451220ab9eb5db3796bcbfe238525f5fcab8ff98118da43192488561d6fd1"
+  },
+  "examples/data/ricechem/q4.json": {
+    "reserialized_sha256": "463957e2c5b7b2034bb94ffc4f7ffb2d46f3904bc72eee489b397a7c515f3cfa",
+    "source_sha256": "463957e2c5b7b2034bb94ffc4f7ffb2d46f3904bc72eee489b397a7c515f3cfa"
+  },
+  "examples/data/sharma_etal_2025_research_rubrics.json": {
+    "reserialized_sha256": "f983d7994277496071de96ea6faea949b573036aafc6ed9a72f55b3fb0b8781c",
+    "source_sha256": "065cc8cc699981399b770e33157e7cfe5b14e1a0996254f96c2a6dfb09425fda"
+  },
+  "src/autorubric/meta/data/meta_rubric_in_context.json": {
+    "reserialized_sha256": "e18cf1fbc589341534466726c41ed5ae5737e433817735c97b8090010efcf22c",
+    "source_sha256": "404c978047394e2e1b5ceaa87c131eac68c6d11ce84645da9b3def5e7de86c50"
+  },
+  "src/autorubric/meta/data/meta_rubric_standalone.json": {
+    "reserialized_sha256": "274e1ca1c154b8a5c0d86cdaa56bd2ddf0bd7d05b1e6944e05dc554561c5c427",
+    "source_sha256": "155e1ecc9eb5c127fd2459fd5f91770b7796a5429109feede165e1ed3f214cb9"
+  }
+}

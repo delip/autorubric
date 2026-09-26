@@ -34,6 +34,7 @@ from ._helpers import (
     resolve_ground_truth,
 )
 from ._types import (
+    BiasResult,
     BootstrapResults,
     CannotAssessMode,
     CannotAssessStats,
@@ -311,6 +312,12 @@ def _build_fleiss_row(
     counted vote). Items with any errored / excluded / CANNOT_ASSESS-under-``exclude`` vote
     are dropped from the Fleiss matrix (they remain in Krippendorff's alpha as missing cells).
 
+    ``superseded`` votes are not counted: a cascade's decision-model vote on an escalated
+    criterion was recorded but not aggregated. A cascade therefore never yields a complete
+    row (a criterion that was not escalated has only the decision model's vote; an escalated
+    one only the escalation judges'), so its Fleiss' kappa is ``None``: a cascade is not a
+    panel of raters. Superseded votes are kept in Krippendorff's alpha (``_build_alpha_cell``).
+
     Args:
         cr: An ``EnsembleCriterionReport`` (single-judge ``CriterionReport``s lack votes).
         criterion: The criterion (supplies option count for multi-choice).
@@ -329,7 +336,7 @@ def _build_fleiss_row(
             return None
         counts = [0] * n_cats
         for v in votes:
-            if v.is_error:
+            if v.is_error or v.superseded:
                 continue
             verdict = v.verdict
             if verdict == CriterionVerdict.CANNOT_ASSESS:
@@ -353,7 +360,7 @@ def _build_fleiss_row(
             return None
         counts = [0] * n_cats
         for v in mc_votes:
-            if v.is_error:
+            if v.is_error or v.superseded:
                 continue
             if 0 <= v.selected_index < n_cats:
                 counts[v.selected_index] += 1
@@ -372,6 +379,10 @@ def _build_alpha_cell(
     """Map a single judge vote to its Krippendorff reliability-matrix cell value.
 
     Errored votes, and CANNOT_ASSESS under ``exclude``, become ``np.nan`` (missing).
+    ``superseded`` votes are kept: a cascade's decision-model vote on an escalated criterion
+    is the decision model's rating of that unit, and alpha, which tolerates missing cells,
+    is the only statistic measuring its agreement with the escalation judges on those
+    criteria. (Fleiss' kappa skips such votes; see ``_build_fleiss_row``.)
 
     Args:
         vote: A ``JudgeVote`` (binary) or ``MultiChoiceJudgeVote`` (multi-choice).
@@ -1073,11 +1084,12 @@ def _build_coverage_stats(
 
 def _compute_judge_metrics(
     judge_id: str,
-    judge_scores: list[float],
+    judge_scores: list[float | None],
     true_scores: list[float],
     judge_verdicts: list[list[CriterionVerdict]],
     judge_mc_preds: list[list[int | None]],
     judge_errors: list[list[str | None]],
+    judge_missing: list[list[bool]],
     true_verdicts: list[list[CriterionVerdict | int]],
     criterion_types: list[str],
     criteria: list[Criterion],
@@ -1088,11 +1100,33 @@ def _compute_judge_metrics(
     """Compute metrics for a single judge, mirroring the aggregate's type handling.
 
     ``judge_verdicts`` (binary verdicts), ``judge_mc_preds`` (multi-choice option
-    indices, already NA-normalized), ``judge_errors`` and ``true_verdicts`` are all
-    items x criteria and aligned 1:1. Binary criteria contribute label/MET-vs-rest data;
-    multi-choice criteria contribute exact-match accuracy and (weighted/unweighted) kappa
-    exactly as the aggregate does (reusing the same per-criterion functions). Only cells
-    with a genuine (error-free) judge vote and a correctly-typed ground truth are included.
+    indices, already NA-normalized), ``judge_errors``, ``judge_missing`` and
+    ``true_verdicts`` are all items x criteria and aligned 1:1. Binary criteria contribute
+    label/MET-vs-rest data; multi-choice criteria contribute exact-match accuracy and
+    (weighted/unweighted) kappa exactly as the aggregate does (reusing the same
+    per-criterion functions). Only cells with a genuine (present, error-free) judge vote and
+    a correctly-typed ground truth are included. A ``judge_missing`` cell (the judge cast no
+    vote on that criterion of that item, e.g. a cascade escalation judge on a criterion that
+    was not escalated) counts neither as a prediction nor as an abstention; its slots hold
+    layout placeholders only. A ``superseded`` vote is present: it is the judge's prediction.
+
+    ``judge_scores`` is item-aligned with ``true_scores``. A ``None`` entry means the
+    judge's whole-rubric score is undefined for its role (a judge consulted only on some
+    criteria is ``None`` on every item, even an item where it judged every criterion).
+    Score-level metrics are undefined for a judge with no defined score, so all of its
+    score fields (``score_rmse``, ``score_mae``, ``score_spearman``, ``score_kendall``,
+    ``score_pearson``, ``bias``) are ``None``. Otherwise they are computed over the items
+    whose score is defined: a ``None`` on only some items (e.g. in a hand-built report) is
+    left out of the pairs, as the aggregate leaves out score-less items, never filled in.
+    A judge absent from some items' ``judge_scores`` (a judge set that changed between
+    items) has no entry there, not a ``None`` entry; ``compute_metrics`` rejects that case
+    before calling this function.
+
+    A judge whose ``judge_scores`` entries are all ``None`` has no whole-rubric score on any
+    item, the mark of a cascade escalation judge (by role, however many criteria escalated):
+    its ``coverage`` is ``"escalated"`` and ``n_pairs`` counts the included cells, i.e. its
+    escalated subset, before the ``cannot_assess`` / ``na_mode`` handling. Any other judge
+    has ``coverage="full"`` and ``n_pairs=None``.
     """
     n_criteria = len(criterion_types)
 
@@ -1109,7 +1143,10 @@ def _compute_judge_metrics(
         mc_v = judge_mc_preds[item_idx] if item_idx < len(judge_mc_preds) else []
         true_v = true_verdicts[item_idx]
         err_v = judge_errors[item_idx] if item_idx < len(judge_errors) else [None] * n_criteria
+        miss_v = judge_missing[item_idx]
         for c in range(n_criteria):
+            if c < len(miss_v) and miss_v[c]:
+                continue
             if c < len(err_v) and err_v[c] is not None:
                 continue
             if c >= len(true_v):
@@ -1162,16 +1199,32 @@ def _compute_judge_metrics(
     # cannot_assess filtering would otherwise hide. None when the judge had no binary data.
     judge_confusion_matrix = _build_binary_judge_confusion_matrix(pj_pred, pj_true, criterion_types)
 
-    # Score-level metrics (unchanged)
-    score_rmse = float(np.sqrt(mean_squared_error(true_scores, judge_scores)))
-    score_mae = float(mean_absolute_error(true_scores, judge_scores))
-
-    score_spearman = _compute_correlation(judge_scores, true_scores, "spearman")
-    score_kendall = _compute_correlation(judge_scores, true_scores, "kendall")
-    score_pearson = _compute_correlation(judge_scores, true_scores, "pearson")
-
-    # Bias
-    bias = systematic_bias(judge_scores, true_scores)
+    # Score-level metrics over the items whose judge score is defined; an undefined (None)
+    # score is left out, never filled in. With every score defined these are all items, as
+    # before. With none defined, every score-level metric is undefined (None).
+    scored_pairs = [
+        (pred, true)
+        for pred, true in zip(judge_scores, true_scores, strict=True)
+        if pred is not None
+    ]
+    score_rmse: float | None = None
+    score_mae: float | None = None
+    score_spearman: CorrelationResult | None = None
+    score_kendall: CorrelationResult | None = None
+    score_pearson: CorrelationResult | None = None
+    bias: BiasResult | None = None
+    # A judge with no whole-rubric score on any item was consulted only on the criteria
+    # escalated to it: its criterion-level metrics above cover exactly that subset.
+    escalated = all(score is None for score in judge_scores)
+    if scored_pairs:
+        pred_scores = [pred for pred, _ in scored_pairs]
+        true_scored = [true for _, true in scored_pairs]
+        score_rmse = float(np.sqrt(mean_squared_error(true_scored, pred_scores)))
+        score_mae = float(mean_absolute_error(true_scored, pred_scores))
+        score_spearman = _compute_correlation(pred_scores, true_scored, "spearman")
+        score_kendall = _compute_correlation(pred_scores, true_scored, "kendall")
+        score_pearson = _compute_correlation(pred_scores, true_scored, "pearson")
+        bias = systematic_bias(pred_scores, true_scored)
 
     return JudgeMetrics(
         judge_id=judge_id,
@@ -1192,6 +1245,8 @@ def _compute_judge_metrics(
         score_kendall=score_kendall,
         score_pearson=score_pearson,
         bias=bias,
+        coverage="escalated" if escalated else "full",
+        n_pairs=sum(len(cells) for cells in pj_pred) if escalated else None,
     )
 
 
@@ -1436,7 +1491,15 @@ def compute_metrics(
             ``kappa_ci``←``mean_kappa`` (ordinal quadratic-weighted), ``rmse_ci``←``score_rmse``.
             Each CI is ``None`` when undefined (empty/degenerate axis).
         n_bootstrap: Number of bootstrap samples if bootstrap=True.
-        per_judge: If True and ensemble, compute per-judge metrics.
+        per_judge: If True and ensemble, compute per-judge metrics. Every scored item must
+            have been graded by the same judges (see Raises). A judge's missing vote on a
+            criterion (a cascade escalation judge on a criterion that was not escalated) is
+            left out of its metrics, as neither a verdict nor an abstention, while a cascade
+            decision model's ``superseded`` votes are its predictions. A judge with no
+            whole-rubric score on any item (every ``judge_scores`` entry ``None``: a cascade
+            escalation judge) is measured on its escalated subset:
+            ``JudgeMetrics.coverage == "escalated"``, ``n_pairs`` is the subset's size and
+            the score-level fields are ``None``.
         cannot_assess: How to handle CANNOT_ASSESS verdicts (binary criteria):
             - "exclude": Skip pairs where either is CANNOT_ASSESS (default)
             - "as_unmet": Treat CANNOT_ASSESS as UNMET
@@ -1477,6 +1540,9 @@ def compute_metrics(
 
     Raises:
         ValueError: If no common items between eval_result and dataset.
+        ValueError: If ``per_judge`` is True and a judge is in the ``judge_scores`` of only
+            some scored items (the judge set changed between items). A ``None`` entry is
+            present, not absent, and is supported.
 
     Example:
         >>> result = await evaluate(dataset, grader)
@@ -1567,8 +1633,9 @@ def compute_metrics(
     all_pred_scores: list[float] = []
     all_true_scores: list[float] = []
 
-    # For ensemble: per-judge data (binary verdicts + multi-choice option indices).
-    judge_scores: dict[str, list[float]] = {}
+    # For ensemble: per-judge data (binary verdicts + multi-choice option indices). A judge
+    # score is None when that judge's whole-rubric score is undefined for its role.
+    judge_scores: dict[str, list[float | None]] = {}
     judge_verdicts: dict[str, list[list[CriterionVerdict]]] = {}
     # Per-judge multi-choice predictions (items x criteria); binary cells are a None
     # placeholder. A multi-choice cell may transiently be None (genuine error-abstain);
@@ -1576,6 +1643,13 @@ def compute_metrics(
     # built, mirroring the aggregate per_criterion_pred normalization.
     judge_mc_preds: dict[str, list[list[int | None]]] = {}
     judge_errors: dict[str, list[list[str | None]]] = {}
+    # Per-judge missing mask (items x criteria), parallel to the rows above: True where the
+    # judge cast no vote on that criterion of that item (a cascade escalation judge on a
+    # criterion that was not escalated, or a judge absent from the item). A missing vote is
+    # missing, not a verdict: the cell's slots hold layout placeholders, and the cell is
+    # excluded from NA reconstruction and from the judge's metrics (neither a prediction
+    # nor an abstention).
+    judge_missing: dict[str, list[list[bool]]] = {}
     is_ensemble = False
 
     # Per-item ground-truth verdicts (all criteria) aligned 1:1 with each item that
@@ -1699,6 +1773,7 @@ def compute_metrics(
                     judge_verdicts[jid] = []
                     judge_mc_preds[jid] = []
                     judge_errors[jid] = []
+                    judge_missing[jid] = []
                 judge_scores[jid].append(score)
 
             # Align ground truth (all criteria) once per ensemble item.
@@ -1710,12 +1785,16 @@ def compute_metrics(
             # criterion yields a placeholder UNMET verdict and the vote's selected_index
             # (raw int|None — None is a genuine abstain, normalized later). The error
             # is captured per criterion from whichever vote type matched, so errored MC
-            # votes are skipped with the same parity as binary.
+            # votes are skipped with the same parity as binary. A superseded vote (a
+            # cascade decision model's vote on an escalated criterion) is the judge's
+            # prediction like any other. A judge with no vote on the criterion gets
+            # placeholders (UNMET / None) and a True missing-mask cell.
             if hasattr(report, "report") and report.report:
                 for jid in judge_scores.keys():
                     judge_v: list[CriterionVerdict] = []
                     judge_mc: list[int | None] = []
                     judge_e: list[str | None] = []
+                    judge_m: list[bool] = []
                     for c_idx, cr in enumerate(report.report):
                         c_type = (
                             criterion_types[c_idx] if c_idx < len(criterion_types) else "binary"
@@ -1727,10 +1806,12 @@ def compute_metrics(
                                 if vote.judge_id == jid:
                                     judge_v.append(vote.verdict)
                                     judge_e.append(vote.error)
+                                    judge_m.append(False)
                                     break
                             else:
-                                judge_v.append(CriterionVerdict.UNMET)
+                                judge_v.append(CriterionVerdict.UNMET)  # placeholder
                                 judge_e.append(None)
+                                judge_m.append(True)
                         else:
                             judge_v.append(CriterionVerdict.UNMET)  # placeholder
                             mc_votes = getattr(cr, "multi_choice_votes", None) or []
@@ -1738,14 +1819,17 @@ def compute_metrics(
                                 if vote.judge_id == jid:
                                     judge_mc.append(vote.selected_index)
                                     judge_e.append(vote.error)
+                                    judge_m.append(False)
                                     break
                             else:
-                                judge_mc.append(None)
+                                judge_mc.append(None)  # placeholder, not an abstain
                                 judge_e.append(None)
+                                judge_m.append(True)
                     if jid in judge_verdicts:
                         judge_verdicts[jid].append(judge_v)
                         judge_mc_preds[jid].append(judge_mc)
                         judge_errors[jid].append(judge_e)
+                        judge_missing[jid].append(judge_m)
 
             # Inter-judge agreement collection (binary + multi-choice) from ensemble votes.
             if hasattr(report, "report") and report.report:
@@ -1808,11 +1892,12 @@ def compute_metrics(
             # Also consider per-judge multi-choice cells: a single judge may have
             # abstained (None) or picked the injected NA while the aggregate verdict
             # did not, so the effective criterion still needs an NA option for the
-            # per-judge normalization to recognize that cell.
+            # per-judge normalization to recognize that cell. A missing cell's None is a
+            # placeholder, not an abstain, so it never triggers the reconstruction.
             observed = any(
-                c_idx < len(row) and _needs_na(row[c_idx])
-                for rows in judge_mc_preds.values()
-                for row in rows
+                c_idx < len(row) and not missing_row[c_idx] and _needs_na(row[c_idx])
+                for jid, rows in judge_mc_preds.items()
+                for row, missing_row in zip(rows, judge_missing[jid], strict=True)
             )
         if observed:
             effective_criteria[c_idx] = author_c.with_guaranteed_na_option()
@@ -1833,13 +1918,14 @@ def compute_metrics(
     # using the SAME effective_criteria. A judge's None multi-choice cell is either a binary
     # placeholder (no NA option to point at) or a genuine abstain on a multi-choice
     # criterion; only multi-choice cells with a resolvable NA index are normalized, so binary
-    # placeholders stay None and are ignored by the per-judge multi-choice path.
+    # placeholders stay None and are ignored by the per-judge multi-choice path. A missing
+    # cell's None placeholder is left as is (the mask excludes it downstream).
     for jid in judge_mc_preds:
-        for item_row in judge_mc_preds[jid]:
+        for item_row, missing_row in zip(judge_mc_preds[jid], judge_missing[jid], strict=True):
             for c_idx in range(min(n_criteria, len(item_row))):
                 if criterion_types[c_idx] == "binary":
                     continue
-                if item_row[c_idx] is not None:
+                if item_row[c_idx] is not None or missing_row[c_idx]:
                     continue
                 na_idx = effective_criteria[c_idx].na_option_index
                 if na_idx is None:
@@ -2184,6 +2270,17 @@ def compute_metrics(
             jv = judge_verdicts.get(jid, [])
             if not jv:
                 continue
+            # A judge's scores are item-aligned only when it is in every scored item's
+            # judge_scores (a None entry counts: it is present, with an undefined score). A
+            # judge absent from some items has no entry to align, so its per-judge metrics
+            # are not supported; say which judge, rather than failing on the length mismatch.
+            if len(judge_scores[jid]) != len(all_true_scores):
+                raise ValueError(
+                    "per_judge=True needs every scored item graded by the same judges, but "
+                    f"judge {jid!r} is in the judge_scores of {len(judge_scores[jid])} of "
+                    f"{len(all_true_scores)} scored items (did the judge set change between "
+                    "items, e.g. on a resumed run?). Use per_judge=False for the other metrics."
+                )
 
             per_judge_metrics[jid] = _compute_judge_metrics(
                 judge_id=jid,
@@ -2192,6 +2289,7 @@ def compute_metrics(
                 judge_verdicts=jv,
                 judge_mc_preds=judge_mc_preds.get(jid, []),
                 judge_errors=judge_errors.get(jid, []),
+                judge_missing=judge_missing[jid],
                 true_verdicts=per_item_true,
                 criterion_types=list(criterion_types),
                 criteria=criteria,

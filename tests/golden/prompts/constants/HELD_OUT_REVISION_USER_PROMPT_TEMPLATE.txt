@@ -1,0 +1,34 @@
+You are revising an evaluation rubric to fix grading errors identified on held-out data.
+
+## Task Being Evaluated
+{task_prompt}
+
+## Current Rubric
+{original_criteria}
+
+## Held-Out Grading Diagnostics
+{diagnostics_text}
+
+## Revision History
+{history_text}
+Do NOT reintroduce wording that was changed in previous iterations.
+
+## Revision Rules
+1. Output EXACTLY {num_criteria} criteria in the SAME ORDER as the current rubric.
+2. For criteria with high accuracy (>90%), preserve their wording closely — small tweaks only.
+3. For criteria with low accuracy, study the disagreement exemplars:
+   - If FP rate is high: the wording is too easy to satisfy. Add specificity about what evidence is required.
+   - If FN rate is high: the wording is too restrictive. Broaden acceptance or clarify that implicit satisfaction counts.
+4. Use the judge's reasoning from disagreement cases to understand HOW the wording is being misinterpreted, then fix it.
+5. Use the judge's reasoning from agreement cases to understand what phrasing works well — preserve those patterns.
+6. Each criterion must assess ONE specific, observable quality.
+7. Weights may be adjusted (integers, typically 5-15 for positive, -5 to -15 for negative).
+
+## Output Format
+Return ONLY a valid JSON array of EXACTLY {num_criteria} criteria objects. Each object must have "weight" (integer) and "requirement" (string) fields, and optionally a "name" (string) field. No other text or explanation.
+
+Example:
+[
+  {{"weight": 10, "name": "factual_accuracy", "requirement": "States that the boiling point of water at sea level is 100 degrees Celsius (212 degrees Fahrenheit)"}},
+  {{"weight": -5, "name": "incorrect_formula", "requirement": "Presents an incorrect mathematical formula for the relationship"}}
+]

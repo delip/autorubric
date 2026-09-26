@@ -197,7 +197,7 @@ async def main() -> None:
     # original (good) rubric, since ground-truth verdicts map to those criteria.
     # The poor rubric has different criteria, so we grade with the poor rubric
     # and compare rubric scores against the original expected scores.
-    grader = CriterionGrader(llm_config=eval_llm)
+    grader = CriterionGrader(judge_model_config=eval_llm)
     extra_cost = 0.0  # costs outside the improvement loop
 
     # -- Before: test-set correlation with the poor rubric --

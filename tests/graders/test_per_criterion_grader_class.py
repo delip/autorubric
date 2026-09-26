@@ -43,7 +43,7 @@ async def test_per_criterion_grader_class_integration(
         "autorubric.graders.criterion_grader.LLMClient",
         return_value=per_criterion_mock_client,
     ):
-        grader = CriterionGrader(llm_config=mock_llm_config)
+        grader = CriterionGrader(judge_model_config=mock_llm_config)
 
         report: EvaluationReport = await sample_rubric.grade(sample_output, grader=grader)
 
@@ -74,7 +74,7 @@ async def test_per_criterion_grader_handles_invalid_json(sample_rubric, mock_llm
         "autorubric.graders.criterion_grader.LLMClient",
         return_value=mock_client,
     ):
-        grader = CriterionGrader(llm_config=mock_llm_config)
+        grader = CriterionGrader(judge_model_config=mock_llm_config)
 
         report = await grader.grade(
             to_grade="Example submission",
@@ -128,7 +128,7 @@ async def test_per_criterion_grader_with_negative_criterion_unmet(sample_rubric,
         "autorubric.graders.criterion_grader.LLMClient",
         return_value=mock_client,
     ):
-        grader = CriterionGrader(llm_config=mock_llm_config)
+        grader = CriterionGrader(judge_model_config=mock_llm_config)
 
         report = await sample_rubric.grade("Test", grader=grader)
 
@@ -174,7 +174,7 @@ async def test_all_negative_criteria_all_unmet_returns_perfect_score(mock_llm_co
         "autorubric.graders.criterion_grader.LLMClient",
         return_value=mock_client,
     ):
-        grader = CriterionGrader(llm_config=mock_llm_config)
+        grader = CriterionGrader(judge_model_config=mock_llm_config)
         result = await rubric.grade("Clean, accurate text", grader=grader)
 
         assert result.score == pytest.approx(1.0)
@@ -213,7 +213,7 @@ async def test_all_negative_criteria_all_met_returns_zero_score(mock_llm_config)
         "autorubric.graders.criterion_grader.LLMClient",
         return_value=mock_client,
     ):
-        grader = CriterionGrader(llm_config=mock_llm_config)
+        grader = CriterionGrader(judge_model_config=mock_llm_config)
         result = await rubric.grade("Bad text with errors", grader=grader)
 
         assert result.score == pytest.approx(0.0)
@@ -263,7 +263,7 @@ async def test_all_negative_criteria_partial_errors_returns_partial_score(mock_l
         "autorubric.graders.criterion_grader.LLMClient",
         return_value=mock_client,
     ):
-        grader = CriterionGrader(llm_config=mock_llm_config)
+        grader = CriterionGrader(judge_model_config=mock_llm_config)
         result = await rubric.grade("Text with one error", grader=grader)
 
         # 1 error out of 3: score = 1.0 + (-1.0 / 3.0) = 2/3 ~ 0.667
@@ -312,7 +312,7 @@ async def test_all_negative_criteria_with_different_weights(mock_llm_config):
         "autorubric.graders.criterion_grader.LLMClient",
         return_value=mock_client,
     ):
-        grader = CriterionGrader(llm_config=mock_llm_config)
+        grader = CriterionGrader(judge_model_config=mock_llm_config)
         result = await rubric.grade("Text with minor error", grader=grader)
 
         # total_negative_weight = 3.0, weighted_score_sum = -1.0
@@ -349,7 +349,7 @@ async def test_parse_failure_no_bias_with_negative_heavy_rubric(mock_llm_config)
         "autorubric.graders.criterion_grader.LLMClient",
         return_value=mock_client,
     ):
-        grader = CriterionGrader(llm_config=mock_llm_config)
+        grader = CriterionGrader(judge_model_config=mock_llm_config)
         result = await rubric.grade("Test input", grader=grader)
 
         # With conservative defaults:
@@ -385,7 +385,7 @@ async def test_parse_failure_all_negative_rubric_returns_zero(mock_llm_config):
         "autorubric.graders.criterion_grader.LLMClient",
         return_value=mock_client,
     ):
-        grader = CriterionGrader(llm_config=mock_llm_config)
+        grader = CriterionGrader(judge_model_config=mock_llm_config)
         result = await rubric.grade("Test", grader=grader)
 
         # All negative criteria default to MET (errors assumed present)
@@ -425,7 +425,7 @@ async def test_criterion_name_propagates_to_report(mock_llm_config):
         "autorubric.graders.criterion_grader.LLMClient",
         return_value=mock_client,
     ):
-        grader = CriterionGrader(llm_config=mock_llm_config)
+        grader = CriterionGrader(judge_model_config=mock_llm_config)
         result = await rubric.grade("Test submission", grader=grader)
 
         assert result.report is not None

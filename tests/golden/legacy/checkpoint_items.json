@@ -1,0 +1,296 @@
+{
+  "submission": "Water boils at 100 degrees Celsius at sea level.",
+  "description": "legacy checkpoint item",
+  "ensemble": {
+    "item_idx": 0,
+    "duration_seconds": 1.25,
+    "error": null,
+    "report": {
+      "score": 0.375,
+      "raw_score": 3.0,
+      "error": null,
+      "cannot_assess_count": 0,
+      "mean_agreement": 0.5,
+      "token_usage": {
+        "prompt_tokens": 70,
+        "completion_tokens": 35,
+        "total_tokens": 105
+      },
+      "completion_cost": 0.007,
+      "report_type": "ensemble",
+      "criterion_reports": [
+        {
+          "criterion": {
+            "weight": 3.0,
+            "requirement": "States the boiling point",
+            "name": "boiling_point",
+            "options": null,
+            "scale_type": "ordinal",
+            "aggregation": null
+          },
+          "final_verdict": "UNMET",
+          "final_reason": "alpha: alpha says MET | beta: beta says UNMET",
+          "votes": [
+            {
+              "judge_id": "alpha",
+              "verdict": "MET",
+              "reason": "alpha says MET",
+              "weight": 1.0,
+              "error": null,
+              "reasoning": "step-by-step deliberation"
+            },
+            {
+              "judge_id": "beta",
+              "verdict": "UNMET",
+              "reason": "beta says UNMET",
+              "weight": 2.0,
+              "error": null,
+              "reasoning": null
+            }
+          ],
+          "agreement": 0.5,
+          "final_multi_choice_verdict": null,
+          "multi_choice_votes": [],
+          "error": null
+        },
+        {
+          "criterion": {
+            "weight": -2.0,
+            "requirement": "Recommends untreated water",
+            "name": "unsafe_advice",
+            "options": null,
+            "scale_type": "ordinal",
+            "aggregation": null
+          },
+          "final_verdict": "MET",
+          "final_reason": "alpha: alpha says MET | beta: beta says UNMET",
+          "votes": [
+            {
+              "judge_id": "alpha",
+              "verdict": "MET",
+              "reason": "alpha says MET",
+              "weight": 1.0,
+              "error": null,
+              "reasoning": "step-by-step deliberation"
+            },
+            {
+              "judge_id": "beta",
+              "verdict": "UNMET",
+              "reason": "beta says UNMET",
+              "weight": 2.0,
+              "error": null,
+              "reasoning": null
+            }
+          ],
+          "agreement": 0.5,
+          "final_multi_choice_verdict": null,
+          "multi_choice_votes": [],
+          "error": null
+        },
+        {
+          "criterion": {
+            "weight": 4.0,
+            "requirement": "How clear is the explanation?",
+            "name": "clarity",
+            "options": [
+              {
+                "label": "Very unclear",
+                "value": 0.0,
+                "na": false
+              },
+              {
+                "label": "Somewhat clear",
+                "value": 0.5,
+                "na": false
+              },
+              {
+                "label": "Very clear",
+                "value": 1.0,
+                "na": false
+              },
+              {
+                "label": "Cannot assess / not applicable",
+                "value": 0.0,
+                "na": true
+              }
+            ],
+            "scale_type": "ordinal",
+            "aggregation": null
+          },
+          "final_verdict": null,
+          "final_reason": "alpha: alpha picked the first listed option | beta: beta picked the first listed option",
+          "votes": [],
+          "agreement": 0.5,
+          "final_multi_choice_verdict": {
+            "selected_index": 2,
+            "selected_label": "Very clear",
+            "value": 1.0,
+            "na": false,
+            "aggregated_value": 1.0
+          },
+          "multi_choice_votes": [
+            {
+              "judge_id": "alpha",
+              "selected_index": 3,
+              "selected_label": "Cannot assess / not applicable",
+              "value": 0.0,
+              "reason": "alpha picked the first listed option",
+              "weight": 1.0,
+              "na": true,
+              "shuffle_order": [
+                3,
+                0,
+                2,
+                1
+              ],
+              "error": null,
+              "reasoning": null
+            },
+            {
+              "judge_id": "beta",
+              "selected_index": 2,
+              "selected_label": "Very clear",
+              "value": 1.0,
+              "reason": "beta picked the first listed option",
+              "weight": 2.0,
+              "na": false,
+              "shuffle_order": [
+                2,
+                1,
+                0,
+                3
+              ],
+              "error": null,
+              "reasoning": null
+            }
+          ],
+          "error": null
+        },
+        {
+          "criterion": {
+            "weight": 1.0,
+            "requirement": "Which register best describes the answer?",
+            "name": "register",
+            "options": [
+              {
+                "label": "Formal",
+                "value": 1.0,
+                "na": false
+              },
+              {
+                "label": "Slang",
+                "value": 0.0,
+                "na": false
+              },
+              {
+                "label": "N/A",
+                "value": 0.0,
+                "na": true
+              }
+            ],
+            "scale_type": "nominal",
+            "aggregation": null
+          },
+          "final_verdict": null,
+          "final_reason": "alpha: alpha picked the first listed option | beta: Judge call failed (parse): unparseable judge output",
+          "votes": [],
+          "agreement": 0.5,
+          "final_multi_choice_verdict": {
+            "selected_index": 0,
+            "selected_label": "Formal",
+            "value": 1.0,
+            "na": false,
+            "aggregated_value": 1.0
+          },
+          "multi_choice_votes": [
+            {
+              "judge_id": "alpha",
+              "selected_index": 0,
+              "selected_label": "Formal",
+              "value": 1.0,
+              "reason": "alpha picked the first listed option",
+              "weight": 1.0,
+              "na": false,
+              "shuffle_order": [
+                0,
+                1,
+                2
+              ],
+              "error": null,
+              "reasoning": null
+            },
+            {
+              "judge_id": "beta",
+              "selected_index": 2,
+              "selected_label": "N/A",
+              "value": 0.0,
+              "reason": "Judge call failed (parse): unparseable judge output",
+              "weight": 2.0,
+              "na": true,
+              "shuffle_order": [
+                1,
+                2,
+                0
+              ],
+              "error": "parse: unparseable judge output",
+              "reasoning": null
+            }
+          ],
+          "error": null
+        }
+      ],
+      "judge_scores": {
+        "alpha": 0.5,
+        "beta": 0.5714285714285714
+      }
+    }
+  },
+  "single": {
+    "item_idx": 1,
+    "duration_seconds": 0.5,
+    "error": null,
+    "report": {
+      "score": 0.75,
+      "raw_score": 3.0,
+      "error": null,
+      "cannot_assess_count": 0,
+      "token_usage": {
+        "prompt_tokens": 20,
+        "completion_tokens": 10,
+        "total_tokens": 30
+      },
+      "completion_cost": 0.002,
+      "report_type": "single",
+      "criterion_reports": [
+        {
+          "weight": 3.0,
+          "requirement": "States the boiling point",
+          "name": "boiling_point",
+          "options": null,
+          "scale_type": "ordinal",
+          "aggregation": null,
+          "verdict": "MET",
+          "multi_choice_verdict": null,
+          "reason": "States 100 C.",
+          "shuffle_order": null,
+          "error": null,
+          "reasoning": "considered the value"
+        },
+        {
+          "weight": -2.0,
+          "requirement": "Recommends untreated water",
+          "name": "unsafe_advice",
+          "options": null,
+          "scale_type": "ordinal",
+          "aggregation": null,
+          "verdict": "CANNOT_ASSESS",
+          "multi_choice_verdict": null,
+          "reason": "Judge call failed (infrastructure): timeout",
+          "shuffle_order": null,
+          "error": "infrastructure: timeout",
+          "reasoning": null
+        }
+      ]
+    }
+  }
+}
