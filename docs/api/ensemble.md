@@ -70,7 +70,7 @@ They also share a single `judge_scores` entry, one set of per-judge metrics, and
 order and few-shot examples. `CriterionGrader` still accepts a repeated `judge_id` for now, but
 it emits a `FutureWarning` naming the repeated ids. A repeated `judge_id` will raise `ValueError`
 in the next major version. A cascade already rejects repeats (see
-[Decision Models](../decision-models.md)).
+[Decision Models](../cookbook/decision-models.md)).
 
 To poll one model several times, give each copy its own id. Each copy then also gets its own
 option shuffle:

@@ -82,7 +82,7 @@ Blank text (empty or whitespace only) means no guidelines and is stored as `None
 What each judge sees:
 
 - **LLM judges** get a `<guidelines>` block at the start of every per-criterion prompt, stating that the criterion text governs and the guidelines clarify how to apply it. It sits in the user prompt, so a custom `system_prompt` keeps it. A rubric without guidelines produces exactly the prompts it produced before guidelines existed.
-- **Decision models** get them once per request as `state["guidelines"]`; the framed questions add a sentence telling the model to apply them (see [Decision-Model Judges](../decision-models.md#rubric-guidelines-shared-context)).
+- **Decision models** get them once per request as `state["guidelines"]`; the framed questions add a sentence telling the model to apply them (see [Decision-Model Judges](../cookbook/decision-models.md#rubric-guidelines-shared-context)).
 - **Custom graders** receive them when their `judge` accepts a `guidelines` keyword or `**kwargs`; otherwise grading proceeds without them and warns once per grader that it ignores rubric guidelines.
 - **Meta-rubric evaluation** shows them to the meta-judge as part of the rubric under review. **Rubric improvement** keeps them unchanged on every revised rubric; the revision LLM sees them but does not revise them.
 

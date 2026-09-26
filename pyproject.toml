@@ -5,14 +5,14 @@ build-backend = "hatchling.build"
 [project]
 name = "autorubric"
 dynamic = ["version"]
-description = "A Python library encapsulating best practices for rubric-based evaluation of LLM/VLM outputs using LLM-as-a-judge."
+description = "A Python library encapsulating best practices for rubric-based evaluation of LLM/VLM outputs using AI judges such as LLMs and decision models."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 authors = [
     { name = "Delip Rao", email = "" }
 ]
-keywords = ["rubrics", "grading", "eval", "llm", "evaluation", "autorubric", "llm judge", "llm as a judge"]
+keywords = ["rubrics", "grading", "eval", "llm", "evaluation", "autorubric", "llm judge", "llm as a judge", "ai judge", "decision model"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",

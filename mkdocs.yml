@@ -1,6 +1,6 @@
 site_name: AutoRubric
 site_url: https://autorubric.org/docs/
-site_description: A Python library for evaluating text outputs against weighted criteria using LLM-as-a-judge.
+site_description: A Python library for evaluating text outputs against weighted criteria using AI judges such as LLMs and decision models.
 site_author: Delip Rao
 repo_url: https://github.com/delip/autorubric
 repo_name: delip/autorubric
@@ -112,13 +112,15 @@ extra:
 nav:
   - Home: index.md
   - Quickstart: quickstart.md
-  - Decision-Model Judges: decision-models.md
   - Cookbook:
       - cookbook/index.md
       - Foundation:
           - Your First Evaluation: cookbook/first-evaluation.md
+          - LLM Judges: cookbook/llm-judges.md
+          - Decision-Model Judges: cookbook/decision-models.md
           - Managing Datasets: cookbook/managing-datasets.md
           - Working with Explanations: cookbook/explanations.md
+          - Cheap First-Pass Grading with Jev: cookbook/cascade-grading.md
       - Reliability:
           - Few-Shot Calibration: cookbook/few-shot-calibration.md
           - Ensemble Judging: cookbook/ensemble-judging.md
@@ -138,7 +140,6 @@ nav:
       - Specialized:
           - Per-Item Rubrics: cookbook/per-item-rubrics.md
           - Cost Optimization: cookbook/cost-optimization.md
-          - Cheap First-Pass Grading with Jev: cookbook/cascade-grading.md
           - Configuration Management: cookbook/configuration-management.md
           - Evaluating Agent Skills: cookbook/agent-skill-evaluation.md
           - Improving Agent Skills: cookbook/improving-agent-skills.md

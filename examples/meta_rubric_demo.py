@@ -61,7 +61,6 @@ async def main() -> None:
 
     llm_config = LLMConfig(
         model="gemini/gemini-2.5-flash",
-        temperature=0.0,
         thinking="medium",
         max_parallel_requests=10,
     )

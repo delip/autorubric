@@ -97,7 +97,7 @@ import asyncio
 from autorubric import LLMConfig
 from autorubric.meta import evaluate_rubric_standalone
 
-llm_config = LLMConfig(model="openai/gpt-4.1-mini", temperature=0.0)
+llm_config = LLMConfig(model="openai/gpt-4.1-mini")
 
 async def main():
     result = await evaluate_rubric_standalone(
@@ -448,7 +448,7 @@ async def validate_rubric(rubric_path: str, task_path: str, threshold: float = 0
     with open(task_path, encoding="utf-8") as f:
         task_prompt = f.read()
 
-    llm_config = LLMConfig(model="openai/gpt-4.1-mini", temperature=0.0)
+    llm_config = LLMConfig(model="openai/gpt-4.1-mini")
 
     result = await evaluate_rubric_in_context(
         rubric, task_prompt, llm_config,
@@ -619,7 +619,7 @@ def create_improved_rubric() -> Rubric:
 
 
 async def main():
-    llm_config = LLMConfig(model="openai/gpt-4.1-mini", temperature=0.0)
+    llm_config = LLMConfig(model="openai/gpt-4.1-mini")
 
     flawed_rubric = create_flawed_rubric()
     improved_rubric = create_improved_rubric()

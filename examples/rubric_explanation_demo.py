@@ -27,7 +27,6 @@ async def main():
     grader = CriterionGrader(
         judge_model_config=LLMConfig(
             model="openai/gpt-4.1-mini",
-            temperature=0.0,
         )
     )
 

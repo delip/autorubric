@@ -164,7 +164,7 @@ The pattern is fixed: **line 1 in default light text (`--text-primary`), line 2 
 - If you change the desktop `3.2rem`, re-tune the mobile `2.25rem` proportionally.
 - The gold is scoped to `.hero h1 .accent` (re-scoped from the original `.hero h1 span` when the rotator shipped, so the roller's wrapper spans don't turn line 1 gold). Keep gold on the `.accent` subject phrase only — never on a wrapper span or line 1.
 
-> **Implemented:** the hero `<h1>` is now a vertical-roll **rotator** that cycles this signature through three phrasings — "Structured evaluation for / LLM-generated content", "LLM-based grading for / Human-authored content", and "Structured evaluation for / Non-verifiable domains" — each preserving the gold-subject-line split. See *§9 — Shipped: the hero headline rotator*.
+> **Implemented:** the hero `<h1>` is now a vertical-roll **rotator** that cycles this signature through three phrasings — "Structured evaluation for / LLM-generated content", "Automated grading for / Human-authored content", and "Structured evaluation for / Non-verifiable domains" — each preserving the gold-subject-line split. See *§9 — Shipped: the hero headline rotator*.
 
 ---
 
@@ -322,9 +322,9 @@ Keep card descriptions to 2–3 lines (suits the compact `0.9rem`). Don't set ex
 
 ## 8. Iconography
 
-A single, tight inline-SVG system. **No raster imagery anywhere.** Eleven icons, all Feather/Lucide line glyphs.
+A single, tight inline-SVG system. **No raster imagery anywhere.** Fourteen icons, all Feather/Lucide line glyphs.
 
-### The icon contract (all 11 icons obey)
+### The icon contract (all 14 icons obey)
 ```
 viewBox="0 0 24 24"   fill="none"   stroke-width="2"
 ```
@@ -335,14 +335,14 @@ Drawn only from stroke primitives (`<path>`, `<line>`, `<polyline>`, `<circle>`)
 | Role | Size | Stroke | Where |
 |---|---|---|---|
 | Hero/CTA icons | `20×20` | `stroke="currentColor"` (inherits button text color) | lines 343, 351 |
-| Feature-card icons | `18×18` | `stroke="var(--accent)"` (always gold) | 9× from line 419 onward |
+| Feature-card icons | `18×18` | `stroke="var(--accent)"` (always gold) | 12×, one per features-grid card |
 
 **Rule:** an icon inside an interactive/text element uses `currentColor`; a decorative feature/section accent uses `var(--accent)`. Never hard-code `#f0b429` in markup. Don't invent intermediate sizes (`20` = CTA, `18` = feature). Keep the icon-label gap matched to its container (`8px` in `.btn`, `10px` in `.feature h3`). Don't scale below ~16px or the 2-unit stroke clogs.
 
 ### Known issues to keep consistent
 - The **file-text** glyph is reused for both "Paper" (CTA) and "Few-Shot Calibration". Acceptable; if you want each feature unique, swap Few-Shot to a distinct 18px `var(--accent)` glyph.
 - Icons currently omit `stroke-linecap`/`stroke-linejoin` (render with sharp `butt`/`miter` defaults, slightly crisper than canonical Feather). **Pick one convention and apply to all** — either add `stroke-linecap="round" stroke-linejoin="round"` everywhere, or leave them off everywhere. Don't mix.
-- All 11 SVGs lack `aria-hidden` — add `aria-hidden="true"` (and `focusable="false"`) since each sits beside a text label (see §11).
+- All 14 SVGs lack `aria-hidden` — add `aria-hidden="true"` (and `focusable="false"`) since each sits beside a text label (see §11).
 - Gaps worth filling on-brand: a favicon (inline-SVG/data-URI to avoid a request) and an OG/share image — both should use the same gold-on-`#0d1117` palette.
 
 ---
@@ -357,7 +357,7 @@ Drawn only from stroke primitives (`<path>`, `<line>`, `<polyline>`, `<circle>`)
 - Four `:hover` rules. Three animate (nav link color, primary-button background, secondary-button border). **`footer a:hover` does NOT animate** — `footer a` declares no transition, so it snaps. This is an inconsistency: add `transition: color 0.2s` to `footer a` to harmonize it with nav.
 
 ### Shipped: the hero headline rotator (reference implementation)
-The hero `<h1>` cycles through three two-line phrasings — "Structured evaluation for / LLM-generated content", "LLM-based grading for / Human-authored content", and "Structured evaluation for / Non-verifiable domains" — via a vanilla **vertical roll**. It is the canonical example of "new motion done right" and the only `transform`/JS-driven motion on the page.
+The hero `<h1>` cycles through three two-line phrasings — "Structured evaluation for / LLM-generated content", "Automated grading for / Human-authored content", and "Structured evaluation for / Non-verifiable domains" — via a vanilla **vertical roll**. It is the canonical example of "new motion done right" and the only `transform`/JS-driven motion on the page.
 - **Markup:** `.hero-headline` holds a visually-hidden static accessible name (`.sr-only`) **plus** an `aria-hidden` `.roll-viewport` → `.roll-track` containing the `N` real `.roll-phrase` blocks **plus one trailing seam** that duplicates the first — currently four blocks `[A, B, C, A′]` (A′ duplicates the default). Each phrase keeps its manual `<br>` and the gold `.accent` subject line. To add or remove a phrase, edit the real blocks and keep exactly one trailing duplicate of the first as the seam; the JS reads `REAL = phrases.length - 1` and needs no other change.
 - **Mechanism (always-up, invisible snap):** the track only ever rolls **up** (`translateY` step 0→1→…→N), dwelling on each real phrase; on reaching the duplicate seam `A′` (step `N`) it snaps back to `A` with transitions off — invisible because both render the default. No per-tick DOM reordering (this is what makes it robust — no reset-desync).
 - **Timing:** `--roll-ms: 650ms` / `--roll-ease: cubic-bezier(0.22, 1, 0.36, 1)` (gentle ease-out), uniform dwell `DWELL = 3500ms` so every phrase holds equally (equal rotation; full cycle ≈ 12.4s for three phrases). The JS constants mirror the CSS custom properties — **keep them in sync**.
@@ -399,7 +399,8 @@ Brand personality: **precise, citation-grounded, non-hypey**, written for develo
 ### Positioning & framing
 - Canonical brand line (title/tab, line 7): **"AutoRubric - Research-Backed LLM Evaluation."** "Research-Backed" is the load-bearing modifier — never swap it for hype ("powerful", "best-in-class", "AI-powered").
 - **Mind the noun phrase for what gets evaluated.** The page carries near-synonyms: "LLM-generated content" (hero accent span) vs "LLM outputs" (title, meta, why-section). Whatever the hero accent span says becomes the de-facto tagline; if the hero rotates between framings (e.g. "LLM-generated content" → "Human-authored content" → "Non-verifiable domains"), treat the set as intentional positioning and keep each phrasing crisp and parallel. Keep the rest of the page's "LLM outputs"/"LLM-generated" usage internally consistent with whatever the hero foregrounds.
-- Tagline pattern (lines 337–339): **cite the research, then give the verbs.** Keep the imperative triple "Define… validate… iterate" and the signature phrase "rubric science." Preserve exact capitalization **"LLM-as-a-Judge"** (hyphenated, title-cased).
+- **Name both judge kinds.** AutoRubric grades with two kinds of AI judges: LLM judges and decision models. Wherever the page says who does the judging, name both or stay judge-neutral ("Automated grading", "AI judges"); don't regress to LLM-only framing such as "LLM-based grading". "LLM-as-a-Judge" stays as the name of the research tradition the tagline cites.
+- Tagline pattern (lines 337–339): **cite the research, then give the verbs.** Keep the imperative triple "Define… validate… iterate" and the signature phrase "rubric science." The research sentence also names the judge kinds ("grades with AI judges: LLMs, decision models, or both"). Preserve exact capitalization **"LLM-as-a-Judge"** (hyphenated, title-cased).
 
 ### The credibility engine (Why section, lines 400–407)
 Never dilute. Keep as canonical vocabulary, verbatim:
@@ -408,7 +409,7 @@ Never dilute. Keep as canonical vocabulary, verbatim:
 - **Exactly one** `<strong>` — on **"meta-rubric evaluation"** (the headline differentiator). Keep it the only bolded term so it doesn't lose force. Keep the Paper link reachable to back "Research shows."
 
 ### Features
-- **Names:** Title-Case technique noun phrases (~2–3 words), never benefit-y or playful. The ten: Weighted Criteria, Ensemble Judging, Few-Shot Calibration, Bias Mitigation, Agreement Metrics, Distribution Analysis, Meta-Rubric Feedback, Batch Evaluation, 100+ LLM Providers. Keep the `+` in "100+".
+- **Names:** Title-Case technique noun phrases (~2–3 words), never benefit-y or playful. The twelve: Weighted Criteria, Decision-Model Judges, Ensemble Judging, Few-Shot Calibration, Bias Mitigation, Agreement Metrics, Distribution Analysis, Cascade Calibration, Meta-Rubric Feedback, Batch Evaluation, Confidence Cascades, 100+ LLM Providers. Keep the `+` in "100+".
 - **Bodies:** 2–3 short declarative fragments dense with named metrics/methods/providers — the terse, peer-reviewable style *is* the voice.
 - **Preserve exact technical spellings:** "Cohen's kappa" (lowercase k), "Earth Mover's Distance", "KS tests", `CANNOT_ASSESS` (all-caps + underscore, matches the code), "LiteLLM", "Few-Shot" (hyphenated), "Spearman, Kendall, and Pearson correlations", "Bootstrap confidence intervals".
 - **Five fixed categories (eyebrow taxonomy):** **Core / Robustness / Validation / Meta-Evaluation / Operations.** New features slot into an existing bucket. If a new bucket is truly needed, keep the register: a single scientific/engineering noun (never "Power", "Magic"). Section headings stay plain ("Why AutoRubric?", "What AutoRubric Offers") — never "Powerful Features".
@@ -428,7 +429,7 @@ Compliance text — keep verbatim, including the Agreement No. and the DoD discl
 
 The page has a clean semantic skeleton — `<html lang="en">`, single `<header>`/`<main>`/`<footer>`, three `<section>`s, and a correct `h1 → h2 → h3` hierarchy with no skipped levels and exactly one `h1`. Maintain that. Open items, in rough priority:
 
-- [ ] **Decorative SVGs:** add `aria-hidden="true"` + `focusable="false"` to all 11 icons (they duplicate adjacent text labels).
+- [ ] **Decorative SVGs:** add `aria-hidden="true"` + `focusable="false"` to all 14 icons (they duplicate adjacent text labels).
 - [ ] **Focus visibility:** add a brand focus ring — `:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }` (`--accent` is `10.15:1` on `#0d1117`). No element defines `:focus`/`:active`/`:disabled` today.
 - [ ] **Skip link:** add `<a href="#main" class="skip-link">Skip to content</a>` as the first `<body>` child, give `<main>` `id="main"`, and visually-hide it until focused (5 nav links precede `<main>`).
 - [ ] **DARPA contrast:** raise `#6e7681` (4.12:1 @ `0.75rem`) to ≥ 4.5:1, or reuse `--text-secondary` (see §6).
@@ -464,7 +465,7 @@ The page has a clean semantic skeleton — `<html lang="en">`, single `<header>`
 
 The landing page is the site's primary SEO surface (the docs live under `/docs/`). Keep it keyword-rich **the legitimate way**; never use hidden or repeated keyword text — that is a [Google spam-policy violation](https://developers.google.com/search/docs/essentials/spam-policies#keyword-stuffing) that risks ranking penalties and contradicts §10's credibility-over-hype voice.
 
-- **`<title>` + meta description:** keep "Research-Backed LLM Evaluation" in the title; the description is one readable sentence (~150 chars) naming the core terms (LLM-generated / human-authored content, weighted rubrics, LLM-as-a-Judge, ensemble judging, agreement metrics). Keep it ≤ ~160 chars so it isn't truncated in search results.
+- **`<title>` + meta description:** keep "Research-Backed LLM Evaluation" in the title; the description is one readable sentence (~150 chars) naming the core terms (LLM-generated / human-authored content, weighted rubrics, LLM-as-a-Judge, decision models, ensemble judging, agreement metrics). Keep it ≤ ~160 chars so it isn't truncated in search results.
 - **Structured data (the keyword workhorse):** a `SoftwareApplication` JSON-LD block carries `keywords` (terms harvested from the cookbook/API headings) and a `featureList`. This is how search engines ingest the full technique vocabulary **without** on-page stuffing. When you add a feature or cookbook page, add its term to `keywords`/`featureList` here.
 - **OpenGraph + Twitter cards, `canonical`, `robots`:** present — keep them in sync with the title/description. No share image yet: when a gold-on-`#0d1117` OG image exists (see §8), add `og:image`/`twitter:image` and switch the Twitter card to `summary_large_image`.
 - **Crawlability of the rotating hero:** all phrasings are real text in the static DOM (animation / `aria-hidden` does not hide them from crawlers). Keep it that way — don't move phrasings into JS-only strings.

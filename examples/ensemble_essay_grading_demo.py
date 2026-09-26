@@ -56,7 +56,6 @@ async def main():
         JudgeSpec(
             judge_model_config=LLMConfig(
                 model="gemini/gemini-2.5-flash",
-                temperature=0.0,
                 max_parallel_requests=10,
             ),
             judge_id="gemini-flash",
@@ -65,7 +64,6 @@ async def main():
         JudgeSpec(
             judge_model_config=LLMConfig(
                 model="anthropic/claude-sonnet-4-5-20250929",
-                temperature=0.0,
                 max_parallel_requests=10,
             ),
             judge_id="claude-sonnet",
@@ -74,7 +72,6 @@ async def main():
         JudgeSpec(
             judge_model_config=LLMConfig(
                 model="openai/gpt-5.2",
-                temperature=0.0,
                 max_parallel_requests=10,
             ),
             judge_id="gpt-5.2",

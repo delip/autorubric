@@ -44,7 +44,6 @@ def build_judges() -> list[JudgeSpec]:
         JudgeSpec(
             judge_model_config=LLMConfig(
                 model="groq/openai/gpt-oss-120b",
-                temperature=0.0,
                 max_parallel_requests=1,
                 cache_enabled=True,
                 cache_dir=".autorubric_paper_experiments_cache",
@@ -54,7 +53,6 @@ def build_judges() -> list[JudgeSpec]:
         JudgeSpec(
             judge_model_config=LLMConfig(
                 model="groq/moonshotai/kimi-k2-instruct-0905",
-                temperature=0.0,
                 max_parallel_requests=2,
                 cache_enabled=True,
                 cache_dir=".autorubric_paper_experiments_cache",
@@ -64,7 +62,6 @@ def build_judges() -> list[JudgeSpec]:
         JudgeSpec(
             judge_model_config=LLMConfig(
                 model="gemini/gemini-3-flash-preview",
-                temperature=0.0,
                 max_parallel_requests=10,
                 cache_enabled=True,
                 cache_dir=".autorubric_paper_experiments_cache",

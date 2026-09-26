@@ -442,7 +442,7 @@ async def main():
 
     # Grader with length penalty
     grader = CriterionGrader(
-        judge_model_config=LLMConfig(model="openai/gpt-4.1-mini", temperature=0.0),
+        judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
         length_penalty=LengthPenalty(
             free_budget=100,      # No penalty up to 100 words
             max_cap=250,          # Max penalty at 250+ words
@@ -453,7 +453,7 @@ async def main():
 
     # Grader without length penalty (for comparison)
     grader_no_penalty = CriterionGrader(
-        judge_model_config=LLMConfig(model="openai/gpt-4.1-mini", temperature=0.0)
+        judge_model_config=LLMConfig(model="openai/gpt-4.1-mini")
     )
 
     print("=" * 75)

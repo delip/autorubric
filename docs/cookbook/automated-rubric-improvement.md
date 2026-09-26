@@ -91,7 +91,6 @@ from autorubric.meta import improve_rubric
 
 eval_llm = LLMConfig(
     model="gemini/gemini-2.5-flash",
-    temperature=0.0,
     thinking="medium",
     max_parallel_requests=10,
 )
@@ -519,7 +518,6 @@ def create_flawed_rubric() -> Rubric:
 async def main():
     eval_llm = LLMConfig(
         model="gemini/gemini-2.5-flash",
-        temperature=0.0,
         thinking="medium",
         max_parallel_requests=10,
     )

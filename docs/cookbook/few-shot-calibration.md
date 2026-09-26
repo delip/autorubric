@@ -95,7 +95,7 @@ from autorubric import LLMConfig
 from autorubric.graders import CriterionGrader
 
 baseline_grader = CriterionGrader(
-    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini", temperature=0.0)
+    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini")
 )
 ```
 
@@ -107,7 +107,7 @@ Now create a grader that uses training examples:
 from autorubric import FewShotConfig
 
 calibrated_grader = CriterionGrader(
-    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini", temperature=0.0),
+    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
     training_data=train_data,
     few_shot_config=FewShotConfig(
         n_examples=3,           # Include 3 examples per criterion
@@ -458,12 +458,12 @@ async def main():
 
     # Baseline grader (no few-shot)
     baseline_grader = CriterionGrader(
-        judge_model_config=LLMConfig(model="openai/gpt-4.1-mini", temperature=0.0)
+        judge_model_config=LLMConfig(model="openai/gpt-4.1-mini")
     )
 
     # Calibrated grader (3-shot)
     calibrated_grader = CriterionGrader(
-        judge_model_config=LLMConfig(model="openai/gpt-4.1-mini", temperature=0.0),
+        judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
         training_data=train_data,
         few_shot_config=FewShotConfig(
             n_examples=3,

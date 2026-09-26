@@ -44,7 +44,6 @@ def build_judges() -> list[JudgeSpec]:
         JudgeSpec(
             judge_model_config=LLMConfig(
                 model="gemini/gemini-2.5-flash",
-                temperature=0.0,
                 cache_enabled=True,
                 cache_dir=".autorubric_paper_experiments_cache",
                 max_parallel_requests=10,
@@ -54,7 +53,6 @@ def build_judges() -> list[JudgeSpec]:
         JudgeSpec(
             judge_model_config=LLMConfig(
                 model="anthropic/claude-sonnet-4-5-20250929",
-                temperature=0.0,
                 cache_enabled=True,
                 cache_dir=".autorubric_paper_experiments_cache",
                 max_parallel_requests=10,
@@ -64,7 +62,6 @@ def build_judges() -> list[JudgeSpec]:
         JudgeSpec(
             judge_model_config=LLMConfig(
                 model="openai/gpt-5.2",
-                temperature=0.0,
                 cache_enabled=True,
                 cache_dir=".autorubric_paper_experiments_cache",
                 max_parallel_requests=10,

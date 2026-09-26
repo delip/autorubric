@@ -79,7 +79,6 @@ from autorubric.graders import CriterionGrader
 grader = CriterionGrader(
     judge_model_config=LLMConfig(
         model="openai/gpt-4.1-mini",  # or "anthropic/claude-sonnet-4-5-20250929"
-        temperature=0.0,  # Low temperature for more consistent grades; omit for the provider default
     )
 )
 ```
@@ -216,6 +215,7 @@ If the response had contained factual errors (that criterion MET), the score wou
 
 ## Going Further
 
+- [LLM Judges](llm-judges.md) and [Decision-Model Judges](decision-models.md) - The two kinds of judges you can grade with
 - [Managing Datasets](managing-datasets.md) - Organize multiple items for batch evaluation
 - [Ensemble Judging](ensemble-judging.md) - Use multiple LLMs for more reliable verdicts
 - [API Reference: Core Grading](../api/core-grading.md) - Full `Rubric` and grading documentation
@@ -365,7 +365,6 @@ async def main():
     grader = CriterionGrader(
         judge_model_config=LLMConfig(
             model="openai/gpt-4.1-mini",
-            temperature=0.0,
         )
     )
 

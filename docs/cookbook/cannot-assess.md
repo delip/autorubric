@@ -438,7 +438,7 @@ async def main():
 
         for name, strategy in strategies:
             grader = CriterionGrader(
-                judge_model_config=LLMConfig(model="openai/gpt-4.1-mini", temperature=0.0),
+                judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
                 cannot_assess_config=CannotAssessConfig(
                     strategy=strategy,
                     partial_credit=0.5
@@ -476,7 +476,7 @@ async def main():
     target = RAG_RESPONSES[3]  # The fabricated citation one
 
     grader = CriterionGrader(
-        judge_model_config=LLMConfig(model="openai/gpt-4.1-mini", temperature=0.0),
+        judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
         cannot_assess_config=CannotAssessConfig(strategy=CannotAssessStrategy.SKIP)
     )
 

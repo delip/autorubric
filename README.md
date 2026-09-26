@@ -16,7 +16,7 @@
 
 # AutoRubric
 
-A Python library for evaluating text outputs against weighted criteria using LLM-as-a-judge.
+A Python library for evaluating text outputs against weighted criteria using AI judges such as LLMs and decision models.
 
 ```bibtex
   @misc{rao2026autorubric,
@@ -156,11 +156,11 @@ When writing or editing code that uses AutoRubric:
 | Feature                    | Description                                                              |
 | -------------------------- | ------------------------------------------------------------------------ |
 | Weighted criteria          | Positive and negative weights with explicit requirements                 |
-| Per-criterion explanations | Every verdict includes the judge's reasoning                             |
+| Per-criterion explanations | Every LLM verdict includes the judge's reasoning                         |
 | 100+ LLM providers         | OpenAI, Anthropic, Google, Azure, Groq, Ollama, and more via LiteLLM     |
-| Ensemble judging           | Combine multiple LLM judges with configurable aggregation strategies     |
+| Ensemble judging           | Combine multiple judges, LLMs and decision models alike, with configurable aggregation strategies |
 | Decision-model judges      | One request per item with TypeSafe's Jev or a compatible model, alone or as a cheap first pass with an LLM fallback (`pip install 'autorubric[typesafe]'`) |
-| Few-shot calibration       | Provide labeled examples to improve grading consistency                  |
+| Few-shot calibration       | Provide labeled examples to LLM judges to improve grading consistency    |
 | Multi-choice criteria      | Ordinal and nominal scales beyond binary met/unmet verdicts              |
 | Batch evaluation           | High-throughput `EvalRunner` with checkpointing and resumption           |
 | Metrics & validation       | Agreement metrics, bootstrap confidence intervals, distribution analysis |

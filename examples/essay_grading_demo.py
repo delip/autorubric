@@ -41,7 +41,6 @@ async def main():
     # Configure LLM with thinking enabled and rate limiting
     llm_config = LLMConfig(
         model="gemini/gemini-2.5-flash",
-        temperature=0.0,
         thinking="medium",  # Enable reasoning for better evaluation quality
         cache_enabled=True,
         max_parallel_requests=10,  # Rate limit to prevent API throttling

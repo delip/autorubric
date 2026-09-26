@@ -33,7 +33,7 @@ from autorubric.dataset import RubricDataset
 from autorubric.meta import improve_rubric
 
 async def main():
-    eval_llm = LLMConfig(model="openai/gpt-4.1", temperature=0.0)
+    eval_llm = LLMConfig(model="openai/gpt-4.1")
     revision_llm = LLMConfig(model="openai/gpt-4.1", temperature=0.3)
 
     rubric = Rubric.from_file("my_rubric.json")

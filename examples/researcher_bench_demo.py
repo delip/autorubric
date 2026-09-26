@@ -110,7 +110,6 @@ async def main() -> None:
 
     llm_config = LLMConfig(
         model=MODEL,
-        temperature=0.0,
         max_parallel_requests=args.max_parallel_requests,
     )
 
