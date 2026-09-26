@@ -195,7 +195,7 @@ config = LLMConfig(
 )
 ```
 
-Leaving `temperature` unset suits reasoning models, which accept only their default temperature. See [Temperature](api/llm.md#temperature) for details, including how this default changed after v1.5.3.
+Leaving `temperature` unset suits reasoning models, which accept only their default temperature. See [Temperature](api/llm.md#temperature) for details, including how this default changed in v1.6.0.
 
 ## Loading Rubrics from YAML
 

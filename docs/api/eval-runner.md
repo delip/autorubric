@@ -77,7 +77,7 @@ because every judge call failed: the report has no score and its `error` begins
 - is not graded again when the run resumes, like any item already done, but still counts in
   the resumed run's `failed_items`.
 
-A run saved by an earlier release recorded an item whose every judgment failed as successful,
+A run saved by v1.5.3 or earlier recorded an item whose every judgment failed as successful,
 with a fabricated score (for example 0.0 under `SKIP`). `EvalResult.from_experiment` loads it
 as it was saved, and `compute_metrics` still leaves it out (see
 [Errored Items and Score Pairs](metrics.md#errored-items-and-score-pairs)).

@@ -449,7 +449,7 @@ class LLMConfig:
             such as GPT-5.x and for Gemini 3, and required for Anthropic extended
             thinking. An explicit value, including 0.0, is sent unchanged. Temperature
             0.0 reduces but does not guarantee determinism on most providers.
-            Note: the default changed from 0.0 to None after v1.5.3. To keep the previous
+            Note: the default changed from 0.0 to None in v1.6.0. To keep the previous
             behavior, pass ``temperature=0.0`` explicitly (it keeps the same cache keys).
         max_tokens: Maximum tokens in response.
         top_p: Nucleus sampling parameter.

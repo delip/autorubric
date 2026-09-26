@@ -61,7 +61,7 @@ LLMConfig(model="openai/gpt-4.1-mini", temperature=0.0)  # temperature=0.0 sent
 
 A low temperature reduces run-to-run variance, but most providers do not guarantee identical outputs even at `0.0`.
 
-!!! warning "Default changed after v1.5.3"
+!!! warning "Default changed in v1.6.0"
     Up to and including v1.5.3, `temperature` defaulted to `0.0` and was always sent. A config that never sets it now samples at the provider's default, so its grades may differ from earlier runs, and responses cached by those runs are not reused (an unset temperature has its own cache key). To keep the old behaviour, set `temperature=0.0` explicitly (`temperature: 0.0` in YAML). Configs that already set `temperature` explicitly send the same value and keep their cached responses.
 
 ## YAML Configuration
