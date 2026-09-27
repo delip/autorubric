@@ -195,6 +195,8 @@ print(manifest["grader_config"]["shuffle_options"])   # True
 print(manifest["grader_config"]["judges"][0]["temperature"])  # 0.3 (None = provider default)
 ```
 
+A grader built with `llm_calls="per_item"` also records `"llm_calls": "per_item"` in `grader_config`; a grader that calls its LLM judges per criterion, the default, records no `llm_calls` key.
+
 When resuming an interrupted evaluation, the same seed produces the same shuffle orders for remaining items—no special handling required.
 
 ### Step 7: Coordinate with Few-Shot Selection

@@ -32,6 +32,8 @@ We replaced the Gemini dependency with a provider-agnostic backend (via LiteLLM)
 
 `rubric` shipped three grading strategies: per-criterion (one LLM call per criterion), one-shot (all criteria in a single call), and holistic (a single 0-100 score). We kept only the per-criterion approach. In the one-shot variant, criteria evaluations could contaminate each other within a shared context window: a judge that decided criterion 3 was unmet might let that color its reading of criterion 4. The holistic approach discarded per-criterion transparency entirely and asked the LLM to mentally compute weighted sums.
 
+Single-call grading has since returned as an opt-in mode, `CriterionGrader(llm_calls="per_item")`, with per-criterion grading still the default.
+
 The surviving grader treats a solo LLM as an ensemble of one, so the same code path handles both single-judge and multi-judge configurations. Ensemble judging is the default operating mode; single-judge evaluation is the degenerate case.
 
 ### Ensemble judging and agreement

@@ -2,7 +2,7 @@
 
 Practical recipes for evaluating text outputs with AutoRubric. Each recipe solves a specific real-world scenario with focused code snippets and complete runnable examples.
 
-AutoRubric grades with two kinds of AI judges. **LLM judges** take one criterion per call and explain each verdict. **Decision models**, such as TypeSafe's Jev, grade a whole rubric in one request and return probabilities instead of explanations. Both plug into the same `CriterionGrader`, and you can use either alone, mix them in an ensemble, or let a decision model take the first pass and hand its uncertain criteria to an LLM.
+AutoRubric grades with two kinds of AI judges. **LLM judges** take one criterion per call by default and explain each verdict — or, with `llm_calls="per_item"`, the whole rubric in one call. **Decision models**, such as TypeSafe's Jev, always grade a whole rubric in one request and return probabilities instead of explanations. Both plug into the same `CriterionGrader`, and you can use either alone, mix them in an ensemble, or let a decision model take the first pass and hand its uncertain criteria to an LLM.
 
 ## Recipe Index
 

@@ -18,7 +18,7 @@ A Python library for evaluating text outputs against weighted criteria using AI 
 
 AutoRubric provides a structured, research-backed approach to evaluating LLM outputs using rubric-based grading with AI judges. Instead of relying on vague quality assessments, AutoRubric enables you to define explicit, weighted criteria and receive detailed per-criterion verdicts.
 
-Judges come in two kinds. [LLM judges](cookbook/llm-judges.md) take one criterion per call and explain each verdict. [Decision models](cookbook/decision-models.md), such as TypeSafe's Jev, grade a whole rubric in one request and return probabilities instead of explanations. Use either alone, mix them in an ensemble, or let a decision model take the first pass and hand its uncertain criteria to an LLM.
+Judges come in two kinds. [LLM judges](cookbook/llm-judges.md) take one criterion per call by default and explain each verdict — or, with `llm_calls="per_item"`, the whole rubric in one call. [Decision models](cookbook/decision-models.md), such as TypeSafe's Jev, always grade a whole rubric in one request and return probabilities instead of explanations. Use either alone, mix them in an ensemble, or let a decision model take the first pass and hand its uncertain criteria to an LLM.
 
 ### Key Features
 
@@ -95,7 +95,7 @@ AutoRubric is built on research findings about effective LLM-as-a-judge evaluati
 | Guide | Description |
 |-------|-------------|
 | **[Quickstart](quickstart.md)** | Get up and running with installation, configuration, and your first evaluation |
-| **[LLM Judges](cookbook/llm-judges.md)** | Judges that take one criterion per call and explain each verdict, from 100+ providers |
+| **[LLM Judges](cookbook/llm-judges.md)** | Judges that explain each verdict, one call per criterion by default or the whole rubric in one call, from 100+ providers |
 | **[Decision-Model Judges](cookbook/decision-models.md)** | Probabilistic judges that grade a whole rubric in one request, and confidence cascades |
 | **[Cookbook](cookbook/index.md)** | Practical examples and recipes for common evaluation scenarios |
 | **[API Reference](api/index.md)** | Complete API documentation with all classes, functions, and types |

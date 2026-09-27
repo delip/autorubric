@@ -88,7 +88,7 @@ for judge_id, jm in metrics.per_judge.items():
 
 A judge's score on an item is `None` when every one of its calls on that item failed (it
 judged nothing) or none of its verdicts is left to score, and always for a cascade's
-escalation judge, which never judges a whole rubric. Its score fields pair its score with
+escalation judge, which votes only on the escalated criteria. Its score fields pair its score with
 the ground-truth score where both are defined, and are `None` when there is no such item. A
 cascade's escalation judge has `coverage="escalated"`; any other judge, even one whose every
 call failed, has `coverage="full"`.
