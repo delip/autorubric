@@ -1,12 +1,13 @@
 """Grader settings that decision-model judges cannot use.
 
-``system_prompt``, ``multi_choice_system_prompt`` and ``shuffle_options`` shape the prompts an
-LLM judge is sent. A decision model's request has no system prompt and keeps the rubric's
-option order, so in a mixed ensemble or a cascade these settings apply to the LLM judges,
-and a grader whose every judge is a decision model ignores them. Such a grader warns
-(``UserWarning``) about each setting that differs from its default: a system prompt that is
-not ``None``, or ``shuffle_options=False``. ``shuffle_options=True`` is the default and what a
-decision model does anyway (it never shuffles), so it never warns, passed or not.
+``system_prompt``, ``multi_choice_system_prompt``, ``shuffle_options`` and ``llm_calls`` shape
+the prompts an LLM judge is sent. A decision model's request has no system prompt, keeps the
+rubric's option order and always covers the whole rubric, so in a mixed ensemble or a cascade
+these settings apply to the LLM judges, and a grader whose every judge is a decision model
+ignores them. Such a grader warns (``UserWarning``) about each setting that differs from its
+default: a system prompt that is not ``None``, ``shuffle_options=False``, or
+``llm_calls="per_item"``. ``shuffle_options=True`` is the default and what a decision model
+does anyway (it never shuffles), so it never warns, passed or not.
 
 ``binary_response_format`` / ``multi_choice_response_format`` define the fields of a
 generated judgment, which only an LLM judge fills, so either one raises ``ValueError`` at
@@ -111,12 +112,14 @@ CHANGED_SETTINGS = [
     ("system_prompt", "Grade strictly."),
     ("multi_choice_system_prompt", "Pick exactly one option."),
     ("shuffle_options", False),
+    ("llm_calls", "per_item"),
 ]
 # Each LLM-only setting passed at its default.
 DEFAULT_SETTINGS = [
     ("system_prompt", None),
     ("multi_choice_system_prompt", None),
     ("shuffle_options", True),
+    ("llm_calls", "per_criterion"),
 ]
 
 
@@ -215,11 +218,13 @@ class TestLLMOnlySettingsWarning:
             system_prompt="Grade strictly.",
             multi_choice_system_prompt="Pick exactly one option.",
             shuffle_options=False,
+            llm_calls="per_item",
         )
         assert [str(w.message) for w in caught] == [
             llm_only_warning("system_prompt"),
             llm_only_warning("multi_choice_system_prompt"),
             llm_only_warning("shuffle_options"),
+            llm_only_warning("llm_calls"),
         ]
 
     @pytest.mark.asyncio
@@ -231,8 +236,9 @@ class TestLLMOnlySettingsWarning:
             system_prompt="Grade strictly.",
             multi_choice_system_prompt="Pick exactly one option.",
             shuffle_options=False,
+            llm_calls="per_item",
         )
-        assert len(caught) == 3
+        assert len(caught) == 4
 
         plain_report = await Rubric(RUBRIC).grade(SUBMISSION, grader=plain)
         tuned_report = await Rubric(RUBRIC).grade(SUBMISSION, grader=tuned)

@@ -1,0 +1,1 @@
+- A multi-choice criterion holds a <question> and numbered <options>. Judge it as the multi-choice criterion guide below describes.

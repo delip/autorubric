@@ -1,0 +1,1 @@
+- A binary criterion holds a <criterion_type> and a <criterion>. Judge it as the binary criterion guide below describes.

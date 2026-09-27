@@ -1,0 +1,9 @@
+RESPONSE FORMAT:
+Respond with valid JSON holding exactly one judgment per criterion, in the order the criteria are listed:
+{skeleton}
+
+- "criterion_id" is the criterion's id.
+{kind_rules}
+- "explanation" is the 1-2 sentence explanation the criterion's guide asks for.
+
+Return only raw JSON starting with {{, no back-ticks, no 'json' prefix.

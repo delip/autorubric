@@ -3,9 +3,17 @@
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal, Self, TypedDict
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ModelWrapValidatorHandler,
+    PrivateAttr,
+    ValidationError,
+    model_validator,
+)
 
 CountFn = Callable[[str], int]
 
@@ -918,6 +926,92 @@ class MultiChoiceJudgment(BaseModel):
     )
 
 
+# The response format of ``CriterionGrader(llm_calls="per_item")``, in which an LLM judge
+# answers for every criterion of an item in one call. The docstrings and field descriptions
+# of these two models are part of the JSON schema the provider is sent, so they are written
+# for the judge; the notes for readers are these comments.
+#
+# An entry's ``criterion_id`` is the id its criterion is listed under in the call
+# (``c{criterion_idx}``, a decision model's question id). A binary criterion's entry sets
+# ``criterion_status`` and a multi-choice criterion's entry sets ``selected_option``
+# (1-indexed, in the order the call showed the options); the grader ignores the other
+# field. The defaults let an entry leave that field out where decoding is not constrained
+# by the schema; a strict schema lists every field either way. ``reasoning`` is the call's
+# extended-thinking trace (populated only when thinking is enabled), at the top level only:
+# ``LLMClient.generate`` injects it there, and the provider schema leaves it out.
+
+
+class RubricCriterionJudgment(BaseModel):
+    """One criterion's judgment in an LLM judge's single-call answer."""
+
+    model_config = ConfigDict(frozen=True)
+
+    criterion_id: str = Field(description="The criterion's id, e.g. c0")
+    criterion_status: CriterionVerdict | None = Field(
+        default=None, description="A binary criterion's verdict; null for a multi-choice one"
+    )
+    selected_option: int | None = Field(
+        default=None, description="A multi-choice criterion's option number; null for a binary one"
+    )
+    explanation: str = Field(description="Brief explanation of the judgment")
+
+
+def _validation_message(exc: ValidationError) -> str:
+    """A ``ValidationError`` condensed to one line: ``"loc: msg"`` per error, ``"; "``-joined.
+
+    An error on the whole value (an empty ``loc``) is just its message.
+    """
+    return "; ".join(
+        f"{'.'.join(str(part) for part in err['loc'])}: {err['msg']}" if err["loc"] else err["msg"]
+        for err in exc.errors(include_url=False)
+    )
+
+
+class RubricJudgment(BaseModel):
+    """An LLM judge's answer for every criterion of an item, in one call."""
+
+    model_config = ConfigDict(frozen=True)
+
+    judgments: list[RubricCriterionJudgment] = Field(description="One judgment per criterion")
+    reasoning: str | None = Field(
+        default=None,
+        description=(
+            "Extended thinking/reasoning trace from the LLM (populated when thinking is enabled)"
+        ),
+    )
+    # The unusable entries, as (criterion_id, error); see ``_keep_usable_entries``.
+    _unusable: list[tuple[str, str]] = PrivateAttr(default_factory=list)
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def _keep_usable_entries(cls, data: Any, handler: ModelWrapValidatorHandler[Self]) -> Self:
+        """Validate each entry of ``judgments`` on its own, so one cannot fail the answer.
+
+        ``judgments`` keeps the valid entries, in order. An invalid entry whose
+        ``criterion_id`` is a string is recorded in ``_unusable`` as ``(criterion_id,
+        error)``, so that its criterion alone fails; one without a readable id is dropped,
+        and its criterion counts as unanswered. An answer that is not an object, or whose
+        ``judgments`` is missing or not a list, fails validation as a whole, and an
+        instance validates as it is, ``_unusable`` included. ``_unusable`` pickles with the
+        instance, so a cached answer maps exactly as the original did.
+        """
+        if not isinstance(data, dict) or not isinstance(data.get("judgments"), list):
+            return handler(data)
+        usable: list[RubricCriterionJudgment] = []
+        unusable: list[tuple[str, str]] = []
+        for entry in data["judgments"]:
+            try:
+                usable.append(RubricCriterionJudgment.model_validate(entry))
+            except ValidationError as exc:
+                criterion_id = entry.get("criterion_id") if isinstance(entry, dict) else None
+                if isinstance(criterion_id, str):
+                    unusable.append((criterion_id, _validation_message(exc)))
+        judgment = handler({**data, "judgments": usable})
+        # ``frozen`` covers fields only, so the private attribute can be set.
+        judgment._unusable = unusable
+        return judgment
+
+
 # ============================================================================
 # Ensemble Grading Types
 # ============================================================================
@@ -937,6 +1031,19 @@ Tie-breaking (``majority`` head-count tie or ``weighted`` equal-weight tie) reso
 the **score-minimizing verdict by weight sign**: UNMET for weight ≥ 0 (earns 0), MET for
 weight < 0 (applies the full penalty) — the binary analog of
 ``Criterion.worst_scored_option``. ``unanimous``/``any`` are thresholds, not ties.
+"""
+
+LLMCalls = Literal["per_criterion", "per_item"]
+"""How ``CriterionGrader`` calls each LLM judge for an item (its ``llm_calls``).
+
+- per_criterion: One call per criterion (the default).
+- per_item: One call for the whole rubric: the submission and its context are sent once,
+  every criterion is listed under its id (``c0``, ``c1``, ...), and the answer holds one
+  judgment per criterion (``RubricJudgment``).
+
+A decision-model judge always makes one request per item, whatever this is. The name counts
+LLM calls per item; it is unrelated to ``compute_metrics(per_item_metrics=...)`` and to
+per-item rubrics.
 """
 
 
