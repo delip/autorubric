@@ -1,0 +1,16 @@
+<examples>
+<example_1>
+<example_submission>Paris is the capital of France.</example_submission>
+<judgment id="c0">
+<verdict>MET</verdict>
+<reason>Names Paris.</reason>
+</judgment>
+</example_1>
+<example_2>
+<example_submission>The response is a jumbled mess of clauses.</example_submission>
+<judgment id="c1">
+<verdict>UNMET</verdict>
+<reason>Hard to follow.</reason>
+</judgment>
+</example_2>
+</examples>

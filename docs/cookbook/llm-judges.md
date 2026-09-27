@@ -1,14 +1,14 @@
 # LLM Judges
 
-An LLM judge is a language model that AutoRubric prompts once per criterion; each call returns a verdict, or a selected option, with a written explanation. Through [LiteLLM](https://docs.litellm.ai/), AutoRubric reaches 100+ providers, hosted APIs and self-hosted servers alike. You can use an LLM judge on its own, as a member of an ensemble, or as the fallback in a confidence cascade that sends it only the criteria a decision model is unsure of.
+An LLM judge is a language model that AutoRubric prompts to grade a rubric against a submission; each call returns a verdict, or a selected option, with a written explanation. By default it makes one call per criterion; it can instead grade an item's whole rubric in a single call (`llm_calls="per_item"`; see [Grading a whole rubric in one call](#grading-a-whole-rubric-in-one-call)). Through [LiteLLM](https://docs.litellm.ai/), AutoRubric reaches 100+ providers, hosted APIs and self-hosted servers alike. You can use an LLM judge on its own, as a member of an ensemble, or as the fallback in a confidence cascade that sends it only the criteria a decision model is unsure of.
 
 LLM judges are one of AutoRubric's two kinds of judges; the other is the [decision model](decision-models.md). The [quickstart](../quickstart.md) and most recipes use LLM judges, and meta-rubric evaluation and rubric improvement accept no other kind. [Choosing a judge kind](#choosing-a-judge-kind) compares the two.
 
 ## What an LLM judge does
 
-An LLM judge grades an item with **one call per criterion**. An item's calls run concurrently, as do the calls of every judge in an ensemble, up to any [rate limit](#rate-limits-and-retries) you set.
+An LLM judge grades an item with **one call per criterion** by default. An item's calls run concurrently, as do the calls of every judge in an ensemble, up to any [rate limit](#rate-limits-and-retries) you set. This section describes that default; [Grading a whole rubric in one call](#grading-a-whole-rubric-in-one-call) describes the alternative, `llm_calls="per_item"`.
 
-- **One criterion per prompt.** The system prompt defines `MET`, `UNMET` and `CANNOT_ASSESS` for positive and negative criteria or, for a multi-choice criterion, how to pick one option and when to pick the NA option, with rules and worked examples. The user prompt holds, in order: the rubric's [guidelines](#steering-an-llm-judge) when it has any, the criterion's `requirement`, the `query` that produced the submission and a reference submission when you pass them, and the submission. A binary prompt also marks the criterion positive or negative, by the sign of its weight; a multi-choice prompt numbers the options. The judge never sees the other criteria, a criterion's name or weight, or an option's value.
+- **One criterion per prompt.** The system prompt defines `MET`, `UNMET` and `CANNOT_ASSESS` for positive and negative criteria or, for a multi-choice criterion, how to pick one option and when to pick the NA option, with rules and worked examples. The user prompt holds, in order: the rubric's [guidelines](#steering-an-llm-judge) when it has any, the criterion's `requirement`, the `query` that produced the submission and a reference submission when you pass them, and the submission. A binary prompt also marks the criterion positive or negative, by the sign of its weight; a multi-choice prompt numbers the options. The judge never sees the other criteria, a criterion's name or weight, or an option's value. Under `llm_calls="per_item"` the same rules are embedded, unchanged, in a single call for every criterion instead.
 - **Structured output.** Each call requests JSON in a response format: `CriterionJudgment` (`criterion_status`, `explanation`) for binary criteria, `MultiChoiceJudgment` (`selected_option`, `explanation`) for multi-choice ones. The system prompt asks for a one- or two-sentence explanation that cites the submission.
 - **A verdict with a reason.** The vote records the verdict and, as `reason`, the explanation. With [extended thinking](#extended-thinking), `reasoning` holds the provider's reasoning trace. `probabilities` and `confidence` are `None`: an LLM judge returns an answer, not a distribution.
 
@@ -97,7 +97,7 @@ from autorubric import LLMConfig
 from autorubric.graders import CriterionGrader
 
 grader = CriterionGrader(judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"))
-report = await rubric.grade(to_grade=submission, grader=grader, query=prompt)  # one call per criterion
+report = await rubric.grade(to_grade=submission, grader=grader, query=prompt)  # one call per criterion (the default)
 
 vote = report.report[0].votes[0]
 print(vote.verdict, vote.probabilities, vote.confidence)
@@ -172,28 +172,110 @@ grader = CriterionGrader(
 )
 ```
 
-An escalation judge is called only on the escalated criteria, and for each it gets the prompt it would get in an otherwise identical grader without the cascade, with the same `seed` and `judge_id`: few-shot examples, system prompts and option shuffling apply to it as to any LLM judge. That is why a plain LLM run graded with `judges=escalation.judges`, the same `seed` and the same LLM settings can stand in for the cascade's LLM stage when you calibrate a threshold offline ([Offline calibration and replay](decision-models.md#offline-calibration-and-replay)). An escalation judge's `judge_scores` entry is `None`, since it never judges a whole rubric. [Cheap First-Pass Grading with Jev and an LLM Fallback](cascade-grading.md) calibrates and deploys a cascade end to end.
+An escalation judge votes only on the escalated criteria, and is called as it would be in an otherwise identical grader without the cascade, with the same `seed` and `judge_id`: few-shot examples, system prompts and option shuffling apply to it as to any LLM judge. Called per criterion (the default), it gets one call per escalated criterion, with that grader's prompt for it; under [`llm_calls="per_item"`](#grading-a-whole-rubric-in-one-call), it makes that grader's one full-rubric call for an item with any escalated criterion and keeps only the escalated criteria's results. That is why a plain LLM run graded with `judges=escalation.judges`, the same `seed` and the same LLM settings can stand in for the cascade's LLM stage when you calibrate a threshold offline ([Offline calibration and replay](decision-models.md#offline-calibration-and-replay)). An escalation judge's `judge_scores` entry is `None`, since it votes only on the escalated criteria. [Cheap First-Pass Grading with Jev and an LLM Fallback](cascade-grading.md) calibrates and deploys a cascade end to end.
+
+## Grading a whole rubric in one call
+
+`CriterionGrader(llm_calls="per_item")` makes each LLM judge grade an item's whole rubric in one call instead of one call per criterion. It applies to every LLM judge of the grader — the judge of `judge_model_config`, every judge in `judges`, and a cascade's escalation judges — and never to a decision-model judge. The default, `llm_calls="per_criterion"`, is everything described above.
+
+### Enabling it
+
+A single judge:
+
+```python
+grader = CriterionGrader(
+    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    llm_calls="per_item",
+)
+report = await rubric.grade(to_grade=submission, grader=grader, query=prompt)  # one call for the whole rubric
+```
+
+A panel — each LLM judge makes one call per item; a decision-model judge in the same panel is unaffected:
+
+```python
+grader = CriterionGrader(
+    judges=[
+        JudgeSpec(DecisionModelConfig(model="jev-latest"), "jev"),
+        JudgeSpec(LLMConfig(model="openai/gpt-4.1-mini"), "gpt"),
+    ],
+    llm_calls="per_item",
+)
+```
+
+A cascade — an escalation judge makes one full-rubric call for an item on which anything escalated, and keeps only the escalated criteria's results:
+
+```python
+grader = CriterionGrader(
+    judge_model_config=DecisionModelConfig(model="jev-latest"),
+    escalation=EscalationConfig(judges=LLMConfig(model="openai/gpt-4.1-mini"), threshold=0.72),
+    llm_calls="per_item",
+)
+```
+
+`llm_calls="per_item"` cannot be combined with `binary_response_format` or `multi_choice_response_format`: those describe one criterion's judgment, and a `per_item` call answers every criterion of the rubric at once. An `EvalRunner` experiment records the setting in its manifest's `grader_config` as `"llm_calls": "per_item"`; a grader that calls per criterion records no `llm_calls` key.
+
+### What the call looks like
+
+The system prompt embeds the per-criterion system prompts verbatim, one per kind of criterion the rubric has, under a short preamble that tells the judge to apply each guide to each criterion of its kind separately and independently, and a closing section that asks for one JSON judgment per criterion. A rubric with only binary or only multi-choice criteria carries only that one guide, just as a per-criterion call for that kind never sees the other.
+
+The user prompt lists every criterion of the effective rubric under an id, `c0`, `c1`, ... (the same id a decision model poses it under), each holding exactly the criterion block a per-criterion prompt would send it — its `<criterion_type>` and `<criterion>`, or its `<question>` and `<options>` — and nothing else about it: no name, no weight. A multi-choice criterion's options are shuffled by the same key a per-criterion call uses (the grader's seed, the submission, the criterion's index and the judge's id), so a criterion's option order is identical in both modes and `shuffle_order` is recorded the same way.
+
+The judge answers with one structured judgment per criterion: `RubricJudgment`, an internal response format holding a list of per-criterion entries (a `criterion_id`, a `criterion_status` or `selected_option`, and an explanation). The grader maps that answer back to one `CriterionResult` per criterion, in rubric order, the same way it maps a decision model's answers.
+
+### Cost
+
+With N criteria, a submission (with its input and reference) of S tokens, a system prompt of P tokens, and about c tokens per criterion block, a per-criterion judge's input tokens per item and judge scale as N·(P + S + c); a `per_item` judge's scale as P_w + S + N·c, where P_w is the wrapped system prompt (the preamble, the guide for each kind of criterion present, and the closing format). For N = 10 and S = 1,000, that is roughly 26,700 input tokens per item and judge called per criterion, against roughly 3,400 (a rubric of one kind) to 5,000 (both kinds) under `per_item`. [Prompt caching](cost-optimization.md#step-5-enable-prompt-caching-anthropic) narrows the gap only for the system-prompt part: under `per_criterion` the submission follows the criterion in every call and is re-sent each time, so caching never covers it.
+
+The call's token usage and cost ride on its first criterion's result, so a report's `token_usage` and `completion_cost` add up each judge's one call. A call in which some criteria fail alone is counted in full; a call that fails adds nothing, as a failed per-criterion call adds nothing.
+
+### Latency
+
+`per_item` cuts the number of requests N-fold, and input tokens by about (N − 1)·(P + S) per item and judge, which raises throughput under a requests-per-minute or tokens-per-minute limit. Wall-clock time for one item can move the other way: a `per_criterion` judge writes its N explanations in parallel calls, while a `per_item` call writes all N, one after another, inside a single response.
+
+### `max_tokens` and `timeout`
+
+Output grows with N: roughly 80-100 tokens per criterion (its id, verdict fields, and a one- or two-sentence explanation), plus any thinking budget. Leave `max_tokens` unset, or size it at about 100·N tokens plus the thinking budget; the `max_tokens=1024` used elsewhere in these docs covers about 10-12 criteria. A reply truncated at `max_tokens` is not valid JSON, which fails every criterion of the call. The default `timeout` of 60 seconds can also be too short once a thinking model has to write out every criterion's reasoning inside one response.
+
+### Failure scoping
+
+A criterion whose answer is missing, duplicated, or otherwise unusable fails alone, as an abstention (`CANNOT_ASSESS`, or the NA option), exactly as an unusable per-criterion answer does. A failed call fails every criterion of that call with the same error, sorted as a failed per-criterion call's error is ([Failures](#standalone-use)). An API error, or a reply that is not a valid `RubricJudgment` (one cut off at `max_tokens`, say), is `infrastructure` or `parse`, so every criterion abstains. Any other exception is `unknown` and gives every criterion the worst case for its weight sign; that includes the one a reply with no content raises, and, with [extended thinking](#extended-thinking) on, the one a JSON reply that is not an object raises. With a single judge, a failed call leaves the item with no score at all (its report's `error` reads `"Every criterion's judgment failed: ..."`). In a panel the other judges still grade the item, as they do when per-criterion calls fail, but only abstentions are set aside when votes are aggregated: an `unknown` failure's worst-case stand-ins count as votes on every criterion of the call.
+
+### Few-shot examples
+
+With `training_data`, an example under `per_item` is a whole training item instead of one criterion's submission: each of the judge's `n_examples` items is shown once, labelled on every criterion it and the graded rubric share. With `balance_verdicts=True` (the default), the items are chosen by greedy label coverage — repeatedly picking the item that adds the most (criterion, label) pairs not yet shown, until `n_examples` are picked — since balancing each criterion's labels on their own is impossible when the same k items must carry every criterion's labels.
+
+### Extended thinking
+
+A `per_item` call produces one thinking trace for the whole rubric. It is copied onto the `reasoning` of every criterion judged from a usable answer in that call (not onto a criterion that failed alone), so one thinking budget now covers the whole rubric instead of one per criterion. See [Extended Thinking](extended-thinking.md).
+
+### The contamination caveat
+
+The upstream `rubric` library, from which AutoRubric was forked, shipped a mode that graded a whole rubric in one call; AutoRubric dropped it at the fork, because criteria evaluations could shift each other within a shared context window. `llm_calls="per_item"` brings single-call grading back as an opt-in: the judge is told to judge each criterion as if it were the only one, and each criterion gets its own field in the structured answer, but that does not guarantee the verdicts match per-criterion grading. In the live comparison in [Grading a Whole Rubric in One Call](single-call-grading.md), one call per item was cheaper and faster on both of two datasets and graded measurably stricter on one of them. Compare the two on your own labelled data before switching a production judge over; that recipe shows how.
+
+### A naming note
+
+`llm_calls` counts LLM calls per item. It is unrelated to `compute_metrics(per_item_metrics=...)`, a metrics-computation setting, and to per-item rubrics, where each dataset item carries its own `Rubric`.
 
 ## Choosing a judge kind
 
 | | LLM judge | Decision model |
 |---|---|---|
 | Configuration | `LLMConfig` | `DecisionModelConfig` |
-| Requests per item | One call per criterion, for each judge | One request for the whole rubric |
+| Requests per item | One call per criterion by default, for each judge; one call for the whole rubric under `llm_calls="per_item"` | One request for the whole rubric |
 | What comes back | A verdict or option with a written explanation | A probability distribution over each criterion's answers |
 | Explanations | `reason` on every vote | None: an answered vote's `reason` is `None` |
 | Probabilities and confidence | `None` | `probabilities` and `confidence` on every answered vote |
-| What drives cost | The system prompt (about 1,600 tokens) and the submission, once per criterion, plus each call's output | One request's input tokens, with the submission sent once |
+| What drives cost | By default, the system prompt (about 1,600 tokens) and the submission, once per criterion, plus each call's output; under `llm_calls="per_item"`, the submission and a wrapped system prompt once, plus each criterion and its judgment ([below](#grading-a-whole-rubric-in-one-call)) | One request's input tokens, with the submission sent once |
 | Price | LiteLLM's price data; `None` when it cannot price the model | `input_cost_per_token`, which you set; `None` until you do |
 | Steering and calibration | Rubric guidelines, few-shot examples, system prompts, extended thinking | Rubric guidelines, the framings and `decision_threshold`; in a cascade, the escalation threshold |
 | Abstention | `CANNOT_ASSESS` (binary) or the NA option (multi-choice, guaranteed unless `auto_na_option=False`) | Only for criteria posed as a choice: binary ones under `binary_framing="choice"`, and multi-choice ones through the NA option, except ordinal ones under `ordinal_framing="score"` |
 | Multi-choice option order | Shuffled per item, criterion and judge (`shuffle_options`) | The rubric's order |
 | Determinism and caching | Outputs can vary between runs; the response cache replays them | Probabilities can vary slightly between runs; the response cache replays them |
 | Few-shot examples | Yes | No: a grader whose judges are all decision models raises `ValueError` |
-| Custom response formats | Yes | No: `ValueError` with any decision-model judge |
+| Custom response formats | Yes, under `llm_calls="per_criterion"` only | No: `ValueError` with any decision-model judge |
 | Meta-rubric evaluation and rubric improvement | Yes | No: `ValueError` |
 | Role in a cascade | Escalation judge | First stage |
 | Missing credentials | Not checked when the grader is built; every call fails as `infrastructure` | `ValueError` when the grader is built |
 | Providers and endpoints | 100+ providers through LiteLLM; proxies and self-hosted servers through `api_base` | TypeSafe's API, or any System One-compatible endpoint through `api_base`; needs `autorubric[typesafe]` |
 
-An LLM judge fits when you need a written reason for each verdict, want to calibrate the judge with few-shot examples or your own prompts, need meta-rubric evaluation or rubric improvement, or want a particular provider's model. A decision model fits when the cost per item matters, since it sends the submission once for the whole rubric instead of once per criterion, and when you want a probability and a confidence for each verdict. Which kind is more accurate depends on your rubric and data: grade a labelled sample with each and compare them, as in [Validating Your Judge Against Human Labels](judge-validation.md). To combine the two, let a decision model take the first pass and escalate its uncertain criteria to an LLM, as in [Cheap First-Pass Grading with Jev and an LLM Fallback](cascade-grading.md).
+An LLM judge fits when you need a written reason for each verdict, want to calibrate the judge with few-shot examples or your own prompts, need meta-rubric evaluation or rubric improvement, or want a particular provider's model. A decision model fits when the cost per item matters, since it sends the submission once for the whole rubric instead of once per criterion, and when you want a probability and a confidence for each verdict; [`llm_calls="per_item"`](#grading-a-whole-rubric-in-one-call) narrows that cost gap for an LLM judge without giving up its written explanations. Which kind is more accurate depends on your rubric and data: grade a labelled sample with each and compare them, as in [Validating Your Judge Against Human Labels](judge-validation.md). To combine the two, let a decision model take the first pass and escalate its uncertain criteria to an LLM, as in [Cheap First-Pass Grading with Jev and an LLM Fallback](cascade-grading.md).

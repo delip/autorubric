@@ -104,7 +104,9 @@ def _serialize_grader_config(grader: Grader) -> dict[str, Any]:
     URL, its API key and its ``extra_headers`` are not recorded. A cascade adds
     ``escalation``: its escalation judges (``judges``, LLM entries as above), ``threshold``
     and ``per_criterion`` (None when not set); a grader without a cascade has no such key.
-    Gracefully handles mocks and missing attributes.
+    A grader that calls its LLM judges once per item adds ``llm_calls: "per_item"``; one that
+    calls them per criterion (the default) has no such key, so its manifest is what it was
+    before the setting existed. Gracefully handles mocks and missing attributes.
     """
     config: dict[str, Any] = {
         "grader_class": grader.__class__.__name__,
@@ -183,6 +185,8 @@ def _serialize_grader_config(grader: Grader) -> dict[str, Any]:
         auto_na = getattr(grader, "_auto_na_option", None)
         if isinstance(auto_na, bool):
             config["auto_na_option"] = auto_na
+        if getattr(grader, "_llm_calls", None) == "per_item":
+            config["llm_calls"] = "per_item"
     except (TypeError, AttributeError):
         pass
 

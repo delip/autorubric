@@ -1,0 +1,3 @@
+<multi_choice_criterion_guide>
+{guide}
+</multi_choice_criterion_guide>

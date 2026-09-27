@@ -1,0 +1,13 @@
+<examples>
+<example_1>
+<example_submission>Paris is the capital; the explanation was crystal clear.</example_submission>
+<judgment id="c0">
+<verdict>MET</verdict>
+</judgment>
+<judgment id="c1">
+<selected_option>1</selected_option>
+<selected_label>Very clear</selected_label>
+<reason>Very clear wording.</reason>
+</judgment>
+</example_1>
+</examples>

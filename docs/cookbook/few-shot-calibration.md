@@ -110,7 +110,7 @@ calibrated_grader = CriterionGrader(
     judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
     training_data=train_data,
     few_shot_config=FewShotConfig(
-        n_examples=3,           # Include 3 examples per criterion
+        n_examples=3,           # 3 examples per criterion (this grader's default llm_calls="per_criterion")
         balance_verdicts=True,  # Try to include both MET and UNMET examples
         include_reason=False,   # Omit items' ground_truth_reasons (this dataset has none)
         seed=42                 # Reproducible example selection
@@ -119,9 +119,15 @@ calibrated_grader = CriterionGrader(
 ```
 
 !!! tip "How Few-Shot Works"
-    For each criterion, AutoRubric selects `n_examples` items from the training
-    data and includes them in the prompt. With `balance_verdicts=True`, it tries
-    to include roughly equal numbers of MET and UNMET examples.
+    With the default `llm_calls="per_criterion"` used here, AutoRubric selects
+    `n_examples` items from the training data for each criterion and includes
+    them in that criterion's prompt. With `balance_verdicts=True`, it tries to
+    include roughly equal numbers of MET and UNMET examples. Under
+    `CriterionGrader(llm_calls="per_item")`, where a judge grades the whole
+    rubric in one call, `n_examples` instead counts whole training items shown
+    once per call, and `balance_verdicts=True` selects them by greedy label
+    coverage rather than per-criterion balance — see
+    [API Reference: Few-Shot](../api/few-shot.md#item-level-examples-under-llm_callsper_item).
 
 ### Step 5: Compare Baseline vs Calibrated
 

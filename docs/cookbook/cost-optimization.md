@@ -152,11 +152,26 @@ if result.total_token_usage:
 | Provider | Cache Type | Min Prompt Size | Discount | Notes |
 |----------|-----------|-----------------|----------|-------|
 | Anthropic | Explicit prefix | 1024 tokens | 90% on cached input | Requires `cache_control` breakpoints; AutoRubric sets these automatically |
-| OpenAI | Automatic prefix | 1024 tokens | 50% on cached input | No opt-in needed; applies when the prefix matches a recent request |
+| OpenAI | Automatic prefix | 1024 tokens | 50-90% on cached input, depending on the model | No opt-in needed; applies when the prefix matches a recent request |
 | DeepSeek | Automatic prefix | 1024 tokens | 50-90% on cached input | Behavior mirrors OpenAI; discount varies by model tier |
 | Gemini | Context caching | 32k tokens | 75% on cached input | Best suited for large system prompts or few-shot context |
 
-### Step 6: Compare Model Cost vs Accuracy
+### Step 6: One Call Per Item Instead of Per Criterion
+
+A per-criterion LLM judge re-sends the system prompt and the submission with every criterion, so an item's input tokens grow with the number of criteria. `CriterionGrader(llm_calls="per_item")` makes each LLM judge grade the whole rubric in one call instead, sending the submission once and listing every criterion under an id (`c0`, `c1`, ...):
+
+```python
+grader = CriterionGrader(
+    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    llm_calls="per_item",
+)
+```
+
+For a 10-criterion rubric and a 1,000-token submission, that is roughly 3,400-5,000 input tokens per item and judge instead of roughly 26,700. Fewer, larger requests also raise throughput under a requests-per-minute or tokens-per-minute limit, though a single call writes every criterion's explanation one after another, so per-item wall-clock time can go up rather than down. A failed call now costs a whole item's judgment instead of one criterion's, so give `max_tokens` enough room for every criterion's answer. See [`llm_calls="per_item"`](llm-judges.md#grading-a-whole-rubric-in-one-call) for the full cost model, the failure-scoping trade-off, and the caveat on comparing it against per-criterion grading before switching a production judge over.
+
+[Grading a Whole Rubric in One Call](single-call-grading.md) walks through that comparison and reports a live one: on a 100-answer RiceChem sample, one call per item cost 2.8x less as LiteLLM recorded it (4.2x at list price) and ran 3.3x faster, but graded stricter.
+
+### Step 7: Compare Model Cost vs Accuracy
 
 Evaluate the same dataset with different models:
 
@@ -207,7 +222,7 @@ GPT-4.1                   94.1%    $0.0156      12.3s
 !!! tip "Model Selection Heuristic"
     Start with the cheapest model that meets your accuracy threshold, then upgrade selectively. Run a per-criterion breakdown: if a cheap model scores well on most criteria but underperforms on one or two, route only those criteria to a stronger model instead of upgrading everything.
 
-### Step 7: Cost-Effective Production Strategy
+### Step 8: Cost-Effective Production Strategy
 
 Combine strategies for optimal cost:
 
@@ -239,7 +254,7 @@ config = EvalConfig(
 )
 ```
 
-### Step 8: Cost Monitoring Dashboard
+### Step 9: Cost Monitoring Dashboard
 
 Track costs over time:
 
@@ -296,6 +311,7 @@ total exceeds what they spent.
 - **Response caching** (`cache_enabled=True`) avoids redundant API calls
 - **Prompt caching** reduces costs for repeated system prompts
 - **Model comparison** reveals cost vs accuracy trade-offs
+- **`llm_calls="per_item"`** sends the submission once per item instead of once per criterion, at the cost of a wider blast radius when a call fails
 - **Smaller models** (GPT-4-mini, Haiku, Flash) often suffice for simpler tasks
 - **Checkpointing** (`resume=True`) prevents re-evaluating on restart
 - **Monitor costs** across experiments to identify optimization opportunities

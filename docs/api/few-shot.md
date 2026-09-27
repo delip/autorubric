@@ -91,6 +91,48 @@ grader = CriterionGrader(
 )
 ```
 
+## Item-Level Examples Under `llm_calls="per_item"`
+
+`llm_calls` is a `CriterionGrader` setting, unrelated to `compute_metrics(per_item_metrics=...)`
+and to per-item rubrics: it names how many LLM calls a judge makes per graded item. Under
+`CriterionGrader(llm_calls="per_item")`, where each LLM judge grades an item's whole rubric in
+one call, few-shot selection changes shape. Instead of drawing examples per criterion, an
+example is a whole training item, shown once in the call with its label on every criterion:
+
+```python
+grader = CriterionGrader(
+    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    llm_calls="per_item",
+    training_data=train_data,
+    few_shot_config=FewShotConfig(n_examples=3, balance_verdicts=True, seed=42),
+)
+```
+
+- **Eligibility.** An item is shown only if every one of its ground-truth labels resolves for
+  its criterion — a verdict (or its value, such as `"MET"`) for a binary criterion, an option
+  for a multi-choice one. An item missing a resolvable label for even one criterion is not
+  used as an example at all. A multi-choice label resolves among the options the judge is
+  shown, so with `auto_na_option=True` (the default) the NA option the grader adds counts
+  too: an item that `fill_ground_truth` labelled with that option is a whole example.
+- **`n_examples`** counts training items per call, not per criterion: `n_examples=3` shows 3
+  whole items in each call, however many criteria the rubric has.
+- **`balance_verdicts=True`** (the default) selects by greedy label coverage rather than
+  per-criterion balance, which is impossible once every example carries every criterion's
+  label: each pick is the item that shows the most (criterion, label) pairs no already-picked
+  item shows, ties broken by the seeded order; no item's submission is ever shown twice; once
+  no remaining item adds a new pair, the rest of the slots are filled in the seeded order.
+- **`balance_verdicts=False`** takes the first items of that seeded order.
+- **Multi-choice labels** are numbered in the call's shuffled option order, matching how that
+  criterion's options are shown.
+- **`include_reason`** still shows each example's `DataItem.ground_truth_reasons` entry for
+  the criterion, where the item has one.
+- **The draw is deterministic** for a given seed and judge: each judge (including a cascade's
+  escalation judges) draws its own examples, so a panel's judges generally see different items
+  in a different order. The examples are taken when the grader is built, as per-criterion
+  examples are: changing a training item afterwards changes no prompt.
+- **Cost.** Each call carries k example submissions (`n_examples`), against N × k submissions
+  per item under the default `llm_calls="per_criterion"`, where N is the number of criteria.
+
 ---
 
 ## FewShotConfig

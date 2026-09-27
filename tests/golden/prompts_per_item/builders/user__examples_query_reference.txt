@@ -1,0 +1,40 @@
+<criteria>
+<rubric_criterion id="c0">
+<criterion_type>
+positive
+</criterion_type>
+
+<criterion>
+States the boiling point of water at sea level
+</criterion>
+</rubric_criterion>
+
+<rubric_criterion id="c1">
+<question>
+How clear is the explanation?
+</question>
+
+<options>
+1. Very unclear
+2. Somewhat clear
+3. Very clear
+4. Cannot assess / not applicable
+</options>
+</rubric_criterion>
+</criteria>
+
+<examples>
+<example_1>
+<example_submission>Water boils at 90 degrees.</example_submission>
+</example_1>
+</examples>
+
+<input>At what temperature does water boil?</input>
+
+<reference_submission>
+At sea level, water boils at 100 °C (212 °F).
+</reference_submission>
+
+<submission>
+Water boils at 100 degrees Celsius at sea level.
+</submission>

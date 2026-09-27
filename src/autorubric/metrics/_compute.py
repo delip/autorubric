@@ -1218,8 +1218,8 @@ def _compute_judge_metrics(
     layout placeholders only. A ``superseded`` vote is present: it is the judge's prediction.
 
     ``judge_scores`` is item-aligned with ``true_scores``. A ``None`` entry means the
-    judge's whole-rubric score is undefined: for its role (a judge consulted only on some
-    criteria is ``None`` on every item, even an item where it judged every criterion),
+    judge's whole-rubric score is undefined: for its role (a judge that votes only on some
+    criteria is ``None`` on every item, even an item where it voted on every criterion),
     because every vote of the judge on the item failed, or because none of its verdicts
     is left to score. A ``None`` true score (ground truth that leaves nothing to score)
     leaves the item out of the pairs too.
@@ -1325,7 +1325,7 @@ def _compute_judge_metrics(
     score_kendall: CorrelationResult | None = None
     score_pearson: CorrelationResult | None = None
     bias: BiasResult | None = None
-    # A cascade's escalation judge was consulted only on the criteria escalated to it: its
+    # A cascade's escalation judge votes only on the criteria escalated to it: its
     # criterion-level metrics above cover exactly that subset.
     escalated = escalation_judge
     if scored_pairs:

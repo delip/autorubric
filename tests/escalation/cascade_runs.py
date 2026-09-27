@@ -10,6 +10,8 @@ Nothing here reaches the network or spends money:
   from a hash of the model and the prompts, and every explanation carries that hash. Two
   calls agree only if their prompts are identical, option order included, so a replay can
   equal a live cascade only when the LLM run used the cascade's ``seed`` and ``judge_id``.
+  A per-item call (``llm_calls="per_item"``) is answered criterion by criterion, each as a
+  call about that criterion alone would be.
 """
 
 from __future__ import annotations
@@ -38,7 +40,12 @@ from autorubric import (
 )
 from autorubric.graders import CriterionGrader, JudgeSpec
 from autorubric.llm import GenerateResult
-from autorubric.types import CANONICAL_NA_OPTION, CriterionJudgment, MultiChoiceJudgment
+from autorubric.types import (
+    CANONICAL_NA_OPTION,
+    CriterionJudgment,
+    MultiChoiceJudgment,
+    RubricJudgment,
+)
 
 MET = CriterionVerdict.MET
 UNMET = CriterionVerdict.UNMET
@@ -170,6 +177,17 @@ class ScriptedSDKClient(FakeSDKClient):
 
 _SECTION = r"<{0}>\n(.*?)\n</{0}>"
 _NA_SUFFIX = " (cannot assess / not applicable)"
+# A per-item call's list of criteria (ending with the blank line after it), each criterion
+# in it with its id, and the guide of each kind of criterion in its system prompt.
+_CRITERIA = re.compile(r"<criteria>\n.*?\n</criteria>\n\n", re.S)
+_RUBRIC_CRITERION = re.compile(r'<rubric_criterion id="(c\d+)">\n(.*?)\n</rubric_criterion>', re.S)
+_GUIDE = r"<{0}_criterion_guide>\n(.*?)\n</{0}_criterion_guide>"
+
+# Script answers for a criterion that a per-item reply gives no usable judgment of: none
+# with its id, or one that does not validate (its criterion fails alone, as a parse error).
+# A per-criterion call scripted with either raises a ``ValueError`` (a parse error too).
+NO_JUDGMENT = "<no judgment>"
+UNUSABLE_JUDGMENT = "<unusable judgment>"
 
 
 class ScriptedLLM:
@@ -180,12 +198,25 @@ class ScriptedLLM:
     exception to raise. Any other criterion is answered from the hash of the model and the
     prompts: MET or UNMET, or the option at a hashed position among those presented, so a
     shuffled option order changes the answer. Every explanation carries the hash.
+
+    A call asking for a ``RubricJudgment`` (``llm_calls="per_item"``) is answered per
+    criterion id: each criterion listed is answered exactly as a call about it alone would
+    be, the prompts of that call rebuilt from the per-item ones (the criterion's block in
+    place of the list, the guide of its kind as the system prompt), so a per-item run and a
+    per-criterion run of one script give the same verdicts, reasons and option orders. The
+    per-item call raises the exception scripted for the first criterion it lists that has
+    one, failing every criterion of the call, and ``NO_JUDGMENT`` and ``UNUSABLE_JUDGMENT``
+    fail one criterion alone. Rebuilt prompts are exact for calls without few-shot examples.
+
+    ``user_prompts`` holds every user prompt sent, and ``prompts`` every ``(system_prompt,
+    user_prompt)`` pair.
     """
 
     def __init__(self, model: str, script: dict[tuple[str, str], Any]) -> None:
         self.model = model
         self.script = script
         self.user_prompts: list[str] = []
+        self.prompts: list[tuple[str, str]] = []
 
     async def generate(
         self,
@@ -196,6 +227,62 @@ class ScriptedLLM:
         **kwargs: Any,
     ) -> GenerateResult:
         self.user_prompts.append(user_prompt)
+        self.prompts.append((system_prompt, user_prompt))
+        parsed = (
+            self._rubric_judgment(system_prompt, user_prompt)
+            if response_format is RubricJudgment
+            else self._judgment(system_prompt, user_prompt)
+        )
+        return GenerateResult(
+            content="{}",
+            thinking=None,
+            raw_response=None,
+            usage=LLM_USAGE,
+            cost=LLM_COST,
+            parsed=parsed,
+        )
+
+    def _rubric_judgment(self, system_prompt: str, user_prompt: str) -> RubricJudgment:
+        """The reply to a per-item call: each criterion's judgment as a call about it alone
+        would give it, under its id."""
+        criteria = _CRITERIA.search(user_prompt)
+        assert criteria is not None
+        submission = re.findall(_SECTION.format("submission"), user_prompt, re.S)[-1]
+        entries: list[dict[str, Any]] = []
+        for criterion_id, block in _RUBRIC_CRITERION.findall(criteria.group(0)):
+            multi_choice = "<options>" in block
+            found = re.search(
+                _SECTION.format("question" if multi_choice else "criterion"), block, re.S
+            )
+            assert found is not None
+            answer = self.script.get((submission, found.group(1)))
+            if answer == NO_JUDGMENT:
+                continue
+            if answer == UNUSABLE_JUDGMENT:
+                entries.append(
+                    {"criterion_id": criterion_id, "criterion_status": "met", "explanation": "?"}
+                )
+                continue
+            guide = re.search(
+                _GUIDE.format("multi_choice" if multi_choice else "binary"), system_prompt, re.S
+            )
+            assert guide is not None
+            alone = user_prompt.replace(criteria.group(0), f"{block}\n\n", 1)
+            judgment = self._judgment(guide.group(1), alone)
+            entries.append(
+                {
+                    "criterion_id": criterion_id,
+                    "criterion_status": getattr(judgment, "criterion_status", None),
+                    "selected_option": getattr(judgment, "selected_option", None),
+                    "explanation": judgment.explanation,
+                }
+            )
+        return RubricJudgment.model_validate({"judgments": entries})
+
+    def _judgment(
+        self, system_prompt: str, user_prompt: str
+    ) -> CriterionJudgment | MultiChoiceJudgment:
+        """The reply to a call about one criterion."""
         multi_choice = "<options>" in user_prompt
         # A requirement can span lines (HealthBench's do).
         section = _SECTION.format("question" if multi_choice else "criterion")
@@ -210,7 +297,9 @@ class ScriptedLLM:
         answer = self.script.get((submission, requirement))
         if isinstance(answer, BaseException):
             raise answer
-        parsed: Any
+        if answer in (NO_JUDGMENT, UNUSABLE_JUDGMENT):
+            raise ValueError(f"{self.model} gave no usable judgment")
+        parsed: CriterionJudgment | MultiChoiceJudgment
         if multi_choice:
             options = re.search(_SECTION.format("options"), user_prompt, re.S)
             assert options is not None
@@ -223,14 +312,7 @@ class ScriptedLLM:
         else:
             verdict = CriterionVerdict(answer) if answer is not None else [MET, UNMET][hashed % 2]
             parsed = CriterionJudgment(criterion_status=verdict, explanation=explanation)
-        return GenerateResult(
-            content="{}",
-            thinking=None,
-            raw_response=None,
-            usage=LLM_USAGE,
-            cost=LLM_COST,
-            parsed=parsed,
-        )
+        return parsed
 
 
 # =============================================================================

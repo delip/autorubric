@@ -1,6 +1,7 @@
 """Tests for LLMClient class."""
 
 import hashlib
+import json
 import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -617,6 +618,213 @@ class TestProviderResponseFormat:
         assert isinstance(result, CriterionJudgment)
         assert result.criterion_status.value == "MET"
         assert result.reasoning is None
+
+
+class TestRubricJudgmentResponseFormat:
+    """``_provider_response_format(RubricJudgment)``: the schema an LLM judge is sent under
+    ``CriterionGrader(llm_calls="per_item")``, and how a transport-level reply's thinking
+    trace lands on it.
+
+    ``RubricJudgment`` nests ``RubricCriterionJudgment`` (one entry per criterion) and a
+    ``CriterionVerdict`` enum inside it, so unlike ``CriterionJudgment``'s flat schema this
+    one carries live ``$ref``s under ``$defs``, both in ``judgments.items`` and inside
+    ``criterion_status``'s ``anyOf``.
+    """
+
+    def test_provider_schema_snapshot(self):
+        from autorubric.types import RubricJudgment
+
+        param = _provider_response_format(RubricJudgment)
+        assert isinstance(param, dict)
+        assert param == {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "RubricJudgment",
+                "strict": True,
+                "schema": {
+                    "$defs": {
+                        "CriterionVerdict": {
+                            "description": (
+                                "Status of a criterion evaluation.\n\n"
+                                "- MET: The criterion is satisfied by the submission\n"
+                                "- UNMET: The criterion is not satisfied by the submission\n"
+                                "- CANNOT_ASSESS: Insufficient evidence to make a "
+                                "determination"
+                            ),
+                            "enum": ["MET", "UNMET", "CANNOT_ASSESS"],
+                            "title": "CriterionVerdict",
+                            "type": "string",
+                        },
+                        "RubricCriterionJudgment": {
+                            "description": (
+                                "One criterion's judgment in an LLM judge's single-call answer."
+                            ),
+                            "properties": {
+                                "criterion_id": {
+                                    "description": "The criterion's id, e.g. c0",
+                                    "title": "Criterion Id",
+                                    "type": "string",
+                                },
+                                "criterion_status": {
+                                    "anyOf": [
+                                        {"$ref": "#/$defs/CriterionVerdict"},
+                                        {"type": "null"},
+                                    ],
+                                    "description": (
+                                        "A binary criterion's verdict; null for a multi-choice one"
+                                    ),
+                                },
+                                "selected_option": {
+                                    "anyOf": [{"type": "integer"}, {"type": "null"}],
+                                    "description": (
+                                        "A multi-choice criterion's option number; null "
+                                        "for a binary one"
+                                    ),
+                                    "title": "Selected Option",
+                                },
+                                "explanation": {
+                                    "description": "Brief explanation of the judgment",
+                                    "title": "Explanation",
+                                    "type": "string",
+                                },
+                            },
+                            "required": [
+                                "criterion_id",
+                                "criterion_status",
+                                "selected_option",
+                                "explanation",
+                            ],
+                            "title": "RubricCriterionJudgment",
+                            "type": "object",
+                            "additionalProperties": False,
+                        },
+                    },
+                    "description": (
+                        "An LLM judge's answer for every criterion of an item, in one call."
+                    ),
+                    "properties": {
+                        "judgments": {
+                            "description": "One judgment per criterion",
+                            "items": {"$ref": "#/$defs/RubricCriterionJudgment"},
+                            "title": "Judgments",
+                            "type": "array",
+                        }
+                    },
+                    "required": ["judgments"],
+                    "title": "RubricJudgment",
+                    "type": "object",
+                    "additionalProperties": False,
+                },
+            },
+        }
+        # The top level requires only judgments: reasoning is stripped, as for every other
+        # response format (TestProviderResponseFormat), and the container is strict.
+        schema = param["json_schema"]["schema"]
+        assert "reasoning" not in schema["properties"]
+        assert schema["required"] == ["judgments"]
+        assert param["json_schema"]["strict"] is True
+        # The entry under $defs requires every field and forbids extras.
+        entry = schema["$defs"]["RubricCriterionJudgment"]
+        assert set(entry["required"]) == {
+            "criterion_id",
+            "criterion_status",
+            "selected_option",
+            "explanation",
+        }
+        assert entry["additionalProperties"] is False
+        assert entry["properties"]["criterion_status"]["anyOf"] == [
+            {"$ref": "#/$defs/CriterionVerdict"},
+            {"type": "null"},
+        ]
+
+    @pytest.mark.asyncio
+    async def test_generate_puts_the_trace_on_the_top_level_reasoning(self):
+        from autorubric.types import CriterionVerdict, RubricJudgment
+
+        content = json.dumps(
+            {
+                "judgments": [
+                    {
+                        "criterion_id": "c0",
+                        "criterion_status": "MET",
+                        "selected_option": None,
+                        "explanation": "Meets the requirement.",
+                    },
+                    {
+                        "criterion_id": "c1",
+                        "criterion_status": None,
+                        "selected_option": 2,
+                        "explanation": "Best matching option.",
+                    },
+                ]
+            }
+        )
+        mock_message = MagicMock()
+        mock_message.content = content
+        mock_message.reasoning_content = "Weighing each criterion in turn before deciding."
+        mock_message.thinking_blocks = None
+        mock_message.thinking = None
+        mock_choice = MagicMock()
+        mock_choice.message = mock_message
+        mock_response = MagicMock()
+        mock_response.choices = [mock_choice]
+
+        client = LLMClient(LLMConfig(model="anthropic/claude-sonnet-5"))
+        with patch("autorubric.llm.litellm.acompletion", new_callable=AsyncMock) as mock_completion:
+            mock_completion.return_value = mock_response
+            result = await client.generate(
+                system_prompt="judge every criterion",
+                user_prompt="the whole rubric",
+                response_format=RubricJudgment,
+            )
+
+        assert isinstance(result, RubricJudgment)
+        assert result.reasoning == "Weighing each criterion in turn before deciding."
+        assert len(result.judgments) == 2
+        assert result.judgments[0].criterion_status == CriterionVerdict.MET
+        assert result.judgments[1].selected_option == 2
+        # No entry carries its own reasoning: the trace lives at the top level only.
+        assert not hasattr(result.judgments[0], "reasoning")
+
+
+class TestNonObjectReplies:
+    """A structured reply that is JSON but not an object fails validation, which
+    ``classify_grading_error`` routes as ``parse``."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "content", ["[1, 2]", '"MET"', "3", "null"], ids=["array", "string", "number", "null"]
+    )
+    @pytest.mark.parametrize(
+        "response_format_name", ["CriterionJudgment", "MultiChoiceJudgment", "RubricJudgment"]
+    )
+    async def test_fails_validation_as_a_parse_error(self, response_format_name, content):
+        from pydantic import ValidationError
+
+        from autorubric import types
+        from autorubric.llm import classify_grading_error
+
+        response_format = getattr(types, response_format_name)
+        mock_message = MagicMock()
+        mock_message.content = content
+        mock_message.reasoning_content = None
+        mock_message.thinking_blocks = None
+        mock_message.thinking = None
+        mock_choice = MagicMock()
+        mock_choice.message = mock_message
+        mock_response = MagicMock()
+        mock_response.choices = [mock_choice]
+
+        client = LLMClient(LLMConfig(model="anthropic/claude-sonnet-5"))
+        with patch("autorubric.llm.litellm.acompletion", new_callable=AsyncMock) as mock_completion:
+            mock_completion.return_value = mock_response
+            with pytest.raises(ValidationError) as caught:
+                await client.generate(
+                    system_prompt="judge",
+                    user_prompt="submission",
+                    response_format=response_format,
+                )
+        assert classify_grading_error(caught.value) == "parse"
 
 
 class TestCacheNamespace:

@@ -143,7 +143,7 @@ BaseModel (Pydantic)
 
 1. `Rubric.grade()` delegates to grader's `grade()` method
 2. `CriterionGrader` treats single LLM as "ensemble of 1"
-3. Makes concurrent LLM calls per criterion per judge via `asyncio.gather()`
+3. Makes concurrent LLM calls per criterion per judge via `asyncio.gather()` by default, or one call per item per judge under `llm_calls="per_item"`
 4. Aggregates votes using configurable strategy
 5. Returns `EnsembleEvaluationReport` (consistent interface)
 

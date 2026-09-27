@@ -90,6 +90,7 @@ from autorubric.types import (
     FewShotExample,
     JudgeVote,
     LengthPenalty,
+    LLMCalls,
     MultiChoiceJudgeVote,
     MultiChoiceJudgment,
     MultiChoiceVerdict,
@@ -147,6 +148,7 @@ __all__ = [
     "replay_escalation",
     # Core types
     "AggregationStrategy",
+    "LLMCalls",
     "CannotAssessConfig",
     "CannotAssessStrategy",
     "CountFn",

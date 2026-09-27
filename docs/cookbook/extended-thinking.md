@@ -280,6 +280,27 @@ grader = CriterionGrader(
 )
 ```
 
+### Step 7: One Trace Per Call Under `llm_calls="per_item"`
+
+`CriterionGrader(llm_calls="per_item")` makes an LLM judge grade a whole rubric in one call (see [`llm_calls="per_item"`](llm-judges.md#grading-a-whole-rubric-in-one-call)). With `thinking` set, that call still produces a single reasoning trace, and the grader copies it onto the `reasoning` of every criterion judged from a usable answer in that call:
+
+```python
+grader = CriterionGrader(
+    judge_model_config=LLMConfig(
+        model="anthropic/claude-sonnet-4-5-20250929",
+        thinking="high",
+    ),
+    llm_calls="per_item",
+)
+
+result = await rubric.grade(to_grade=security_report, grader=grader, query=query)
+for cr in result.report:
+    for vote in cr.votes or cr.multi_choice_votes:
+        print(vote.judge_id, vote.reasoning)  # the same trace on every criterion this judge answered
+```
+
+One thinking budget therefore covers the whole rubric rather than one budget per criterion, which is cheaper in thinking tokens but gives every criterion the same deliberation instead of a criterion-specific one. A criterion that fails alone inside an otherwise successful call (an unusable or missing judgment) gets no trace, the same as a failed per-criterion call.
+
 ## Key Takeaways
 
 - **Extended thinking** improves accuracy on complex technical evaluations
@@ -288,6 +309,7 @@ grader = CriterionGrader(
 - **Multiple providers** support thinking/reasoning with unified API
 - **Cost vs accuracy trade-off**: use thinking selectively where it matters
 - **`OUTPUT_ONLY` penalty** allows unlimited thinking while controlling output
+- **`llm_calls="per_item"`** shares one thinking trace across every criterion a call answers, instead of one trace per criterion
 
 ## Going Further
 

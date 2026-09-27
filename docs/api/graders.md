@@ -17,6 +17,13 @@ grader = CriterionGrader(
     judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
 )
 
+# One call per item: the judge grades the whole rubric in a single call
+# instead of one call per criterion
+grader = CriterionGrader(
+    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    llm_calls="per_item",
+)
+
 # With custom system prompt
 grader = CriterionGrader(
     judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
@@ -46,6 +53,8 @@ result = await rubric.grade(to_grade=response, grader=grader)
 `judge_model_config` sets up a single judge and `judges` sets up an ensemble. Pass exactly one of them.
 
 Either accepts a `DecisionModelConfig` as well as an `LLMConfig`: a decision-model judge grades each item with one request for the whole rubric. `escalation=EscalationConfig(...)` makes a grader with one decision-model judge a confidence cascade that escalates uncertain criteria to LLM judges. See [Decision Models](decision-models.md) for the API, and the [LLM Judges](../cookbook/llm-judges.md) and [Decision-Model Judges](../cookbook/decision-models.md) chapters for guided introductions to the two judge kinds.
+
+`llm_calls="per_item"` makes every LLM judge of the grader — the judge of `judge_model_config`, each judge of `judges`, and a cascade's escalation judges — grade an item's whole rubric in one call instead of one call per criterion, the way a decision-model judge always does. The default, `"per_criterion"`, is unchanged. See [Grading a whole rubric in one call](../cookbook/llm-judges.md#grading-a-whole-rubric-in-one-call) for what the single call looks like, and [Decision-Model Judges](../cookbook/decision-models.md#what-a-decision-model-does) for what it shares with a decision model's request.
 
 !!! note "`llm_config` is deprecated"
     `llm_config` is a deprecated alias of `judge_model_config`. It builds the same judge but emits a
@@ -119,3 +128,13 @@ Configuration for a single judge in an ensemble.
     options:
       show_source: true
       members_order: source
+
+---
+
+## LLMCalls
+
+How `CriterionGrader` calls each LLM judge for an item: `"per_criterion"` (the default) or `"per_item"`.
+
+::: autorubric.LLMCalls
+    options:
+      show_source: true

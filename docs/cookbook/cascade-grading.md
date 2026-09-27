@@ -4,7 +4,7 @@ Let a decision model grade every criterion and send only its uncertain criteria 
 
 ## The Scenario
 
-You grade thousands of short answers a week against a ten-criterion rubric. An LLM judge is accurate enough, but it makes one call per criterion and re-sends the answer each time, so the bill grows with every criterion. TypeSafe's Jev, a [decision model](decision-models.md), grades the whole rubric in one request for a small fraction of the price, and it reports how confident it is. You want Jev to handle the criteria it is sure about and the LLM to handle the rest, at the LLM's accuracy and a lower price. You have a few hundred labelled answers to check that the trade holds.
+You grade thousands of short answers a week against a ten-criterion rubric. An LLM judge is accurate enough, but by default it makes one call per criterion and re-sends the answer each time, so the bill grows with every criterion. TypeSafe's Jev, a [decision model](decision-models.md), grades the whole rubric in one request for a small fraction of the price, and it reports how confident it is. You want Jev to handle the criteria it is sure about and the LLM to handle the rest, at the LLM's accuracy and a lower price. You have a few hundred labelled answers to check that the trade holds.
 
 ## What You'll Learn
 
@@ -37,7 +37,7 @@ dm_grader = CriterionGrader(judge_model_config=jev)
 llm_grader = CriterionGrader(judges=[JudgeSpec(gemini, "escalation")], seed=SEED)
 ```
 
-The LLM grader is built the way the cascade will call its fallback. `EscalationConfig(judges=gemini, ...)` names a bare `LLMConfig` `"escalation"`, and the cascade will use `seed=SEED`. With the same `judge_id` and `seed`, every prompt of the LLM run, option shuffles and few-shot examples included, is the prompt the live cascade sends for that criterion, so the offline replay reproduces the cascade exactly.
+The LLM grader is built the way the cascade will call its fallback. `EscalationConfig(judges=gemini, ...)` names a bare `LLMConfig` `"escalation"`, and the cascade will use `seed=SEED`. With the same `judge_id` and `seed`, every prompt of the LLM run, option shuffles and few-shot examples included, is the prompt the live cascade sends for that criterion, so the offline replay reproduces the cascade exactly. The same applies if `llm_grader` and the cascade are both built with `llm_calls="per_item"`: an escalation judge then makes one full-rubric call for an item with any escalated criterion, instead of one call per escalated criterion, and the replay is still exact — see [Grading a whole rubric in one call](llm-judges.md#grading-a-whole-rubric-in-one-call) for the call, and [Offline calibration and replay](decision-models.md#offline-calibration-and-replay) for the `llm_calls` keyword of the replay and the calibration.
 
 ### Step 2: Split the Labelled Data
 
@@ -76,6 +76,8 @@ print(f"LLM alone: {compute_metrics(llm_calib, calib).criterion_accuracy:.3f}")
 
 Each point replays the cascade at one threshold and measures it: its `escalation_rate`, its `metric` (`criterion_accuracy` by default) and its estimated `cost_usd`. `best(tolerance=0.005)` returns the point that escalates least among those within half a point of the best accuracy, which is the "same accuracy for less money" choice. Add `max_escalation_rate=0.3` to cap the share of criteria that go to the LLM.
 
+If `llm_grader` uses `llm_calls="per_item"`, pass `llm_calls="per_item"` to `calibrate_escalation` too, so its cost and time estimates match how the LLM run was actually called; it changes nothing about which criteria escalate or their verdicts, only those two estimates. Under `per_item`, an escalation judge is billed by item rather than by criterion, since one call answers every criterion of an item once it is made at all — so escalating fewer criteria only saves money when it leaves some items with no escalation whatsoever. Compare candidate thresholds by the points' `cost_usd` rather than assuming a lower `escalation_rate` is automatically cheaper.
+
 Before going further, read the diagnostics of the chosen point:
 
 - `dm_accuracy_kept` should be close to the LLM's accuracy: Jev keeps these criteria.
@@ -100,7 +102,7 @@ print(f"cascade {stats.metric:.3f} vs LLM alone {llm_alone:.3f}")
 print(f"escalated {stats.escalation_rate:.0%}, estimated cost ${stats.cost_usd:.4f}")
 ```
 
-`replay_escalation` builds the `EvalResult` the cascade would have produced on the test items. Its cost is an estimate, pro-rated from per-item totals. Compare it with the LLM-alone accuracy on the same items. Replaying `best` on the calibration items instead would warn with a `UserWarning`, since the point records a fingerprint of the items it was calibrated on.
+`replay_escalation` builds the `EvalResult` the cascade would have produced on the test items. Its cost is an estimate, pro-rated from per-item totals. Compare it with the LLM-alone accuracy on the same items. Replaying `best` on the calibration items instead would warn with a `UserWarning`, since the point records a fingerprint of the items it was calibrated on. As with `calibrate_escalation`, pass `replay_escalation(..., llm_calls="per_item")` when `llm_grader` was graded that way, so the estimated cost and time reflect one full-rubric call per item with an escalation rather than one call per escalated criterion.
 
 ### Step 6: Deploy the Cascade
 
@@ -126,7 +128,7 @@ For each item, Jev answers every criterion in one request; the criteria whose ju
 
 - **A cascade saves money; it is not meant to raise accuracy.** Judge it against the LLM alone on held-out items, at equal accuracy.
 - **Calibrate on one split, measure on another.** `EscalationCurve.best` picks from many measurements on the same items, so its metric is optimistic.
-- **Use `tolerance` to trade a little accuracy for fewer LLM calls**, and `max_escalation_rate` to cap the LLM share.
+- **Use `tolerance` to trade a little accuracy for fewer LLM calls**, and `max_escalation_rate` to cap the LLM share. Under `llm_calls="per_item"`, less escalation saves a call only for an item left with no escalated criterion, so check the points' `cost_usd`.
 - **Match the seed and `judge_id`.** Grade the LLM runs with `JudgeSpec(gemini, "escalation")` and the cascade's `seed`, so replays equal the live cascade exactly.
 - **Check both conditions:** Jev must be accurate where it keeps criteria, and the LLM must beat Jev where it defers.
 

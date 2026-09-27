@@ -1,0 +1,1 @@
+- For a multi-choice criterion, "selected_option" is the number of the chosen option, as that criterion's <options> number it, and "criterion_status" is null.

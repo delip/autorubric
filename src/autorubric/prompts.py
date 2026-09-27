@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
-from autorubric.types import Criterion, CriterionOption
+from autorubric.types import Criterion, CriterionOption, CriterionVerdict
 from autorubric.utils import _normalize_guidelines
 
 if TYPE_CHECKING:
@@ -198,6 +200,23 @@ def _guidelines_block(guidelines: str | None) -> str:
     return GUIDELINES_BLOCK.format(guidelines=guidelines)
 
 
+def _binary_criterion_block(criterion: Criterion) -> str:
+    """The part of a user prompt that poses a binary criterion.
+
+    Its ``<criterion_type>`` (``negative`` for a negative weight, else ``positive``) and its
+    ``<criterion>``. The one rendering of a binary criterion, whether it is judged alone or
+    listed with a whole rubric.
+    """
+    criterion_type = "negative" if criterion.weight < 0 else "positive"
+    return f"""<criterion_type>
+{criterion_type}
+</criterion_type>
+
+<criterion>
+{criterion.requirement}
+</criterion>"""
+
+
 def build_user_prompt(
     criterion: Criterion,
     to_grade: str,
@@ -223,7 +242,7 @@ def build_user_prompt(
     Raises:
         TypeError: If ``guidelines`` is neither a ``str`` nor ``None``.
     """
-    criterion_type = "negative" if criterion.weight < 0 else "positive"
+    criterion_text = _binary_criterion_block(criterion)
     guidelines_text = _guidelines_block(guidelines)
     query_text = f"<input>{query}</input>\n\n" if query else ""
     reference_text = (
@@ -232,13 +251,7 @@ def build_user_prompt(
         else ""
     )
 
-    return f"""{guidelines_text}<criterion_type>
-{criterion_type}
-</criterion_type>
-
-<criterion>
-{criterion.requirement}
-</criterion>
+    return f"""{guidelines_text}{criterion_text}
 
 {query_text}{reference_text}<submission>
 {to_grade}
@@ -272,7 +285,7 @@ def build_few_shot_user_prompt(
     Raises:
         TypeError: If ``guidelines`` is neither a ``str`` nor ``None``.
     """
-    criterion_type = "negative" if criterion.weight < 0 else "positive"
+    criterion_text = _binary_criterion_block(criterion)
     guidelines_text = _guidelines_block(guidelines)
     query_text = f"<input>{query}</input>\n\n" if query else ""
     examples_text = _format_few_shot_examples(examples, include_reason)
@@ -282,13 +295,7 @@ def build_few_shot_user_prompt(
         else ""
     )
 
-    return f"""{guidelines_text}<criterion_type>
-{criterion_type}
-</criterion_type>
-
-<criterion>
-{criterion.requirement}
-</criterion>
+    return f"""{guidelines_text}{criterion_text}
 
 {examples_text}
 
@@ -317,13 +324,51 @@ def _format_few_shot_examples(
     for i, ex in enumerate(examples, 1):
         parts.append(f"<example_{i}>")
         parts.append(f"<example_submission>{ex.submission}</example_submission>")
-        parts.append(f"<verdict>{ex.verdict.value}</verdict>")
-        if include_reason and ex.reason:
-            parts.append(f"<reason>{ex.reason}</reason>")
+        parts.extend(_example_judgment_lines(ex.verdict, None, ex.reason, include_reason))
         parts.append(f"</example_{i}>")
     parts.append("</examples>")
 
     return "\n".join(parts)
+
+
+def _example_judgment_lines(
+    label: CriterionVerdict | int,
+    options: Sequence[CriterionOption] | None,
+    reason: str | None,
+    include_reason: bool,
+) -> list[str]:
+    """The tags of one criterion's judgment in a few-shot example, one per line.
+
+    Every few-shot example shows a judgment in these tags, whether it is drawn per criterion
+    (``_format_few_shot_examples``, ``_format_multi_choice_examples``) or is a whole
+    training item in a call for the whole rubric (``_format_rubric_examples``): a binary
+    criterion's ``<verdict>``, or a multi-choice criterion's 1-based ``<selected_option>``
+    and its ``<selected_label>``; then the ``<reason>``, when shown and not empty.
+
+    Args:
+        label: A binary criterion's verdict, or the 0-based index of a multi-choice
+            criterion's chosen option among ``options``.
+        options: The multi-choice criterion's options, in the order the prompt shows them;
+            ``None`` for a binary criterion.
+        reason: The written reason for the label, or ``None``.
+        include_reason: Whether to show the reason.
+
+    Raises:
+        ValueError: If ``label`` is an option index and there are no ``options``.
+    """
+    if isinstance(label, int):
+        if options is None:
+            raise ValueError(f"option index {label} given for a criterion without options")
+        # Convert 0-based index to 1-based for display
+        lines = [
+            f"<selected_option>{label + 1}</selected_option>",
+            f"<selected_label>{options[label].label}</selected_label>",
+        ]
+    else:
+        lines = [f"<verdict>{label.value}</verdict>"]
+    if include_reason and reason:
+        lines.append(f"<reason>{reason}</reason>")
+    return lines
 
 
 # System prompt addition for few-shot grading
@@ -493,6 +538,29 @@ def _render_options(options: list[CriterionOption]) -> str:
     return "\n".join(lines)
 
 
+def _multi_choice_criterion_block(criterion: Criterion) -> str:
+    """The part of a user prompt that poses a multi-choice criterion.
+
+    Its ``<question>`` and its numbered ``<options>`` (``_render_options``), in the order
+    the criterion lists them. The one rendering of a multi-choice criterion, whether it is
+    judged alone or listed with a whole rubric.
+
+    Raises:
+        ValueError: If the criterion has no options (is binary).
+    """
+    if criterion.options is None:
+        raise ValueError("Cannot build multi-choice prompt for binary criterion")
+    # Format options as numbered list (1-indexed for human readability)
+    options_text = _render_options(criterion.options)
+    return f"""<question>
+{criterion.requirement}
+</question>
+
+<options>
+{options_text}
+</options>"""
+
+
 def build_multi_choice_user_prompt(
     criterion: Criterion,
     to_grade: str,
@@ -517,9 +585,7 @@ def build_multi_choice_user_prompt(
         ValueError: If criterion has no options (is binary).
         TypeError: If ``guidelines`` is neither a ``str`` nor ``None``.
     """
-    if criterion.options is None:
-        raise ValueError("Cannot build multi-choice prompt for binary criterion")
-
+    criterion_text = _multi_choice_criterion_block(criterion)
     guidelines_text = _guidelines_block(guidelines)
     query_text = f"<input>{query}</input>\n\n" if query else ""
     reference_text = (
@@ -528,16 +594,7 @@ def build_multi_choice_user_prompt(
         else ""
     )
 
-    # Format options as numbered list (1-indexed for human readability)
-    options_text = _render_options(criterion.options)
-
-    return f"""{guidelines_text}<question>
-{criterion.requirement}
-</question>
-
-<options>
-{options_text}
-</options>
+    return f"""{guidelines_text}{criterion_text}
 
 {query_text}{reference_text}<submission>
 {to_grade}
@@ -572,9 +629,7 @@ def build_multi_choice_few_shot_user_prompt(
         ValueError: If criterion has no options (is binary).
         TypeError: If ``guidelines`` is neither a ``str`` nor ``None``.
     """
-    if criterion.options is None:
-        raise ValueError("Cannot build multi-choice prompt for binary criterion")
-
+    criterion_text = _multi_choice_criterion_block(criterion)
     guidelines_text = _guidelines_block(guidelines)
     query_text = f"<input>{query}</input>\n\n" if query else ""
     reference_text = (
@@ -583,19 +638,10 @@ def build_multi_choice_few_shot_user_prompt(
         else ""
     )
 
-    # Format options as numbered list
-    options_text = _render_options(criterion.options)
-
     # Format examples
     examples_text = _format_multi_choice_examples(criterion, examples, include_reason)
 
-    return f"""{guidelines_text}<question>
-{criterion.requirement}
-</question>
-
-<options>
-{options_text}
-</options>
+    return f"""{guidelines_text}{criterion_text}
 
 {examples_text}
 
@@ -624,16 +670,11 @@ def _format_multi_choice_examples(
 
     parts = ["<examples>"]
     for i, (submission, selected_idx, reason) in enumerate(examples, 1):
-        # Convert 0-based index to 1-based for display
-        selected_option = selected_idx + 1
-        selected_label = criterion.options[selected_idx].label
-
         parts.append(f"<example_{i}>")
         parts.append(f"<example_submission>{submission}</example_submission>")
-        parts.append(f"<selected_option>{selected_option}</selected_option>")
-        parts.append(f"<selected_label>{selected_label}</selected_label>")
-        if include_reason and reason:
-            parts.append(f"<reason>{reason}</reason>")
+        parts.extend(
+            _example_judgment_lines(selected_idx, criterion.options, reason, include_reason)
+        )
         parts.append(f"</example_{i}>")
     parts.append("</examples>")
 
@@ -655,6 +696,280 @@ Each example includes:
 - <reason>: (Optional) Explanation for the selection
 
 Apply consistent standards across the examples and the submission you are evaluating."""
+
+
+# ============================================================================
+# Whole-Rubric Prompts (one LLM call per item)
+# ============================================================================
+# Under ``CriterionGrader(llm_calls="per_item")`` an LLM judge grades every criterion of an
+# item in one call. Its system prompt embeds the grader's per-criterion system prompts
+# verbatim, as a guide for each kind of criterion the call holds, between a preamble that
+# says how to apply them (to each criterion separately and independently) and a response
+# format for the batched answer. The response format comes last: each guide ends with its
+# own one-criterion format, and where decoding is not constrained by the schema the last
+# instruction tends to win. Its user prompt lists every criterion under its id, posed by the
+# same block a per-criterion prompt poses it with, so a whole-rubric judge reads exactly the
+# guidance and criterion text a per-criterion judge reads. Its few-shot examples are whole
+# training items, each shown once with its judgment of every criterion under the criterion's
+# id, in the tags a per-criterion example uses. Nothing here reaches a prompt unless a grader
+# is set to call per item.
+
+# ``{criterion_kinds}`` is the line of each kind of criterion in the call
+# (``RUBRIC_JUDGMENT_BINARY_KIND``, ``RUBRIC_JUDGMENT_MULTI_CHOICE_KIND``), one per line.
+# ``{examples}`` is empty, or ``RUBRIC_JUDGMENT_EXAMPLES`` and a blank line when the user
+# prompt shows few-shot examples.
+RUBRIC_JUDGMENT_PREAMBLE = """\
+You are an expert evaluation judge. Your task is to judge every criterion in the <criteria> list \
+against one submission, in a single response. Be precise, evidence-based, and consistent.
+
+Each criterion in <criteria> is a <rubric_criterion> with an id (c0, c1, ...).
+{criterion_kinds}
+
+Each guide is written for judging one criterion at a time. Apply it to each criterion of its \
+kind separately, as if that criterion were the only one: judge every criterion independently, \
+and never let your judgment of one criterion influence another. The <submission>, and any \
+<guidelines>, <input> and <reference_submission>, apply to every criterion.
+
+{examples}A guide's RESPONSE FORMAT and EXAMPLES show the fields of one criterion's judgment. \
+Your response holds one judgment per criterion, as the RESPONSE FORMAT at the end of these \
+instructions says."""
+
+RUBRIC_JUDGMENT_BINARY_KIND = (
+    "- A binary criterion holds a <criterion_type> and a <criterion>. Judge it as the binary "
+    "criterion guide below describes."
+)
+RUBRIC_JUDGMENT_MULTI_CHOICE_KIND = (
+    "- A multi-choice criterion holds a <question> and numbered <options>. Judge it as the "
+    "multi-choice criterion guide below describes."
+)
+RUBRIC_JUDGMENT_EXAMPLES = (
+    "The <examples> show earlier submissions with the correct judgment of each criterion, each "
+    "under the criterion's id; use them as the guides describe."
+)
+
+# Wrap a guide, the system prompt a per-criterion call for that kind of criterion gets
+# (``{guide}``, verbatim: the default, with its few-shot addition, or a custom prompt).
+RUBRIC_JUDGMENT_BINARY_GUIDE = """\
+<binary_criterion_guide>
+{guide}
+</binary_criterion_guide>"""
+RUBRIC_JUDGMENT_MULTI_CHOICE_GUIDE = """\
+<multi_choice_criterion_guide>
+{guide}
+</multi_choice_criterion_guide>"""
+
+# ``{skeleton}`` is a one-line JSON answer with an example judgment for each kind of
+# criterion in the call; ``{kind_rules}`` is the rule of each kind
+# (``RUBRIC_JUDGMENT_BINARY_RULE``, ``RUBRIC_JUDGMENT_MULTI_CHOICE_RULE``), one per line. The
+# literal brace of the last line is doubled for ``str.format``.
+RUBRIC_JUDGMENT_RESPONSE_FORMAT = """\
+RESPONSE FORMAT:
+Respond with valid JSON holding exactly one judgment per criterion, in the order the criteria \
+are listed:
+{skeleton}
+
+- "criterion_id" is the criterion's id.
+{kind_rules}
+- "explanation" is the 1-2 sentence explanation the criterion's guide asks for.
+
+Return only raw JSON starting with {{, no back-ticks, no 'json' prefix."""
+
+RUBRIC_JUDGMENT_BINARY_RULE = (
+    '- For a binary criterion, "criterion_status" is "MET", "UNMET" or "CANNOT_ASSESS", and '
+    '"selected_option" is null.'
+)
+RUBRIC_JUDGMENT_MULTI_CHOICE_RULE = (
+    '- For a multi-choice criterion, "selected_option" is the number of the chosen option, as '
+    'that criterion\'s <options> number it, and "criterion_status" is null.'
+)
+
+# The skeleton's example judgment of each kind of criterion, without its id: the skeleton
+# numbers its judgments c0, c1, ... in the order it lists them, binary first.
+_RUBRIC_JUDGMENT_BINARY_SKELETON = {
+    "criterion_status": "MET",
+    "selected_option": None,
+    "explanation": "...",
+}
+_RUBRIC_JUDGMENT_MULTI_CHOICE_SKELETON = {
+    "criterion_status": None,
+    "selected_option": 2,
+    "explanation": "...",
+}
+
+
+def build_rubric_system_prompt(
+    binary_guide: str | None,
+    multi_choice_guide: str | None,
+    *,
+    with_examples: bool = False,
+) -> str:
+    """Build the system prompt of an LLM judge's one call for a whole rubric.
+
+    ``RUBRIC_JUDGMENT_PREAMBLE``, then each guide given (binary first) wrapped in its tags,
+    then ``RUBRIC_JUDGMENT_RESPONSE_FORMAT``, one blank line apart. A guide is given only for
+    a kind of criterion the call holds, and the preamble's kind lines and the response
+    format's example judgments and rules cover exactly those kinds, so a call for a rubric of
+    one kind never carries the other kind's guide, as a per-criterion call never does.
+
+    Args:
+        binary_guide: The system prompt a per-criterion call for a binary criterion gets,
+            embedded verbatim; ``None`` when the call has no binary criterion.
+        multi_choice_guide: The system prompt a per-criterion call for a multi-choice
+            criterion gets, embedded verbatim; ``None`` when the call has no multi-choice
+            criterion.
+        with_examples: Whether the user prompt shows few-shot examples. If True, the
+            preamble says how to read them (``RUBRIC_JUDGMENT_EXAMPLES``).
+
+    Returns:
+        The system prompt.
+
+    Raises:
+        ValueError: If both guides are ``None``.
+    """
+    if binary_guide is None and multi_choice_guide is None:
+        raise ValueError("A rubric system prompt needs the guide of at least one kind of criterion")
+    kinds: list[str] = []
+    guides: list[str] = []
+    rules: list[str] = []
+    skeletons: list[dict[str, object]] = []
+    if binary_guide is not None:
+        kinds.append(RUBRIC_JUDGMENT_BINARY_KIND)
+        guides.append(RUBRIC_JUDGMENT_BINARY_GUIDE.format(guide=binary_guide))
+        rules.append(RUBRIC_JUDGMENT_BINARY_RULE)
+        skeletons.append(_RUBRIC_JUDGMENT_BINARY_SKELETON)
+    if multi_choice_guide is not None:
+        kinds.append(RUBRIC_JUDGMENT_MULTI_CHOICE_KIND)
+        guides.append(RUBRIC_JUDGMENT_MULTI_CHOICE_GUIDE.format(guide=multi_choice_guide))
+        rules.append(RUBRIC_JUDGMENT_MULTI_CHOICE_RULE)
+        skeletons.append(_RUBRIC_JUDGMENT_MULTI_CHOICE_SKELETON)
+
+    preamble = RUBRIC_JUDGMENT_PREAMBLE.format(
+        criterion_kinds="\n".join(kinds),
+        examples=f"{RUBRIC_JUDGMENT_EXAMPLES}\n\n" if with_examples else "",
+    )
+    # json.dumps writes the skeleton on one line, with ", " and ": " separators.
+    skeleton = json.dumps(
+        {
+            "judgments": [
+                {"criterion_id": f"c{i}", **judgment} for i, judgment in enumerate(skeletons)
+            ]
+        }
+    )
+    response_format = RUBRIC_JUDGMENT_RESPONSE_FORMAT.format(
+        skeleton=skeleton, kind_rules="\n".join(rules)
+    )
+    return "\n\n".join([preamble, *guides, response_format])
+
+
+def build_rubric_user_prompt(
+    criteria: Sequence[tuple[str, Criterion]],
+    to_grade: str,
+    query: str | None = None,
+    reference_submission: str | None = None,
+    *,
+    examples_text: str = "",
+    guidelines: str | None = None,
+) -> str:
+    """Build the user prompt of an LLM judge's one call for a whole rubric.
+
+    The rubric's guidelines first, when it has any, then every criterion in ``<criteria>``,
+    each in a ``<rubric_criterion>`` tagged with its id and holding the block a per-criterion
+    prompt poses it with (``_binary_criterion_block``, ``_multi_choice_criterion_block``),
+    then the examples, the input, the reference submission and the submission, in the order
+    a per-criterion prompt has them.
+
+    Args:
+        criteria: Each criterion with its id, in the order to list them. A multi-choice
+            criterion is given as the judge is shown it (its options in the call's order).
+        to_grade: The submission text to evaluate.
+        query: Optional input/query that prompted the submission.
+        reference_submission: Optional exemplar response for grading context.
+        examples_text: The rendered few-shot examples (``_format_rubric_examples``), if
+            any, placed after the criteria.
+        guidelines: Optional rubric guidelines, as in ``build_user_prompt``.
+
+    Returns:
+        The user prompt.
+
+    Raises:
+        ValueError: If ``criteria`` is empty.
+        TypeError: If ``guidelines`` is neither a ``str`` nor ``None``.
+    """
+    if not criteria:
+        raise ValueError("Cannot build a rubric prompt without criteria")
+    blocks = []
+    for criterion_id, criterion in criteria:
+        block = (
+            _multi_choice_criterion_block(criterion)
+            if criterion.is_multi_choice
+            else _binary_criterion_block(criterion)
+        )
+        blocks.append(f'<rubric_criterion id="{criterion_id}">\n{block}\n</rubric_criterion>')
+    criteria_text = "\n\n".join(blocks)
+    guidelines_text = _guidelines_block(guidelines)
+    query_text = f"<input>{query}</input>\n\n" if query else ""
+    reference_text = (
+        f"<reference_submission>\n{reference_submission}\n</reference_submission>\n\n"
+        if reference_submission
+        else ""
+    )
+    examples_block = f"{examples_text}\n\n" if examples_text else ""
+
+    return f"""{guidelines_text}<criteria>
+{criteria_text}
+</criteria>
+
+{examples_block}{query_text}{reference_text}<submission>
+{to_grade}
+</submission>"""
+
+
+def _format_rubric_examples(
+    examples: Sequence[
+        tuple[str, Sequence[tuple[str, Criterion, CriterionVerdict | int, str | None]]]
+    ],
+    include_reason: bool,
+) -> str:
+    """Format the few-shot examples of an LLM judge's one call for a whole rubric as XML.
+
+    Each example is a whole training item: its submission, then a ``<judgment>`` per
+    criterion under the criterion's id, holding the tags a per-criterion example shows
+    (``_example_judgment_lines``, shared with ``_format_few_shot_examples`` and
+    ``_format_multi_choice_examples``): a binary criterion's ``<verdict>``, or a
+    multi-choice criterion's 1-based ``<selected_option>`` and its ``<selected_label>``,
+    numbered in the order the call shows the options; then the ``<reason>``, if shown.
+
+    Args:
+        examples: Each example's submission and its judgments, in the order to show them;
+            an example has at least one judgment. A judgment is ``(criterion_id, criterion,
+            label, reason)``: the criterion as the call shows it (a multi-choice criterion
+            with its options in the call's order); the label, a ``CriterionVerdict`` for a
+            binary criterion or the chosen option's 0-based index among the options as
+            shown for a multi-choice one; and the training item's written reason for the
+            label, or ``None``.
+        include_reason: If True, a judgment with a reason shows it.
+
+    Returns:
+        The ``<examples>`` block, or an empty string if there are no examples.
+
+    Raises:
+        ValueError: If a judgment gives an option index for a criterion without options.
+    """
+    if not examples:
+        return ""
+
+    parts = ["<examples>"]
+    for i, (submission, judgments) in enumerate(examples, 1):
+        parts.append(f"<example_{i}>")
+        parts.append(f"<example_submission>{submission}</example_submission>")
+        for criterion_id, criterion, label, reason in judgments:
+            parts.append(f'<judgment id="{criterion_id}">')
+            parts.extend(_example_judgment_lines(label, criterion.options, reason, include_reason))
+            parts.append("</judgment>")
+        parts.append(f"</example_{i}>")
+    parts.append("</examples>")
+
+    return "\n".join(parts)
 
 
 # ============================================================================

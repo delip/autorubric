@@ -16,17 +16,19 @@ from collections import Counter
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal, overload
+from typing import TYPE_CHECKING, Any, Literal, cast, get_args, overload
 
 from pydantic import BaseModel
 
 from autorubric.decision import (
     DecisionModelClient,
     DecisionModelConfig,
+    _describe,
     _is_real_number,
     answer_to_report,
     build_questions,
     build_state,
+    question_id,
 )
 from autorubric.graders.base import Grader, _caller_stacklevel
 from autorubric.llm import GenerateResult, LLMClient, LLMConfig, classify_grading_error
@@ -35,9 +37,12 @@ from autorubric.prompts import (
     GRADER_SYSTEM_PROMPT_DEFAULT,
     MULTI_CHOICE_FEW_SHOT_ADDITION,
     MULTI_CHOICE_SYSTEM_PROMPT,
+    _format_rubric_examples,
     build_few_shot_user_prompt,
     build_multi_choice_few_shot_user_prompt,
     build_multi_choice_user_prompt,
+    build_rubric_system_prompt,
+    build_rubric_user_prompt,
     build_user_prompt,
 )
 from autorubric.scoring import _every_judgment_failed, score_reports
@@ -55,11 +60,14 @@ from autorubric.types import (
     FewShotExample,
     JudgeVote,
     LengthPenalty,
+    LLMCalls,
     MultiChoiceJudgeVote,
     MultiChoiceJudgment,
     MultiChoiceVerdict,
     NominalAggregation,
     OrdinalAggregation,
+    RubricCriterionJudgment,
+    RubricJudgment,
     TokenUsage,
     _binary_worst_verdict,
 )
@@ -88,8 +96,11 @@ def _derive_shuffle_rng(
 
 
 # Sentinel used in the item-key slot of ``_derive_shuffle_rng`` for few-shot example
-# selection. Few-shot examples are a fixed property of (criterion, judge), not of the
-# item being graded, so the per-call item content is intentionally not part of the key.
+# selection. Few-shot examples are a fixed property of the judge, not of the item being
+# graded, so the per-call item content is intentionally not part of the key. Called per
+# criterion, a judge draws examples for each criterion, keyed on the criterion's index; under
+# ``llm_calls="per_item"`` it draws whole training items once, with ``-1`` in the criterion
+# slot for the whole rubric.
 FEW_SHOT_DOMAIN = "few_shot"
 
 # The judge_id a grader built with ``judge_model_config`` gives its one judge. That judge's
@@ -264,6 +275,20 @@ def _check_judge_weight(weight: object, judge_id: object) -> None:
         )
 
 
+def _check_llm_calls(llm_calls: object) -> None:
+    """Refuse an ``llm_calls`` value that is not one of ``LLMCalls``.
+
+    The one check of ``CriterionGrader`` and of an offline cascade replay and calibration
+    (``autorubric.escalation.replay_escalation`` and ``calibrate_escalation``), so all three
+    accept the same values and refuse others with the same message.
+
+    Raises:
+        ValueError: If ``llm_calls`` is neither ``"per_criterion"`` nor ``"per_item"``.
+    """
+    if llm_calls not in get_args(LLMCalls):
+        raise ValueError(f"llm_calls must be one of {get_args(LLMCalls)}; got {llm_calls!r}")
+
+
 @dataclass
 class JudgeSpec:
     """Specification for a single judge in an ensemble.
@@ -276,9 +301,10 @@ class JudgeSpec:
     passing both ``judge_model_config=`` and ``llm_config=`` raises ``ValueError``.
 
     The configuration decides the judge's kind: an ``LLMConfig`` makes an LLM judge, which
-    is asked about each criterion in its own call, and a ``DecisionModelConfig`` makes a
-    decision-model judge, which is asked about every criterion of an item in one request.
-    Both kinds mix freely in one ensemble.
+    is asked about each criterion in its own call (or about every criterion of an item in
+    one call, when the grader's ``llm_calls`` is ``"per_item"``), and a
+    ``DecisionModelConfig`` makes a decision-model judge, which is asked about every
+    criterion of an item in one request. Both kinds mix freely in one ensemble.
 
     Attributes:
         llm_config: The judge's model configuration, an ``LLMConfig`` or a
@@ -393,10 +419,15 @@ class EscalationConfig:
     model. The decision model answers every criterion of an item, in its one request per
     item; a criterion is **escalated** when its vote errored, abstained (``CANNOT_ASSESS``
     or an NA option), or has a ``confidence`` below the criterion's threshold
-    (``threshold_for``). Only escalated criteria go to the escalation judges, and only
-    their votes decide such a criterion's verdict (aggregated with the grader's
+    (``threshold_for``). The escalation judges vote on the escalated criteria only, and
+    only their votes decide such a criterion's verdict (aggregated with the grader's
     ``aggregation`` / ``ordinal_aggregation`` / ``nominal_aggregation``); the decision
-    model's vote is kept with ``superseded=True`` and never used as a fallback.
+    model's vote is kept with ``superseded=True`` and never used as a fallback. An
+    escalation judge is called as the grader's ``llm_calls`` says: by default once per
+    escalated criterion, about that criterion alone; under ``llm_calls="per_item"`` once
+    per item with any escalated criterion, about the whole rubric, keeping its judgments
+    of the escalated criteria only. Either way each call is the one the judge would make
+    in the same grader without the cascade.
 
     Validated at construction (``dataclasses.replace`` validates again) and frozen: its
     fields cannot be reassigned. The ``judges`` list and the ``per_criterion`` dict can
@@ -410,7 +441,8 @@ class EscalationConfig:
             compare a cascade with a separate LLM run judge for judge (the same prompts,
             option shuffles and few-shot examples included), grade that run with these
             judges (``judges=escalation.judges``, their ``judge_id``s included) and the
-            cascade's ``seed`` and other LLM settings (``replay_escalation`` lists them).
+            cascade's ``seed``, ``llm_calls`` and other LLM settings (``replay_escalation``
+            lists them).
         threshold: A criterion is escalated when the decision model's confidence is below
             it, in [0, 1]. ``0.0`` escalates only errors and abstentions; ``1.0`` everything
             short of certainty.
@@ -615,11 +647,15 @@ def _warn_unknown_threshold_names(
 class CriterionResult:
     """Result from evaluating a single criterion by a single judge.
 
-    ``usage`` and ``cost`` belong to the call that produced the result. An LLM judge makes
-    one call per criterion, so each result carries its own. A decision-model judge makes
-    one request per item, whose usage and cost ride on the item's first result (the other
-    results carry ``None``), so ``JudgeCriterionResults.total_usage``/``total_cost`` are the
-    per-item totals for either kind. ``cost`` is ``None`` when it is unknown.
+    ``usage`` and ``cost`` belong to the call that produced the result. An LLM judge called
+    per criterion (the grader's default ``llm_calls``) makes one call per criterion, so each
+    result carries its own. A decision-model judge makes one request per item, and an LLM
+    judge under ``llm_calls="per_item"`` one call per item; that request's or call's usage
+    and cost ride on the judge's first result for the item (for a cascade's escalation
+    judge, which keeps results for the escalated criteria only, the first escalated
+    criterion's), and its other results carry ``None``, so
+    ``JudgeCriterionResults.total_usage``/``total_cost`` are the per-item totals however
+    the judge was called. ``cost`` is ``None`` when it is unknown.
     """
 
     report: CriterionReport
@@ -633,10 +669,13 @@ class JudgeCriterionResults:
 
     ``role`` is the judge's part in grading the item. A ``"primary"`` judge (every judge of
     a grader without a cascade, and a cascade's decision model) judges every criterion, so
-    each entry is a result. An ``"escalation"`` judge of a cascade judges only the criteria
-    the decision model escalated and holds ``None`` at the others; its list is full-length
-    all the same, so every judge's entries line up by criterion index. ``reports``,
-    ``total_usage`` and ``total_cost`` cover the criteria the judge judged.
+    each entry is a result. An ``"escalation"`` judge of a cascade has a result only at the
+    criteria the decision model escalated (under ``llm_calls="per_item"`` its one call
+    answers every criterion, and only the escalated criteria's answers are kept) and holds
+    ``None`` at the others; its list is full-length all the same, so every judge's entries
+    line up by criterion index. ``reports``, ``total_usage`` and ``total_cost`` cover the
+    judge's results; the totals count each of the judge's calls or requests once, whether
+    it made one per criterion or one per item (see ``CriterionResult``).
     """
 
     judge_id: str
@@ -685,16 +724,17 @@ def _failed_judgment_result(
 ) -> CriterionResult:
     """The result a judge gets for ``criterion`` when judging it failed with ``error``.
 
-    The single source of failure reports for every judge kind: an LLM judge's failed call,
-    a decision model's failed request (once for each criterion posed in it), an answer
-    that cannot be used, and a criterion a decision model cannot be asked about. The
-    failure is classified by ``classify_grading_error`` and logged with the judge's id.
-    Infrastructure (API/network) and parse/validation failures are not the submission's
-    fault, so they abstain: ``CANNOT_ASSESS`` (binary) or ``na=True`` (multi-choice), which
-    the default ``CannotAssessStrategy.SKIP`` excludes from scoring, instead of a
-    score-affecting worst-case verdict. Only truly unknown errors keep the conservative
-    worst case. The report surfaces the failure structurally (``error``, prefixed with the
-    category; see ``is_error``) and in ``reason``, and carries no usage or cost.
+    The single source of failure reports for every judge kind: an LLM judge's failed call
+    (once for each criterion asked about in it), a decision model's failed request (once
+    for each criterion posed in it), an answer that cannot be used, and a criterion a
+    decision model cannot be asked about. The failure is classified by
+    ``classify_grading_error`` and logged with the judge's id. Infrastructure
+    (API/network) and parse/validation failures are not the submission's fault, so they
+    abstain: ``CANNOT_ASSESS`` (binary) or ``na=True`` (multi-choice), which the default
+    ``CannotAssessStrategy.SKIP`` excludes from scoring, instead of a score-affecting
+    worst-case verdict. Only truly unknown errors keep the conservative worst case. The
+    report surfaces the failure structurally (``error``, prefixed with the category; see
+    ``is_error``) and in ``reason``, and carries no usage or cost.
 
     Args:
         criterion: The criterion as evaluated (after its NA option is guaranteed).
@@ -921,26 +961,48 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
     ``None``). In a mixed ensemble every judge votes on every criterion, and the votes
     aggregate exactly as an all-LLM ensemble's do.
 
+    With ``llm_calls="per_item"``, each LLM judge of ``judge_model_config`` or ``judges`` is
+    asked about the whole rubric in **one call per item** instead, as a decision model is:
+    the submission and its context are sent once; the system prompt embeds the binary and
+    multi-choice system prompts, for the kinds of criteria the rubric has, as guides to
+    apply to each criterion separately and independently; every criterion is listed under
+    its decision-model question id (``c0``, ``c1``, ...), posed as in a per-criterion call
+    and with its options shuffled exactly as there; and the answer (``RubricJudgment``) maps
+    back to one result per criterion. A missing or unusable answer fails only its criterion
+    (``parse``), a failed call fails every criterion, and the call's usage and cost ride on
+    the item's first result. With few-shot examples, the call shows whole training items,
+    each once with its ground truth for every criterion, instead of examples drawn for each
+    criterion. Votes, aggregation and scoring are the same in both modes. A cascade's
+    escalation judges make that call too, but only for an item with an escalated criterion,
+    and keep only the escalated criteria's results (see below).
+
     A confidence cascade (``escalation=EscalationConfig(...)``) puts one decision model
     first and LLM judges behind it. The decision model judges every criterion in its one
     request per item; a criterion it errored or abstained on, or answered with a
-    ``confidence`` below the criterion's threshold, is escalated: each escalation judge
-    judges it (and only the escalated criteria), with the same prompt it would get in an
-    otherwise identical grader without the cascade (the same ``seed``, ``judge_id`` and
-    LLM settings). An escalated
+    ``confidence`` below the criterion's threshold, is escalated, and each escalation judge
+    votes on the escalated criteria only. Called per criterion, an escalation judge is
+    asked about each escalated criterion in a call of its own. Under
+    ``llm_calls="per_item"`` it is asked about the whole rubric in one call, made only for
+    an item with an escalated criterion; its judgments of the other criteria are
+    discarded, a failed call fails its votes on the escalated criteria, and the call's
+    usage and cost ride on the first escalated criterion's result. Either way each call is
+    the one the judge would make in an otherwise identical grader without the cascade (the
+    same ``seed``, ``judge_id`` and LLM settings, ``llm_calls`` included). An escalated
     criterion's report is marked ``escalated=True``, keeps the decision model's vote with
     ``superseded=True``, and takes its verdict from the escalation judges' votes alone,
     aggregated as any ensemble's; it never falls back to the decision model's vote. The
     decision model's ``judge_scores`` entry is its own score over every criterion; an
-    escalation judge's is ``None``, as it never judges a whole rubric.
+    escalation judge's is ``None`` by role, as it votes only where the decision model
+    escalated, even on an item where every criterion escalated.
 
     Some settings exist for LLM judges only. Few-shot examples, the system prompts and
     ``shuffle_options`` apply to the LLM judges of a mixed ensemble or a cascade and never
-    reach a decision model. A grader whose judges are all decision models rejects few-shot
-    examples and warns when a system prompt is given or ``shuffle_options`` is ``False``,
-    since it has no judge to apply them to. A custom response format describes a generated judgment,
-    which only an LLM judge produces, so it cannot be combined with any decision-model
-    judge.
+    reach a decision model; so does ``llm_calls``. A grader whose judges are all decision
+    models rejects few-shot examples and warns when a system prompt is given,
+    ``shuffle_options`` is ``False`` or ``llm_calls`` is ``"per_item"``, since it has no judge
+    to apply them to. A custom response format describes a generated judgment, which only an
+    LLM judge produces, so it cannot be combined with any decision-model judge; it describes
+    one criterion's judgment, so it cannot be combined with ``llm_calls="per_item"`` either.
 
     Example:
         >>> from autorubric import DecisionModelConfig, LLMConfig, FewShotConfig, RubricDataset
@@ -976,6 +1038,12 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         ...     few_shot_config=FewShotConfig(n_examples=3),
         ... )
         >>>
+        >>> # Single LLM, one call per item for the whole rubric
+        >>> grader = CriterionGrader(
+        ...     judge_model_config=LLMConfig(model="gemini/gemini-3-flash-preview"),
+        ...     llm_calls="per_item",
+        ... )
+        >>>
         >>> # Decision model: one request per item for the whole rubric
         >>> grader = CriterionGrader(judge_model_config=DecisionModelConfig(model="jev-latest"))
         >>>
@@ -996,12 +1064,13 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         ... )
     """
 
-    # Class-level defaults of the cascade state: a grader whose ``__init__`` never ran (a
-    # subclass that skips it, or one unpickled from a version without the cascade) has no
-    # cascade, and a grader has not warned about unknown ``per_criterion`` names until
-    # ``judge`` does.
+    # Class-level defaults of the cascade state and of ``llm_calls``: a grader whose
+    # ``__init__`` never ran (a subclass that skips it, or one unpickled from a version
+    # without them) has no cascade and calls its LLM judges per criterion, and a grader has
+    # not warned about unknown ``per_criterion`` names until ``judge`` does.
     _escalation: EscalationConfig | None = None
     _escalation_names_warned: bool = False
+    _llm_calls: LLMCalls = "per_criterion"
 
     def __init__(
         self,
@@ -1035,6 +1104,8 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         multi_choice_response_format: type[BaseModel] | None = None,
         # Confidence cascade: LLM judges behind a decision model
         escalation: EscalationConfig | None = None,
+        # LLM calls per item: one per criterion, or one for the whole rubric
+        llm_calls: LLMCalls = "per_criterion",
         # Deprecated alias of judge_model_config (every parameter is keyword-only, so
         # its position at the end changes no call)
         llm_config: LLMConfig | DecisionModelConfig | None = None,
@@ -1062,8 +1133,18 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 judges only, never to a decision-model judge, whose request is exactly what
                 it would be without them. An example shows its item's ground truth for the
                 criterion and, when ``few_shot_config.include_reason`` is True, the item's
-                written reason for it (``DataItem.ground_truth_reasons``), if any.
+                written reason for it (``DataItem.ground_truth_reasons``), if any. Called per
+                criterion, a judge is shown examples drawn for each criterion separately.
+                Under ``llm_calls="per_item"`` an example is a whole training item, shown
+                once in the judge's one call per item with its ground truth (and reason) for
+                every criterion; only an item whose ground truth resolves for every
+                criterion (a verdict for a binary criterion, an option for a multi-choice
+                one) is eligible. Either way each judge draws its own examples, and the
+                training data needs a global rubric, which says what each label means.
             few_shot_config: Configuration for few-shot example selection (LLM judges only).
+                Under ``llm_calls="per_item"``, ``n_examples`` counts the training items
+                each call shows and ``balance_verdicts`` selects them by greedy label
+                coverage (see ``FewShotConfig``).
             system_prompt: Custom system prompt for binary criteria. Applies to LLM judges
                 only (a decision model's request has no system prompt); in a mixed ensemble
                 the LLM judges use it.
@@ -1102,14 +1183,30 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 binary_response_format). Defaults to MultiChoiceJudgment. LLM judges only,
                 like binary_response_format.
             escalation: Makes the grader a confidence cascade (see the class docstring):
-                the escalation judges, all LLMs, judge the criteria the decision model
-                errored or abstained on or answered with a confidence below the
+                the escalation judges, all LLMs, vote only on the criteria the decision
+                model errored or abstained on or answered with a confidence below the
                 criterion's threshold. The grader's one judge (``judge_model_config``, or a
                 single ``JudgeSpec`` in ``judges``) must then be a decision model. The
                 escalation judges count as judges for the LLM-only settings: few-shot
-                examples, the system prompts and ``shuffle_options`` apply to them. The
-                grader validates and keeps its own copy of the config (``dataclasses.replace``),
-                so changing the config's lists in place later does not affect it.
+                examples, the system prompts, ``shuffle_options`` and ``llm_calls`` apply to
+                them. The grader validates and keeps its own copy of the config
+                (``dataclasses.replace``), so changing the config's lists in place later
+                does not affect it.
+            llm_calls: How each LLM judge, a cascade's escalation judges included, is called
+                for an item: ``"per_criterion"`` (the default), one call per criterion, or
+                ``"per_item"``, one call for the whole rubric (see the class docstring). An
+                escalation judge calls only where the decision model escalated: once per
+                escalated criterion, or once, about the whole rubric, for an item with any
+                escalated criterion, keeping its judgments of the escalated criteria only.
+                ``"per_item"`` sends the submission once instead of once per criterion but
+                generates every criterion's judgment in one reply, so ``max_tokens`` and
+                ``timeout`` must allow for the whole rubric's answer: a reply cut off at
+                ``max_tokens`` fails every criterion. It also shapes few-shot examples: under
+                ``"per_item"`` they are whole training items, each labelled on every
+                criterion (see ``training_data``). Applies to LLM judges only; a decision
+                model always makes one request per item. The name counts LLM calls per item;
+                it is unrelated to ``compute_metrics(per_item_metrics=...)`` and to per-item
+                rubrics.
             llm_config: Deprecated alias of ``judge_model_config``; builds the same single
                 judge and emits a ``DeprecationWarning``.
 
@@ -1120,10 +1217,12 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 are not exactly one decision model, with a ``judge_id`` that repeats among
                 the decision model and the escalation judges, or with a config that no
                 longer validates (its ``judges`` list or ``per_criterion`` dict changed in
-                place since it was built, e.g. emptied); if few_shot_config or
-                training_data is given while every judge is a decision model (few-shot
-                examples apply to LLM judges only); if binary_response_format or
-                multi_choice_response_format is given while any judge is a decision model;
+                place since it was built, e.g. emptied); if llm_calls is not
+                ``"per_criterion"`` or ``"per_item"``; if few_shot_config or training_data is
+                given while every judge is a decision model (few-shot examples apply to LLM
+                judges only), or training_data has no global rubric; if
+                binary_response_format or multi_choice_response_format is given while any
+                judge is a decision model, or with ``llm_calls="per_item"``;
                 or if a decision-model judge has no API key, has a key the SDK would reject
                 (anything but printable ASCII without whitespace), or has a resolved base
                 URL (``api_base`` or the ``TYPESAFE_BASE_URL`` environment variable) that is
@@ -1136,11 +1235,12 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 installed (``pip install 'autorubric[typesafe]'``).
 
         Warns:
-            UserWarning: If system_prompt or multi_choice_system_prompt is not None, or
-                shuffle_options is False, while every judge is a decision model: these
-                settings apply to LLM judges only, so they have no effect. One warning per
-                setting that differs from its default (None, None and True); a cascade's
-                escalation judges are LLM judges, so a cascade never warns.
+            UserWarning: If system_prompt or multi_choice_system_prompt is not None,
+                shuffle_options is False, or llm_calls is ``"per_item"``, while every judge
+                is a decision model: these settings apply to LLM judges only, so they have
+                no effect. One warning per setting that differs from its default (None,
+                None, True and ``"per_criterion"``); a cascade's escalation judges are LLM
+                judges, so a cascade never warns.
             FutureWarning: If a ``judge_id`` repeats among ``judges``. Judges that share
                 one are conflated: those of one kind (LLM or decision model) all call the
                 model of the last of them, and all share one ``judge_scores`` entry, one set
@@ -1231,6 +1331,9 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
             )
         all_judges = [*self._judges, *self._escalation_judges]
 
+        # Checked before any client is built, as the settings below are.
+        _check_llm_calls(llm_calls)
+
         # Settings a decision-model judge cannot use, checked before any client is built so
         # that a configuration error is reported as one.
         decision_model_ids = [
@@ -1260,14 +1363,22 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 "a response format describes a generated judgment, which only an LLM judge "
                 "produces"
             )
+        if response_formats and llm_calls == "per_item":
+            raise ValueError(
+                f"{' and '.join(response_formats)} cannot be combined with "
+                "llm_calls='per_item': a response format describes one criterion's judgment, "
+                "and a per_item call answers every criterion at once"
+            )
         if every_judge_is_decision_model:
             # A setting that differs from its default asks for something no judge here
-            # can do: a prompt (None is "no prompt"), or shuffle_options=False (a decision
-            # model never shuffles, so True, the default, is what it does anyway).
+            # can do: a prompt (None is "no prompt"), shuffle_options=False (a decision
+            # model never shuffles, so True, the default, is what it does anyway), or
+            # llm_calls="per_item" (it changes how LLM judges are called, and there are none).
             changed = (
                 ("system_prompt", system_prompt is not None),
                 ("multi_choice_system_prompt", multi_choice_system_prompt is not None),
                 ("shuffle_options", not shuffle_options),
+                ("llm_calls", llm_calls != "per_criterion"),
             )
             for name, is_changed in changed:
                 if is_changed:
@@ -1285,6 +1396,7 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         self._cannot_assess_config = cannot_assess_config or CannotAssessConfig()
         self._shuffle_options = shuffle_options
         self._auto_na_option = auto_na_option
+        self._llm_calls = llm_calls
         self._seed = seed if seed is not None else random.randint(0, 2**31 - 1)
 
         # Coordinate few-shot seed with master seed when unset
@@ -1334,6 +1446,12 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         # Note: For multi-choice, examples are stored as (submission, selected_index, reason)
         self._criterion_examples: dict[tuple[int, str], list[FewShotExample]] = {}
         self._multi_choice_examples: dict[tuple[int, str], list[tuple[str, int, str | None]]] = {}
+        # Under llm_calls="per_item": each LLM judge's examples, whole training items in the
+        # order its one call per item shows them, each as (submission, labels, reasons): a
+        # label per criterion (_item_labels) and the item's reason for it, if any
+        self._item_examples: dict[
+            str, list[tuple[str, list[CriterionVerdict | int], list[str | None]]]
+        ] = {}
         if training_data is not None:
             self._prepare_examples()
 
@@ -1341,7 +1459,7 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
     def is_ensemble(self) -> bool:
         """Whether this grader has several judges that each judge every criterion.
 
-        A cascade is not an ensemble: its escalation judges judge only the criteria its
+        A cascade is not an ensemble: its escalation judges vote only on the criteria its
         decision model escalates.
         """
         return len(self._judges) > 1
@@ -1373,18 +1491,34 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
     # =========================================================================
 
     def _prepare_examples(self) -> None:
-        """Pre-compute few-shot examples for each criterion and each LLM judge.
+        """Pre-compute the few-shot examples of each LLM judge.
 
         The LLM judges include a cascade's escalation judges. Decision-model judges get
         none: few-shot examples apply to LLM judges only. Each judge's selection is keyed on
         its own ``judge_id``, so leaving decision models out changes no LLM judge's
         examples, and an escalation judge gets the examples it would get in a grader without
         the cascade with the same ``judge_id``.
+
+        Called per criterion (the default ``llm_calls``), a judge gets examples for each
+        criterion, drawn for that criterion alone: ``_select_examples_for_criterion`` for a
+        binary criterion, ``_select_multi_choice_examples`` for a multi-choice one. Under
+        ``llm_calls="per_item"`` it gets whole training items instead, each shown once in
+        its one call per item with its ground truth for every criterion
+        (``_select_item_examples``), and the per-criterion examples stay empty.
+
+        Either way an example is taken as the training item is now, its submission, labels
+        and reasons: the examples are a fixed property of the judge, so changing a training
+        item after the grader is built changes no prompt.
+
+        Raises:
+            ValueError: If the training data has no global rubric, which says what each
+                ground-truth label means.
         """
         training_data = self._training_data
         if training_data is None:
             return
 
+        # Raises without a global rubric, however the judges are called.
         n_criteria = training_data.num_criteria
         rubric_criteria = training_data.rubric.rubric if training_data.rubric else []
         llm_judges = [
@@ -1392,6 +1526,20 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
             for j in (*self._judges, *self._escalation_judges)
             if not isinstance(j.llm_config, DecisionModelConfig)
         ]
+
+        if self._llm_calls == "per_item":
+            for judge in llm_judges:
+                # Every selected item's labels resolve: only such an item is eligible.
+                self._item_examples[judge.judge_id] = [
+                    (
+                        item.submission,
+                        labels,
+                        [_ground_truth_reason(item, idx) for idx in range(len(labels))],
+                    )
+                    for item in self._select_item_examples(judge.judge_id)
+                    if (labels := self._item_labels(item)) is not None
+                ]
+            return
 
         for criterion_idx in range(n_criteria):
             criterion = (
@@ -1609,6 +1757,125 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 for item, resolved_idx in all_pairs[:n_examples]
             ]
 
+    def _select_item_examples(self, judge_id: str) -> list[DataItem]:
+        """Select the whole training items a judge's one call per item shows as examples.
+
+        Under ``llm_calls="per_item"`` an example is a training item labelled on every
+        criterion (``_item_labels``); only an item with a usable label for every criterion
+        is eligible. The eligible items, in dataset order, are shuffled by
+        ``_derive_shuffle_rng(few_shot_seed, FEW_SHOT_DOMAIN, -1, judge_id)``: ``-1`` stands
+        for the whole rubric and is no criterion's index, and each judge draws its own
+        examples. Then, up to ``n_examples`` items:
+
+        - With ``balance_verdicts=False``, the first items of that seeded order.
+        - With ``balance_verdicts=True``, greedy label coverage. Balancing each criterion's
+          labels is impossible when every example carries every criterion's label, so each
+          pick is the item showing the most (criterion index, label) pairs that no picked
+          item shows yet, the earliest in the seeded order on a tie. Once no item adds a
+          pair, the remaining slots are filled in the seeded order. An item whose submission
+          was already picked is skipped throughout, so no submission is shown twice.
+
+        Reasons (``DataItem.ground_truth_reasons``) never affect the draw.
+
+        Returns:
+            The items, in the order the prompt shows them: the order they were picked in.
+        """
+        if self._training_data is None:
+            return []
+
+        config = self._few_shot_config
+        seed = config.seed
+        # Guaranteed non-None when training_data is present (see __init__ few-shot seed
+        # coordination); _prepare_examples is the only caller and runs only in that case.
+        assert seed is not None
+        rng = _derive_shuffle_rng(seed, FEW_SHOT_DOMAIN, -1, judge_id)
+
+        # Each eligible item with its labels, in the seeded order
+        candidates = [
+            (item, labels)
+            for item in self._training_data
+            if (labels := self._item_labels(item)) is not None
+        ]
+        rng.shuffle(candidates)
+        n_examples = config.n_examples
+
+        if not config.balance_verdicts:
+            return [item for item, _labels in candidates[:n_examples]]
+
+        pairs = [set(enumerate(labels)) for _item, labels in candidates]
+        shown: set[tuple[int, CriterionVerdict | int]] = set()
+        picked: list[DataItem] = []
+        picked_submissions: set[str] = set()
+        # Picking by coverage while any item adds a pair; a picked item's submission is
+        # among picked_submissions, so an item is picked at most once.
+        while len(picked) < n_examples:
+            best, best_gain = None, 0
+            for position, (item, _labels) in enumerate(candidates):
+                if item.submission in picked_submissions:
+                    continue
+                gain = len(pairs[position] - shown)
+                if gain > best_gain:
+                    best, best_gain = position, gain
+            if best is None:
+                break
+            picked.append(candidates[best][0])
+            picked_submissions.add(candidates[best][0].submission)
+            shown |= pairs[best]
+        # Filling the remaining slots in the seeded order
+        for item, _labels in candidates:
+            if len(picked) >= n_examples:
+                break
+            if item.submission not in picked_submissions:
+                picked.append(item)
+                picked_submissions.add(item.submission)
+        return picked
+
+    def _item_labels(self, item: DataItem) -> list[CriterionVerdict | int] | None:
+        """A training item's ground truth as few-shot labels, one per criterion.
+
+        A criterion's kind is the training rubric's (a criterion it lacks counts as
+        binary). A binary criterion's label is its ``CriterionVerdict``, given as one or as
+        its value (``"MET"``), as ``resolve_ground_truth`` reads it. A multi-choice
+        criterion's label is the 0-based index of its option among the options the judge is
+        shown (``_effective_criterion``), which with ``auto_na_option`` include the NA option
+        it guarantees, so the label ``fill_ground_truth`` records when a judge chose that
+        option resolves too. The index is resolved from an option label as
+        ``Criterion.find_option_by_label`` resolves it, or given as an index in range: a
+        ``DataItem`` takes labels only, so an index is one set on an item after it was
+        built, which ``resolve_ground_truth`` reads too.
+
+        Returns:
+            The labels, in criterion order, or ``None`` when the item cannot be a
+            whole-rubric example: it has no ground truth, or a label is unusable (a binary
+            criterion's names no verdict, a multi-choice criterion's no option).
+        """
+        if self._training_data is None or item.ground_truth is None:
+            return None
+        rubric = self._training_data.rubric
+        criteria = rubric.rubric if rubric else []
+        labels: list[CriterionVerdict | int] = []
+        for criterion_idx, label in enumerate(item.ground_truth):
+            criterion = criteria[criterion_idx] if criterion_idx < len(criteria) else None
+            if criterion is None or criterion.options is None:
+                try:
+                    labels.append(CriterionVerdict(label))
+                except ValueError:
+                    return None
+                continue
+            shown = self._effective_criterion(criterion)
+            option_idx: int | None = None
+            if isinstance(label, str):
+                try:
+                    option_idx = shown.find_option_by_label(label)
+                except ValueError:
+                    pass
+            elif isinstance(label, int) and not isinstance(label, bool):
+                option_idx = label if 0 <= label < len(shown.options or []) else None
+            if option_idx is None:
+                return None
+            labels.append(option_idx)
+        return labels
+
     # =========================================================================
     # Single Criterion Evaluation
     # =========================================================================
@@ -1701,18 +1968,10 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
             verdict = judgment.criterion_status
             reason = _require_llm_reason(reason)
 
-            report = CriterionReport(
-                requirement=criterion.requirement,
-                verdict=verdict,
-                reason=reason,
-                # Preserve the extended-thinking deliberation trace. getattr
-                # guards custom binary_response_format models that lack the field.
-                reasoning=getattr(judgment, "reasoning", None),
-                weight=criterion.weight,
-                name=criterion.name,
-                options=criterion.options,
-                scale_type=criterion.scale_type,
-                aggregation=criterion.aggregation,
+            # Preserve the extended-thinking deliberation trace. getattr guards custom
+            # binary_response_format models that lack the field.
+            report = self._binary_report(
+                criterion, verdict, reason, getattr(judgment, "reasoning", None)
             )
             return CriterionResult(report=report, usage=result.usage, cost=result.cost)
 
@@ -1739,34 +1998,11 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         randomized order to mitigate position bias. The response is mapped back
         to the original option indices.
         """
-        if criterion.options is None:
-            raise ValueError("Multi-choice criterion must have options")
-
         # Shuffle options to mitigate position bias
         # shuffled_indices[shuffled_pos] = original_pos
-        if self._shuffle_options:
-            original_indices = list(range(len(criterion.options)))
-            shuffled_indices = original_indices.copy()
-            item_key = hashlib.sha256(to_grade.encode()).hexdigest()[:16]
-            rng = _derive_shuffle_rng(self._seed, item_key, criterion_idx, judge.judge_id)
-            rng.shuffle(shuffled_indices)
-
-            # Create shuffled options list
-            shuffled_options = [criterion.options[i] for i in shuffled_indices]
-
-            # Create criterion with shuffled options for prompt building
-
-            prompt_criterion = Criterion(
-                weight=criterion.weight,
-                requirement=criterion.requirement,
-                name=criterion.name,
-                options=shuffled_options,
-                scale_type=criterion.scale_type,
-                aggregation=criterion.aggregation,
-            )
-        else:
-            shuffled_indices = list(range(len(criterion.options)))
-            prompt_criterion = criterion
+        prompt_criterion, shuffled_indices = self._presented_criterion(
+            criterion, criterion_idx, judge.judge_id, to_grade
+        )
 
         examples = self._multi_choice_examples.get((criterion_idx, judge.judge_id), [])
 
@@ -1803,43 +2039,9 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
             )
 
             judgment: MultiChoiceJudgment = result.parsed
-
-            # Convert 1-indexed response to 0-indexed (in shuffled space)
-            shuffled_idx = judgment.selected_option - 1
-
-            # Validate index is in range
-            if shuffled_idx < 0 or shuffled_idx >= len(criterion.options):
-                raise ValueError(
-                    f"Selected option {judgment.selected_option} out of range "
-                    f"[1, {len(criterion.options)}]"
-                )
-
-            # Map back from shuffled position to original index
-            original_idx = shuffled_indices[shuffled_idx]
-
-            selected_option = criterion.options[original_idx]
-            multi_choice_verdict = MultiChoiceVerdict(
-                selected_index=original_idx,
-                selected_label=selected_option.label,
-                value=selected_option.value,
-                na=selected_option.na,
-            )
-
-            reason = _require_llm_reason(_inject_affected_criteria(judgment.explanation, judgment))
-
-            report = CriterionReport(
-                requirement=criterion.requirement,
-                verdict=None,  # Binary verdict is None for multi-choice
-                multi_choice_verdict=multi_choice_verdict,
-                reason=reason,
-                # Preserve the extended-thinking deliberation trace.
-                reasoning=getattr(judgment, "reasoning", None),
-                weight=criterion.weight,
-                name=criterion.name,
-                options=criterion.options,
-                scale_type=criterion.scale_type,
-                aggregation=criterion.aggregation,
-                shuffle_order=shuffled_indices if self._shuffle_options else None,
+            # The judgment is the whole reply, so it also carries the extended-thinking trace.
+            report = self._multi_choice_report(
+                criterion, judgment.selected_option, judgment, judgment, shuffled_indices
             )
             return CriterionResult(report=report, usage=result.usage, cost=result.cost)
 
@@ -1852,6 +2054,162 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 e,
                 shuffle_order=shuffled_indices if self._shuffle_options else None,
             )
+
+    # =========================================================================
+    # Criterion Presentation and Answer Mapping
+    # =========================================================================
+    # Shared by the two ways of calling an LLM judge (one call per criterion, or one per
+    # item), so that a criterion is shown and its answer mapped the same way in both.
+
+    def _presented_criterion(
+        self, criterion: Criterion, criterion_idx: int, judge_id: str, to_grade: str
+    ) -> tuple[Criterion, list[int]]:
+        """A multi-choice criterion as ``judge_id`` is shown it, with its option permutation.
+
+        With ``shuffle_options`` the options are permuted by
+        ``_derive_shuffle_rng(seed, item_key, criterion_idx, judge_id)``, where ``item_key``
+        is the first 16 hex digits of the submission's SHA-256, so a criterion's order
+        depends only on the item, the criterion's index and the judge, and is the same
+        whether the judge is asked about it alone or with the whole rubric. The permutation
+        maps each presented position to the original option index
+        (``shuffled_indices[shuffled_pos] = original_pos``). Without shuffling it is the
+        identity, the criterion is returned as it is, and the submission is not hashed.
+
+        Args:
+            criterion: The multi-choice criterion (from the effective rubric).
+            criterion_idx: Its index in the effective rubric.
+            judge_id: The judge it is shown to.
+            to_grade: The submission, as the judge receives it; its hash keys the shuffle.
+
+        Returns:
+            The criterion to put in the prompt, and the permutation.
+
+        Raises:
+            ValueError: If the criterion has no options.
+        """
+        if criterion.options is None:
+            raise ValueError("Multi-choice criterion must have options")
+        shuffled_indices = list(range(len(criterion.options)))
+        if not self._shuffle_options:
+            return criterion, shuffled_indices
+        item_key = hashlib.sha256(to_grade.encode()).hexdigest()[:16]
+        rng = _derive_shuffle_rng(self._seed, item_key, criterion_idx, judge_id)
+        rng.shuffle(shuffled_indices)
+        prompt_criterion = Criterion(
+            weight=criterion.weight,
+            requirement=criterion.requirement,
+            name=criterion.name,
+            options=[criterion.options[i] for i in shuffled_indices],
+            scale_type=criterion.scale_type,
+            aggregation=criterion.aggregation,
+        )
+        return prompt_criterion, shuffled_indices
+
+    @staticmethod
+    def _binary_report(
+        criterion: Criterion,
+        verdict: CriterionVerdict,
+        reason: str,
+        reasoning: str | None,
+    ) -> CriterionReport:
+        """An LLM judge's report on a binary criterion it judged.
+
+        Args:
+            criterion: The criterion (from the effective rubric).
+            verdict: The judge's verdict.
+            reason: The judgment's explanation, tagged (``_inject_affected_criteria``) and
+                checked (``_require_llm_reason``).
+            reasoning: The extended-thinking trace behind it, if any.
+        """
+        return CriterionReport(
+            requirement=criterion.requirement,
+            verdict=verdict,
+            reason=reason,
+            reasoning=reasoning,
+            weight=criterion.weight,
+            name=criterion.name,
+            options=criterion.options,
+            scale_type=criterion.scale_type,
+            aggregation=criterion.aggregation,
+        )
+
+    def _multi_choice_report(
+        self,
+        criterion: Criterion,
+        selected_option: int,
+        judgment: Any,
+        reply: Any,
+        shuffled_indices: list[int],
+    ) -> CriterionReport:
+        """An LLM judge's report on a multi-choice criterion it judged.
+
+        ``selected_option`` is 1-indexed in the order the judge was shown the options. It is
+        checked to be in range and mapped back through the permutation to the original
+        option; only then is the judgment's explanation read, and the reply's thinking trace
+        last. That is the order in which a judgment has always been read, so a judgment
+        with more than one fault fails on the same one.
+
+        Args:
+            criterion: The criterion (from the effective rubric).
+            selected_option: The option number the judge chose.
+            judgment: The judgment whose ``explanation`` (tagged by
+                ``_inject_affected_criteria`` when it has ``affected_criteria``) is the
+                report's reason.
+            reply: The parsed reply whose ``reasoning``, if it has one, is the
+                extended-thinking trace behind the judgment: the judgment itself when the
+                criterion had a call of its own, the whole ``RubricJudgment`` when it was
+                judged with the rubric in one call.
+            shuffled_indices: The permutation the options were shown in
+                (``_presented_criterion``); recorded as ``shuffle_order`` when
+                ``shuffle_options`` is on.
+
+        Raises:
+            ValueError: If the criterion has no options, the option is out of range, or the
+                explanation is null.
+        """
+        options = criterion.options
+        if options is None:
+            raise ValueError("Multi-choice criterion must have options")
+
+        # Convert 1-indexed response to 0-indexed (in shuffled space)
+        shuffled_idx = selected_option - 1
+
+        # Validate index is in range
+        if shuffled_idx < 0 or shuffled_idx >= len(options):
+            raise ValueError(f"Selected option {selected_option} out of range [1, {len(options)}]")
+
+        # Map back from shuffled position to original index
+        original_idx = shuffled_indices[shuffled_idx]
+
+        chosen = options[original_idx]
+        multi_choice_verdict = MultiChoiceVerdict(
+            selected_index=original_idx,
+            selected_label=chosen.label,
+            value=chosen.value,
+            na=chosen.na,
+        )
+
+        reason = _require_llm_reason(_inject_affected_criteria(judgment.explanation, judgment))
+
+        return CriterionReport(
+            requirement=criterion.requirement,
+            verdict=None,  # Binary verdict is None for multi-choice
+            multi_choice_verdict=multi_choice_verdict,
+            reason=reason,
+            # Preserve the extended-thinking deliberation trace. getattr guards custom
+            # multi_choice_response_format models that lack the field.
+            reasoning=getattr(reply, "reasoning", None),
+            weight=criterion.weight,
+            name=criterion.name,
+            options=criterion.options,
+            scale_type=criterion.scale_type,
+            aggregation=criterion.aggregation,
+            shuffle_order=shuffled_indices if self._shuffle_options else None,
+        )
+
+    # =========================================================================
+    # All Criteria of an Item, per Judge
+    # =========================================================================
 
     async def _judge_all_criteria_for_judge(
         self,
@@ -1866,14 +2224,23 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         """Evaluate all criteria for a single judge, one result per criterion, in order.
 
         An LLM judge is asked about each criterion in its own call, all in parallel, each
-        user prompt starting with the rubric's guidelines when there are any. A
+        user prompt starting with the rubric's guidelines when there are any; under
+        ``llm_calls="per_item"`` it is asked about the whole rubric in one call instead
+        (``_judge_rubric_in_one_call``), whose user prompt starts with them. A
         decision-model judge is asked about the whole rubric in one request
-        (``_judge_all_criteria_with_decision_model``), the guidelines in its state.
+        (``_judge_all_criteria_with_decision_model``), the guidelines in its state. The
+        usage and cost of a judge's one call or request per item ride on its first result.
         """
         if isinstance(judge.llm_config, DecisionModelConfig):
             results = await self._judge_all_criteria_with_decision_model(
                 judge, rubric, to_grade, query, reference_submission, guidelines=guidelines
             )
+        elif self._llm_calls == "per_item":
+            results, usage, cost = await self._judge_rubric_in_one_call(
+                judge, rubric, to_grade, query, reference_submission, guidelines=guidelines
+            )
+            if results:
+                results[0] = dataclasses.replace(results[0], usage=usage, cost=cost)
         else:
             tasks = [
                 self._judge_single_criterion(
@@ -1979,6 +2346,287 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
             )
         return results
 
+    def _rubric_system_prompt(self, rubric: Sequence[Criterion], *, with_examples: bool) -> str:
+        """The system prompt of an LLM judge's one call for ``rubric``.
+
+        ``build_rubric_system_prompt`` embeds, as guides, the grader's system prompt of each
+        kind of criterion ``rubric`` has, as it stands (the default, with its few-shot
+        addition when there is training data, or a custom one): ``system_prompt`` for
+        binary criteria and ``multi_choice_system_prompt`` for multi-choice ones.
+
+        Args:
+            rubric: The criteria of the call; at least one.
+            with_examples: Whether the user prompt shows few-shot examples.
+
+        Raises:
+            ValueError: If ``rubric`` is empty.
+        """
+        return build_rubric_system_prompt(
+            self._system_prompt if any(c.is_binary for c in rubric) else None,
+            self._multi_choice_system_prompt if any(c.is_multi_choice for c in rubric) else None,
+            with_examples=with_examples,
+        )
+
+    async def _judge_rubric_in_one_call(
+        self,
+        judge: JudgeSpec,
+        rubric: list[Criterion],
+        to_grade: str,
+        query: str | None = None,
+        reference_submission: str | None = None,
+        *,
+        guidelines: str | None = None,
+    ) -> tuple[list[CriterionResult], TokenUsage | None, float | None]:
+        """Judge every criterion with an LLM judge in one call (``llm_calls="per_item"``).
+
+        The LLM judge's counterpart of ``_judge_all_criteria_with_decision_model``. Both
+        prompts are built before the call, outside its failure handling, so a configuration
+        error raises instead of failing the criteria. The system prompt embeds the guide of
+        each kind of criterion the rubric has (``_rubric_system_prompt``). The user prompt
+        lists every criterion of the effective rubric under its id ``c{criterion_idx}``, as
+        a per-criterion prompt poses it, a multi-choice criterion with its options in the
+        order a per-criterion call shows them (``_presented_criterion``). Exactly one call
+        is made, answered as a ``RubricJudgment``, and none for an empty rubric. Its
+        judgments map back to one result per criterion, in rubric order.
+
+        With training data, the user prompt shows the judge's few-shot examples
+        (``_select_item_examples``) after the criteria, rendered with the prompts: each a
+        whole training item with its judgment of each criterion under the criterion's id,
+        a multi-choice criterion's option numbered in this call's order (``_rubric_examples``,
+        ``_format_rubric_examples``). The system prompt's preamble then says how to read
+        them. When no example has a judgment to show, the call has no examples block and the
+        preamble leaves out its examples sentence; the guides keep their few-shot additions,
+        which come with the training data, as a per-criterion call without examples does.
+
+        Failures are scoped as tightly as they occur, and each is reported by
+        ``_failed_judgment_result`` (routed by ``classify_grading_error``):
+
+        - A failed call (an API error, or a reply that is not a ``RubricJudgment``, e.g.
+          not JSON) fails every criterion, each with the call's error; criteria are never
+          re-sent one at a time.
+        - A criterion fails alone (``parse``) when the reply has no judgment with its id,
+          more than one, or only an unusable one, when its judgment leaves its kind's field
+          null, or when a multi-choice judgment's option is out of range. Judgments whose
+          id is no criterion's are ignored, and so is the field of the other kind.
+
+        Every criterion judged from a usable judgment carries the call's thinking trace, if
+        any, as its ``reasoning``. A failed criterion's report comes from
+        ``_failed_judgment_result`` and has none, as a failed per-criterion call's never
+        does.
+
+        Args:
+            judge: The LLM judge.
+            rubric: The effective rubric (NA options already guaranteed).
+            to_grade: The submission, as ``judge`` receives it.
+            query: The input that prompted the submission.
+            reference_submission: An exemplar response for grading context.
+            guidelines: The rubric's guidelines.
+
+        Returns:
+            One ``CriterionResult`` per criterion of ``rubric``, in order, none carrying
+            usage or cost, then the call's usage and cost (``None`` when no call was made
+            or it failed), for the caller to put on a result.
+        """
+        if not rubric:
+            return [], None, None
+        client = self._clients[judge.judge_id]
+        presented: list[tuple[str, Criterion]] = []
+        # Each multi-choice criterion's option permutation; None for a binary criterion.
+        shuffles: list[list[int] | None] = []
+        for criterion_idx, criterion in enumerate(rubric):
+            shown: Criterion = criterion
+            shuffled_indices: list[int] | None = None
+            if criterion.is_multi_choice:
+                shown, shuffled_indices = self._presented_criterion(
+                    criterion, criterion_idx, judge.judge_id, to_grade
+                )
+            presented.append((question_id(criterion_idx), shown))
+            shuffles.append(shuffled_indices)
+        examples_text = _format_rubric_examples(
+            self._rubric_examples(judge.judge_id, rubric, presented, shuffles),
+            self._few_shot_config.include_reason,
+        )
+        system_prompt = self._rubric_system_prompt(rubric, with_examples=bool(examples_text))
+        user_prompt = build_rubric_user_prompt(
+            presented,
+            to_grade,
+            query,
+            reference_submission,
+            examples_text=examples_text,
+            guidelines=guidelines,
+        )
+
+        try:
+            # return_result=True makes generate return a GenerateResult.
+            result = cast(
+                GenerateResult,
+                await client.generate(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    response_format=RubricJudgment,
+                    return_result=True,
+                ),
+            )
+            reply: RubricJudgment = result.parsed
+            # Every judgment by the id it answers, usable (an entry) or not (its error).
+            answers: dict[str, list[RubricCriterionJudgment | str]] = {}
+            for entry in reply.judgments:
+                answers.setdefault(entry.criterion_id, []).append(entry)
+            for criterion_id, error in reply._unusable:
+                answers.setdefault(criterion_id, []).append(error)
+        except Exception as e:
+            # Classified by classify_grading_error: infrastructure/parse abstain, unknown
+            # keeps the conservative worst case; the same for every criterion of the call.
+            failed = [
+                _failed_judgment_result(
+                    criterion,
+                    judge.judge_id,
+                    e,
+                    shuffle_order=shuffled_indices if self._shuffle_options else None,
+                )
+                for criterion, shuffled_indices in zip(rubric, shuffles, strict=True)
+            ]
+            return failed, None, None
+
+        results: list[CriterionResult] = []
+        for criterion_idx, (criterion, shuffled_indices) in enumerate(
+            zip(rubric, shuffles, strict=True)
+        ):
+            try:
+                report = self._rubric_judgment_report(
+                    criterion,
+                    criterion_idx,
+                    answers.get(question_id(criterion_idx), []),
+                    reply,
+                    shuffled_indices,
+                )
+            except Exception as e:
+                results.append(
+                    _failed_judgment_result(
+                        criterion,
+                        judge.judge_id,
+                        e,
+                        shuffle_order=shuffled_indices if self._shuffle_options else None,
+                    )
+                )
+            else:
+                results.append(CriterionResult(report=report))
+        return results, result.usage, result.cost
+
+    def _rubric_examples(
+        self,
+        judge_id: str,
+        rubric: Sequence[Criterion],
+        presented: Sequence[tuple[str, Criterion]],
+        shuffles: Sequence[list[int] | None],
+    ) -> list[tuple[str, list[tuple[str, Criterion, CriterionVerdict | int, str | None]]]]:
+        """The few-shot examples of a judge's one call, each with its judgments as shown.
+
+        Each of the judge's examples (``_item_examples``, drawn by
+        ``_select_item_examples``) has a judgment for each criterion index that both the
+        training rubric and ``rubric`` have, with a criterion of the same kind: its verdict,
+        or its option renumbered to the option's position in the call's order, when the
+        graded criterion has that option. As with per-criterion examples, this assumes
+        ``rubric`` is the training data's rubric. An example with no judgment is left out.
+
+        Args:
+            judge_id: The judge whose examples to show.
+            rubric: The effective rubric of the call.
+            presented: Each criterion of ``rubric`` with its id, as the call shows it.
+            shuffles: Each multi-choice criterion's option permutation
+                (``shuffled_indices[shuffled_pos] = original_pos``); None for a binary one.
+
+        Returns:
+            Each example's submission and its judgments, ``(criterion_id, criterion as
+            shown, label, reason)``, for ``_format_rubric_examples``; empty without examples.
+        """
+        examples = self._item_examples.get(judge_id, [])
+        if self._training_data is None or not examples:
+            return []
+        training_rubric = self._training_data.rubric
+        training_criteria = training_rubric.rubric if training_rubric else []
+        shown_examples = []
+        for submission, labels, reasons in examples:
+            judgments: list[tuple[str, Criterion, CriterionVerdict | int, str | None]] = []
+            for criterion_idx, label in enumerate(labels):
+                if criterion_idx >= min(len(training_criteria), len(rubric)):
+                    break
+                if (
+                    training_criteria[criterion_idx].is_multi_choice
+                    != rubric[criterion_idx].is_multi_choice
+                ):
+                    continue
+                criterion_id, shown = presented[criterion_idx]
+                shuffled_indices = shuffles[criterion_idx]
+                if shuffled_indices is None:
+                    shown_label: CriterionVerdict | int = label
+                elif isinstance(label, int) and label < len(shuffled_indices):
+                    # From the option's original index to its position in the call's order
+                    shown_label = shuffled_indices.index(label)
+                else:
+                    continue
+                judgments.append((criterion_id, shown, shown_label, reasons[criterion_idx]))
+            if judgments:
+                shown_examples.append((submission, judgments))
+        return shown_examples
+
+    def _rubric_judgment_report(
+        self,
+        criterion: Criterion,
+        criterion_idx: int,
+        answers: Sequence[RubricCriterionJudgment | str],
+        reply: RubricJudgment,
+        shuffled_indices: list[int] | None,
+    ) -> CriterionReport:
+        """A criterion's report from the judgments a one-call reply has for its id.
+
+        Args:
+            criterion: The criterion (from the effective rubric).
+            criterion_idx: Its index in the effective rubric, which gives its id.
+            answers: Every judgment the reply has with the criterion's id: a usable entry,
+                or the validation error of an unusable one.
+            reply: The whole reply, whose ``reasoning`` is the call's extended-thinking
+                trace, if any.
+            shuffled_indices: The option permutation a multi-choice criterion was shown
+                in; None for a binary criterion.
+
+        Raises:
+            ValueError: If there is not exactly one judgment for the criterion, if it is
+                unusable, if it leaves the field of the criterion's kind null, or if a
+                multi-choice judgment's option is out of range.
+        """
+        describe = _describe(criterion, criterion_idx)
+        if not answers:
+            raise ValueError(
+                f"no usable judgment for {describe}: the reply has no judgment with its id"
+            )
+        if len(answers) > 1:
+            raise ValueError(
+                f"no usable judgment for {describe}: the reply has {len(answers)} judgments "
+                "with its id"
+            )
+        (answer,) = answers
+        if isinstance(answer, str):
+            raise ValueError(f"no usable judgment for {describe}: {answer}")
+        if criterion.is_multi_choice:
+            if answer.selected_option is None:
+                raise ValueError(
+                    f"no usable judgment for {describe}: a multi-choice criterion needs a "
+                    "selected_option, got null"
+                )
+            # Every multi-choice criterion was presented with its option permutation.
+            assert shuffled_indices is not None
+            return self._multi_choice_report(
+                criterion, answer.selected_option, answer, reply, shuffled_indices
+            )
+        if answer.criterion_status is None:
+            raise ValueError(
+                f"no usable judgment for {describe}: a binary criterion needs a "
+                "criterion_status, got null"
+            )
+        reason = _require_llm_reason(_inject_affected_criteria(answer.explanation, answer))
+        return self._binary_report(criterion, answer.criterion_status, reason, reply.reasoning)
+
     # =========================================================================
     # Judge and Aggregate (Grader Interface)
     # =========================================================================
@@ -2011,7 +2659,9 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         In a cascade the decision model judges every criterion first; then every escalation
         judge judges the escalated criteria (``_escalates``: an error, an abstention, or a
         confidence below ``EscalationConfig.threshold_for`` the criterion), all at once, and
-        none when nothing is escalated.
+        none when nothing is escalated: in a call per escalated criterion, or, under
+        ``llm_calls="per_item"``, in one call about the whole rubric whose judgments of the
+        other criteria are discarded (``_judge_escalated_criteria``).
 
         Args:
             to_grade: The submission, as ``Grader.grade`` passes it.
@@ -2101,12 +2751,22 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         *,
         guidelines: str | None = None,
     ) -> JudgeCriterionResults:
-        """Judge a cascade's escalated criteria with one escalation judge, all in parallel.
+        """Judge a cascade's escalated criteria with one escalation judge.
 
-        Each goes through ``_judge_single_criterion`` under its index in the effective
-        rubric, the index that keys option shuffling and few-shot selection, so the judge's
-        prompt for it is the one it would get in a grader without the cascade with the same
-        ``seed`` and ``judge_id``.
+        The judge is called exactly as it would be in a grader without the cascade with the
+        same ``seed``, ``judge_id`` and LLM settings, and makes no call when nothing is
+        escalated:
+
+        - Per criterion (the default ``llm_calls``), each escalated criterion goes through
+          ``_judge_single_criterion``, all in parallel, under its index in the effective
+          rubric, the index that keys option shuffling and few-shot selection.
+        - Under ``llm_calls="per_item"``, the judge makes the one call about the whole
+          effective rubric (``_judge_rubric_in_one_call``) that it makes for every item
+          without the cascade: every criterion, in order, with the same option
+          permutations and the same few-shot examples, which are drawn for its
+          ``judge_id`` (``_select_item_examples``). Only its results for the escalated
+          criteria are kept; a failed call therefore fails the escalated criteria's votes
+          alone. The call's usage and cost ride on the first escalated criterion's result.
 
         Args:
             judge: The escalation judge (an LLM).
@@ -2121,23 +2781,35 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
             The judge's full-length results (``role="escalation"``): a result at each
             escalated criterion, ``None`` at the others.
         """
-        results = await asyncio.gather(
-            *(
-                self._judge_single_criterion(
-                    judge,
-                    rubric[criterion_idx],
-                    criterion_idx,
-                    to_grade,
-                    query,
-                    reference_submission,
-                    guidelines=guidelines,
-                )
-                for criterion_idx in escalated
-            )
-        )
         criterion_results: list[CriterionResult | None] = [None] * len(rubric)
-        for criterion_idx, result in zip(escalated, results, strict=True):
-            criterion_results[criterion_idx] = result
+        if self._llm_calls == "per_item":
+            if escalated:
+                # The call a grader without the cascade makes, of which only the escalated
+                # criteria's results are kept, the first of them carrying its usage and cost.
+                results, usage, cost = await self._judge_rubric_in_one_call(
+                    judge, rubric, to_grade, query, reference_submission, guidelines=guidelines
+                )
+                first = escalated[0]
+                results[first] = dataclasses.replace(results[first], usage=usage, cost=cost)
+                for criterion_idx in escalated:
+                    criterion_results[criterion_idx] = results[criterion_idx]
+        else:
+            results = await asyncio.gather(
+                *(
+                    self._judge_single_criterion(
+                        judge,
+                        rubric[criterion_idx],
+                        criterion_idx,
+                        to_grade,
+                        query,
+                        reference_submission,
+                        guidelines=guidelines,
+                    )
+                    for criterion_idx in escalated
+                )
+            )
+            for criterion_idx, result in zip(escalated, results, strict=True):
+                criterion_results[criterion_idx] = result
         return JudgeCriterionResults(
             judge_id=judge.judge_id,
             weight=judge.weight,
@@ -2173,13 +2845,14 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         - Binary: Uses JudgeVote and _aggregate_votes()
         - Multi-choice: Uses MultiChoiceJudgeVote and _aggregate_multi_choice_votes()
 
-        In a cascade the escalated criteria are the ones the escalation judges judged
-        (their results are ``None`` everywhere else). On those, the primary judge's vote is
-        marked ``superseded=True`` and the final verdict, reason and error come from the
+        In a cascade the escalated criteria are the ones the escalation judges have results
+        for (their results are ``None`` everywhere else). On those, the primary judge's vote
+        is marked ``superseded=True`` and the final verdict, reason and error come from the
         votes that are not superseded, which are the escalation judges'; the report is
         marked ``escalated=True``. ``judge_scores`` holds each primary judge's score over its
-        own verdicts (superseded ones included) and ``None`` for each escalation judge,
-        which never judges a whole rubric.
+        own verdicts (superseded ones included) and ``None`` for each escalation judge, by
+        role: it votes only where the decision model escalated, even on an item where every
+        criterion escalated.
         """
         if not judge_results:
             # Empty/failed aggregation has no score: emit None, not a fabricated 0.0
