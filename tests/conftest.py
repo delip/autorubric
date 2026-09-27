@@ -1,6 +1,9 @@
 """Common fixtures for autorubric tests."""
 
+import os
 import re
+from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -31,6 +34,70 @@ def pytest_configure(config: pytest.Config) -> None:
     the run's filters.
     """
     config.addinivalue_line("filterwarnings", "error::DeprecationWarning:autorubric")
+
+
+class _ExperimentsWatch:
+    """The entries of the working directory's ``experiments/`` the suite has seen.
+
+    ``EvalRunner`` experiments (``experiments_dir="experiments"``) and the improvement loop's
+    artifacts (``ImprovementConfig.save_artifacts`` with no ``artifacts_dir``) default to
+    ``./experiments``, which in a checkout is the repository's own (gitignored) directory,
+    where real experiment runs live. A test must write to ``tmp_path`` instead. The
+    directory is listed only when its modification time changed, so the check costs one
+    ``stat`` per test.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self._mtime = self._stat_mtime()
+        self._entries = self._list()
+
+    def _stat_mtime(self) -> int | None:
+        try:
+            return self.path.stat().st_mtime_ns
+        except FileNotFoundError:
+            return None
+
+    def _list(self) -> frozenset[str]:
+        try:
+            return frozenset(os.listdir(self.path))
+        except FileNotFoundError:
+            return frozenset()
+
+    def new_entries(self) -> list[str]:
+        """The entries created since the last call (or since the watch began)."""
+        mtime = self._stat_mtime()
+        if mtime == self._mtime:
+            return []
+        entries = self._list()
+        created = sorted(entries - self._entries)
+        self._mtime, self._entries = mtime, entries
+        return created
+
+
+@pytest.fixture(scope="session")
+def _experiments_watch() -> _ExperimentsWatch:
+    return _ExperimentsWatch(Path.cwd() / "experiments")
+
+
+@pytest.fixture(autouse=True)
+def _no_new_experiments_in_the_working_directory(
+    request: pytest.FixtureRequest, _experiments_watch: _ExperimentsWatch
+) -> Iterator[None]:
+    """Fail a test that creates anything under the working directory's ``experiments/``.
+
+    Tests run one at a time, so whatever appears there during a test is the test's. The
+    created entries are reported, not removed: the directory also holds real runs.
+    """
+    yield
+    created = _experiments_watch.new_entries()
+    if created:
+        pytest.fail(
+            f"{request.node.nodeid} created {', '.join(created)} in {_experiments_watch.path}; "
+            "write to tmp_path instead (e.g. ImprovementConfig(artifacts_dir=tmp_path) or "
+            "evaluate(..., experiments_dir=tmp_path))",
+            pytrace=False,
+        )
 
 
 @pytest.fixture
