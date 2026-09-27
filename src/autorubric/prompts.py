@@ -324,13 +324,51 @@ def _format_few_shot_examples(
     for i, ex in enumerate(examples, 1):
         parts.append(f"<example_{i}>")
         parts.append(f"<example_submission>{ex.submission}</example_submission>")
-        parts.append(f"<verdict>{ex.verdict.value}</verdict>")
-        if include_reason and ex.reason:
-            parts.append(f"<reason>{ex.reason}</reason>")
+        parts.extend(_example_judgment_lines(ex.verdict, None, ex.reason, include_reason))
         parts.append(f"</example_{i}>")
     parts.append("</examples>")
 
     return "\n".join(parts)
+
+
+def _example_judgment_lines(
+    label: CriterionVerdict | int,
+    options: Sequence[CriterionOption] | None,
+    reason: str | None,
+    include_reason: bool,
+) -> list[str]:
+    """The tags of one criterion's judgment in a few-shot example, one per line.
+
+    Every few-shot example shows a judgment in these tags, whether it is drawn per criterion
+    (``_format_few_shot_examples``, ``_format_multi_choice_examples``) or is a whole
+    training item in a call for the whole rubric (``_format_rubric_examples``): a binary
+    criterion's ``<verdict>``, or a multi-choice criterion's 1-based ``<selected_option>``
+    and its ``<selected_label>``; then the ``<reason>``, when shown and not empty.
+
+    Args:
+        label: A binary criterion's verdict, or the 0-based index of a multi-choice
+            criterion's chosen option among ``options``.
+        options: The multi-choice criterion's options, in the order the prompt shows them;
+            ``None`` for a binary criterion.
+        reason: The written reason for the label, or ``None``.
+        include_reason: Whether to show the reason.
+
+    Raises:
+        ValueError: If ``label`` is an option index and there are no ``options``.
+    """
+    if isinstance(label, int):
+        if options is None:
+            raise ValueError(f"option index {label} given for a criterion without options")
+        # Convert 0-based index to 1-based for display
+        lines = [
+            f"<selected_option>{label + 1}</selected_option>",
+            f"<selected_label>{options[label].label}</selected_label>",
+        ]
+    else:
+        lines = [f"<verdict>{label.value}</verdict>"]
+    if include_reason and reason:
+        lines.append(f"<reason>{reason}</reason>")
+    return lines
 
 
 # System prompt addition for few-shot grading
@@ -632,16 +670,11 @@ def _format_multi_choice_examples(
 
     parts = ["<examples>"]
     for i, (submission, selected_idx, reason) in enumerate(examples, 1):
-        # Convert 0-based index to 1-based for display
-        selected_option = selected_idx + 1
-        selected_label = criterion.options[selected_idx].label
-
         parts.append(f"<example_{i}>")
         parts.append(f"<example_submission>{submission}</example_submission>")
-        parts.append(f"<selected_option>{selected_option}</selected_option>")
-        parts.append(f"<selected_label>{selected_label}</selected_label>")
-        if include_reason and reason:
-            parts.append(f"<reason>{reason}</reason>")
+        parts.extend(
+            _example_judgment_lines(selected_idx, criterion.options, reason, include_reason)
+        )
         parts.append(f"</example_{i}>")
     parts.append("</examples>")
 
@@ -901,10 +934,10 @@ def _format_rubric_examples(
 
     Each example is a whole training item: its submission, then a ``<judgment>`` per
     criterion under the criterion's id, holding the tags a per-criterion example shows
-    (``_format_few_shot_examples``, ``_format_multi_choice_examples``): a binary criterion's
-    ``<verdict>``, or a multi-choice criterion's 1-based ``<selected_option>`` and its
-    ``<selected_label>``, numbered in the order the call shows the options; then the
-    ``<reason>``, if shown.
+    (``_example_judgment_lines``, shared with ``_format_few_shot_examples`` and
+    ``_format_multi_choice_examples``): a binary criterion's ``<verdict>``, or a
+    multi-choice criterion's 1-based ``<selected_option>`` and its ``<selected_label>``,
+    numbered in the order the call shows the options; then the ``<reason>``, if shown.
 
     Args:
         examples: Each example's submission and its judgments, in the order to show them;
@@ -931,19 +964,7 @@ def _format_rubric_examples(
         parts.append(f"<example_submission>{submission}</example_submission>")
         for criterion_id, criterion, label, reason in judgments:
             parts.append(f'<judgment id="{criterion_id}">')
-            if isinstance(label, CriterionVerdict):
-                parts.append(f"<verdict>{label.value}</verdict>")
-            elif criterion.options is not None:
-                # Convert 0-based index to 1-based for display
-                parts.append(f"<selected_option>{label + 1}</selected_option>")
-                parts.append(f"<selected_label>{criterion.options[label].label}</selected_label>")
-            else:
-                raise ValueError(
-                    f"The example judgment {criterion_id} gives option index {label} for a "
-                    "binary criterion"
-                )
-            if include_reason and reason:
-                parts.append(f"<reason>{reason}</reason>")
+            parts.extend(_example_judgment_lines(label, criterion.options, reason, include_reason))
             parts.append("</judgment>")
         parts.append(f"</example_{i}>")
     parts.append("</examples>")

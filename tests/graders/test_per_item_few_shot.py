@@ -8,8 +8,10 @@ Selection (``_select_item_examples``) happens once per LLM judge at construction
 
 - An item is eligible when it has ground truth and every label is usable for its criterion's
   kind in the training rubric (a criterion the training rubric lacks counts as binary): a
-  ``CriterionVerdict`` for a binary criterion; for a multi-choice one, an option label that
-  resolves or an ``int`` (not ``bool``) option index in range.
+  ``CriterionVerdict``, or its value, for a binary criterion; for a multi-choice one, an
+  option label that resolves or an ``int`` (not ``bool``) option index in range, among the
+  options the judge is shown (with ``auto_na_option``, the NA option it adds too).
+- Each judge's examples are kept as the training items were at construction.
 - The eligible items, in dataset order, are shuffled by
   ``_derive_shuffle_rng(few_shot_seed, "few_shot", -1, judge_id)``.
 - ``balance_verdicts=False`` takes the first ``n_examples`` of that order.
@@ -51,7 +53,7 @@ from decision.conftest import (  # noqa: F401
     _no_network,
     make_response,
 )
-from test_per_item_calls import RubricLLM, make_grader, presented_labels, rubric_blocks
+from test_per_item_calls import RubricLLM, make_grader, one_judge, presented_labels, rubric_blocks
 
 from autorubric import (
     Criterion,
@@ -63,6 +65,7 @@ from autorubric import (
     LLMConfig,
     Rubric,
     RubricDataset,
+    fill_ground_truth,
 )
 from autorubric.dataset import DataItem
 from autorubric.graders import CriterionGrader, JudgeSpec
@@ -91,7 +94,7 @@ SUBMISSION = "Plants use light to turn water and carbon dioxide into sugar."
 OTHER_SUBMISSION = "Plants eat soil."
 GUIDELINES = "Judge at a middle-school level."
 
-# The examples sentence of the system prompt, written out as specified.
+# The examples sentence of the system prompt, written out literally.
 EXAMPLES_SENTENCE = (
     "The <examples> show earlier submissions with the correct judgment of each criterion, "
     "each under the criterion's id; use them as the guides describe."
@@ -211,6 +214,14 @@ def names(items: Sequence[DataItem]) -> list[str]:
     return [item.description for item in items]
 
 
+def picked(grader: CriterionGrader, judge_id: str) -> list[DataItem]:
+    """The training items a judge's examples show, in order: the judge's selection
+    (``_select_item_examples``), which is what the grader keeps as its examples."""
+    items = grader._select_item_examples(judge_id)
+    assert [s for s, _, _ in grader._item_examples[judge_id]] == [i.submission for i in items]
+    return items
+
+
 def per_item_grader(
     fake: RubricLLM, data: RubricDataset | None = None, config: FewShotConfig | None = None, **kw
 ) -> CriterionGrader:
@@ -244,7 +255,7 @@ def shown_examples(user_prompt: str) -> list[tuple[str, dict[str, str]]]:
 
 
 def expected_judgment(label: Any, reason: str | None, presented: list[str] | None) -> str:
-    """A judgment's content as specified: the verdict, or the option's number in the order
+    """A judgment's content, written out: the verdict, or the option's number in the order
     the call presents the options (``presented``) and its label; then the reason if shown."""
     if presented is None:
         lines = [f"<verdict>{label.value}</verdict>"]
@@ -262,11 +273,12 @@ def assert_examples_match(
     user_prompt: str, grader: CriterionGrader, judge_id: str, include_reason: bool
 ) -> None:
     """The prompt shows the judge's selected items, in order, each judged on every criterion
-    as specified, multi-choice options numbered as this very prompt presents them."""
+    as expected_judgment writes it out, multi-choice options numbered as this very prompt
+    presents them."""
     criteria, _ = split_examples(user_prompt)
     blocks = rubric_blocks(criteria)
     examples = shown_examples(user_prompt)
-    assert [s for s, _ in examples] == [i.submission for i in grader._item_examples[judge_id]]
+    assert [s for s, _ in examples] == [s for s, _, _ in grader._item_examples[judge_id]]
     for submission, judgments in examples:
         labels, reasons = TRAINING[submission]
         assert list(judgments) == [f"c{idx}" for idx in range(len(labels))]
@@ -324,20 +336,20 @@ class TestSelectionIsSeededPerJudge:
     @pytest.mark.parametrize("balance", [True, False])
     def test_each_judge_draws_its_own_examples(self, balance):
         grader = panel_grader(big_pool(), few_shot(4, balance=balance))
-        assert names(grader._item_examples["alpha"]) != names(grader._item_examples["beta"])
+        assert names(picked(grader, "alpha")) != names(picked(grader, "beta"))
 
     def test_another_seed_draws_other_examples(self):
         data = big_pool()
         one = panel_grader(data, few_shot(4, balance=False), seed=3)
         other = panel_grader(data, few_shot(4, balance=False), seed=4)
-        assert names(one._item_examples["alpha"]) != names(other._item_examples["alpha"])
+        assert names(picked(one, "alpha")) != names(picked(other, "alpha"))
 
     def test_without_balance_the_examples_are_the_first_of_the_seeded_order(self):
         data = big_pool()
         grader = panel_grader(data, few_shot(5, balance=False))
         for judge_id in ("alpha", "beta"):
             expected = seeded_order(data.items, SEED, judge_id)[:5]
-            assert names(grader._item_examples[judge_id]) == names(expected)
+            assert names(picked(grader, judge_id)) == names(expected)
 
     def test_the_few_shot_seed_takes_precedence_over_the_master_seed(self):
         data = big_pool()
@@ -346,15 +358,13 @@ class TestSelectionIsSeededPerJudge:
         other = panel_grader(data, config, seed=1234)
         for judge_id in ("alpha", "beta"):
             expected = names(seeded_order(data.items, 77, judge_id)[:5])
-            assert names(one._item_examples[judge_id]) == expected
-            assert names(other._item_examples[judge_id]) == expected
+            assert names(picked(one, judge_id)) == expected
+            assert names(picked(other, judge_id)) == expected
 
     def test_an_unset_few_shot_seed_follows_the_master_seed(self):
         data = big_pool()
         grader = panel_grader(data, few_shot(5, balance=False), seed=42)
-        assert names(grader._item_examples["alpha"]) == names(
-            seeded_order(data.items, 42, "alpha")[:5]
-        )
+        assert names(picked(grader, "alpha")) == names(seeded_order(data.items, 42, "alpha")[:5])
 
     def test_every_llm_judge_gets_examples_and_the_per_criterion_ones_stay_empty(self):
         grader = panel_grader(big_pool(), few_shot(3))
@@ -407,9 +417,17 @@ class TestEligibility:
         add("unresolvable label", [MET, "Crystal clear", UNMET, "Formal"], False)
         add("non-verdict binary label", ["nope", "Unclear", UNMET, "Casual"], False)
         add("option label at a binary criterion", [MET, "Unclear", "Formal", "Casual"], False)
+        # A binary label may be a verdict's value, as resolve_ground_truth reads it.
+        add("verdict values", ["UNMET", "Unclear", "MET", "Casual"], True)
+        add("lowercase verdict value", ["met", "Unclear", UNMET, "Casual"], False)
+        # Clarity and tone have no NA option of their own; the grader adds one (the default
+        # auto_na_option), and the label fill_ground_truth records when a judge chose it
+        # resolves to it.
+        add("NA label", [MET, NA_LABEL, UNMET, NA_LABEL], ok=True)
         # Option indices bypass DataItem's validation (it takes labels and verdicts only).
         set_label(add("index in range", [MET, "Unclear", UNMET, "Casual"], True), 1, 2)
-        set_label(add("index out of range", [MET, "Unclear", UNMET, "Casual"], False), 3, 4)
+        set_label(add("NA option index", [MET, "Unclear", UNMET, "Casual"], True), 3, 4)
+        set_label(add("index out of range", [MET, "Unclear", UNMET, "Casual"], False), 3, 5)
         set_label(add("negative index", [MET, "Unclear", UNMET, "Casual"], False), 1, -1)
         set_label(add("bool index", [MET, "Unclear", UNMET, "Casual"], False), 1, True)
         add("also good", [CANNOT_ASSESS, "Unclear", MET, "Playful"], True)
@@ -419,15 +437,23 @@ class TestEligibility:
     def test_the_examples_are_the_eligible_items(self, balance):
         data, eligible = self.pool()
         grader = per_item_grader(RubricLLM(), data, few_shot(50, balance=balance))
-        assert sorted(names(grader._item_examples["default"])) == sorted(eligible)
+        assert sorted(names(picked(grader, "default"))) == sorted(eligible)
 
     def test_the_seeded_order_is_over_the_eligible_items_only(self):
         data, eligible = self.pool()
         grader = per_item_grader(RubricLLM(), data, few_shot(50, balance=False))
         eligible_items = [item for item in data.items if item.description in eligible]
-        assert names(grader._item_examples["default"]) == names(
+        assert names(picked(grader, "default")) == names(
             seeded_order(eligible_items, SEED, "default")
         )
+
+    def test_without_auto_na_option_there_is_no_na_option_to_name(self):
+        data, eligible = self.pool()
+        grader = per_item_grader(
+            RubricLLM(), data, few_shot(50, balance=False), auto_na_option=False
+        )
+        without_na = sorted(set(eligible) - {"NA label", "NA option index"})
+        assert sorted(names(picked(grader, "default"))) == without_na
 
     @pytest.mark.asyncio
     async def test_an_option_index_is_rendered_as_its_option(self):
@@ -436,10 +462,59 @@ class TestEligibility:
         grader = per_item_grader(fake, data, few_shot(50, balance=False), shuffle_options=False)
         await Rubric(TRAIN_RUBRIC).grade(SUBMISSION, grader=grader, query=QUERY)
         (call,) = fake.calls
-        judgments = dict(shown_examples(call.user_prompt))["index in range text"]
-        assert judgments["c1"] == (
+        examples = dict(shown_examples(call.user_prompt))
+        assert examples["index in range text"]["c1"] == (
             "<selected_option>3</selected_option>\n<selected_label>Very clear</selected_label>"
         )
+        # The NA option the grader adds is shown last, after tone's four options.
+        assert examples["NA option index text"]["c3"] == (
+            f"<selected_option>5</selected_option>\n<selected_label>{NA_LABEL}</selected_label>"
+        )
+
+    @pytest.mark.asyncio
+    async def test_labels_are_rendered_as_what_they_name(self):
+        """A verdict's value as that verdict, the NA label as the NA option the grader adds."""
+        data, _ = self.pool()
+        fake = RubricLLM()
+        grader = per_item_grader(fake, data, few_shot(50, balance=False), shuffle_options=False)
+        await Rubric(TRAIN_RUBRIC).grade(SUBMISSION, grader=grader, query=QUERY)
+        (call,) = fake.calls
+        examples = dict(shown_examples(call.user_prompt))
+        assert examples["verdict values text"]["c0"] == "<verdict>UNMET</verdict>"
+        assert examples["verdict values text"]["c2"] == "<verdict>MET</verdict>"
+        assert examples["NA label text"] == {
+            "c0": "<verdict>MET</verdict>",
+            "c1": (
+                f"<selected_option>4</selected_option>\n<selected_label>{NA_LABEL}</selected_label>"
+            ),
+            "c2": "<verdict>UNMET</verdict>",
+            "c3": (
+                f"<selected_option>5</selected_option>\n<selected_label>{NA_LABEL}</selected_label>"
+            ),
+        }
+
+    @pytest.mark.asyncio
+    async def test_an_item_fill_ground_truth_labels_with_the_na_option_is_an_example(self):
+        """The label a judge's choice of the NA option the grader adds leaves in the ground
+        truth names that option, so the item stays a whole example."""
+        unlabelled = RubricDataset(prompt=QUERY, rubric=Rubric(TRAIN_RUBRIC))
+        for submission in ("Leaves catch light.", "Roots drink water."):
+            unlabelled.add_item(submission, submission)
+        labeller = one_judge(RubricLLM({"c1": {"label": NA_LABEL}}), shuffle_options=False)
+        labelled = await fill_ground_truth(unlabelled, labeller, show_progress=False)
+        assert [item.ground_truth for item in labelled] == [[MET, NA_LABEL, MET, "Formal"]] * 2
+
+        fake = RubricLLM()
+        grader = per_item_grader(fake, labelled, few_shot(2), shuffle_options=False)
+        assert names(picked(grader, "default")) != []
+        await Rubric(TRAIN_RUBRIC).grade(SUBMISSION, grader=grader, query=QUERY)
+        (call,) = fake.calls
+        examples = dict(shown_examples(call.user_prompt))
+        assert sorted(examples) == ["Leaves catch light.", "Roots drink water."]
+        for judgments in examples.values():
+            assert judgments["c1"] == (
+                f"<selected_option>4</selected_option>\n<selected_label>{NA_LABEL}</selected_label>"
+            )
 
     @pytest.mark.asyncio
     async def test_no_eligible_item_means_no_examples(self):
@@ -487,7 +562,7 @@ class TestEligibility:
         """A verdict there keeps the item eligible; an option label, no verdict, does not."""
         data = self.longer_rubric_pool()
         grader = per_item_grader(RubricLLM(), data, few_shot(50, balance=balance))
-        assert sorted(names(grader._item_examples["default"])) == ["extra verdict", "global"]
+        assert sorted(names(picked(grader, "default"))) == ["extra verdict", "global"]
 
     @pytest.mark.asyncio
     async def test_a_label_the_training_rubric_has_no_criterion_for_gets_no_judgment(self):
@@ -572,7 +647,7 @@ class TestGreedyCoverage:
         )
         # Without balance the examples are that order, a shared submission included.
         grader = self.grader(len(COVERAGE_ROWS), balance=False)
-        assert names(grader._item_examples["default"]) == COVERAGE_ORDER
+        assert names(picked(grader, "default")) == COVERAGE_ORDER
 
     @pytest.mark.parametrize(
         "n, expected",
@@ -586,17 +661,17 @@ class TestGreedyCoverage:
         ],
     )
     def test_the_greedy_picks(self, n, expected):
-        assert names(self.grader(n)._item_examples["default"]) == expected
+        assert names(picked(self.grader(n), "default")) == expected
 
     @pytest.mark.parametrize("n", [7, 50])
     def test_more_slots_than_items_shows_each_submission_once(self, n):
-        picks = names(self.grader(n)._item_examples["default"])
+        picks = names(picked(self.grader(n), "default"))
         assert picks == ["g", "b", "a", "c", "f", "e"]
         assert "d" not in picks
 
     @pytest.mark.parametrize("n", [7, 50])
     def test_without_balance_more_slots_than_items_takes_them_all(self, n):
-        picks = names(self.grader(n, balance=False)._item_examples["default"])
+        picks = names(picked(self.grader(n, balance=False), "default"))
         assert picks == COVERAGE_ORDER
 
     def test_n_examples_zero_selects_nothing(self):
@@ -681,7 +756,7 @@ class TestCoverageIdentifiesOptionsByIndex:
         ],
     )
     def test_the_greedy_picks(self, n, expected):
-        assert names(self.grader(n)._item_examples["default"]) == expected
+        assert names(picked(self.grader(n), "default")) == expected
 
     @pytest.mark.asyncio
     async def test_each_naming_is_shown_as_the_option(self):
@@ -705,7 +780,7 @@ class TestCoverageIdentifiesOptionsByIndex:
 
 class TestRendering:
     @pytest.mark.asyncio
-    async def test_the_examples_block_as_specified(self):
+    async def test_the_examples_block_written_out(self):
         """Shuffling off, so option numbers are the training rubric's; reasons shown."""
         fake = RubricLLM()
         grader = per_item_grader(
@@ -756,7 +831,7 @@ class TestRendering:
                 "</judgment>"
             ),
         }
-        chosen = [item.submission for item in grader._item_examples["default"]]
+        chosen = [s for s, _, _ in grader._item_examples["default"]]
         assert len(chosen) == 2
         block = "\n".join(
             [
@@ -842,7 +917,41 @@ class TestRendering:
         for submission in (SUBMISSION, OTHER_SUBMISSION):
             await Rubric(TRAIN_RUBRIC).grade(submission, grader=grader, query=QUERY)
         first, second = ([s for s, _ in shown_examples(c.user_prompt)] for c in fake.calls)
-        assert first == second == [i.submission for i in grader._item_examples["default"]]
+        assert first == second == [s for s, _, _ in grader._item_examples["default"]]
+
+    @pytest.mark.asyncio
+    async def test_changing_the_training_items_afterwards_changes_no_prompt(self):
+        """The examples are kept as the training items were when the grader was built, as
+        per-criterion examples are: a later change to an item's submission, labels or
+        reasons, even one that leaves a label unusable, shows in no prompt."""
+        data = training_data()
+        fakes = {"per_item": RubricLLM(), "per_criterion": RubricLLM()}
+        config = few_shot(4, include_reason=True)
+        per_item = per_item_grader(fakes["per_item"], data, config)
+        per_criterion = make_grader(
+            {"default": fakes["per_criterion"]},
+            judge_model_config=LLM,
+            training_data=data,
+            few_shot_config=config,
+        )
+        for grader in (per_item, per_criterion):
+            await Rubric(TRAIN_RUBRIC).grade(SUBMISSION, grader=grader, query=QUERY)
+
+        for item in data.items:
+            labels = cast(list[Any], item.ground_truth)
+            item.submission = f"{item.submission} (edited)"
+            set_label(item, 0, UNMET if labels[0] == MET else MET)
+            set_label(item, 1, "Crystal clear")
+            item.ground_truth_reasons = ["Edited."] * len(labels)
+        for grader in (per_item, per_criterion):
+            await Rubric(TRAIN_RUBRIC).grade(SUBMISSION, grader=grader, query=QUERY)
+
+        for mode, fake in fakes.items():
+            half = len(fake.calls) // 2
+            before, after = fake.calls[:half], fake.calls[half:]
+            assert [c.user_prompt for c in after] == [c.user_prompt for c in before], mode
+        (call, _) = fakes["per_item"].calls
+        assert "(edited)" not in call.user_prompt and "Edited." not in call.user_prompt
 
     @pytest.mark.parametrize("include_reason", [False, True])
     @pytest.mark.asyncio
@@ -1153,7 +1262,7 @@ class TestCascade:
             few_shot_config=config,
         )
         assert list(cascade._item_examples) == ["esc"]
-        assert names(cascade._item_examples["esc"]) == names(plain._item_examples["esc"])
+        assert names(picked(cascade, "esc")) == names(picked(plain, "esc"))
 
         report = await Rubric(TRAIN_RUBRIC).grade(SUBMISSION, grader=cascade, query=QUERY)
         await Rubric(TRAIN_RUBRIC).grade(SUBMISSION, grader=plain, query=QUERY)

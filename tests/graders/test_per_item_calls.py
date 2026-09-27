@@ -688,6 +688,15 @@ class TestCalls:
         assert ("<binary_criterion_guide>" in call.system_prompt) == (guides[0] is not None)
         assert ("<multi_choice_criterion_guide>" in call.system_prompt) == (guides[1] is not None)
 
+    def test_the_system_prompt_is_always_told_whether_examples_are_shown(self):
+        """``with_examples`` has no default: a call showing examples that left it out would
+        build a preamble that never says how to read them."""
+        parameter = inspect.signature(CriterionGrader._rubric_system_prompt).parameters[
+            "with_examples"
+        ]
+        assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+        assert parameter.default is inspect.Parameter.empty
+
     @pytest.mark.asyncio
     async def test_custom_system_prompts_are_embedded_verbatim(self):
         fake = RubricLLM()

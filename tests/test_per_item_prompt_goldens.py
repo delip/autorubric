@@ -22,7 +22,7 @@ The goldens under ``tests/golden/prompts_per_item/`` pin three layers:
   ``CriterionGrader(llm_calls="per_item", seed=<fixed>)`` sends for a single judge and for a
   two-judge panel over a mixed rubric, without and with item-level few-shot training data.
 
-A separate set of tests, independent of these goldens, checks the *specified* text by
+A separate set of tests, independent of these goldens, checks the reviewed prompt text by
 writing it out literally: goldens captured from the implementation prove the implementation
 is stable, not that it is correct, so those tests do not read this module's own constants or
 read back a golden file.
@@ -57,6 +57,7 @@ from autorubric import (
     CriterionVerdict,
     DataItem,
     FewShotConfig,
+    FewShotExample,
     Rubric,
     RubricDataset,
     TokenUsage,
@@ -66,6 +67,8 @@ from autorubric.llm import GenerateResult, LLMConfig
 from autorubric.prompts import (
     GRADER_SYSTEM_PROMPT_DEFAULT,
     MULTI_CHOICE_SYSTEM_PROMPT,
+    _format_few_shot_examples,
+    _format_multi_choice_examples,
     _format_rubric_examples,
     build_rubric_system_prompt,
     build_rubric_user_prompt,
@@ -635,10 +638,11 @@ def test_user_prompt_builder_with_guidelines_starts_with_the_block(case: str) ->
 
 
 # ---------------------------------------------------------------------------
-# Specification tests: the specified prompt text, written out literally, not read from this
-# module's own golden files or from ``autorubric.prompts`` constants. If the rendered text
-# differs from the specification, these fail and stay failing: they are never adjusted to
-# match whatever the implementation happens to produce.
+# Literal-text tests: the reviewed prompt text, written out by hand, not read from this
+# module's own golden files or from ``autorubric.prompts`` constants, so they check the text
+# itself where the goldens check only that it is stable. A deliberate change to the prompt
+# updates these literals and the goldens together; a change the literals do not describe
+# fails here.
 # ---------------------------------------------------------------------------
 
 _SPEC_ROLE_PARAGRAPH = (
@@ -707,7 +711,7 @@ _SPEC_CLOSING_LINE = "Return only raw JSON starting with {, no back-ticks, no 'j
 
 
 def test_spec_mixed_system_prompt_non_guide_text() -> None:
-    """The mixed system prompt's every line outside the two guide bodies is as specified."""
+    """The mixed system prompt's every line outside the two guide bodies, written out."""
     expected = "\n\n".join(
         [
             "\n".join(
@@ -817,7 +821,7 @@ def test_spec_with_examples_paragraph() -> None:
 
 
 def test_spec_example_user_prompt() -> None:
-    """The specified worked user-prompt example, reproduced with its literal criteria."""
+    """The worked user-prompt example, reproduced with its literal criteria."""
     capital = Criterion(
         name="capital", weight=1.0, requirement="States that the capital of France is Paris"
     )
@@ -926,11 +930,11 @@ def test_spec_a_zero_weight_criterion_is_posed_as_positive() -> None:
 
 
 def test_spec_format_rubric_examples_worked_example() -> None:
-    """The specified worked few-shot example, reproduced with its literal text.
+    """The worked few-shot example, reproduced with its literal text.
 
-    Written out by hand from the specification, not read from a golden file or from
-    ``autorubric.prompts``: if the rendered text ever differs from this, this test fails and
-    stays failing rather than being adjusted to match the implementation.
+    Written out by hand, not read from a golden file or from ``autorubric.prompts``: a
+    deliberate change to how examples render updates this text too, and any other change
+    fails here.
     """
     capital = Criterion(
         name="capital", weight=1.0, requirement="States that the capital of France is Paris"
@@ -972,6 +976,63 @@ def test_spec_format_rubric_examples_worked_example() -> None:
         "</examples>"
     )
     assert _format_rubric_examples(examples, include_reason=True) == expected
+
+
+# ---------------------------------------------------------------------------
+# One rendering of an example's judgment
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("include_reason", [False, True])
+def test_a_judgment_is_rendered_as_a_per_criterion_example_renders_it(
+    include_reason: bool,
+) -> None:
+    """A whole-rubric example's judgment holds exactly the lines a per-criterion example
+    shows for the same label and reason, for a binary and a multi-choice criterion: the
+    three formatters render a judgment with one helper, so they cannot drift apart."""
+    capital = Criterion(name="capital", weight=1.0, requirement="Names the capital")
+    clarity = Criterion(
+        name="clarity",
+        weight=1.0,
+        requirement="How clear is the explanation?",
+        options=[
+            CriterionOption(label="Unclear", value=0.0),
+            CriterionOption(label="Somewhat clear", value=0.5),
+            CriterionOption(label="Very clear", value=1.0),
+        ],
+    )
+    unmet = CriterionVerdict.UNMET
+    binary_example = _format_few_shot_examples(
+        [FewShotExample(submission="S", verdict=unmet, reason="Names no city.")], include_reason
+    )
+    option_example = _format_multi_choice_examples(
+        clarity, [("S", 2, "Each step is explained.")], include_reason
+    )
+    whole = _format_rubric_examples(
+        [
+            (
+                "S",
+                [
+                    ("c0", capital, unmet, "Names no city."),
+                    ("c1", clarity, 2, "Each step is explained."),
+                ],
+            )
+        ],
+        include_reason,
+    )
+
+    def judgment_of(example: str) -> str:
+        return example.split("</example_submission>\n", 1)[1].split("\n</example_1>", 1)[0]
+
+    judgments = dict(re.findall(r'<judgment id="(c\d)">\n(.*?)\n</judgment>', whole, re.S))
+    assert judgments == {"c0": judgment_of(binary_example), "c1": judgment_of(option_example)}
+    assert ("<reason>" in whole) == include_reason
+
+
+def test_an_option_index_for_a_binary_criterion_is_refused() -> None:
+    capital = Criterion(name="capital", weight=1.0, requirement="Names the capital")
+    with pytest.raises(ValueError, match="option index 1 given for a criterion without"):
+        _format_rubric_examples([("S", [("c0", capital, 1, None)])], include_reason=False)
 
 
 # ---------------------------------------------------------------------------

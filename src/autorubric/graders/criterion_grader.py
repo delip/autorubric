@@ -1447,8 +1447,11 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         self._criterion_examples: dict[tuple[int, str], list[FewShotExample]] = {}
         self._multi_choice_examples: dict[tuple[int, str], list[tuple[str, int, str | None]]] = {}
         # Under llm_calls="per_item": each LLM judge's examples, whole training items in the
-        # order its one call per item shows them
-        self._item_examples: dict[str, list[DataItem]] = {}
+        # order its one call per item shows them, each as (submission, labels, reasons): a
+        # label per criterion (_item_labels) and the item's reason for it, if any
+        self._item_examples: dict[
+            str, list[tuple[str, list[CriterionVerdict | int], list[str | None]]]
+        ] = {}
         if training_data is not None:
             self._prepare_examples()
 
@@ -1503,6 +1506,10 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         its one call per item with its ground truth for every criterion
         (``_select_item_examples``), and the per-criterion examples stay empty.
 
+        Either way an example is taken as the training item is now, its submission, labels
+        and reasons: the examples are a fixed property of the judge, so changing a training
+        item after the grader is built changes no prompt.
+
         Raises:
             ValueError: If the training data has no global rubric, which says what each
                 ground-truth label means.
@@ -1522,7 +1529,16 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
 
         if self._llm_calls == "per_item":
             for judge in llm_judges:
-                self._item_examples[judge.judge_id] = self._select_item_examples(judge.judge_id)
+                # Every selected item's labels resolve: only such an item is eligible.
+                self._item_examples[judge.judge_id] = [
+                    (
+                        item.submission,
+                        labels,
+                        [_ground_truth_reason(item, idx) for idx in range(len(labels))],
+                    )
+                    for item in self._select_item_examples(judge.judge_id)
+                    if (labels := self._item_labels(item)) is not None
+                ]
             return
 
         for criterion_idx in range(n_criteria):
@@ -1818,15 +1834,20 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         """A training item's ground truth as few-shot labels, one per criterion.
 
         A criterion's kind is the training rubric's (a criterion it lacks counts as
-        binary). A binary criterion's label is its ``CriterionVerdict``; a multi-choice
-        criterion's is the 0-based index of its option, resolved from an option label by
-        ``_label_to_option_index`` or given as an index in range.
+        binary). A binary criterion's label is its ``CriterionVerdict``, given as one or as
+        its value (``"MET"``), as ``resolve_ground_truth`` reads it. A multi-choice
+        criterion's label is the 0-based index of its option among the options the judge is
+        shown (``_effective_criterion``), which with ``auto_na_option`` include the NA option
+        it guarantees, so the label ``fill_ground_truth`` records when a judge chose that
+        option resolves too. The index is resolved from an option label as
+        ``Criterion.find_option_by_label`` resolves it, or given as an index in range: a
+        ``DataItem`` takes labels only, so an index is one set on an item after it was
+        built, which ``resolve_ground_truth`` reads too.
 
         Returns:
             The labels, in criterion order, or ``None`` when the item cannot be a
             whole-rubric example: it has no ground truth, or a label is unusable (a binary
-            criterion's is no ``CriterionVerdict``, a multi-choice criterion's resolves to
-            no option).
+            criterion's names no verdict, a multi-choice criterion's no option).
         """
         if self._training_data is None or item.ground_truth is None:
             return None
@@ -1834,19 +1855,22 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         criteria = rubric.rubric if rubric else []
         labels: list[CriterionVerdict | int] = []
         for criterion_idx, label in enumerate(item.ground_truth):
-            options = criteria[criterion_idx].options if criterion_idx < len(criteria) else None
-            option_idx: int | None
-            if options is None:
-                if not isinstance(label, CriterionVerdict):
+            criterion = criteria[criterion_idx] if criterion_idx < len(criteria) else None
+            if criterion is None or criterion.options is None:
+                try:
+                    labels.append(CriterionVerdict(label))
+                except ValueError:
                     return None
-                labels.append(label)
                 continue
+            shown = self._effective_criterion(criterion)
+            option_idx: int | None = None
             if isinstance(label, str):
-                option_idx = self._label_to_option_index(criterion_idx, label)
+                try:
+                    option_idx = shown.find_option_by_label(label)
+                except ValueError:
+                    pass
             elif isinstance(label, int) and not isinstance(label, bool):
-                option_idx = label if 0 <= label < len(options) else None
-            else:
-                option_idx = None
+                option_idx = label if 0 <= label < len(shown.options or []) else None
             if option_idx is None:
                 return None
             labels.append(option_idx)
@@ -2322,9 +2346,7 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
             )
         return results
 
-    def _rubric_system_prompt(
-        self, rubric: Sequence[Criterion], *, with_examples: bool = False
-    ) -> str:
+    def _rubric_system_prompt(self, rubric: Sequence[Criterion], *, with_examples: bool) -> str:
         """The system prompt of an LLM judge's one call for ``rubric``.
 
         ``build_rubric_system_prompt`` embeds, as guides, the grader's system prompt of each
@@ -2500,12 +2522,12 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
     ) -> list[tuple[str, list[tuple[str, Criterion, CriterionVerdict | int, str | None]]]]:
         """The few-shot examples of a judge's one call, each with its judgments as shown.
 
-        Each of the judge's examples (``_select_item_examples``) has a judgment for each
-        criterion index that both the training rubric and ``rubric`` have, with a criterion
-        of the same kind: its verdict, or its option renumbered to the option's position in
-        the call's order, when the graded criterion has that option. As with per-criterion
-        examples, this assumes ``rubric`` is the training data's rubric. An example with no
-        judgment is left out.
+        Each of the judge's examples (``_item_examples``, drawn by
+        ``_select_item_examples``) has a judgment for each criterion index that both the
+        training rubric and ``rubric`` have, with a criterion of the same kind: its verdict,
+        or its option renumbered to the option's position in the call's order, when the
+        graded criterion has that option. As with per-criterion examples, this assumes
+        ``rubric`` is the training data's rubric. An example with no judgment is left out.
 
         Args:
             judge_id: The judge whose examples to show.
@@ -2524,11 +2546,7 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         training_rubric = self._training_data.rubric
         training_criteria = training_rubric.rubric if training_rubric else []
         shown_examples = []
-        for item in examples:
-            labels = self._item_labels(item)
-            if labels is None:
-                # Selected items resolve; one no longer does only if it changed since.
-                continue
+        for submission, labels, reasons in examples:
             judgments: list[tuple[str, Criterion, CriterionVerdict | int, str | None]] = []
             for criterion_idx, label in enumerate(labels):
                 if criterion_idx >= min(len(training_criteria), len(rubric)):
@@ -2547,11 +2565,9 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                     shown_label = shuffled_indices.index(label)
                 else:
                     continue
-                judgments.append(
-                    (criterion_id, shown, shown_label, _ground_truth_reason(item, criterion_idx))
-                )
+                judgments.append((criterion_id, shown, shown_label, reasons[criterion_idx]))
             if judgments:
-                shown_examples.append((item.submission, judgments))
+                shown_examples.append((submission, judgments))
         return shown_examples
 
     def _rubric_judgment_report(
