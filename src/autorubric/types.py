@@ -1041,6 +1041,11 @@ LLMCalls = Literal["per_criterion", "per_item"]
   every criterion is listed under its id (``c0``, ``c1``, ...), and the answer holds one
   judgment per criterion (``RubricJudgment``).
 
+A cascade's escalation judges are called the same way, only where the decision model
+escalated: per_item makes one full-rubric call for an item with any escalated criterion.
+``replay_escalation`` and ``calibrate_escalation`` take it to know how an LLM run was
+called, which sets how they estimate a cascade's cost and time from that run's.
+
 A decision-model judge always makes one request per item, whatever this is. The name counts
 LLM calls per item; it is unrelated to ``compute_metrics(per_item_metrics=...)`` and to
 per-item rubrics.
@@ -1220,9 +1225,9 @@ class EnsembleEvaluationReport(BaseModel):
         report: Per-criterion breakdown with ensemble voting details.
         judge_scores: Each judge's own score over the whole rubric (from its own verdicts),
             keyed by ``judge_id``. ``None`` when that judge's whole-rubric score is
-            undefined: by role, a judge consulted only on some criteria (e.g. an
+            undefined: by role, a judge that votes only on some criteria (e.g. an
             escalation judge) is ``None`` on every item, even an item where it happened to
-            judge every criterion, so the entry's meaning never depends on the item; and
+            vote on every criterion, so the entry's meaning never depends on the item; and
             on an item where every vote of the judge failed (it judged nothing) or none of
             its verdicts is left to score.
         mean_agreement: Average agreement across all criteria, or None when there

@@ -337,7 +337,11 @@ class TestCalibrate:
         def lower_rmse(metrics: MetricsResult) -> float | None:
             return None if metrics.score_rmse is None else -metrics.score_rmse
 
-        fit = {"thresholds": sweep, "per_criterion": True, "min_pairs_per_criterion": 1}
+        fit: dict[str, Any] = {
+            "thresholds": sweep,
+            "per_criterion": True,
+            "min_pairs_per_criterion": 1,
+        }
         fitted = calibrate_escalation(
             runs.data, runs.dm, runs.llm, metric=lower_rmse, **fit, **scoring
         ).points[0]
@@ -842,7 +846,11 @@ class TestPerCriterion:
             cascade_runs, decision_model, Rubric([LIGHT, CLARITY]), rows, "mixed rubric"
         )
         sweep = [0.0, 0.5]
-        fit = {"per_criterion": True, "min_pairs_per_criterion": 4, "thresholds": sweep}
+        fit: dict[str, Any] = {
+            "per_criterion": True,
+            "min_pairs_per_criterion": 4,
+            "thresholds": sweep,
+        }
 
         by_accuracy = calibrate_escalation(runs.data, runs.dm, runs.llm, **fit)
         assert by_accuracy.points[0].per_criterion == {"light": 0.0, "clarity": 0.0}

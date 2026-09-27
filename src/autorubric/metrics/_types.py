@@ -1001,7 +1001,7 @@ class JudgeMetrics(BaseModel):
         score_rmse: RMSE of this judge's cumulative scores (its
             ``EnsembleEvaluationReport.judge_scores`` entries) against the ground-truth
             scores. ``None`` when the judge's score is undefined on every item (a judge
-            consulted only on some criteria has a ``None`` entry by role; a judge every
+            that votes only on some criteria has a ``None`` entry by role; a judge every
             vote of which failed has one on each such item), and likewise for every other
             score field below. An item whose entry is ``None`` while others are defined,
             or whose ground truth leaves nothing to score, is left out of the judge's
@@ -1015,8 +1015,8 @@ class JudgeMetrics(BaseModel):
             ``"full"``: the judge was consulted on every criterion, like any ensemble
             member or a cascade's decision model (whose ``superseded`` votes are its
             predictions), even one whose every call failed. ``"escalated"``: the judge is
-            a cascade escalation judge, consulted only on the criteria escalated to it: it
-            votes on no criterion that was not escalated and never casts a ``superseded``
+            a cascade escalation judge, which votes only on the criteria escalated to it:
+            it votes on no criterion that was not escalated and never casts a ``superseded``
             vote (its ``judge_scores`` entries are ``None`` by role). Its
             criterion-level metrics then cover exactly the pairs it voted on (the escalated
             subset) and every score field above is ``None``. The value follows the judge's

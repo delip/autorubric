@@ -271,6 +271,20 @@ def _check_judge_weight(weight: object, judge_id: object) -> None:
         )
 
 
+def _check_llm_calls(llm_calls: object) -> None:
+    """Refuse an ``llm_calls`` value that is not one of ``LLMCalls``.
+
+    The one check of ``CriterionGrader`` and of an offline cascade replay and calibration
+    (``autorubric.escalation.replay_escalation`` and ``calibrate_escalation``), so all three
+    accept the same values and refuse others with the same message.
+
+    Raises:
+        ValueError: If ``llm_calls`` is neither ``"per_criterion"`` nor ``"per_item"``.
+    """
+    if llm_calls not in get_args(LLMCalls):
+        raise ValueError(f"llm_calls must be one of {get_args(LLMCalls)}; got {llm_calls!r}")
+
+
 @dataclass
 class JudgeSpec:
     """Specification for a single judge in an ensemble.
@@ -401,10 +415,15 @@ class EscalationConfig:
     model. The decision model answers every criterion of an item, in its one request per
     item; a criterion is **escalated** when its vote errored, abstained (``CANNOT_ASSESS``
     or an NA option), or has a ``confidence`` below the criterion's threshold
-    (``threshold_for``). Only escalated criteria go to the escalation judges, and only
-    their votes decide such a criterion's verdict (aggregated with the grader's
+    (``threshold_for``). The escalation judges vote on the escalated criteria only, and
+    only their votes decide such a criterion's verdict (aggregated with the grader's
     ``aggregation`` / ``ordinal_aggregation`` / ``nominal_aggregation``); the decision
-    model's vote is kept with ``superseded=True`` and never used as a fallback.
+    model's vote is kept with ``superseded=True`` and never used as a fallback. An
+    escalation judge is called as the grader's ``llm_calls`` says: by default once per
+    escalated criterion, about that criterion alone; under ``llm_calls="per_item"`` once
+    per item with any escalated criterion, about the whole rubric, keeping its judgments
+    of the escalated criteria only. Either way each call is the one the judge would make
+    in the same grader without the cascade.
 
     Validated at construction (``dataclasses.replace`` validates again) and frozen: its
     fields cannot be reassigned. The ``judges`` list and the ``per_criterion`` dict can
@@ -418,7 +437,8 @@ class EscalationConfig:
             compare a cascade with a separate LLM run judge for judge (the same prompts,
             option shuffles and few-shot examples included), grade that run with these
             judges (``judges=escalation.judges``, their ``judge_id``s included) and the
-            cascade's ``seed`` and other LLM settings (``replay_escalation`` lists them).
+            cascade's ``seed``, ``llm_calls`` and other LLM settings (``replay_escalation``
+            lists them).
         threshold: A criterion is escalated when the decision model's confidence is below
             it, in [0, 1]. ``0.0`` escalates only errors and abstentions; ``1.0`` everything
             short of certainty.
@@ -627,7 +647,9 @@ class CriterionResult:
     per criterion (the grader's default ``llm_calls``) makes one call per criterion, so each
     result carries its own. A decision-model judge makes one request per item, and an LLM
     judge under ``llm_calls="per_item"`` one call per item; that request's or call's usage
-    and cost ride on the item's first result (the other results carry ``None``), so
+    and cost ride on the judge's first result for the item (for a cascade's escalation
+    judge, which keeps results for the escalated criteria only, the first escalated
+    criterion's), and its other results carry ``None``, so
     ``JudgeCriterionResults.total_usage``/``total_cost`` are the per-item totals however
     the judge was called. ``cost`` is ``None`` when it is unknown.
     """
@@ -643,12 +665,13 @@ class JudgeCriterionResults:
 
     ``role`` is the judge's part in grading the item. A ``"primary"`` judge (every judge of
     a grader without a cascade, and a cascade's decision model) judges every criterion, so
-    each entry is a result. An ``"escalation"`` judge of a cascade judges only the criteria
-    the decision model escalated and holds ``None`` at the others; its list is full-length
-    all the same, so every judge's entries line up by criterion index. ``reports``,
-    ``total_usage`` and ``total_cost`` cover the criteria the judge judged; the totals
-    count each of the judge's calls or requests once, whether it made one per criterion or
-    one per item (see ``CriterionResult``).
+    each entry is a result. An ``"escalation"`` judge of a cascade has a result only at the
+    criteria the decision model escalated (under ``llm_calls="per_item"`` its one call
+    answers every criterion, and only the escalated criteria's answers are kept) and holds
+    ``None`` at the others; its list is full-length all the same, so every judge's entries
+    line up by criterion index. ``reports``, ``total_usage`` and ``total_cost`` cover the
+    judge's results; the totals count each of the judge's calls or requests once, whether
+    it made one per criterion or one per item (see ``CriterionResult``).
     """
 
     judge_id: str
@@ -943,20 +966,28 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
     and with its options shuffled exactly as there; and the answer (``RubricJudgment``) maps
     back to one result per criterion. A missing or unusable answer fails only its criterion
     (``parse``), a failed call fails every criterion, and the call's usage and cost ride on
-    the item's first result. Votes, aggregation and scoring are the same in both modes.
+    the item's first result. Votes, aggregation and scoring are the same in both modes. A
+    cascade's escalation judges make that call too, but only for an item with an escalated
+    criterion, and keep only the escalated criteria's results (see below).
 
     A confidence cascade (``escalation=EscalationConfig(...)``) puts one decision model
     first and LLM judges behind it. The decision model judges every criterion in its one
     request per item; a criterion it errored or abstained on, or answered with a
-    ``confidence`` below the criterion's threshold, is escalated: each escalation judge
-    judges it (and only the escalated criteria), with the same prompt it would get in an
-    otherwise identical grader without the cascade (the same ``seed``, ``judge_id`` and
-    LLM settings). An escalated
+    ``confidence`` below the criterion's threshold, is escalated, and each escalation judge
+    votes on the escalated criteria only. Called per criterion, an escalation judge is
+    asked about each escalated criterion in a call of its own. Under
+    ``llm_calls="per_item"`` it is asked about the whole rubric in one call, made only for
+    an item with an escalated criterion; its judgments of the other criteria are
+    discarded, a failed call fails its votes on the escalated criteria, and the call's
+    usage and cost ride on the first escalated criterion's result. Either way each call is
+    the one the judge would make in an otherwise identical grader without the cascade (the
+    same ``seed``, ``judge_id`` and LLM settings, ``llm_calls`` included). An escalated
     criterion's report is marked ``escalated=True``, keeps the decision model's vote with
     ``superseded=True``, and takes its verdict from the escalation judges' votes alone,
     aggregated as any ensemble's; it never falls back to the decision model's vote. The
     decision model's ``judge_scores`` entry is its own score over every criterion; an
-    escalation judge's is ``None``, as it never judges a whole rubric.
+    escalation judge's is ``None`` by role, as it votes only where the decision model
+    escalated, even on an item where every criterion escalated.
 
     Some settings exist for LLM judges only. Few-shot examples, the system prompts and
     ``shuffle_options`` apply to the LLM judges of a mixed ensemble or a cascade and never
@@ -1136,17 +1167,21 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 binary_response_format). Defaults to MultiChoiceJudgment. LLM judges only,
                 like binary_response_format.
             escalation: Makes the grader a confidence cascade (see the class docstring):
-                the escalation judges, all LLMs, judge the criteria the decision model
-                errored or abstained on or answered with a confidence below the
+                the escalation judges, all LLMs, vote only on the criteria the decision
+                model errored or abstained on or answered with a confidence below the
                 criterion's threshold. The grader's one judge (``judge_model_config``, or a
                 single ``JudgeSpec`` in ``judges``) must then be a decision model. The
                 escalation judges count as judges for the LLM-only settings: few-shot
-                examples, the system prompts and ``shuffle_options`` apply to them. The
-                grader validates and keeps its own copy of the config (``dataclasses.replace``),
-                so changing the config's lists in place later does not affect it.
-            llm_calls: How each LLM judge of ``judge_model_config`` or ``judges`` is called
+                examples, the system prompts, ``shuffle_options`` and ``llm_calls`` apply to
+                them. The grader validates and keeps its own copy of the config
+                (``dataclasses.replace``), so changing the config's lists in place later
+                does not affect it.
+            llm_calls: How each LLM judge, a cascade's escalation judges included, is called
                 for an item: ``"per_criterion"`` (the default), one call per criterion, or
-                ``"per_item"``, one call for the whole rubric (see the class docstring).
+                ``"per_item"``, one call for the whole rubric (see the class docstring). An
+                escalation judge calls only where the decision model escalated: once per
+                escalated criterion, or once, about the whole rubric, for an item with any
+                escalated criterion, keeping its judgments of the escalated criteria only.
                 ``"per_item"`` sends the submission once instead of once per criterion but
                 generates every criterion's judgment in one reply, so ``max_tokens`` and
                 ``timeout`` must allow for the whole rubric's answer: a reply cut off at
@@ -1278,8 +1313,7 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         all_judges = [*self._judges, *self._escalation_judges]
 
         # Checked before any client is built, as the settings below are.
-        if llm_calls not in get_args(LLMCalls):
-            raise ValueError(f"llm_calls must be one of {get_args(LLMCalls)}; got {llm_calls!r}")
+        _check_llm_calls(llm_calls)
 
         # Settings a decision-model judge cannot use, checked before any client is built so
         # that a configuration error is reported as one.
@@ -1400,7 +1434,7 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
     def is_ensemble(self) -> bool:
         """Whether this grader has several judges that each judge every criterion.
 
-        A cascade is not an ensemble: its escalation judges judge only the criteria its
+        A cascade is not an ensemble: its escalation judges vote only on the criteria its
         decision model escalates.
         """
         return len(self._judges) > 1
@@ -2378,7 +2412,9 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         In a cascade the decision model judges every criterion first; then every escalation
         judge judges the escalated criteria (``_escalates``: an error, an abstention, or a
         confidence below ``EscalationConfig.threshold_for`` the criterion), all at once, and
-        none when nothing is escalated.
+        none when nothing is escalated: in a call per escalated criterion, or, under
+        ``llm_calls="per_item"``, in one call about the whole rubric whose judgments of the
+        other criteria are discarded (``_judge_escalated_criteria``).
 
         Args:
             to_grade: The submission, as ``Grader.grade`` passes it.
@@ -2468,12 +2504,21 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         *,
         guidelines: str | None = None,
     ) -> JudgeCriterionResults:
-        """Judge a cascade's escalated criteria with one escalation judge, all in parallel.
+        """Judge a cascade's escalated criteria with one escalation judge.
 
-        Each goes through ``_judge_single_criterion`` under its index in the effective
-        rubric, the index that keys option shuffling and few-shot selection, so the judge's
-        prompt for it is the one it would get in a grader without the cascade with the same
-        ``seed`` and ``judge_id``.
+        The judge is called exactly as it would be in a grader without the cascade with the
+        same ``seed``, ``judge_id`` and LLM settings, and makes no call when nothing is
+        escalated:
+
+        - Per criterion (the default ``llm_calls``), each escalated criterion goes through
+          ``_judge_single_criterion``, all in parallel, under its index in the effective
+          rubric, the index that keys option shuffling and few-shot selection.
+        - Under ``llm_calls="per_item"``, the judge makes the one call about the whole
+          effective rubric (``_judge_rubric_in_one_call``) that it makes for every item
+          without the cascade: every criterion, in order, with the same option
+          permutations. Only its results for the escalated criteria are kept; a failed
+          call therefore fails the escalated criteria's votes alone. The call's usage and
+          cost ride on the first escalated criterion's result.
 
         Args:
             judge: The escalation judge (an LLM).
@@ -2488,23 +2533,35 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
             The judge's full-length results (``role="escalation"``): a result at each
             escalated criterion, ``None`` at the others.
         """
-        results = await asyncio.gather(
-            *(
-                self._judge_single_criterion(
-                    judge,
-                    rubric[criterion_idx],
-                    criterion_idx,
-                    to_grade,
-                    query,
-                    reference_submission,
-                    guidelines=guidelines,
-                )
-                for criterion_idx in escalated
-            )
-        )
         criterion_results: list[CriterionResult | None] = [None] * len(rubric)
-        for criterion_idx, result in zip(escalated, results, strict=True):
-            criterion_results[criterion_idx] = result
+        if self._llm_calls == "per_item":
+            if escalated:
+                # The call a grader without the cascade makes, of which only the escalated
+                # criteria's results are kept, the first of them carrying its usage and cost.
+                results, usage, cost = await self._judge_rubric_in_one_call(
+                    judge, rubric, to_grade, query, reference_submission, guidelines=guidelines
+                )
+                first = escalated[0]
+                results[first] = dataclasses.replace(results[first], usage=usage, cost=cost)
+                for criterion_idx in escalated:
+                    criterion_results[criterion_idx] = results[criterion_idx]
+        else:
+            results = await asyncio.gather(
+                *(
+                    self._judge_single_criterion(
+                        judge,
+                        rubric[criterion_idx],
+                        criterion_idx,
+                        to_grade,
+                        query,
+                        reference_submission,
+                        guidelines=guidelines,
+                    )
+                    for criterion_idx in escalated
+                )
+            )
+            for criterion_idx, result in zip(escalated, results, strict=True):
+                criterion_results[criterion_idx] = result
         return JudgeCriterionResults(
             judge_id=judge.judge_id,
             weight=judge.weight,
@@ -2540,13 +2597,14 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         - Binary: Uses JudgeVote and _aggregate_votes()
         - Multi-choice: Uses MultiChoiceJudgeVote and _aggregate_multi_choice_votes()
 
-        In a cascade the escalated criteria are the ones the escalation judges judged
-        (their results are ``None`` everywhere else). On those, the primary judge's vote is
-        marked ``superseded=True`` and the final verdict, reason and error come from the
+        In a cascade the escalated criteria are the ones the escalation judges have results
+        for (their results are ``None`` everywhere else). On those, the primary judge's vote
+        is marked ``superseded=True`` and the final verdict, reason and error come from the
         votes that are not superseded, which are the escalation judges'; the report is
         marked ``escalated=True``. ``judge_scores`` holds each primary judge's score over its
-        own verdicts (superseded ones included) and ``None`` for each escalation judge,
-        which never judges a whole rubric.
+        own verdicts (superseded ones included) and ``None`` for each escalation judge, by
+        role: it votes only where the decision model escalated, even on an item where every
+        criterion escalated.
         """
         if not judge_results:
             # Empty/failed aggregation has no score: emit None, not a fabricated 0.0

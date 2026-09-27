@@ -22,12 +22,16 @@ scoring core (``score_reports``), so it cannot drift from a live run. A calibrat
 measures replays with ``escalation_stats``, scored with the scoring settings it is given.
 When each run was graded by a ``CriterionGrader`` configured as the cascade for everything
 that stage uses (``replay_escalation``'s exactness conditions: for the LLM run, the
-cascade's escalation judges, ``seed``, ``shuffle_options``, system prompts and few-shot
-settings, among others) and the scoring settings are the cascade's, a point equals the
-diagnostics of the live cascade at its thresholds but for two estimates and the
-configuration: its ``cost_usd`` and ``compute_seconds`` are pro-rated from per-item
-totals, where a live run's are exact sums, and its ``threshold``, ``per_criterion`` and
-``calibration_fingerprint`` record what the diagnostics of a live run leave ``None``.
+cascade's escalation judges, ``seed``, ``llm_calls``, ``shuffle_options``, system prompts
+and few-shot settings, among others) and the scoring settings are the cascade's, a point
+equals the diagnostics of the live cascade at its thresholds but for two estimates and the
+configuration: its ``cost_usd`` and ``compute_seconds`` are estimated from per-item totals,
+where a live run's are exact sums, and its ``threshold``, ``per_criterion`` and
+``calibration_fingerprint`` record what the diagnostics of a live run leave ``None``. The
+estimates follow how the LLM run's judges were called, which the replay and the
+calibration are told (their ``llm_calls``): an item's LLM cost and time are pro-rated by the
+share of its criteria that escalated when the judges were called per criterion, and
+counted in full for an item with any escalated criterion when they were called per item.
 """
 
 from __future__ import annotations
@@ -49,6 +53,7 @@ from autorubric.decision import _is_positive_int, _is_real_number
 from autorubric.eval import EvalResult, EvalTimingStats, ItemResult
 from autorubric.graders.base import _caller_stacklevel
 from autorubric.graders.criterion_grader import (
+    _check_llm_calls,
     _check_thresholds,
     _ensemble_evaluation_report,
     _escalates,
@@ -66,6 +71,7 @@ from autorubric.types import (
     EnsembleCriterionReport,
     EnsembleEvaluationReport,
     JudgeVote,
+    LLMCalls,
     MultiChoiceJudgeVote,
     MultiChoiceVerdict,
 )
@@ -80,7 +86,10 @@ class EscalationPoint(BaseModel):
 
     ``escalation_stats`` measures one on a cascade run, live or replayed, and
     ``calibrate_escalation`` one per threshold of a sweep. Given to ``replay_escalation``, a
-    point replays a cascade at its ``threshold`` and ``per_criterion`` thresholds.
+    point replays a cascade at its ``threshold`` and ``per_criterion`` thresholds. A point
+    records neither the scoring settings it was measured with nor how the LLM run's judges
+    were called (``llm_calls``), so a replay of a calibrated point scores, and estimates
+    cost and time, as the calibration did only when given the same ones.
 
     **Pairs and accuracy.** A pair is one criterion of one item whose grading did not raise,
     even one whose every criterion's judgment failed. A pair is *labelled* when its item has
@@ -175,9 +184,9 @@ class EscalationCurve(BaseModel):
     Each point is a cascade at one global threshold (plus the fitted per-criterion
     thresholds, when the calibration fitted any), measured on the calibration items, and
     carries their ``calibration_fingerprint``. ``best`` picks a point by one rule;
-    ``replay_escalation(dm_result, llm_result, point)``, given the scoring settings the
-    calibration was given, rebuilds the point's run on the runs it was calibrated on, or
-    replays its thresholds on held-out runs.
+    ``replay_escalation(dm_result, llm_result, point)``, given the scoring settings and the
+    ``llm_calls`` the calibration was given (a point records neither), rebuilds the point's
+    run on the runs it was calibrated on, or replays its thresholds on held-out runs.
 
     **The selection rule** (``best``). Among the points within the escalation budget
     (``escalation_rate <= max_escalation_rate``; every point when there is no budget), find
@@ -189,8 +198,12 @@ class EscalationCurve(BaseModel):
     (``None``, or NaN) is passed over; one without an ``escalation_rate`` (a run with no
     pairs) is outside any budget and ranks after every point that has one; one without a
     ``threshold`` ranks after those with one.
-    ``tolerance > 0`` trades metric for less escalation, e.g. "about the same accuracy for
-    fewer LLM calls": ``best(tolerance=0.005)`` gives up at most half a point of accuracy.
+    ``tolerance > 0`` trades metric for less escalation: ``best(tolerance=0.005)`` gives up
+    at most half a point of accuracy. Escalation judges called per criterion make fewer
+    calls as fewer pairs escalate, so the trade is "about the same accuracy for fewer LLM
+    calls". Called per item (``llm_calls="per_item"``), they make one call per item with any
+    escalated criterion, so escalating fewer pairs can save no call at all: compare the
+    points' ``cost_usd`` and ``compute_seconds`` before giving up metric for it.
 
     **Same-data caveat.** Every point was measured on the pairs the sweep chose from, so the
     metric of the point ``best`` picks is optimistic: it is the best of many measurements
@@ -331,6 +344,7 @@ def replay_escalation(
     per_criterion: Mapping[str, float] | None = None,
     cannot_assess_config: CannotAssessConfig | None = None,
     normalize: bool = True,
+    llm_calls: LLMCalls = "per_criterion",
 ) -> EvalResult:
     """Build the ``EvalResult`` a confidence cascade would have produced, with no calls.
 
@@ -366,38 +380,66 @@ def replay_escalation(
       configs, ``judge_id``s and weights; a bare ``LLMConfig`` given to
       ``EscalationConfig`` becomes ``JudgeSpec(config, "escalation")``) with every setting
       they use as the cascade's: its ``seed`` (``CriterionGrader.seed``, generated when not
-      given), ``shuffle_options``, ``system_prompt``, ``multi_choice_system_prompt``,
-      ``training_data`` and ``few_shot_config``, and the default response formats (a
-      cascade cannot have others);
+      given), ``llm_calls``, ``shuffle_options``, ``system_prompt``,
+      ``multi_choice_system_prompt``, ``training_data`` and ``few_shot_config``, and the
+      default response formats (a cascade cannot have others);
     - both: the cascade's ``auto_na_option`` and aggregation settings (``aggregation``,
       ``ordinal_aggregation``, ``nominal_aggregation``).
 
     For ``CriterionGrader(judge_model_config=dm, escalation=escalation, seed=S)`` with
     otherwise default settings, the two runs are graded by
     ``CriterionGrader(judge_model_config=dm)`` and
-    ``CriterionGrader(judges=escalation.judges, seed=S)``. Only the criteria are checked
-    (as graded, NA options that ``auto_na_option`` adds included): an ``EvalResult``
-    records no grader configuration, so another setting goes unnoticed. With only another
-    ``seed`` or ``judge_id``, the LLM prompts differ in the order of a shuffled
-    multi-choice criterion's options and in the few-shot examples, and the replay equals
-    the cascade in distribution only; with another prompt setting (``shuffle_options``, a
-    system prompt, the few-shot settings) the prompts themselves differ, and the replay is
-    not the cascade's run.
+    ``CriterionGrader(judges=escalation.judges, seed=S)``; for a cascade that also has
+    ``llm_calls="per_item"``, the LLM run's grader has it too, and so does this call. Only
+    the criteria are checked (as graded, NA options that ``auto_na_option`` adds
+    included): an ``EvalResult`` records no grader configuration, so another setting goes
+    unnoticed. With only another ``seed`` or ``judge_id``, the LLM prompts differ in the
+    order of a shuffled multi-choice criterion's options and in the few-shot examples, and
+    the replay equals the cascade in distribution only; with another prompt setting
+    (``llm_calls``, ``shuffle_options``, a system prompt, the few-shot settings) the prompts
+    themselves differ, and the replay is not the cascade's run.
+
+    **How the LLM run was called.** This call's ``llm_calls`` says how the LLM run's judges
+    were called, and so which share of its per-item cost and time a live cascade would
+    spend (see *Estimates*). The replay cannot check it, since an ``EvalResult`` records
+    no grader configuration: like the conditions above, it is a declared fact, and for an
+    exact replay it is the cascade's ``llm_calls`` too. It changes nothing but the
+    estimates: whatever it says, the replayed verdicts are the LLM run's. A wrong
+    ``llm_calls`` therefore biases only the estimated costs and durations, and so only the
+    ``cost_usd`` and ``compute_seconds`` of ``escalation_stats``, on which
+    ``EscalationCurve.best`` never selects.
 
     **Estimates.** Per-criterion LLM cost and time are not recorded, only per-item totals.
-    An item's ``completion_cost`` is therefore its decision-model cost plus its LLM cost
-    pro-rated by the share of its criteria that were escalated (``None`` when that is not
-    positive, as in a live report), and its ``duration_seconds`` its decision-model
-    duration plus its LLM duration pro-rated the same way. The run's total duration is the
-    decision-model run's total plus the LLM run's, pro-rated by the share of the LLM run's
-    pairs that were escalated; an item whose decision-model grading raised (it has no
-    votes) escalates none of its pairs, as a live cascade sends it to no LLM judge. These
-    are estimates, which ``escalation_stats`` sums into ``cost_usd`` and
-    ``compute_seconds``. The result says so
-    in its ``experiment_name``, its descriptive field (``"replay of decision-model run
-    '<name>' and LLM run '<name>' (estimated cost and time)"``), since a replay is not an
-    experiment on disk (``experiment_dir`` is ``None``). It carries no ``token_usage``,
-    which cannot be split by criterion.
+    An item's LLM cost and time are therefore its LLM run totals times the share of the
+    LLM run's calls for the item that a live cascade would make:
+
+    - Called per criterion (the default ``llm_calls``), a judge made a call per criterion,
+      and a live cascade makes one per escalated criterion. An item's ``completion_cost``
+      is its decision-model cost plus its LLM cost pro-rated by the share of its criteria
+      that were escalated, and its ``duration_seconds`` its decision-model duration plus
+      its LLM duration pro-rated the same way.
+    - Called per item (``llm_calls="per_item"``), a judge made one call about the item's
+      whole rubric, and a live cascade makes that same call for an item with any escalated
+      criterion, and no call otherwise. An item's ``completion_cost`` is its decision-model
+      cost plus, when any of its criteria was escalated, its LLM cost in full, and its
+      ``duration_seconds`` its decision-model duration plus, likewise, its LLM duration in
+      full.
+
+    An item's ``completion_cost`` is ``None`` when it is not positive, as in a live
+    report. The run's total duration is the decision-model run's total plus the LLM run's,
+    pro-rated by the share of the LLM run's calls (per judge) that a live cascade would
+    make: its escalated pairs over its pairs when called per criterion, its items with an
+    escalated criterion over its items (those with any criterion) when called per item. An
+    item whose decision-model grading raised (it has no votes) makes no call, as a live
+    cascade sends it to no LLM judge, while its calls in the LLM run count among that
+    run's. These are estimates, which ``escalation_stats`` sums into ``cost_usd`` and
+    ``compute_seconds``. The result says so in its ``experiment_name``, its descriptive
+    field (``"replay of decision-model run '<name>' and LLM run '<name>' (estimated cost
+    and time)"``), since a replay is not an experiment on disk (``experiment_dir`` is
+    ``None``). It carries no ``token_usage``, whatever ``llm_calls`` says. Token usage is
+    recorded per item, not per criterion, so for judges called per criterion an item's
+    cannot be split; for judges called per item it would rest on ``llm_calls``, which the
+    replay cannot check and which changes nothing but the estimates marked as such.
 
     **Length penalty.** It is not re-applied: compare replayed scores with runs graded
     without one. Criterion-level metrics are unaffected.
@@ -422,6 +464,9 @@ def replay_escalation(
         cannot_assess_config: How abstentions score (``score_reports``); default
             ``CannotAssessConfig()``, as ``CriterionGrader``'s.
         normalize: Whether scores are normalized to [0, 1], as ``CriterionGrader``'s.
+        llm_calls: How the LLM run's judges were called, its grader's ``llm_calls``:
+            ``"per_criterion"`` (the default) or ``"per_item"``. It sets the unit of the
+            cost and time estimates and nothing else (see *How the LLM run was called*).
 
     Returns:
         An ordinary ``EvalResult`` (``compute_metrics``, ``escalation_stats`` and
@@ -431,7 +476,8 @@ def replay_escalation(
     Raises:
         ValueError: If the threshold or a ``per_criterion`` threshold is not a number in
             [0, 1]; if ``per_criterion`` is given with an ``EscalationPoint``, or the point
-            has no threshold; if the two results do not cover the same items (by
+            has no threshold; if ``llm_calls`` is neither ``"per_criterion"`` nor
+            ``"per_item"``; if the two results do not cover the same items (by
             ``item_idx``, a result holding an item more than once, or an item whose
             recorded submissions differ) graded against the same criteria (as graded, NA
             options included); if ``dm_result`` does not come from one decision-model judge
@@ -477,6 +523,7 @@ def replay_escalation(
         threshold_name=threshold_name,
         per_criterion_name=per_criterion_name,
     )
+    _check_llm_calls(llm_calls)
 
     pairs = _paired_items(dm_result, llm_result)
     _warn_unknown_threshold_names(
@@ -499,16 +546,17 @@ def replay_escalation(
         return score_reports(reports, config, normalized)
 
     item_results: list[ItemResult] = []
-    # The escalated pairs, and the pairs the LLM run judged.
-    n_escalated = n_llm_pairs = 0
+    # The LLM calls (per judge) a live cascade would make, and those the LLM run made: the
+    # escalated pairs and the pairs, or the items with an escalated criterion and the items.
+    n_escalated = n_llm_calls = 0
     for dm_item, llm_item in pairs:
         item_result, escalated, judged = _replayed_item(
-            dm_item, llm_item, threshold, per_criterion, score, normalize
+            dm_item, llm_item, threshold, per_criterion, score, normalize, llm_calls
         )
         item_results.append(item_result)
         n_escalated += escalated
-        n_llm_pairs += judged
-    share = n_escalated / n_llm_pairs if n_llm_pairs else 0.0
+        n_llm_calls += judged
+    share = n_escalated / n_llm_calls if n_llm_calls else 0.0
 
     # Totals as EvalRunner computes them: a failed item's cost counts too.
     errors = [(r.item_idx, r.error) for r in item_results if r.error]
@@ -731,13 +779,18 @@ def _replayed_item(
     per_criterion: Mapping[str, float] | None,
     score: Callable[[list[CriterionReport], bool], float | None],
     normalize: bool,
+    llm_calls: LLMCalls,
 ) -> tuple[ItemResult, int, int]:
-    """One item as a live cascade would have graded it, with the number of its criteria
-    that were escalated and the number the LLM run judged (every criterion of the item).
+    """One item as a live cascade would have graded it, with the item's LLM calls (per
+    judge) that the cascade would make and that the LLM run made (``_llm_run_calls``).
+
+    Its LLM cost and time are the LLM run's times the share of those calls the cascade
+    makes: called per criterion, the share of its criteria that were escalated; called per
+    item, all of it when any criterion was escalated, none otherwise.
 
     A live cascade sends an item whose decision-model grading raised (it has no votes) to
-    no LLM judge, so none of its criteria are escalated, though the LLM run judged them
-    all. Failed decision-model votes escalate, as they do live.
+    no LLM judge, so it makes none of its calls, though the LLM run made them all. Failed
+    decision-model votes escalate, as they do live.
     """
     item = _recorded_item(dm_item, llm_item)
     # A decision-model grading that raised left no votes: a live cascade would have failed
@@ -750,7 +803,8 @@ def _replayed_item(
             duration_seconds=dm_item.duration_seconds,
             error=dm_item.error,
         )
-        return failed, 0, len(_llm_criteria(llm_item))
+        _, llm_run_calls = _llm_run_calls(0, len(_llm_criteria(llm_item)), llm_calls)
+        return failed, 0, llm_run_calls
 
     dm_report, dm_criteria = _ensemble_report(dm_item, "dm_result")
     llm_report, llm_criteria = _ensemble_report(llm_item, "llm_result")
@@ -766,7 +820,8 @@ def _replayed_item(
             reports.append(_escalated_report(llm_cr, vote))
         else:
             reports.append(dm_cr)
-    share = n_escalated / len(reports) if reports else 0.0
+    cascade_calls, llm_run_calls = _llm_run_calls(n_escalated, len(reports), llm_calls)
+    share = cascade_calls / llm_run_calls if llm_run_calls else 0.0
 
     # The decision model's score over its own verdicts (None when its request failed: it
     # judged nothing), as a live cascade scores it; each LLM judge's is None by role.
@@ -798,7 +853,25 @@ def _replayed_item(
         # like one whose grading raised.
         error=report.error,
     )
-    return replayed, n_escalated, len(reports)
+    return replayed, cascade_calls, llm_run_calls
+
+
+def _llm_run_calls(n_escalated: int, n_criteria: int, llm_calls: LLMCalls) -> tuple[int, int]:
+    """An item's LLM calls, per judge: those a live cascade makes, and those the LLM run made.
+
+    The unit in which a replay divides the LLM run's cost and time. Called per criterion, a
+    judge makes one call per criterion: the cascade one per escalated criterion, the LLM
+    run one per criterion. Called per item, a judge makes one call about the whole rubric
+    (none for an empty one): the cascade only when any criterion was escalated.
+
+    Args:
+        n_escalated: The item's escalated criteria.
+        n_criteria: The item's criteria.
+        llm_calls: How the LLM run's judges were called.
+    """
+    if llm_calls == "per_item":
+        return int(n_escalated > 0), int(n_criteria > 0)
+    return n_escalated, n_criteria
 
 
 def _judged_report(criterion: Criterion, vote: JudgeVote | MultiChoiceJudgeVote) -> CriterionReport:
@@ -1108,6 +1181,7 @@ def calibrate_escalation(
     min_pairs_per_criterion: int = 30,
     cannot_assess_config: CannotAssessConfig | None = None,
     normalize: bool = True,
+    llm_calls: LLMCalls = "per_criterion",
 ) -> EscalationCurve:
     """Measure a confidence cascade at every threshold of a sweep, with no calls.
 
@@ -1119,7 +1193,8 @@ def calibrate_escalation(
     the decision model's accuracy on the pairs it kept and on those it deferred, the
     fallback's accuracy on the same deferred pairs (see ``EscalationPoint``), ``metric``,
     the replay's estimated
-    ``cost_usd`` and ``compute_seconds`` (see ``replay_escalation``), and the
+    ``cost_usd`` and ``compute_seconds`` (see ``replay_escalation``; they follow how the LLM
+    run was called, ``llm_calls``), and the
     ``calibration_fingerprint`` of the calibration items: the items of ``dataset`` the two
     runs graded (by ``item_idx``). ``EscalationCurve.best`` picks a point, and
     ``replay_escalation`` replays one.
@@ -1143,15 +1218,19 @@ def calibrate_escalation(
     produce when the two runs meet ``replay_escalation``'s exactness conditions (each
     graded by a ``CriterionGrader`` configured as the cascade for everything that stage
     uses: for the LLM run, ``judges=escalation.judges`` with the cascade's ``seed``,
-    ``shuffle_options``, system prompts, few-shot settings, ``auto_na_option`` and
-    aggregation settings; e.g. ``CriterionGrader(judges=escalation.judges, seed=S)`` for a
-    cascade built with ``seed=S`` and otherwise default settings) and when
-    ``cannot_assess_config`` and ``normalize`` are the cascade's grader's: score-level
-    metrics (``score_rmse``, ``score_pearson``, ...) read the scores they set. With only
-    another seed or ``judge_id`` the LLM prompts differ in the order of a shuffled
-    multi-choice criterion's options and in the few-shot examples, and the curve holds for
-    the cascade in distribution only; with another prompt setting it does not describe the
-    cascade.
+    ``llm_calls``, ``shuffle_options``, system prompts, few-shot settings,
+    ``auto_na_option`` and aggregation settings; e.g.
+    ``CriterionGrader(judges=escalation.judges, seed=S)`` for a cascade built with
+    ``seed=S`` and otherwise default settings) and when ``cannot_assess_config`` and
+    ``normalize`` are the cascade's grader's: score-level metrics (``score_rmse``,
+    ``score_pearson``, ...) read the scores they set. With only another seed or
+    ``judge_id`` the LLM prompts differ in the order of a shuffled multi-choice criterion's
+    options and in the few-shot examples, and the curve holds for the cascade in
+    distribution only; with another prompt setting it does not describe the cascade.
+    This call's ``llm_calls`` states how the LLM run was called, which the runs do not
+    record: it sets only how each point's ``cost_usd`` and ``compute_seconds`` are
+    estimated, so a wrong one biases those two alone, on which neither
+    ``EscalationCurve.best`` nor the per-criterion fitting below selects.
 
     **Per-criterion thresholds** (``per_criterion=True``). A threshold of its own
     (``EscalationConfig.per_criterion``) applies to every criterion of a name, so it is
@@ -1186,7 +1265,9 @@ def calibrate_escalation(
       cascade is configured with (``EscalationConfig(judges, point.threshold,
       per_criterion=point.per_criterion)``), measured on the whole run like any point.
       ``best`` therefore picks among global thresholds with the fits in place: its budget
-      and tolerance trade on the criteria that follow the global threshold.
+      and tolerance trade on the criteria that follow the global threshold. A point records
+      neither ``cannot_assess_config`` and ``normalize`` nor ``llm_calls``, so its replay
+      scores, and estimates cost and time, as this call did only when given the same ones.
 
     Fitting replays the sweep once more for each fitted criterion, and once with the fits
     in place.
@@ -1220,6 +1301,9 @@ def calibrate_escalation(
             ``CannotAssessConfig()``.
         normalize: Whether the replays' scores are normalized to [0, 1], as the cascade's
             grader's.
+        llm_calls: How the LLM run's judges were called, its grader's ``llm_calls``
+            (``"per_criterion"``, the default, or ``"per_item"``), as in
+            ``replay_escalation``: the unit in which the replays estimate cost and time.
 
     Returns:
         The curve: one point per threshold of ``thresholds``, in their order.
@@ -1227,7 +1311,8 @@ def calibrate_escalation(
     Raises:
         ValueError: If ``thresholds`` is empty or holds anything but a number in [0, 1]; if
             ``per_criterion`` is not a bool (thresholds by name are ``replay_escalation``'s)
-            or ``min_pairs_per_criterion`` not a positive int. The errors of
+            or ``min_pairs_per_criterion`` not a positive int; if ``llm_calls`` is neither
+            ``"per_criterion"`` nor ``"per_item"``. The errors of
             ``replay_escalation`` (the two runs are not a decision model's and its
             escalation judges' over the same items and criteria) and of
             ``escalation_stats`` (``metric`` gives no number; ``compute_metrics``' own)
@@ -1254,6 +1339,7 @@ def calibrate_escalation(
         raise ValueError(
             f"min_pairs_per_criterion must be a positive int; got {min_pairs_per_criterion!r}"
         )
+    _check_llm_calls(llm_calls)
 
     fingerprint = _calibration_fingerprint(
         (dataset[r.item_idx], dataset.get_item_rubric(r.item_idx).rubric)
@@ -1269,6 +1355,7 @@ def calibrate_escalation(
             per_criterion=fitted or None,
             cannot_assess_config=cannot_assess_config,
             normalize=normalize,
+            llm_calls=llm_calls,
         )
         configuration = {
             "threshold": float(threshold),
