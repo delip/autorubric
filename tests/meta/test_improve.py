@@ -813,7 +813,7 @@ class TestCheckConvergence:
 
 class TestImproveRubricIntegration:
     @pytest.mark.asyncio
-    async def test_converges_on_no_issues(self):
+    async def test_converges_on_no_issues(self, tmp_path):
         """When the initial evaluation finds no issues, the loop stops immediately."""
         rubric = Rubric(
             [
@@ -845,6 +845,8 @@ class TestImproveRubricIntegration:
                 eval_llm=eval_llm,
                 revision_llm=revision_llm,
                 max_iterations=5,
+                # Artifacts are saved by default; keep them out of the working directory.
+                artifacts_dir=tmp_path,
             )
 
             assert result.convergence_reason == "no_issues"
