@@ -152,7 +152,7 @@ if result.total_token_usage:
 | Provider | Cache Type | Min Prompt Size | Discount | Notes |
 |----------|-----------|-----------------|----------|-------|
 | Anthropic | Explicit prefix | 1024 tokens | 90% on cached input | Requires `cache_control` breakpoints; AutoRubric sets these automatically |
-| OpenAI | Automatic prefix | 1024 tokens | 50% on cached input | No opt-in needed; applies when the prefix matches a recent request |
+| OpenAI | Automatic prefix | 1024 tokens | 50-90% on cached input, depending on the model | No opt-in needed; applies when the prefix matches a recent request |
 | DeepSeek | Automatic prefix | 1024 tokens | 50-90% on cached input | Behavior mirrors OpenAI; discount varies by model tier |
 | Gemini | Context caching | 32k tokens | 75% on cached input | Best suited for large system prompts or few-shot context |
 
@@ -168,6 +168,8 @@ grader = CriterionGrader(
 ```
 
 For a 10-criterion rubric and a 1,000-token submission, that is roughly 3,400-5,000 input tokens per item and judge instead of roughly 26,700. Fewer, larger requests also raise throughput under a requests-per-minute or tokens-per-minute limit, though a single call writes every criterion's explanation one after another, so per-item wall-clock time can go up rather than down. A failed call now costs a whole item's judgment instead of one criterion's, so give `max_tokens` enough room for every criterion's answer. See [`llm_calls="per_item"`](llm-judges.md#grading-a-whole-rubric-in-one-call) for the full cost model, the failure-scoping trade-off, and the caveat on comparing it against per-criterion grading before switching a production judge over.
+
+[Grading a Whole Rubric in One Call](single-call-grading.md) walks through that comparison and reports a live one: on a 100-answer RiceChem sample, one call per item cost 2.8x less as LiteLLM recorded it (4.2x at list price) and ran 3.3x faster, but graded stricter.
 
 ### Step 7: Compare Model Cost vs Accuracy
 

@@ -121,6 +121,7 @@ nav:
           - Managing Datasets: cookbook/managing-datasets.md
           - Working with Explanations: cookbook/explanations.md
           - Cheap First-Pass Grading with Jev: cookbook/cascade-grading.md
+          - Single-Call Grading: cookbook/single-call-grading.md
       - Reliability:
           - Few-Shot Calibration: cookbook/few-shot-calibration.md
           - Ensemble Judging: cookbook/ensemble-judging.md

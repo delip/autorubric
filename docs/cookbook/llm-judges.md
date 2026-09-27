@@ -250,7 +250,7 @@ A `per_item` call produces one thinking trace for the whole rubric. It is copied
 
 ### The contamination caveat
 
-The upstream `rubric` library, from which AutoRubric was forked, shipped a mode that graded a whole rubric in one call; AutoRubric dropped it at the fork, because criteria evaluations could shift each other within a shared context window. `llm_calls="per_item"` brings single-call grading back as an opt-in: the judge is told to judge each criterion as if it were the only one, and each criterion gets its own field in the structured answer, but whether verdicts actually shift between `per_criterion` and `per_item` grading is not measured by AutoRubric itself. Compare the two on your own labelled data before switching a production judge over.
+The upstream `rubric` library, from which AutoRubric was forked, shipped a mode that graded a whole rubric in one call; AutoRubric dropped it at the fork, because criteria evaluations could shift each other within a shared context window. `llm_calls="per_item"` brings single-call grading back as an opt-in: the judge is told to judge each criterion as if it were the only one, and each criterion gets its own field in the structured answer, but that does not guarantee the verdicts match per-criterion grading. In the live comparison in [Grading a Whole Rubric in One Call](single-call-grading.md), one call per item was cheaper and faster on both of two datasets and graded measurably stricter on one of them. Compare the two on your own labelled data before switching a production judge over; that recipe shows how.
 
 ### A naming note
 
