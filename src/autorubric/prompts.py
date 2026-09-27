@@ -6,7 +6,7 @@ import json
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
-from autorubric.types import Criterion, CriterionOption
+from autorubric.types import Criterion, CriterionOption, CriterionVerdict
 from autorubric.utils import _normalize_guidelines
 
 if TYPE_CHECKING:
@@ -676,8 +676,10 @@ Apply consistent standards across the examples and the submission you are evalua
 # own one-criterion format, and where decoding is not constrained by the schema the last
 # instruction tends to win. Its user prompt lists every criterion under its id, posed by the
 # same block a per-criterion prompt poses it with, so a whole-rubric judge reads exactly the
-# guidance and criterion text a per-criterion judge reads. Nothing here reaches a prompt
-# unless a grader is set to call per item.
+# guidance and criterion text a per-criterion judge reads. Its few-shot examples are whole
+# training items, each shown once with its judgment of every criterion under the criterion's
+# id, in the tags a per-criterion example uses. Nothing here reaches a prompt unless a grader
+# is set to call per item.
 
 # ``{criterion_kinds}`` is the line of each kind of criterion in the call
 # (``RUBRIC_JUDGMENT_BINARY_KIND``, ``RUBRIC_JUDGMENT_MULTI_CHOICE_KIND``), one per line.
@@ -849,7 +851,8 @@ def build_rubric_user_prompt(
         to_grade: The submission text to evaluate.
         query: Optional input/query that prompted the submission.
         reference_submission: Optional exemplar response for grading context.
-        examples_text: The rendered few-shot examples, if any, placed after the criteria.
+        examples_text: The rendered few-shot examples (``_format_rubric_examples``), if
+            any, placed after the criteria.
         guidelines: Optional rubric guidelines, as in ``build_user_prompt``.
 
     Returns:
@@ -886,6 +889,66 @@ def build_rubric_user_prompt(
 {examples_block}{query_text}{reference_text}<submission>
 {to_grade}
 </submission>"""
+
+
+def _format_rubric_examples(
+    examples: Sequence[
+        tuple[str, Sequence[tuple[str, Criterion, CriterionVerdict | int, str | None]]]
+    ],
+    include_reason: bool,
+) -> str:
+    """Format the few-shot examples of an LLM judge's one call for a whole rubric as XML.
+
+    Each example is a whole training item: its submission, then a ``<judgment>`` per
+    criterion under the criterion's id, holding the tags a per-criterion example shows
+    (``_format_few_shot_examples``, ``_format_multi_choice_examples``): a binary criterion's
+    ``<verdict>``, or a multi-choice criterion's 1-based ``<selected_option>`` and its
+    ``<selected_label>``, numbered in the order the call shows the options; then the
+    ``<reason>``, if shown.
+
+    Args:
+        examples: Each example's submission and its judgments, in the order to show them;
+            an example has at least one judgment. A judgment is ``(criterion_id, criterion,
+            label, reason)``: the criterion as the call shows it (a multi-choice criterion
+            with its options in the call's order); the label, a ``CriterionVerdict`` for a
+            binary criterion or the chosen option's 0-based index among the options as
+            shown for a multi-choice one; and the training item's written reason for the
+            label, or ``None``.
+        include_reason: If True, a judgment with a reason shows it.
+
+    Returns:
+        The ``<examples>`` block, or an empty string if there are no examples.
+
+    Raises:
+        ValueError: If a judgment gives an option index for a criterion without options.
+    """
+    if not examples:
+        return ""
+
+    parts = ["<examples>"]
+    for i, (submission, judgments) in enumerate(examples, 1):
+        parts.append(f"<example_{i}>")
+        parts.append(f"<example_submission>{submission}</example_submission>")
+        for criterion_id, criterion, label, reason in judgments:
+            parts.append(f'<judgment id="{criterion_id}">')
+            if isinstance(label, CriterionVerdict):
+                parts.append(f"<verdict>{label.value}</verdict>")
+            elif criterion.options is not None:
+                # Convert 0-based index to 1-based for display
+                parts.append(f"<selected_option>{label + 1}</selected_option>")
+                parts.append(f"<selected_label>{criterion.options[label].label}</selected_label>")
+            else:
+                raise ValueError(
+                    f"The example judgment {criterion_id} gives option index {label} for a "
+                    "binary criterion"
+                )
+            if include_reason and reason:
+                parts.append(f"<reason>{reason}</reason>")
+            parts.append("</judgment>")
+        parts.append(f"</example_{i}>")
+    parts.append("</examples>")
+
+    return "\n".join(parts)
 
 
 # ============================================================================

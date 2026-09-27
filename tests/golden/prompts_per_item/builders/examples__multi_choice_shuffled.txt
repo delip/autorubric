@@ -1,0 +1,10 @@
+<examples>
+<example_1>
+<example_submission>The explanation was crystal clear.</example_submission>
+<judgment id="c1">
+<selected_option>1</selected_option>
+<selected_label>Very clear</selected_label>
+<reason>Reader understood immediately.</reason>
+</judgment>
+</example_1>
+</examples>

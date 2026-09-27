@@ -12,13 +12,15 @@ The goldens under ``tests/golden/prompts_per_item/`` pin three layers:
 - ``constants/<NAME>.txt``: every ``RUBRIC_JUDGMENT_*`` prompt constant of
   ``autorubric.prompts``.
 - ``builders/<case>.txt``: ``build_rubric_system_prompt`` over binary-only, multi-choice-only
-  and mixed rubrics, with and without ``with_examples``, and with custom guides; and
+  and mixed rubrics, with and without ``with_examples``, and with custom guides;
   ``build_rubric_user_prompt`` over binary-only, multi-choice-only, mixed, forced-choice
-  (no NA option), a query and reference submission, rendered few-shot examples with both, and
-  negative- and zero-weight criteria.
+  (no NA option), a query and reference submission, an opaque and a genuinely rendered
+  few-shot ``examples_text``, and negative- and zero-weight criteria; and
+  ``_format_rubric_examples`` over binary-only, multi-choice-only with a shuffled option
+  presentation, mixed, with and without ``include_reason``, and an example missing a reason.
 - ``grader_calls.json``: the exact (system prompt, user prompt, response format) triples a
   ``CriterionGrader(llm_calls="per_item", seed=<fixed>)`` sends for a single judge and for a
-  two-judge panel over a mixed rubric.
+  two-judge panel over a mixed rubric, without and with item-level few-shot training data.
 
 A separate set of tests, independent of these goldens, checks the *specified* text by
 writing it out literally: goldens captured from the implementation prove the implementation
@@ -49,12 +51,22 @@ from typing import Any
 import pytest
 
 import autorubric.prompts as prompts_module
-from autorubric import Criterion, CriterionOption, TokenUsage
+from autorubric import (
+    Criterion,
+    CriterionOption,
+    CriterionVerdict,
+    DataItem,
+    FewShotConfig,
+    Rubric,
+    RubricDataset,
+    TokenUsage,
+)
 from autorubric.graders import CriterionGrader, JudgeSpec
 from autorubric.llm import GenerateResult, LLMConfig
 from autorubric.prompts import (
     GRADER_SYSTEM_PROMPT_DEFAULT,
     MULTI_CHOICE_SYSTEM_PROMPT,
+    _format_rubric_examples,
     build_rubric_system_prompt,
     build_rubric_user_prompt,
     build_user_prompt,
@@ -171,6 +183,22 @@ SYSTEM_CASES: dict[str, Callable[[], str]] = {
 # does, so the same inputs serve the guidelines tests below; the goldens are captured with
 # none.
 
+# A genuinely rendered few-shot block (as opposed to the opaque ``EXAMPLES_TEXT`` above),
+# composing ``_format_rubric_examples`` with ``build_rubric_user_prompt`` the way
+# ``_judge_rubric_in_one_call`` does.
+RENDERED_EXAMPLES_TEXT = _format_rubric_examples(
+    [
+        (
+            "Water boils around 100 degrees; not sure about altitude effects.",
+            [
+                ("c0", POSITIVE, CriterionVerdict.MET, "States the boiling point."),
+                ("c1", ORDINAL_AUTO_NA, 2, None),
+            ],
+        )
+    ],
+    include_reason=True,
+)
+
 USER_CASES: dict[str, Callable[..., str]] = {
     "user__binary_only": lambda **kw: build_rubric_user_prompt([("c0", POSITIVE)], PLAIN, **kw),
     "user__multi_choice_only": lambda **kw: build_rubric_user_prompt(
@@ -195,9 +223,107 @@ USER_CASES: dict[str, Callable[..., str]] = {
         examples_text=EXAMPLES_TEXT,
         **kw,
     ),
+    "user__rendered_examples_query_reference": lambda **kw: build_rubric_user_prompt(
+        [("c0", POSITIVE), ("c1", ORDINAL_AUTO_NA)],
+        PLAIN,
+        QUERY,
+        REFERENCE,
+        examples_text=RENDERED_EXAMPLES_TEXT,
+        **kw,
+    ),
 }
 
-BUILDER_CASES: dict[str, Callable[..., str]] = {**SYSTEM_CASES, **USER_CASES}
+# ---------------------------------------------------------------------------
+# _format_rubric_examples cases
+# ---------------------------------------------------------------------------
+# Criteria as a call would *show* them: EXAMPLE_CLARITY_SHOWN's options are deliberately
+# ordered differently from any per-criterion criterion above, to exercise a multi-choice
+# judgment whose option index refers to a shuffled presentation, the way a call already
+# renumbers a shuffled multi-choice criterion's options before this function ever sees it.
+
+EXAMPLE_CAPITAL = Criterion(
+    name="capital", weight=1.0, requirement="States that the capital of France is Paris"
+)
+EXAMPLE_FLUENT = Criterion(name="fluent", weight=1.0, requirement="The response reads fluently")
+EXAMPLE_CLARITY_SHOWN = Criterion(
+    name="clarity_shown",
+    weight=1.0,
+    requirement="How clear is the explanation?",
+    scale_type="ordinal",
+    options=[
+        CriterionOption(label="Very clear", value=1.0),
+        CriterionOption(label="Cannot assess / not applicable", value=0.0, na=True),
+        CriterionOption(label="Somewhat clear", value=0.5),
+        CriterionOption(label="Unclear", value=0.0),
+    ],
+)
+
+# One example with a binary and a multi-choice judgment; shared by the "mixed" case and its
+# "without_reason" twin, so the only difference between the two golden files is the
+# ``include_reason`` flag, never the underlying judgments.
+_MIXED_EXAMPLE_JUDGMENTS: list[
+    tuple[str, list[tuple[str, Criterion, CriterionVerdict | int, str | None]]]
+] = [
+    (
+        "Paris is the capital; the explanation was crystal clear.",
+        [
+            ("c0", EXAMPLE_CAPITAL, CriterionVerdict.MET, "Names Paris."),
+            ("c1", EXAMPLE_CLARITY_SHOWN, 0, "Very clear wording."),
+        ],
+    ),
+    (
+        "London is the capital, in a somewhat rambling explanation.",
+        [
+            ("c0", EXAMPLE_CAPITAL, CriterionVerdict.UNMET, "Names London instead."),
+            ("c1", EXAMPLE_CLARITY_SHOWN, 2, "Rambling but decipherable."),
+        ],
+    ),
+]
+
+EXAMPLES_CASES: dict[str, Callable[[], str]] = {
+    "examples__binary_only": lambda: _format_rubric_examples(
+        [
+            (
+                "Paris is the capital of France.",
+                [("c0", EXAMPLE_CAPITAL, CriterionVerdict.MET, "Names Paris.")],
+            ),
+            (
+                "The response is a jumbled mess of clauses.",
+                [("c1", EXAMPLE_FLUENT, CriterionVerdict.UNMET, "Hard to follow.")],
+            ),
+        ],
+        include_reason=True,
+    ),
+    "examples__multi_choice_shuffled": lambda: _format_rubric_examples(
+        [
+            (
+                "The explanation was crystal clear.",
+                [("c1", EXAMPLE_CLARITY_SHOWN, 0, "Reader understood immediately.")],
+            ),
+        ],
+        include_reason=True,
+    ),
+    "examples__mixed": lambda: _format_rubric_examples(
+        _MIXED_EXAMPLE_JUDGMENTS, include_reason=True
+    ),
+    "examples__without_reason": lambda: _format_rubric_examples(
+        _MIXED_EXAMPLE_JUDGMENTS, include_reason=False
+    ),
+    "examples__missing_reason": lambda: _format_rubric_examples(
+        [
+            (
+                "Paris is the capital; the explanation was crystal clear.",
+                [
+                    ("c0", EXAMPLE_CAPITAL, CriterionVerdict.MET, None),
+                    ("c1", EXAMPLE_CLARITY_SHOWN, 0, "Very clear wording."),
+                ],
+            ),
+        ],
+        include_reason=True,
+    ),
+}
+
+BUILDER_CASES: dict[str, Callable[..., str]] = {**SYSTEM_CASES, **USER_CASES, **EXAMPLES_CASES}
 
 # ---------------------------------------------------------------------------
 # Grader-level capture (mocked clients; no network)
@@ -209,6 +335,61 @@ MIXED_RUBRIC = [POSITIVE, NEGATIVE, ORDINAL_AUTO_NA]
 # recording client below can tell a binary criterion (``<criterion_type>``) from a
 # multi-choice one (``<question>``) by its id alone.
 _CRITERION_BLOCK_RE = re.compile(r'<rubric_criterion id="(c\d+)">\n<(criterion_type|question)>')
+
+# Training data for the item-level few-shot grader configurations below: each item is fully
+# labelled on MIXED_RUBRIC's three criteria, with a written reason for every label, so
+# ``FewShotConfig(include_reason=True)`` has something to show on every criterion.
+FEW_SHOT_TRAINING_DATA = RubricDataset(
+    prompt=QUERY,
+    rubric=Rubric(MIXED_RUBRIC),
+    items=[
+        DataItem(
+            submission="Water boils at 100 degrees Celsius; never drink from untreated rivers.",
+            description="fully compliant",
+            ground_truth=[CriterionVerdict.MET, CriterionVerdict.UNMET, "Very clear"],
+            ground_truth_reasons=[
+                "States the boiling point.",
+                "Warns against river water.",
+                "Straightforward explanation.",
+            ],
+        ),
+        DataItem(
+            submission="It's warm outside; river water is refreshing to drink.",
+            description="off-topic and recommends unsafe advice",
+            ground_truth=[CriterionVerdict.UNMET, CriterionVerdict.MET, "Very unclear"],
+            ground_truth_reasons=[
+                "Never states the boiling point.",
+                "Recommends drinking untreated river water.",
+                "Rambling and unfocused.",
+            ],
+        ),
+        DataItem(
+            submission="Boiling occurs near 100C at sea level; altitude effects are not covered.",
+            description="on-topic but incomplete",
+            ground_truth=[CriterionVerdict.MET, CriterionVerdict.UNMET, "Somewhat clear"],
+            ground_truth_reasons=[
+                "States the boiling point.",
+                "No unsafe advice.",
+                "Mostly clear but incomplete.",
+            ],
+        ),
+        DataItem(
+            submission="Not sure of the temperature; river water is fine boiled or not.",
+            description="ambiguous and risky",
+            ground_truth=[
+                CriterionVerdict.CANNOT_ASSESS,
+                CriterionVerdict.MET,
+                "Cannot assess / not applicable",
+            ],
+            ground_truth_reasons=[
+                None,
+                "Endorses drinking untreated river water.",
+                None,
+            ],
+        ),
+    ],
+)
+FEW_SHOT_CONFIG = FewShotConfig(seed=0, include_reason=True)
 
 
 def _grader_configurations() -> dict[str, dict[str, Any]]:
@@ -233,6 +414,36 @@ def _grader_configurations() -> dict[str, dict[str, Any]]:
                 aggregation="weighted",
                 llm_calls="per_item",
                 seed=0,
+            ),
+            "rubric": MIXED_RUBRIC,
+            "to_grade": PLAIN,
+            "query": QUERY,
+            "reference_submission": None,
+        },
+        "single_judge_per_item_few_shot": {
+            "grader": lambda: CriterionGrader(
+                judges=[JudgeSpec(judge, "golden")],
+                llm_calls="per_item",
+                seed=0,
+                training_data=FEW_SHOT_TRAINING_DATA,
+                few_shot_config=FEW_SHOT_CONFIG,
+            ),
+            "rubric": MIXED_RUBRIC,
+            "to_grade": PLAIN,
+            "query": QUERY,
+            "reference_submission": REFERENCE,
+        },
+        "panel_per_item_few_shot": {
+            "grader": lambda: CriterionGrader(
+                judges=[
+                    JudgeSpec(judge, "alpha"),
+                    JudgeSpec(LLMConfig(model="golden-model-2"), "beta", 2.0),
+                ],
+                aggregation="weighted",
+                llm_calls="per_item",
+                seed=0,
+                training_data=FEW_SHOT_TRAINING_DATA,
+                few_shot_config=FEW_SHOT_CONFIG,
             ),
             "rubric": MIXED_RUBRIC,
             "to_grade": PLAIN,
@@ -712,6 +923,55 @@ def test_spec_a_zero_weight_criterion_is_posed_as_positive() -> None:
     assert (
         build_user_prompt(ZERO_WEIGHT, PLAIN) == f"{block}\n\n<submission>\n{PLAIN}\n</submission>"
     )
+
+
+def test_spec_format_rubric_examples_worked_example() -> None:
+    """The specified worked few-shot example, reproduced with its literal text.
+
+    Written out by hand from the specification, not read from a golden file or from
+    ``autorubric.prompts``: if the rendered text ever differs from this, this test fails and
+    stays failing rather than being adjusted to match the implementation.
+    """
+    capital = Criterion(
+        name="capital", weight=1.0, requirement="States that the capital of France is Paris"
+    )
+    clarity = Criterion(
+        name="clarity",
+        weight=1.0,
+        requirement="How clear is the explanation?",
+        scale_type="ordinal",
+        options=[
+            CriterionOption(label="Unclear", value=0.0),
+            CriterionOption(label="Very clear", value=1.0),
+            CriterionOption(label="Somewhat clear", value=0.5),
+            CriterionOption(label="Cannot assess / not applicable", value=0.0, na=True),
+        ],
+    )
+    examples = [
+        (
+            "...",
+            [
+                ("c0", capital, CriterionVerdict.MET, "Names Paris."),
+                ("c1", clarity, 1, None),
+            ],
+        )
+    ]
+    expected = (
+        "<examples>\n"
+        "<example_1>\n"
+        "<example_submission>...</example_submission>\n"
+        '<judgment id="c0">\n'
+        "<verdict>MET</verdict>\n"
+        "<reason>Names Paris.</reason>\n"
+        "</judgment>\n"
+        '<judgment id="c1">\n'
+        "<selected_option>2</selected_option>\n"
+        "<selected_label>Very clear</selected_label>\n"
+        "</judgment>\n"
+        "</example_1>\n"
+        "</examples>"
+    )
+    assert _format_rubric_examples(examples, include_reason=True) == expected
 
 
 # ---------------------------------------------------------------------------

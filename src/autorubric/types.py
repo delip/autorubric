@@ -1289,12 +1289,26 @@ class FewShotExample:
 class FewShotConfig:
     """Configuration for few-shot example selection.
 
+    Under ``CriterionGrader(llm_calls="per_item")``, where an LLM judge grades an item's whole
+    rubric in one call, an example is a whole training item, shown once per call and labelled
+    on every criterion, and ``n_examples`` and ``balance_verdicts`` apply to those items (see
+    each attribute).
+
     Attributes:
-        n_examples: Total number of examples to include per criterion.
+        n_examples: Total number of examples to include per criterion. Under
+            ``llm_calls="per_item"``, the number of examples per call: whole training items,
+            each labelled on every criterion.
         balance_verdicts: If True, attempt to balance examples across label classes — verdicts
             (MET/UNMET/CANNOT_ASSESS) for binary criteria, option indices for multi-choice
             criteria. If False, randomly sample without balancing. (The name is historical; the
-            balancing logic is class-agnostic and applies to both criterion types.)
+            balancing logic is class-agnostic and applies to both criterion types.) Under
+            ``llm_calls="per_item"``, balancing each criterion's labels is impossible when
+            every example is shared by all criteria, so True means greedy label coverage
+            instead: each pick is the item showing the most (criterion, label) pairs that no
+            picked item shows yet, the earlier in the seeded order on a tie, never an item
+            whose submission was picked already; once no item adds a pair, the remaining
+            slots are filled in the seeded order. The selection is deterministic for a seed
+            and judge. False takes the first items of the seeded order.
         include_reason: If True, each example shows its training item's written reason for
             the criterion, from ``DataItem.ground_truth_reasons``, after its verdict or
             selected option. An example whose item has no reason for that criterion (the

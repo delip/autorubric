@@ -1,0 +1,22 @@
+<examples>
+<example_1>
+<example_submission>Paris is the capital; the explanation was crystal clear.</example_submission>
+<judgment id="c0">
+<verdict>MET</verdict>
+</judgment>
+<judgment id="c1">
+<selected_option>1</selected_option>
+<selected_label>Very clear</selected_label>
+</judgment>
+</example_1>
+<example_2>
+<example_submission>London is the capital, in a somewhat rambling explanation.</example_submission>
+<judgment id="c0">
+<verdict>UNMET</verdict>
+</judgment>
+<judgment id="c1">
+<selected_option>3</selected_option>
+<selected_label>Somewhat clear</selected_label>
+</judgment>
+</example_2>
+</examples>

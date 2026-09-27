@@ -37,6 +37,7 @@ from autorubric.prompts import (
     GRADER_SYSTEM_PROMPT_DEFAULT,
     MULTI_CHOICE_FEW_SHOT_ADDITION,
     MULTI_CHOICE_SYSTEM_PROMPT,
+    _format_rubric_examples,
     build_few_shot_user_prompt,
     build_multi_choice_few_shot_user_prompt,
     build_multi_choice_user_prompt,
@@ -95,8 +96,11 @@ def _derive_shuffle_rng(
 
 
 # Sentinel used in the item-key slot of ``_derive_shuffle_rng`` for few-shot example
-# selection. Few-shot examples are a fixed property of (criterion, judge), not of the
-# item being graded, so the per-call item content is intentionally not part of the key.
+# selection. Few-shot examples are a fixed property of the judge, not of the item being
+# graded, so the per-call item content is intentionally not part of the key. Called per
+# criterion, a judge draws examples for each criterion, keyed on the criterion's index; under
+# ``llm_calls="per_item"`` it draws whole training items once, with ``-1`` in the criterion
+# slot for the whole rubric.
 FEW_SHOT_DOMAIN = "few_shot"
 
 # The judge_id a grader built with ``judge_model_config`` gives its one judge. That judge's
@@ -966,9 +970,11 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
     and with its options shuffled exactly as there; and the answer (``RubricJudgment``) maps
     back to one result per criterion. A missing or unusable answer fails only its criterion
     (``parse``), a failed call fails every criterion, and the call's usage and cost ride on
-    the item's first result. Votes, aggregation and scoring are the same in both modes. A
-    cascade's escalation judges make that call too, but only for an item with an escalated
-    criterion, and keep only the escalated criteria's results (see below).
+    the item's first result. With few-shot examples, the call shows whole training items,
+    each once with its ground truth for every criterion, instead of examples drawn for each
+    criterion. Votes, aggregation and scoring are the same in both modes. A cascade's
+    escalation judges make that call too, but only for an item with an escalated criterion,
+    and keep only the escalated criteria's results (see below).
 
     A confidence cascade (``escalation=EscalationConfig(...)``) puts one decision model
     first and LLM judges behind it. The decision model judges every criterion in its one
@@ -1127,8 +1133,18 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 judges only, never to a decision-model judge, whose request is exactly what
                 it would be without them. An example shows its item's ground truth for the
                 criterion and, when ``few_shot_config.include_reason`` is True, the item's
-                written reason for it (``DataItem.ground_truth_reasons``), if any.
+                written reason for it (``DataItem.ground_truth_reasons``), if any. Called per
+                criterion, a judge is shown examples drawn for each criterion separately.
+                Under ``llm_calls="per_item"`` an example is a whole training item, shown
+                once in the judge's one call per item with its ground truth (and reason) for
+                every criterion; only an item whose ground truth resolves for every
+                criterion (a verdict for a binary criterion, an option for a multi-choice
+                one) is eligible. Either way each judge draws its own examples, and the
+                training data needs a global rubric, which says what each label means.
             few_shot_config: Configuration for few-shot example selection (LLM judges only).
+                Under ``llm_calls="per_item"``, ``n_examples`` counts the training items
+                each call shows and ``balance_verdicts`` selects them by greedy label
+                coverage (see ``FewShotConfig``).
             system_prompt: Custom system prompt for binary criteria. Applies to LLM judges
                 only (a decision model's request has no system prompt); in a mixed ensemble
                 the LLM judges use it.
@@ -1185,7 +1201,9 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 ``"per_item"`` sends the submission once instead of once per criterion but
                 generates every criterion's judgment in one reply, so ``max_tokens`` and
                 ``timeout`` must allow for the whole rubric's answer: a reply cut off at
-                ``max_tokens`` fails every criterion. Applies to LLM judges only; a decision
+                ``max_tokens`` fails every criterion. It also shapes few-shot examples: under
+                ``"per_item"`` they are whole training items, each labelled on every
+                criterion (see ``training_data``). Applies to LLM judges only; a decision
                 model always makes one request per item. The name counts LLM calls per item;
                 it is unrelated to ``compute_metrics(per_item_metrics=...)`` and to per-item
                 rubrics.
@@ -1202,8 +1220,9 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 place since it was built, e.g. emptied); if llm_calls is not
                 ``"per_criterion"`` or ``"per_item"``; if few_shot_config or training_data is
                 given while every judge is a decision model (few-shot examples apply to LLM
-                judges only); if binary_response_format or multi_choice_response_format is
-                given while any judge is a decision model, or with ``llm_calls="per_item"``;
+                judges only), or training_data has no global rubric; if
+                binary_response_format or multi_choice_response_format is given while any
+                judge is a decision model, or with ``llm_calls="per_item"``;
                 or if a decision-model judge has no API key, has a key the SDK would reject
                 (anything but printable ASCII without whitespace), or has a resolved base
                 URL (``api_base`` or the ``TYPESAFE_BASE_URL`` environment variable) that is
@@ -1427,6 +1446,9 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         # Note: For multi-choice, examples are stored as (submission, selected_index, reason)
         self._criterion_examples: dict[tuple[int, str], list[FewShotExample]] = {}
         self._multi_choice_examples: dict[tuple[int, str], list[tuple[str, int, str | None]]] = {}
+        # Under llm_calls="per_item": each LLM judge's examples, whole training items in the
+        # order its one call per item shows them
+        self._item_examples: dict[str, list[DataItem]] = {}
         if training_data is not None:
             self._prepare_examples()
 
@@ -1466,18 +1488,30 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
     # =========================================================================
 
     def _prepare_examples(self) -> None:
-        """Pre-compute few-shot examples for each criterion and each LLM judge.
+        """Pre-compute the few-shot examples of each LLM judge.
 
         The LLM judges include a cascade's escalation judges. Decision-model judges get
         none: few-shot examples apply to LLM judges only. Each judge's selection is keyed on
         its own ``judge_id``, so leaving decision models out changes no LLM judge's
         examples, and an escalation judge gets the examples it would get in a grader without
         the cascade with the same ``judge_id``.
+
+        Called per criterion (the default ``llm_calls``), a judge gets examples for each
+        criterion, drawn for that criterion alone: ``_select_examples_for_criterion`` for a
+        binary criterion, ``_select_multi_choice_examples`` for a multi-choice one. Under
+        ``llm_calls="per_item"`` it gets whole training items instead, each shown once in
+        its one call per item with its ground truth for every criterion
+        (``_select_item_examples``), and the per-criterion examples stay empty.
+
+        Raises:
+            ValueError: If the training data has no global rubric, which says what each
+                ground-truth label means.
         """
         training_data = self._training_data
         if training_data is None:
             return
 
+        # Raises without a global rubric, however the judges are called.
         n_criteria = training_data.num_criteria
         rubric_criteria = training_data.rubric.rubric if training_data.rubric else []
         llm_judges = [
@@ -1485,6 +1519,11 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
             for j in (*self._judges, *self._escalation_judges)
             if not isinstance(j.llm_config, DecisionModelConfig)
         ]
+
+        if self._llm_calls == "per_item":
+            for judge in llm_judges:
+                self._item_examples[judge.judge_id] = self._select_item_examples(judge.judge_id)
+            return
 
         for criterion_idx in range(n_criteria):
             criterion = (
@@ -1701,6 +1740,117 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 (item.submission, resolved_idx, _ground_truth_reason(item, criterion_idx))
                 for item, resolved_idx in all_pairs[:n_examples]
             ]
+
+    def _select_item_examples(self, judge_id: str) -> list[DataItem]:
+        """Select the whole training items a judge's one call per item shows as examples.
+
+        Under ``llm_calls="per_item"`` an example is a training item labelled on every
+        criterion (``_item_labels``); only an item with a usable label for every criterion
+        is eligible. The eligible items, in dataset order, are shuffled by
+        ``_derive_shuffle_rng(few_shot_seed, FEW_SHOT_DOMAIN, -1, judge_id)``: ``-1`` stands
+        for the whole rubric and is no criterion's index, and each judge draws its own
+        examples. Then, up to ``n_examples`` items:
+
+        - With ``balance_verdicts=False``, the first items of that seeded order.
+        - With ``balance_verdicts=True``, greedy label coverage. Balancing each criterion's
+          labels is impossible when every example carries every criterion's label, so each
+          pick is the item showing the most (criterion index, label) pairs that no picked
+          item shows yet, the earliest in the seeded order on a tie. Once no item adds a
+          pair, the remaining slots are filled in the seeded order. An item whose submission
+          was already picked is skipped throughout, so no submission is shown twice.
+
+        Reasons (``DataItem.ground_truth_reasons``) never affect the draw.
+
+        Returns:
+            The items, in the order the prompt shows them: the order they were picked in.
+        """
+        if self._training_data is None:
+            return []
+
+        config = self._few_shot_config
+        seed = config.seed
+        # Guaranteed non-None when training_data is present (see __init__ few-shot seed
+        # coordination); _prepare_examples is the only caller and runs only in that case.
+        assert seed is not None
+        rng = _derive_shuffle_rng(seed, FEW_SHOT_DOMAIN, -1, judge_id)
+
+        # Each eligible item with its labels, in the seeded order
+        candidates = [
+            (item, labels)
+            for item in self._training_data
+            if (labels := self._item_labels(item)) is not None
+        ]
+        rng.shuffle(candidates)
+        n_examples = config.n_examples
+
+        if not config.balance_verdicts:
+            return [item for item, _labels in candidates[:n_examples]]
+
+        pairs = [set(enumerate(labels)) for _item, labels in candidates]
+        shown: set[tuple[int, CriterionVerdict | int]] = set()
+        picked: list[DataItem] = []
+        picked_submissions: set[str] = set()
+        # Picking by coverage while any item adds a pair; a picked item's submission is
+        # among picked_submissions, so an item is picked at most once.
+        while len(picked) < n_examples:
+            best, best_gain = None, 0
+            for position, (item, _labels) in enumerate(candidates):
+                if item.submission in picked_submissions:
+                    continue
+                gain = len(pairs[position] - shown)
+                if gain > best_gain:
+                    best, best_gain = position, gain
+            if best is None:
+                break
+            picked.append(candidates[best][0])
+            picked_submissions.add(candidates[best][0].submission)
+            shown |= pairs[best]
+        # Filling the remaining slots in the seeded order
+        for item, _labels in candidates:
+            if len(picked) >= n_examples:
+                break
+            if item.submission not in picked_submissions:
+                picked.append(item)
+                picked_submissions.add(item.submission)
+        return picked
+
+    def _item_labels(self, item: DataItem) -> list[CriterionVerdict | int] | None:
+        """A training item's ground truth as few-shot labels, one per criterion.
+
+        A criterion's kind is the training rubric's (a criterion it lacks counts as
+        binary). A binary criterion's label is its ``CriterionVerdict``; a multi-choice
+        criterion's is the 0-based index of its option, resolved from an option label by
+        ``_label_to_option_index`` or given as an index in range.
+
+        Returns:
+            The labels, in criterion order, or ``None`` when the item cannot be a
+            whole-rubric example: it has no ground truth, or a label is unusable (a binary
+            criterion's is no ``CriterionVerdict``, a multi-choice criterion's resolves to
+            no option).
+        """
+        if self._training_data is None or item.ground_truth is None:
+            return None
+        rubric = self._training_data.rubric
+        criteria = rubric.rubric if rubric else []
+        labels: list[CriterionVerdict | int] = []
+        for criterion_idx, label in enumerate(item.ground_truth):
+            options = criteria[criterion_idx].options if criterion_idx < len(criteria) else None
+            option_idx: int | None
+            if options is None:
+                if not isinstance(label, CriterionVerdict):
+                    return None
+                labels.append(label)
+                continue
+            if isinstance(label, str):
+                option_idx = self._label_to_option_index(criterion_idx, label)
+            elif isinstance(label, int) and not isinstance(label, bool):
+                option_idx = label if 0 <= label < len(options) else None
+            else:
+                option_idx = None
+            if option_idx is None:
+                return None
+            labels.append(option_idx)
+        return labels
 
     # =========================================================================
     # Single Criterion Evaluation
@@ -2217,6 +2367,15 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         is made, answered as a ``RubricJudgment``, and none for an empty rubric. Its
         judgments map back to one result per criterion, in rubric order.
 
+        With training data, the user prompt shows the judge's few-shot examples
+        (``_select_item_examples``) after the criteria, rendered with the prompts: each a
+        whole training item with its judgment of each criterion under the criterion's id,
+        a multi-choice criterion's option numbered in this call's order (``_rubric_examples``,
+        ``_format_rubric_examples``). The system prompt's preamble then says how to read
+        them. When no example has a judgment to show, the call has no examples block and the
+        preamble leaves out its examples sentence; the guides keep their few-shot additions,
+        which come with the training data, as a per-criterion call without examples does.
+
         Failures are scoped as tightly as they occur, and each is reported by
         ``_failed_judgment_result`` (routed by ``classify_grading_error``):
 
@@ -2261,9 +2420,18 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 )
             presented.append((question_id(criterion_idx), shown))
             shuffles.append(shuffled_indices)
-        system_prompt = self._rubric_system_prompt(rubric)
+        examples_text = _format_rubric_examples(
+            self._rubric_examples(judge.judge_id, rubric, presented, shuffles),
+            self._few_shot_config.include_reason,
+        )
+        system_prompt = self._rubric_system_prompt(rubric, with_examples=bool(examples_text))
         user_prompt = build_rubric_user_prompt(
-            presented, to_grade, query, reference_submission, guidelines=guidelines
+            presented,
+            to_grade,
+            query,
+            reference_submission,
+            examples_text=examples_text,
+            guidelines=guidelines,
         )
 
         try:
@@ -2322,6 +2490,69 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
             else:
                 results.append(CriterionResult(report=report))
         return results, result.usage, result.cost
+
+    def _rubric_examples(
+        self,
+        judge_id: str,
+        rubric: Sequence[Criterion],
+        presented: Sequence[tuple[str, Criterion]],
+        shuffles: Sequence[list[int] | None],
+    ) -> list[tuple[str, list[tuple[str, Criterion, CriterionVerdict | int, str | None]]]]:
+        """The few-shot examples of a judge's one call, each with its judgments as shown.
+
+        Each of the judge's examples (``_select_item_examples``) has a judgment for each
+        criterion index that both the training rubric and ``rubric`` have, with a criterion
+        of the same kind: its verdict, or its option renumbered to the option's position in
+        the call's order, when the graded criterion has that option. As with per-criterion
+        examples, this assumes ``rubric`` is the training data's rubric. An example with no
+        judgment is left out.
+
+        Args:
+            judge_id: The judge whose examples to show.
+            rubric: The effective rubric of the call.
+            presented: Each criterion of ``rubric`` with its id, as the call shows it.
+            shuffles: Each multi-choice criterion's option permutation
+                (``shuffled_indices[shuffled_pos] = original_pos``); None for a binary one.
+
+        Returns:
+            Each example's submission and its judgments, ``(criterion_id, criterion as
+            shown, label, reason)``, for ``_format_rubric_examples``; empty without examples.
+        """
+        examples = self._item_examples.get(judge_id, [])
+        if self._training_data is None or not examples:
+            return []
+        training_rubric = self._training_data.rubric
+        training_criteria = training_rubric.rubric if training_rubric else []
+        shown_examples = []
+        for item in examples:
+            labels = self._item_labels(item)
+            if labels is None:
+                # Selected items resolve; one no longer does only if it changed since.
+                continue
+            judgments: list[tuple[str, Criterion, CriterionVerdict | int, str | None]] = []
+            for criterion_idx, label in enumerate(labels):
+                if criterion_idx >= min(len(training_criteria), len(rubric)):
+                    break
+                if (
+                    training_criteria[criterion_idx].is_multi_choice
+                    != rubric[criterion_idx].is_multi_choice
+                ):
+                    continue
+                criterion_id, shown = presented[criterion_idx]
+                shuffled_indices = shuffles[criterion_idx]
+                if shuffled_indices is None:
+                    shown_label: CriterionVerdict | int = label
+                elif isinstance(label, int) and label < len(shuffled_indices):
+                    # From the option's original index to its position in the call's order
+                    shown_label = shuffled_indices.index(label)
+                else:
+                    continue
+                judgments.append(
+                    (criterion_id, shown, shown_label, _ground_truth_reason(item, criterion_idx))
+                )
+            if judgments:
+                shown_examples.append((item.submission, judgments))
+        return shown_examples
 
     def _rubric_judgment_report(
         self,
@@ -2516,9 +2747,10 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         - Under ``llm_calls="per_item"``, the judge makes the one call about the whole
           effective rubric (``_judge_rubric_in_one_call``) that it makes for every item
           without the cascade: every criterion, in order, with the same option
-          permutations. Only its results for the escalated criteria are kept; a failed
-          call therefore fails the escalated criteria's votes alone. The call's usage and
-          cost ride on the first escalated criterion's result.
+          permutations and the same few-shot examples, which are drawn for its
+          ``judge_id`` (``_select_item_examples``). Only its results for the escalated
+          criteria are kept; a failed call therefore fails the escalated criteria's votes
+          alone. The call's usage and cost ride on the first escalated criterion's result.
 
         Args:
             judge: The escalation judge (an LLM).

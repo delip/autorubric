@@ -874,8 +874,9 @@ def question_id(criterion_idx: int) -> str:
     """Id of the question posing criterion ``criterion_idx``: ``"c{criterion_idx}"``.
 
     ``criterion_idx`` is the criterion's index in the effective rubric (the rubric after NA
-    options are guaranteed), the same index that keys option shuffling and few-shot
-    selection, so ids are unique and stable even for unnamed or duplicate-named criteria.
+    options are guaranteed), the same index that keys option shuffling and, when an LLM
+    judge is called per criterion, few-shot selection, so ids are unique and stable even for
+    unnamed or duplicate-named criteria.
     """
     return f"c{criterion_idx}"
 
