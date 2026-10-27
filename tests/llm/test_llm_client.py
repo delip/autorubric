@@ -563,6 +563,92 @@ class TestLLMClientTemperature:
             client.close()
 
 
+class TestLLMClientMaxTokensAndTopP:
+    """``max_tokens`` and ``top_p`` are sent whenever they are set (not None)."""
+
+    @staticmethod
+    async def _sent_kwargs(config: LLMConfig, **generate_kwargs) -> dict:
+        client = LLMClient(config)
+        with patch("autorubric.llm.litellm.acompletion", new_callable=AsyncMock) as mock_completion:
+            mock_completion.return_value = _text_response()
+            await client.generate(system_prompt="System", user_prompt="User", **generate_kwargs)
+        mock_completion.assert_called_once()
+        return dict(mock_completion.call_args.kwargs)
+
+    @pytest.mark.asyncio
+    async def test_default_config_sends_neither(self):
+        """A config that sets neither leaves both out of the request."""
+        sent = await self._sent_kwargs(LLMConfig(model="openai/gpt-5.2"))
+        assert "max_tokens" not in sent
+        assert "top_p" not in sent
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("top_p", [0.0, 0, 0.9, 1, 1.0])
+    async def test_top_p_is_sent_as_configured(self, top_p):
+        """A top_p of 0 is a real setting (greedy nucleus) and is sent, not dropped as falsy."""
+        sent = await self._sent_kwargs(LLMConfig(model="openai/gpt-5.2", top_p=top_p))
+        assert "top_p" in sent
+        assert sent["top_p"] == top_p
+        assert type(sent["top_p"]) is type(top_p)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("max_tokens", [1, 1024])
+    async def test_max_tokens_is_sent_as_configured(self, max_tokens):
+        """A positive max_tokens is sent unchanged."""
+        sent = await self._sent_kwargs(LLMConfig(model="openai/gpt-5.2", max_tokens=max_tokens))
+        assert sent["max_tokens"] == max_tokens
+
+    @pytest.mark.asyncio
+    async def test_a_previously_sent_config_sends_the_same_request(self):
+        """A config whose values were sent before sends exactly the same parameters."""
+        config = LLMConfig(model="openai/gpt-5.2", temperature=0.2, max_tokens=512, top_p=0.9)
+        sent = await self._sent_kwargs(config)
+        assert {k: v for k, v in sent.items() if k != "messages"} == {
+            "model": "openai/gpt-5.2",
+            "temperature": 0.2,
+            "timeout": 60.0,
+            "max_tokens": 512,
+            "top_p": 0.9,
+        }
+
+    @pytest.mark.asyncio
+    async def test_per_call_overrides_still_apply_when_the_config_sets_them(self):
+        """A per-call max_tokens or top_p replaces the configured value, as before."""
+        config = LLMConfig(model="openai/gpt-5.2", max_tokens=512, top_p=0.9)
+        sent = await self._sent_kwargs(config, max_tokens=64, top_p=0.5)
+        assert sent["max_tokens"] == 64
+        assert sent["top_p"] == 0.5
+
+    @pytest.mark.parametrize(
+        ("top_p", "max_tokens"),
+        [(None, None), (0.9, 1024), (0.5, 1), (1, None)],
+    )
+    def test_cache_key_format_is_unchanged(self, top_p, max_tokens):
+        """The cache key renders both as configured, in the format it always had."""
+        config = LLMConfig(model="openai/gpt-5.2", top_p=top_p, max_tokens=max_tokens)
+        content = (
+            "openai/gpt-5.2:System:User:str:temp=None"
+            f":top_p={top_p}:max_tokens={max_tokens}:thinking=none:seed=None"
+        )
+        expected = hashlib.sha256(content.encode()).hexdigest()
+        assert LLMClient(config)._cache_key("openai/gpt-5.2", "System", "User", None) == expected
+
+    @pytest.mark.parametrize("top_p", [0.0, 0])
+    def test_a_zero_top_p_no_longer_reuses_responses_cached_without_it(self, top_p):
+        """A zero top_p was keyed as configured but left out of the request, so the
+        responses cached under that key were sampled at the provider default. Now that it
+        is sent, its key differs from that one and from an unset top_p's."""
+        args = ("openai/gpt-5.2", "System", "User", None)
+        key = LLMClient(LLMConfig(model="openai/gpt-5.2", top_p=top_p))._cache_key(*args)
+        old_content = (
+            f"openai/gpt-5.2:System:User:str:temp=None:top_p={top_p}"
+            ":max_tokens=None:thinking=none:seed=None"
+        )
+        assert key != hashlib.sha256(old_content.encode()).hexdigest()
+        assert key != LLMClient(LLMConfig(model="openai/gpt-5.2"))._cache_key(*args)
+        assert key == LLMClient(LLMConfig(model="openai/gpt-5.2", top_p=top_p))._cache_key(*args)
+
+
 class TestProviderResponseFormat:
     """Tests for _provider_response_format.
 

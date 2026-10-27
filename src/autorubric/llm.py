@@ -10,6 +10,8 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
+import numbers
 import sys
 from dataclasses import asdict, dataclass, field, fields
 from enum import Enum
@@ -34,6 +36,7 @@ from tenacity import (
 )
 
 from autorubric.rate_limit import RateLimitPool
+from autorubric.types import _as_int
 
 if TYPE_CHECKING:
     from autorubric.types import TokenUsage
@@ -614,8 +617,12 @@ class LLMConfig:
             0.0 reduces but does not guarantee determinism on most providers.
             Note: the default changed from 0.0 to None in v1.6.0. To keep the previous
             behavior, pass ``temperature=0.0`` explicitly (it keeps the same cache keys).
-        max_tokens: Maximum tokens in response.
-        top_p: Nucleus sampling parameter.
+        max_tokens: Maximum tokens in the response: None (default) omits it from the
+            request, so the provider's limit applies; otherwise an integer >= 1, sent
+            unchanged.
+        top_p: Nucleus sampling parameter: None (default) omits it from the request, so the
+            provider's default applies; otherwise a number in [0, 1], sent unchanged
+            (including 0).
         timeout: Request timeout in seconds.
         max_retries: Maximum retry attempts for transient failures.
         retry_min_wait: Minimum wait between retries (seconds).
@@ -698,6 +705,35 @@ class LLMConfig:
     seed: int | None = None  # OpenAI reproducibility
     extra_headers: dict[str, str] = field(default_factory=dict)
     extra_params: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        """Validate ``max_tokens`` and ``top_p``, storing them as plain ``int``/``float``.
+
+        Each is sent with every request whenever it is not None, so a value no provider
+        can mean is refused here rather than sent or silently dropped. A ``bool`` is
+        never taken for a number. Any ``numbers.Integral`` (numpy integers too) is a
+        ``max_tokens``, stored as ``int``; a ``top_p`` that is a real number other than an
+        ``int`` or ``float`` (a numpy float, say) is stored as ``float``.
+
+        Raises:
+            ValueError: If ``max_tokens`` is neither None nor an integer >= 1, or ``top_p``
+                is neither None nor a real number in [0, 1] (NaN is not).
+        """
+        name = type(self).__name__
+        if self.max_tokens is not None:
+            max_tokens = _as_int(self.max_tokens)
+            if max_tokens is None or max_tokens < 1:
+                raise ValueError(
+                    f"{name}.max_tokens must be None or an integer >= 1; got {self.max_tokens!r}"
+                )
+            self.max_tokens = max_tokens
+        top_p = self.top_p
+        if top_p is not None:
+            is_real = isinstance(top_p, numbers.Real) and not isinstance(top_p, bool)
+            if not (is_real and math.isfinite(top_p) and 0 <= top_p <= 1):
+                raise ValueError(f"{name}.top_p must be None or a number in [0, 1]; got {top_p!r}")
+            if type(top_p) not in (int, float):
+                self.top_p = float(top_p)
 
     def get_thinking_config(self) -> ThinkingConfig | None:
         """Get normalized thinking configuration."""
@@ -866,16 +902,24 @@ class LLMClient:
                 override replaces ``config.temperature`` in the key, so an override never
                 reuses a response cached at a different temperature. None (provider
                 default) is rendered as ``None``; explicit values keep the same key format
-                as before, so existing cache entries still match.
+                as before, so existing cache entries still match. ``top_p`` and
+                ``max_tokens`` are rendered as configured, except that a zero ``top_p``,
+                which earlier releases keyed this way but did not send, gets a key of its
+                own.
         """
         temperature = (overrides or {}).get("temperature", self.config.temperature)
         schema_name = response_format.__name__ if response_format else "str"
         thinking_config = self.config.get_thinking_config()
         thinking_str = str(thinking_config) if thinking_config else "none"
+        # A zero top_p used to be left out of the request while keyed as configured, so the
+        # responses cached under that key were sampled at the provider's default. It is
+        # sent now and keyed apart from them; every other value keeps the key it had.
+        top_p = self.config.top_p
+        top_p_str = f"{top_p}:top_p_sent=True" if top_p is not None and top_p == 0 else top_p
         content = (
             f"{model}:{system_prompt}:{user_prompt}:{schema_name}"
             f":temp={temperature}"
-            f":top_p={self.config.top_p}"
+            f":top_p={top_p_str}"
             f":max_tokens={self.config.max_tokens}"
             f":thinking={thinking_str}"
             f":seed={self.config.seed}"
@@ -1021,9 +1065,11 @@ class LLMClient:
             **self.config.extra_params,
         }
 
-        if self.config.max_tokens:
+        # Sent whenever set: LLMConfig refuses values no provider can mean, and a top_p of
+        # 0 is a real setting.
+        if self.config.max_tokens is not None:
             params["max_tokens"] = kwargs.get("max_tokens", self.config.max_tokens)
-        if self.config.top_p:
+        if self.config.top_p is not None:
             params["top_p"] = kwargs.get("top_p", self.config.top_p)
         if self.config.api_key:
             params["api_key"] = self.config.api_key

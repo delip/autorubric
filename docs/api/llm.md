@@ -64,6 +64,18 @@ A low temperature reduces run-to-run variance, but most providers do not guarant
 !!! warning "Default changed in v1.6.0"
     Up to and including v1.5.3, `temperature` defaulted to `0.0` and was always sent. A config that never sets it now samples at the provider's default, so its grades may differ from earlier runs, and responses cached by those runs are not reused (an unset temperature has its own cache key). To keep the old behaviour, set `temperature=0.0` explicitly (`temperature: 0.0` in YAML). Configs that already set `temperature` explicitly send the same value and keep their cached responses.
 
+## Output Length and Nucleus Sampling
+
+`max_tokens` and `top_p` also default to `None`, which leaves them out of the request so the provider's own limit and default apply. A value you set is sent unchanged, including `top_p=0.0`. `LLMConfig` refuses a value no provider can mean with a `ValueError`: a `max_tokens` that is not an integer of at least 1, or a `top_p` that is not a number between 0 and 1 (a `bool` is not taken for a number).
+
+```python
+LLMConfig(model="openai/gpt-4.1-mini", max_tokens=1024, top_p=0.0)  # both sent
+LLMConfig(model="openai/gpt-4.1-mini", max_tokens=0)                 # ValueError
+```
+
+!!! note "Changed behaviour"
+    Earlier releases sent `max_tokens` and `top_p` only when they were truthy, so `top_p=0.0` and `max_tokens=0` were silently left out of the request. `top_p=0.0` is now sent, and responses cached for it by earlier releases, which were sampled without it, are not reused (it has a new cache key). `max_tokens=0`, a negative `max_tokens` and a `top_p` outside [0, 1] are now refused. Configs that set other values send the same requests and keep their cached responses.
+
 ## YAML Configuration
 
 ```yaml

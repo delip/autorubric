@@ -44,8 +44,8 @@ Every field except `model` has a default. [LLM Infrastructure](../api/llm.md) is
 |---|---|---|
 | `model` | required | LiteLLM model id, e.g. `"openai/gpt-4.1-mini"` |
 | `temperature` | `None` | Sampling temperature; `None` leaves it out of the request, so the provider's default applies, and any number, `0.0` included, is sent |
-| `max_tokens` | `None` | Cap on response tokens; `None` sends no cap |
-| `top_p` | `None` | Nucleus sampling; `None` sends none |
+| `max_tokens` | `None` | Cap on response tokens, an integer of at least 1; `None` sends no cap |
+| `top_p` | `None` | Nucleus sampling, a number in [0, 1] (`0.0` is sent); `None` sends none |
 | `timeout` | `60.0` | Timeout of each attempt, in seconds |
 | `max_retries` | `3` | Attempts AutoRubric makes per call, the first included |
 | `retry_min_wait` / `retry_max_wait` | `1.0` / `60.0` | Bounds, in seconds, on the exponential backoff between attempts |

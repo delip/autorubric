@@ -1,9 +1,11 @@
 """Tests for LLMConfig class."""
 
 import tempfile
-from dataclasses import MISSING, asdict, fields
+from dataclasses import MISSING, asdict, fields, replace
 from pathlib import Path
+from typing import cast
 
+import numpy as np
 import pytest
 import yaml
 
@@ -60,6 +62,70 @@ class TestLLMConfigCreation:
         assert config.seed == 42
         assert config.extra_headers == {"X-Custom": "header"}
         assert config.extra_params == {"custom_param": "value"}
+
+
+class TestLLMConfigValidation:
+    """``max_tokens`` and ``top_p`` are refused at construction when they mean nothing."""
+
+    @pytest.mark.parametrize(
+        "max_tokens",
+        [0, -1, True, False, np.bool_(True), np.int64(0), 1.5, 1024.0, "1024", float("nan")],
+    )
+    def test_max_tokens_that_is_not_a_positive_integer_is_refused(self, max_tokens):
+        with pytest.raises(ValueError, match=r"LLMConfig\.max_tokens must be None or an integer"):
+            LLMConfig(model="openai/gpt-5.2", max_tokens=max_tokens)
+
+    @pytest.mark.parametrize(
+        "top_p",
+        [
+            -0.1,
+            1.1,
+            2,
+            float("nan"),
+            float("inf"),
+            True,
+            False,
+            np.bool_(True),
+            "0.9",
+            complex(0.5, 0),
+        ],
+    )
+    def test_top_p_outside_zero_to_one_is_refused(self, top_p):
+        with pytest.raises(ValueError, match=r"LLMConfig\.top_p must be None or a number in"):
+            LLMConfig(model="openai/gpt-5.2", top_p=top_p)
+
+    @pytest.mark.parametrize("max_tokens", [None, 1, 1024])
+    def test_valid_max_tokens_is_kept_unchanged(self, max_tokens):
+        assert LLMConfig(model="openai/gpt-5.2", max_tokens=max_tokens).max_tokens == max_tokens
+
+    @pytest.mark.parametrize("top_p", [None, 0, 0.0, 0.5, 1, 1.0])
+    def test_valid_top_p_is_kept_unchanged(self, top_p):
+        config = LLMConfig(model="openai/gpt-5.2", top_p=top_p)
+        assert config.top_p == top_p
+        assert type(config.top_p) is type(top_p)
+
+    def test_a_numpy_integer_max_tokens_is_stored_as_int(self):
+        max_tokens = cast(int, np.int64(256))  # accepted, though the annotation names only int
+        config = LLMConfig(model="openai/gpt-5.2", max_tokens=max_tokens)
+        assert config.max_tokens == 256
+        assert type(config.max_tokens) is int
+
+    @pytest.mark.parametrize("top_p", [np.float64(0.5), np.float32(0.5)])
+    def test_a_numpy_float_top_p_is_stored_as_float(self, top_p):
+        config = LLMConfig(model="openai/gpt-5.2", top_p=top_p)
+        assert config.top_p == 0.5
+        assert type(config.top_p) is float
+
+    def test_replace_validates_again(self):
+        config = LLMConfig(model="openai/gpt-5.2", top_p=0.5)
+        with pytest.raises(ValueError, match="top_p"):
+            replace(config, top_p=1.5)
+
+    def test_from_yaml_refuses_a_zero_max_tokens(self, tmp_path):
+        path = tmp_path / "llm.yaml"
+        path.write_text("model: openai/gpt-5.2\nmax_tokens: 0\n", encoding="utf-8")
+        with pytest.raises(ValueError, match="max_tokens"):
+            LLMConfig.from_yaml(path)
 
 
 class TestLLMConfigDefaults:
