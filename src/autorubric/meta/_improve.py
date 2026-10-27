@@ -49,15 +49,16 @@ from rich.progress import (
 from rich.table import Table
 from rich.text import Text
 
-from autorubric.dataset import RubricDataset
+from autorubric.dataset import RubricDataset, _criterion_scale_data
 from autorubric.decision import DecisionModelConfig
-from autorubric.graders import CriterionGrader
+from autorubric.graders import CriterionGrader, Grader
 from autorubric.graders.criterion_grader import JudgeSpec
 from autorubric.llm import LLMClient, LLMConfig
 from autorubric.metrics import ConfusionMatrix
 from autorubric.metrics._types import CannotAssessMode
 from autorubric.rubric import Rubric
 from autorubric.types import (
+    Criterion,
     CriterionVerdict,
     EnsembleEvaluationReport,
     TokenUsage,
@@ -107,12 +108,20 @@ class IssueDetail:
 
 @dataclass
 class CriterionExemplar:
-    """A single grading case for a criterion."""
+    """A single grading case for a criterion.
+
+    Attributes:
+        llm_verdict: The judge's verdict on a binary criterion, or the label of the option
+            the judge chose on a multi-choice criterion, as the ``cannot_assess`` handling
+            left it (under ``as_unmet`` an abstention reads as ``UNMET`` or the worst-scored
+            option).
+        ground_truth_verdict: The ground-truth verdict or option label, handled likewise.
+    """
 
     item_index: int
     submission_snippet: str
-    llm_verdict: CriterionVerdict
-    ground_truth_verdict: CriterionVerdict
+    llm_verdict: CriterionVerdict | str
+    ground_truth_verdict: CriterionVerdict | str
     llm_reason: str
     is_disagreement: bool
 
@@ -121,25 +130,39 @@ class CriterionExemplar:
 class CriterionErrorReport:
     """Per-criterion error analysis from held-out grading.
 
+    A binary criterion's judgment agrees with its label when the verdicts match; a
+    multi-choice criterion's when the judge chose the labelled option.
+
     Attributes:
-        kappa: Cohen's kappa between judge and ground-truth MET/UNMET labels over
-            the usable pairs, or None when undefined (e.g. a constant array). Never
-            a fabricated 0.0.
+        accuracy: Fraction of the usable pairs on which judge and ground truth agree (1.0
+            when there are none; ``n_samples`` is then 0).
+        false_positive_rate: Binary criteria: fraction of the usable UNMET labels the judge
+            judged MET (0.0 when there are none). None for a multi-choice criterion, which
+            has no positive class.
+        false_negative_rate: Binary criteria: fraction of the usable MET labels the judge
+            judged UNMET (0.0 when there are none). None for a multi-choice criterion.
+        kappa: Cohen's kappa between judge and ground truth over the usable pairs: on the
+            MET/UNMET labels for a binary criterion, quadratic-weighted over the options for
+            an ordinal one, unweighted for a nominal one (as in ``compute_metrics``). None
+            when undefined (e.g. a constant array). Never a fabricated 0.0.
         coverage: Fraction of ground-truth-paired items that yielded a usable
             (non-abstained) verdict, over the raw pre-exclusion denominator, or None
             when there were no paired items.
-        ca_rate: Fraction of ground-truth-paired items the judge abstained on
-            (CANNOT_ASSESS), over the same raw denominator, or None.
-        confusion_matrix: 2x2 MET/UNMET confusion matrix over the usable verdicts,
-            or None when there were no usable samples.
+        ca_rate: Fraction of ground-truth-paired items on which the judge or the ground
+            truth abstained (CANNOT_ASSESS, or an NA option of a multi-choice criterion),
+            over the same raw denominator, or None.
+        confusion_matrix: Confusion matrix over the usable pairs (rows ground truth, columns
+            judgments): 2x2 MET/UNMET for a binary criterion; over the criterion's option
+            labels for a multi-choice one, with the NA option the grader adds appended when a
+            judgment or a label names it. None when there were no usable samples.
     """
 
     criterion_index: int
     criterion_name: str
     n_samples: int
     accuracy: float
-    false_positive_rate: float
-    false_negative_rate: float
+    false_positive_rate: float | None
+    false_negative_rate: float | None
     disagreement_exemplars: list[CriterionExemplar]
     agreement_exemplars: list[CriterionExemplar]
     kappa: float | None = None
@@ -299,10 +322,16 @@ class ImprovementConfig:
         max_exemplars_per_criterion: Max disagreement exemplars per criterion
             in the held-out revision prompt.
         held_out_min_accuracy: Convergence threshold for held_out strategy.
-        cannot_assess: How abstentions are handled in held-out validation when
-            pairing judge verdicts against ground truth. "exclude" (default) drops
-            abstained pairs; "as_unmet" folds CANNOT_ASSESS into UNMET; "as_category"
-            keeps it as a distinct label.
+        cannot_assess: How abstentions, by the judge or in the ground truth, are handled
+            in held-out validation when pairing judge verdicts against ground truth:
+            CANNOT_ASSESS on a binary criterion, and NA on a multi-choice criterion.
+            "exclude" (default) drops abstained pairs; "as_unmet" folds CANNOT_ASSESS into
+            UNMET, and NA into the criterion's worst-scored option; "as_category" keeps it
+            as a distinct label. "as_category" is refused (``ValueError``, before any call)
+            when the rubric has an ordinal multi-choice criterion the judge is shown an NA
+            option on, as the loop's own grader (default ``auto_na_option``) always does,
+            so under ``improve_rubric`` it is unavailable for any rubric with an ordinal
+            multi-choice criterion, its binary criteria included.
         history_window: Number of recent iterations to include in revision prompt.
         reject_agreement_regression: Whether to reject revisions that decrease
             validation reliability.
@@ -1267,17 +1296,21 @@ def pareto_accept(
     return True, None
 
 
-def _rubric_criteria_data(rubric: Rubric) -> list[dict[str, Any]]:
+def _rubric_criteria_data(rubric: Rubric, *, with_scales: bool = False) -> list[dict[str, Any]]:
     """The criteria as the revision prompts and the loop's artifacts record them.
 
     Each criterion keeps its ``weight`` and ``requirement``, and its ``name`` when it has
-    one.
+    one. With ``with_scales`` (the artifacts), a multi-choice criterion also keeps its
+    scale (``scale_type``, ``options``, ``aggregation``), as ``RubricDataset`` files record
+    it, so ``Rubric.from_dict`` reads the same rubric back; a binary criterion's entry is
+    the same either way. The revision prompts show the criteria without their scales.
     """
     return [
         {
             "weight": c.weight,
             "requirement": c.requirement,
             **({"name": c.name} if c.name else {}),
+            **(_criterion_scale_data(c) if with_scales else {}),
         }
         for c in rubric.rubric
     ]
@@ -1289,7 +1322,7 @@ def _rubric_artifact_data(rubric: Rubric) -> list[dict[str, Any]] | dict[str, An
     The list of criteria, as before guidelines existed, for a rubric without guidelines;
     ``{"guidelines": ..., "criteria": [...]}`` for one with them.
     """
-    criteria = _rubric_criteria_data(rubric)
+    criteria = _rubric_criteria_data(rubric, with_scales=True)
     if rubric.guidelines is None:
         return criteria
     return {"guidelines": rubric.guidelines, "criteria": criteria}
@@ -1409,10 +1442,56 @@ async def revise_rubric(
     return _revised_rubric(criteria_data, rubric), revision_cost
 
 
+def _refuse_ordinal_na_category(
+    criteria: list[Criterion],
+    shown: list[Criterion],
+    labels: list[list[CriterionVerdict | int]],
+    grader: object,
+) -> None:
+    """Refuse ``cannot_assess="as_category"`` for an ordinal criterion on which NA can occur.
+
+    NA can occur when the judge is shown an NA option (the criterion's own, or the one the
+    grader adds with ``auto_na_option``; a grader that is not a ``CriterionGrader`` is
+    assumed to add one) or a label names one. NA has no position on an ordinal scale, so
+    the quadratic-weighted kappa would give it a meaningless distance; for the same reason
+    ``filter_na_multi_choice`` refuses ``na_mode="as_category"``. Checked before any item is
+    graded, so the refusal costs no call. This is stricter than ``compute_metrics``, which
+    refuses only once the run it measures has NA (a judgment or label naming an NA option,
+    or a declared one).
+
+    Raises:
+        ValueError: If such a criterion exists.
+    """
+    for c_idx, criterion in enumerate(criteria):
+        options = shown[c_idx].options
+        if options is None or criterion.scale_type != "ordinal":
+            continue
+        # The criterion as the judge is shown it. A grader that is not a CriterionGrader
+        # may show it an NA option too, so it is read as one adding the NA option.
+        effective_criterion = getattr(grader, "_effective_criterion", None)
+        judged_as = (
+            effective_criterion(criterion)
+            if callable(effective_criterion)
+            else criterion.with_guaranteed_na_option()
+        )
+        judge_sees_na = judged_as.na_option_index is not None
+        label_names_na = any(
+            options[label].na for row in labels if isinstance(label := row[c_idx], int)
+        )
+        if judge_sees_na or label_names_na:
+            name = criterion.name or f"criterion_{c_idx}"
+            raise ValueError(
+                f"Criterion '{name}': cannot_assess='as_category' is not supported for an "
+                "ordinal criterion on which NA can occur (the judge is shown an NA option, "
+                "or a label names one). NA has no ordinal position, so the quadratic-weighted "
+                "kappa would give it a meaningless distance. Use 'exclude' or 'as_unmet'."
+            )
+
+
 async def validate_held_out(
     rubric: Rubric,
     validation_data: RubricDataset,
-    grader: CriterionGrader,
+    grader: Grader[EnsembleEvaluationReport],
     task_prompt: str | None = None,
     *,
     max_exemplars_per_criterion: int = 3,
@@ -1422,18 +1501,30 @@ async def validate_held_out(
 ) -> HeldOutValidationResult:
     """Grade held-out items and compare per-criterion verdicts against ground truth.
 
+    Labels are read as ``resolve_ground_truth`` reads them: a binary criterion's as a
+    verdict, a multi-choice criterion's as one of its options, the NA option the grader adds
+    (``CANONICAL_NA_OPTION``) included. A binary judgment agrees with its label when the
+    verdicts match, a multi-choice judgment when the judge chose the labelled option.
+
     Args:
         rubric: Current rubric to evaluate.
         validation_data: Dataset where all items have ``ground_truth``.
-        grader: Grader configured from ``eval_llm``.
+        grader: Grader configured from ``eval_llm`` (the loop builds a ``CriterionGrader``;
+            another grader is read as one that adds an NA option to each multi-choice
+            criterion without one).
         task_prompt: Optional task prompt for grading context.
         max_exemplars_per_criterion: Max disagreement exemplars per criterion.
-        cannot_assess: How judge abstentions are paired against ground truth.
-            "exclude" (default) drops abstained pairs from the confusion tallies;
-            "as_unmet" folds CANNOT_ASSESS into UNMET; "as_category" keeps it as a
-            distinct label. Coverage and the abstention rate are always measured over
-            the raw, pre-exclusion per-criterion denominator (numerically aligned
-            with ``CoverageStats``). An item whose grade failed (its report has an
+        cannot_assess: How abstentions, on either side, are paired against ground truth:
+            CANNOT_ASSESS on a binary criterion, an NA option (or a judge's abstention
+            without one) on a multi-choice criterion, which is handled as
+            ``filter_na_multi_choice`` handles ``na_mode``. "exclude" (default) drops
+            abstained pairs from the confusion tallies; "as_unmet" folds CANNOT_ASSESS into
+            UNMET, and NA into the criterion's worst-scored option; "as_category" keeps it as
+            a distinct label (refused upfront, before any call, for an ordinal criterion on
+            which NA can occur; stricter than ``compute_metrics``, which refuses only once
+            NA is observed). Coverage and the abstention rate are always
+            measured over the raw, pre-exclusion per-criterion denominator (numerically
+            aligned with ``CoverageStats``). An item whose grade failed (its report has an
             ``error``, e.g. every judgment failed), or a criterion whose judgment failed
             on an item otherwise graded, counts in that denominator only: its stand-in
             verdict is neither an abstention nor a prediction, in any mode.
@@ -1445,13 +1536,50 @@ async def validate_held_out(
 
     Raises:
         ValueError: If a judge of ``grader`` is a decision model: the improvement loop's
-            evaluation judges must be LLMs (checked before any call).
+            evaluation judges must be LLMs. If an item has no ground truth, its
+            ``ground_truth`` length differs from the rubric's criteria count, or a label
+            names no verdict or option of its criterion (as ``resolve_ground_truth``
+            raises). If ``cannot_assess`` is "as_category" and an ordinal criterion can
+            meet NA: the judge is shown an NA option (with the grader's ``auto_na_option``,
+            the default, it always is) or a label names one. Each is checked before any
+            call.
     """
     _reject_decision_model_grader(grader)
-    from autorubric.metrics._compute import _judgment_failed, _kappa_or_none, _mean_or_none
-    from autorubric.metrics._helpers import extract_verdicts_from_report, filter_cannot_assess
+    from autorubric.metrics._compute import (
+        _compute_nominal_criterion_metrics,
+        _compute_ordinal_criterion_metrics,
+        _judgment_failed,
+        _kappa_or_none,
+        _mean_or_none,
+    )
+    from autorubric.metrics._helpers import (
+        extract_all_verdicts_from_report,
+        filter_cannot_assess,
+        filter_na_multi_choice,
+        resolve_ground_truth,
+    )
 
-    num_criteria = len(rubric.rubric)
+    criteria = rubric.rubric
+    num_criteria = len(criteria)
+    # Each multi-choice criterion with the options a judge or a label can name: its own,
+    # and the NA option the grader adds to one without an NA option (CANONICAL_NA_OPTION).
+    shown = [c.with_guaranteed_na_option() if c.is_multi_choice else c for c in criteria]
+
+    # Every item's labels, resolved before any item is graded, so a bad label costs no call:
+    # a binary label as a verdict, a multi-choice label as the index of its option in
+    # ``shown``, as compute_metrics reads them.
+    labels: list[list[CriterionVerdict | int]] = []
+    for item_idx, item in enumerate(validation_data.items):
+        if item.ground_truth is None:
+            raise ValueError(
+                f"Validation item {item_idx} has no ground truth: held-out validation compares "
+                "every item's judgments with its labels"
+            )
+        labels.append(resolve_ground_truth(list(item.ground_truth), criteria))
+
+    if cannot_assess == "as_category":
+        _refuse_ordinal_na_category(criteria, shown, labels, grader)
+
     item_reports: list[EnsembleEvaluationReport] = []
     total_cost: float = 0.0
 
@@ -1463,7 +1591,8 @@ async def validate_held_out(
 
     # Raw (pre-exclusion) coverage/abstention tallies, numerically aligned with
     # CoverageStats: n_paired counts items with a ground-truth label for the
-    # criterion; n_ca counts judge abstentions (CANNOT_ASSESS).
+    # criterion; n_ca counts pairs on which the judge or the ground truth abstained
+    # (CANNOT_ASSESS, or a multi-choice criterion's NA option).
     n_paired = [0] * num_criteria
     n_ca = [0] * num_criteria
 
@@ -1473,6 +1602,11 @@ async def validate_held_out(
 
     # Collect exemplars per criterion
     all_exemplars: list[list[CriterionExemplar]] = [[] for _ in range(num_criteria)]
+
+    # A multi-choice criterion's judged pairs (item index, the judge's option index or None,
+    # the label's option index, the judge's reason). They are measured once every item is
+    # graded, since which options the measures range over depends on all of them.
+    choice_pairs: list[list[tuple[int, int | None, int, str]]] = [[] for _ in range(num_criteria)]
 
     for item_idx, item in enumerate(validation_data.items):
         result = await rubric.grade(
@@ -1486,15 +1620,8 @@ async def validate_held_out(
         item_reports.append(result)
         total_cost += result.completion_cost or 0.0
 
-        llm_verdicts = extract_verdicts_from_report(result, num_criteria)
+        judged = extract_all_verdicts_from_report(result, criteria)
         judgments = result.report or []
-
-        gt_verdicts: list[CriterionVerdict] = []
-        for gt_val in item.ground_truth:  # type: ignore[union-attr]
-            if isinstance(gt_val, CriterionVerdict):
-                gt_verdicts.append(gt_val)
-            else:
-                gt_verdicts.append(CriterionVerdict(gt_val))
 
         for c_idx in range(num_criteria):
             # Raw denominator: this item contributes one ground-truth-paired
@@ -1509,14 +1636,38 @@ async def validate_held_out(
                 # item or a failed cell in compute_metrics, it counts in the raw denominator
                 # (coverage drops) and in no abstention count, tally, kappa or exemplar.
                 continue
+
+            # Get reason from the report
+            llm_reason = ""
+            if result.report and c_idx < len(result.report):
+                llm_reason = result.report[c_idx].final_reason or ""
+
+            verdict = judged[c_idx]
+            label = labels[item_idx][c_idx]
+            options = shown[c_idx].options
+            if options is not None:
+                # Multi-choice: a judge that abstained without an option to choose (None)
+                # abstained as one choosing an NA option does.
+                assert isinstance(label, int)
+                choice = verdict if isinstance(verdict, int) else None
+                if choice is None or options[choice].na or options[label].na:
+                    n_ca[c_idx] += 1
+                choice_pairs[c_idx].append((item_idx, choice, label, llm_reason))
+                continue
+
+            assert isinstance(label, CriterionVerdict)
+            # A missing verdict reads as UNMET, as extract_verdicts_from_report reads it.
+            llm_verdict = (
+                CriterionVerdict(verdict) if isinstance(verdict, str) else CriterionVerdict.UNMET
+            )
             if (
-                llm_verdicts[c_idx] == CriterionVerdict.CANNOT_ASSESS
-                or gt_verdicts[c_idx] == CriterionVerdict.CANNOT_ASSESS
+                llm_verdict == CriterionVerdict.CANNOT_ASSESS
+                or label == CriterionVerdict.CANNOT_ASSESS
             ):
                 n_ca[c_idx] += 1
 
             filtered_llm, filtered_gt = filter_cannot_assess(
-                [llm_verdicts[c_idx]], [gt_verdicts[c_idx]], mode=cannot_assess
+                [llm_verdict], [label], mode=cannot_assess
             )
             if not filtered_llm:
                 continue
@@ -1537,11 +1688,6 @@ async def validate_held_out(
                 tn[c_idx] += 1
             else:
                 fn[c_idx] += 1
-
-            # Get reason from the report
-            llm_reason = ""
-            if result.report and c_idx < len(result.report):
-                llm_reason = result.report[c_idx].final_reason or ""
 
             exemplar = CriterionExemplar(
                 item_index=item_idx,
@@ -1568,34 +1714,89 @@ async def validate_held_out(
     # Build per-criterion error reports
     per_criterion: list[CriterionErrorReport] = []
     for c_idx in range(num_criteria):
-        total = tp[c_idx] + fp[c_idx] + tn[c_idx] + fn[c_idx]
-        accuracy = (tp[c_idx] + tn[c_idx]) / total if total > 0 else 1.0
-        fpr = fp[c_idx] / (fp[c_idx] + tn[c_idx]) if (fp[c_idx] + tn[c_idx]) > 0 else 0.0
-        fnr = fn[c_idx] / (fn[c_idx] + tp[c_idx]) if (fn[c_idx] + tp[c_idx]) > 0 else 0.0
+        criterion = criteria[c_idx]
+        false_positive_rate: float | None
+        false_negative_rate: float | None
+        confusion_matrix: ConfusionMatrix | None
+        if criterion.is_multi_choice:
+            # As compute_metrics reads a multi-choice criterion: the NA option the grader
+            # adds is one of its options only when a judgment or a label names it (or a judge
+            # abstained without an option), NA is handled by the cannot_assess mode as
+            # filter_na_multi_choice handles na_mode, and agreement is an exact option match.
+            pairs = choice_pairs[c_idx]
+            n_author = len(criterion.options or [])
+            if any(c is None or c >= n_author or t >= n_author for _, c, t, _ in pairs):
+                effective = shown[c_idx]
+            else:
+                effective = criterion
+            effective_options = effective.options or []
+            na_index = effective.na_option_index
+            kept_pred: list[int] = []
+            kept_true: list[int] = []
+            for item_idx, choice, label, llm_reason in pairs:
+                pred = na_index if choice is None else choice
+                assert pred is not None
+                filtered_pred, filtered_true, *_ = filter_na_multi_choice(
+                    [pred], [label], effective, mode=cannot_assess
+                )
+                if not filtered_pred:
+                    continue
+                kept_pred.append(filtered_pred[0])
+                kept_true.append(filtered_true[0])
+                all_exemplars[c_idx].append(
+                    CriterionExemplar(
+                        item_index=item_idx,
+                        submission_snippet=validation_data.items[item_idx].submission[:200],
+                        llm_verdict=effective_options[filtered_pred[0]].label,
+                        ground_truth_verdict=effective_options[filtered_true[0]].label,
+                        llm_reason=llm_reason,
+                        is_disagreement=filtered_pred[0] != filtered_true[0],
+                    )
+                )
+            total = len(kept_pred)
+            if effective.scale_type == "ordinal":
+                ordinal = _compute_ordinal_criterion_metrics(kept_pred, kept_true, effective, c_idx)
+                exact_accuracy, kappa = ordinal.exact_accuracy, ordinal.weighted_kappa
+                choice_matrix = ordinal.confusion_matrix
+            else:
+                nominal = _compute_nominal_criterion_metrics(kept_pred, kept_true, effective, c_idx)
+                exact_accuracy, kappa = nominal.exact_accuracy, nominal.kappa
+                choice_matrix = nominal.confusion_matrix
+            accuracy = exact_accuracy if exact_accuracy is not None else 1.0
+            # No positive class among the options, so no false-positive/negative rate.
+            false_positive_rate = false_negative_rate = None
+            confusion_matrix = choice_matrix if total > 0 else None
+        else:
+            total = tp[c_idx] + fp[c_idx] + tn[c_idx] + fn[c_idx]
+            accuracy = (tp[c_idx] + tn[c_idx]) / total if total > 0 else 1.0
+            false_positive_rate = (
+                fp[c_idx] / (fp[c_idx] + tn[c_idx]) if (fp[c_idx] + tn[c_idx]) > 0 else 0.0
+            )
+            false_negative_rate = (
+                fn[c_idx] / (fn[c_idx] + tp[c_idx]) if (fn[c_idx] + tp[c_idx]) > 0 else 0.0
+            )
 
-        # Cohen's kappa over the usable pairs; None when undefined (e.g. a constant
-        # array) — never a fabricated 0.0.
-        kappa = _kappa_or_none(kappa_gt[c_idx], kappa_pred[c_idx]) if total > 0 else None
+            # Cohen's kappa over the usable pairs; None when undefined (e.g. a constant
+            # array) — never a fabricated 0.0.
+            kappa = _kappa_or_none(kappa_gt[c_idx], kappa_pred[c_idx]) if total > 0 else None
+
+            # 2x2 MET/UNMET confusion matrix (rows=true, cols=pred) over the usable
+            # verdicts; None when there are no usable samples so a constructed all-zero
+            # matrix never masquerades as data.
+            confusion_matrix = (
+                ConfusionMatrix(
+                    matrix=[[tp[c_idx], fn[c_idx]], [fp[c_idx], tn[c_idx]]],
+                    labels=["MET", "UNMET"],
+                )
+                if total > 0
+                else None
+            )
 
         # Coverage and abstention rate over the RAW (pre-exclusion) denominator,
         # numerically aligned with CoverageStats. None when nothing was paired.
         raw = n_paired[c_idx]
         coverage = total / raw if raw > 0 else None
         ca_rate = n_ca[c_idx] / raw if raw > 0 else None
-
-        # 2x2 MET/UNMET confusion matrix (rows=true, cols=pred) over the usable
-        # verdicts; None when there are no usable samples so a constructed all-zero
-        # matrix never masquerades as data.
-        confusion_matrix = (
-            ConfusionMatrix(
-                matrix=[[tp[c_idx], fn[c_idx]], [fp[c_idx], tn[c_idx]]],
-                labels=["MET", "UNMET"],
-            )
-            if total > 0
-            else None
-        )
-
-        criterion = rubric.rubric[c_idx]
 
         # Sort disagreements by criterion weight (higher weight = higher impact)
         disagreements = [e for e in all_exemplars[c_idx] if e.is_disagreement]
@@ -1611,8 +1812,8 @@ async def validate_held_out(
                 criterion_name=criterion.name or f"criterion_{c_idx}",
                 n_samples=total,
                 accuracy=accuracy,
-                false_positive_rate=fpr,
-                false_negative_rate=fnr,
+                false_positive_rate=false_positive_rate,
+                false_negative_rate=false_negative_rate,
                 disagreement_exemplars=disagreements,
                 agreement_exemplars=agreements,
                 kappa=kappa,
@@ -1637,6 +1838,16 @@ async def validate_held_out(
         mean_coverage=mean_coverage,
         mean_ca_rate=mean_ca_rate,
     )
+
+
+def _rate_text(rate: float | None) -> str:
+    """A rate as a whole percent, or ``n/a`` for a multi-choice criterion's undefined one."""
+    return "n/a" if rate is None else f"{rate:.0%}"
+
+
+def _verdict_text(verdict: CriterionVerdict | str) -> str:
+    """A binary verdict's value (``MET``), or a multi-choice option's label as it is."""
+    return verdict.value if isinstance(verdict, CriterionVerdict) else verdict
 
 
 def format_held_out_for_prompt(
@@ -1664,7 +1875,7 @@ def format_held_out_for_prompt(
     for cr in sorted(result.per_criterion, key=lambda c: c.accuracy):
         lines.append(
             f"{cr.criterion_name:<30} {cr.accuracy:>10.0%} "
-            f"{cr.false_positive_rate:>10.0%} {cr.false_negative_rate:>10.0%}"
+            f"{_rate_text(cr.false_positive_rate):>10} {_rate_text(cr.false_negative_rate):>10}"
         )
 
     # Per-criterion detail sections (worst-performing first)
@@ -1673,8 +1884,8 @@ def format_held_out_for_prompt(
         lines.append("")
         lines.append(
             f"### Criterion {cr.criterion_index + 1}: {cr.criterion_name} "
-            f"(Accuracy: {cr.accuracy:.0%}, FP: {cr.false_positive_rate:.0%}, "
-            f"FN: {cr.false_negative_rate:.0%})"
+            f"(Accuracy: {cr.accuracy:.0%}, FP: {_rate_text(cr.false_positive_rate)}, "
+            f"FN: {_rate_text(cr.false_negative_rate)})"
         )
 
         if cr.disagreement_exemplars:
@@ -1684,8 +1895,8 @@ def format_held_out_for_prompt(
                 lines.append(f"  Item {ex.item_index + 1}:")
                 lines.append(f"    Submission: {ex.submission_snippet!r}")
                 lines.append(
-                    f"    Judge verdict: {ex.llm_verdict.value}, "
-                    f"Ground truth: {ex.ground_truth_verdict.value}"
+                    f"    Judge verdict: {_verdict_text(ex.llm_verdict)}, "
+                    f"Ground truth: {_verdict_text(ex.ground_truth_verdict)}"
                 )
                 lines.append(f"    Judge reasoning: {ex.llm_reason}")
 
@@ -1694,7 +1905,7 @@ def format_held_out_for_prompt(
             lines.append("**Agreements** (judge got these RIGHT):")
             for ex in cr.agreement_exemplars[:max_exemplars_per_criterion]:
                 lines.append(f"  Item {ex.item_index + 1}:")
-                lines.append(f"    Judge verdict: {ex.llm_verdict.value} (correct)")
+                lines.append(f"    Judge verdict: {_verdict_text(ex.llm_verdict)} (correct)")
                 lines.append(f"    Judge reasoning: {ex.llm_reason}")
 
     lines.append("")
@@ -1744,7 +1955,13 @@ async def revise_rubric_held_out(
     Uses held-out-specific prompt templates that enforce structural constraints
     (same number of criteria in same order). Guidelines are handled as in
     ``revise_rubric``: shown to the LLM as fixed context and carried unchanged onto the
-    revised rubric.
+    revised rubric. So is each criterion's scale (a multi-choice criterion's ``options``,
+    ``scale_type`` and ``aggregation``; a binary criterion stays binary): the ground truth's
+    labels name its options, so the LLM revises wording and weights only. For a rubric with
+    a multi-choice criterion, the prompt shows each such criterion's scale and starts with
+    ``HELD_OUT_REVISION_SCALES_BLOCK`` (after the guidelines block, if any), so the wording
+    the LLM writes stays a question the options answer; a binary-only rubric's prompt is
+    unchanged.
 
     Args:
         rubric: Current rubric to revise.
@@ -1765,6 +1982,7 @@ async def revise_rubric_held_out(
     """
     _check_revision_llm(config.revision_llm)
     from autorubric.prompts import (
+        HELD_OUT_REVISION_SCALES_BLOCK,
         HELD_OUT_REVISION_SYSTEM_PROMPT,
         HELD_OUT_REVISION_USER_PROMPT_TEMPLATE,
     )
@@ -1778,11 +1996,16 @@ async def revise_rubric_held_out(
         or HELD_OUT_REVISION_USER_PROMPT_TEMPLATE
     )
 
-    original_criteria = json.dumps(_rubric_criteria_data(rubric), indent=2)
+    # A multi-choice criterion is shown with its scale, which the LLM must keep its wording
+    # consistent with: the diagnostics name its options, and the revised criterion keeps
+    # them. A rubric without one gets the prompt it always got.
+    has_scales = any(c.is_multi_choice for c in rubric.rubric)
+    original_criteria = json.dumps(_rubric_criteria_data(rubric, with_scales=has_scales), indent=2)
 
     user_prompt = _with_guidelines_block(
         rubric,
-        effective_user_template.format(
+        (HELD_OUT_REVISION_SCALES_BLOCK if has_scales else "")
+        + effective_user_template.format(
             task_prompt=task_prompt or "(No specific task — standalone evaluation)",
             original_criteria=original_criteria,
             diagnostics_text=diagnostics_text,
@@ -1815,6 +2038,22 @@ async def revise_rubric_held_out(
         logger.warning("Held-out revision violated structural constraint: %s", error)
         return rubric, revision_cost
 
+    # The LLM may change wording and weights only. Each criterion keeps its scale, whose
+    # options the ground truth's labels name, so the labels resolve on the revised rubric
+    # as on this one; options the LLM writes, or leaves out, are not taken.
+    revised = Rubric(
+        [
+            new.model_copy(
+                update={
+                    "options": old.options,
+                    "scale_type": old.scale_type,
+                    "aggregation": old.aggregation,
+                }
+            )
+            for old, new in zip(rubric.rubric, revised.rubric, strict=True)
+        ],
+        guidelines=revised.guidelines,
+    )
     return revised, revision_cost
 
 
@@ -2087,7 +2326,7 @@ def _serialize_iteration(iter_result: IterationResult) -> dict:
             "total_tokens": tu.total_tokens,
         }
 
-    rubric_criteria = _rubric_criteria_data(iter_result.rubric)
+    rubric_criteria = _rubric_criteria_data(iter_result.rubric, with_scales=True)
 
     result: dict = {
         "iteration": iter_result.iteration,

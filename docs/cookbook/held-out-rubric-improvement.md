@@ -31,7 +31,9 @@ flowchart TD
     G --> B
 ```
 
-The loop preserves criterion count and order across iterations --- only the `requirement` text changes. This makes before/after comparison straightforward and ensures weights remain stable.
+The loop preserves criterion count, order and names (and each criterion's options) across iterations; a revision may change the `requirement` text and the weights. Keeping the structure fixed makes before/after comparison straightforward.
+
+The ground truth can also label multi-choice criteria, by option label. A judgment then counts as correct when the judge chose the labelled option, and each criterion keeps its options across revisions, since the labels refer to them. This walkthrough's dataset is binary.
 
 ### Step 1: Load the dataset
 

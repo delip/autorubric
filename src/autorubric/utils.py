@@ -398,9 +398,9 @@ async def fill_ground_truth(
         grader adds to a multi-choice criterion without one (``auto_na_option``) is
         recorded as that option's label (``CANONICAL_NA_OPTION``), which the returned
         dataset's rubric does not list but every label reader resolves to that option
-        (``RubricDataset.from_json``, scoring, metrics, few-shot selection), so the
-        dataset round-trips. Items with existing ground_truth (when force=False) are
-        included unchanged.
+        (``RubricDataset.from_json``, scoring, metrics, few-shot selection, held-out
+        validation), so the dataset round-trips. Items with existing ground_truth (when
+        force=False) are included unchanged.
 
     Raises:
         ValueError: If dataset has no items, or if a judge's call fails with a

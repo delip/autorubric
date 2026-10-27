@@ -208,8 +208,8 @@ This rubric is binary, but a multi-choice criterion can get a label its rubric
 does not list. Under the default `auto_na_option=True` the grader adds an NA
 option to every multi-choice criterion that has none, and when the judge picks it,
 the saved label is `"Cannot assess / not applicable"`. The file still reloads with
-`RubricDataset.from_file`, and the label counts as an NA label in scoring, metrics
-and few-shot examples. [Handling Uncertain Assessments](cannot-assess.md#step-4-one-abstain-concept-two-surfaces)
+`RubricDataset.from_file`, and the label counts as an NA label in scoring, metrics,
+few-shot examples and held-out rubric improvement. [Handling Uncertain Assessments](cannot-assess.md#step-4-one-abstain-concept-two-surfaces)
 explains when the label is accepted.
 
 ### Step 5: Evaluate a Cheaper Model

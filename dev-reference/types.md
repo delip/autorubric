@@ -127,8 +127,8 @@ Offline confidence-cascade tools, exported from `autorubric`. `escalation.py` im
 | `ImprovementProgressDisplay` | Rich progress display: bar, issues table, rubric panel, summary table |
 | `IterationResult` | Per-iteration: iteration, rubric, quality_score, agreement, per_criterion_agreement, issues, issues_fixed, issues_introduced, accepted, rejection_reason, quality_report, token_usage, completion_cost |
 | `IssueDetail` | Single issue: criterion_name, requirement, weight, is_antipattern, feedback |
-| `CriterionExemplar` | A single grading case for a criterion (item_index, submission_snippet, verdicts, reason, is_disagreement) |
-| `CriterionErrorReport` | Per-criterion error analysis from held-out grading (accuracy, FP/FN rates, exemplars) |
+| `CriterionExemplar` | A single grading case for a criterion (item_index, submission_snippet, verdicts — `llm_verdict`/`ground_truth_verdict: CriterionVerdict \| str`, an option label for a multi-choice criterion — reason, is_disagreement) |
+| `CriterionErrorReport` | Per-criterion error analysis from held-out grading (accuracy, FP/FN rates — `float \| None`, `None` for a multi-choice criterion — kappa, coverage, ca_rate, confusion_matrix, exemplars); see [Improvement Loop Artifacts](improvement-loop.md) |
 | `HeldOutValidationResult` | Result from held-out validation with per-criterion diagnostics |
 | `ConvergenceFn` | Custom convergence callback type alias |
 

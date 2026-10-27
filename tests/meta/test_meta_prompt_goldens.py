@@ -7,6 +7,10 @@ existing response caches stay valid.
 
 - ``tests/golden/meta/without_guidelines.json`` was captured from the unmodified library
   (``main`` at the merge of PR #17) and is compared against a rubric without guidelines.
+  Its ``revise_rubric_held_out`` entry alone was recaptured when the held-out revision
+  prompt began showing a multi-choice criterion's scale (this rubric has one): before,
+  held-out validation raised on any multi-choice label, so the loop never sent that prompt.
+  A binary rubric's held-out prompt is unchanged (``test_held_out_multi_choice.py``).
 - ``tests/golden/meta/with_guidelines.json`` pins the prompts for the same rubric with
   guidelines; it can only be captured from a library that supports them.
 
