@@ -1,5 +1,7 @@
 """Type definitions for rubrics and evaluation components."""
 
+import numbers
+import operator
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from enum import Enum
@@ -16,6 +18,17 @@ from pydantic import (
 )
 
 CountFn = Callable[[str], int]
+
+
+def _as_int(value: object) -> int | None:
+    """``value`` as a plain ``int`` if it is an integer, else None.
+
+    Any ``numbers.Integral`` counts (numpy integers too, through ``operator.index``), never
+    a ``bool``.
+    """
+    if isinstance(value, numbers.Integral) and not isinstance(value, bool):
+        return operator.index(value)
+    return None
 
 
 def _setstate_with_field_defaults(self: BaseModel, state: dict[Any, Any]) -> None:
@@ -1295,7 +1308,8 @@ class FewShotConfig:
     each attribute).
 
     Attributes:
-        n_examples: Total number of examples to include per criterion. Under
+        n_examples: Total number of examples to include per criterion, an integer >= 1
+            (fewer are shown when fewer training items are eligible). Under
             ``llm_calls="per_item"``, the number of examples per call: whole training items,
             each labelled on every criterion.
         balance_verdicts: If True, attempt to balance examples across label classes — verdicts
@@ -1315,7 +1329,17 @@ class FewShotConfig:
             entry or the whole list is None) is shown without one, so with no reasons in the
             training data the prompts are the same as with False. Reasons never change which
             examples are selected.
-        seed: Random seed for reproducible sampling.
+        seed: Random seed for reproducible sampling: None or an integer. When None,
+            ``CriterionGrader`` uses its own ``seed``.
+
+    Raises:
+        ValueError: On construction (and on ``dataclasses.replace``) if ``n_examples`` is
+            not an integer >= 1, ``balance_verdicts`` or ``include_reason`` is not a
+            ``bool``, or ``seed`` is neither None nor an integer. Any integer type counts
+            (numpy integers too) and is stored as a plain ``int``; a ``bool`` is never taken
+            for an integer. ``CriterionGrader`` checks its config again, so a field set
+            after construction is refused there. The grader's own ``seed``, which fills an
+            unset ``seed``, is not checked here.
 
     Example:
         >>> config = FewShotConfig(
@@ -1329,3 +1353,26 @@ class FewShotConfig:
     balance_verdicts: bool = True
     include_reason: bool = False
     seed: int | None = None
+
+    def __post_init__(self) -> None:
+        """Validate the configuration, storing integer fields as plain ``int``.
+
+        Raises:
+            ValueError: If ``n_examples`` is not an integer >= 1, ``seed`` is neither None
+                nor an integer, or ``balance_verdicts`` or ``include_reason`` is not a bool
+                (``bool`` is never taken for an integer).
+        """
+        name = type(self).__name__
+        n_examples = _as_int(self.n_examples)
+        if n_examples is None or n_examples < 1:
+            raise ValueError(f"{name}.n_examples must be an integer >= 1; got {self.n_examples!r}")
+        self.n_examples = n_examples
+        for flag in ("balance_verdicts", "include_reason"):
+            value = getattr(self, flag)
+            if not isinstance(value, bool):
+                raise ValueError(f"{name}.{flag} must be True or False; got {value!r}")
+        if self.seed is not None:
+            seed = _as_int(self.seed)
+            if seed is None:
+                raise ValueError(f"{name}.seed must be None or an integer; got {self.seed!r}")
+            self.seed = seed

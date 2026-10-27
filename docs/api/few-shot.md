@@ -38,6 +38,17 @@ grader = CriterionGrader(
 result = await rubric.grade(to_grade=response, grader=grader)
 ```
 
+`FewShotConfig` checks its fields when it is built and raises `ValueError` for a value that
+selection would misread. `n_examples` must be an integer of at least 1. When fewer training
+items are eligible, all of them are shown. `seed` must be `None` or an integer, and
+`balance_verdicts` and `include_reason` must be `True` or `False`. A `bool` is never accepted
+as an integer, and a float such as `3.0` is refused too. Numpy integers are accepted and
+stored as plain `int`. `CriterionGrader` validates the
+config again and keeps its own copy, so a field changed after the config was built is refused
+by the grader, and a change made after the grader was built does not affect it. Releases
+before this check accepted a negative `n_examples`, which silently showed every eligible item
+except the last few.
+
 ## Example Reasons
 
 With `include_reason=True`, an example also shows why it got its label: the training item's

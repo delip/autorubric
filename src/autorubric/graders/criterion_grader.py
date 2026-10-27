@@ -1193,6 +1193,8 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 one) is eligible. Either way each judge draws its own examples, and the
                 training data needs a global rubric, which says what each label means.
             few_shot_config: Configuration for few-shot example selection (LLM judges only).
+                The grader validates and keeps its own copy, so changing the config after
+                the grader is built does not affect it.
                 Under ``llm_calls="per_item"``, ``n_examples`` counts the training items
                 each call shows and ``balance_verdicts`` selects them by greedy label
                 coverage (see ``FewShotConfig``).
@@ -1271,7 +1273,9 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 place since it was built, e.g. emptied); if llm_calls is not
                 ``"per_criterion"`` or ``"per_item"``; if few_shot_config or training_data is
                 given while every judge is a decision model (few-shot examples apply to LLM
-                judges only), or training_data has no global rubric; if
+                judges only), or training_data has no global rubric; if few_shot_config
+                no longer validates (a field set after it was built, e.g. a negative
+                ``n_examples``; see ``FewShotConfig``); if
                 binary_response_format or multi_choice_response_format is given while any
                 judge is a decision model, or with ``llm_calls="per_item"``;
                 or if a decision-model judge has no API key, has a key the SDK would reject
@@ -1450,10 +1454,18 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         self._llm_calls = llm_calls
         self._seed = seed if seed is not None else random.randint(0, 2**31 - 1)
 
+        # The grader's own copy, validated again (``dataclasses.replace`` reruns
+        # ``__post_init__``): a field set on the caller's config after it was built is
+        # checked here, and later changes to it do not reach this grader.
+        fsc = (
+            dataclasses.replace(few_shot_config) if few_shot_config is not None else FewShotConfig()
+        )
         # Coordinate few-shot seed with master seed when unset
-        fsc = few_shot_config or FewShotConfig()
         if fsc.seed is None and training_data is not None:
-            fsc = dataclasses.replace(fsc, seed=self._seed)
+            # Set on the copy, not through ``dataclasses.replace``: the check in
+            # ``FewShotConfig.__post_init__`` is about a seed the caller set on the config,
+            # and the grader's own ``seed`` is used here exactly as given.
+            fsc.seed = self._seed
         self._few_shot_config = fsc
         self._binary_response_format = binary_response_format or CriterionJudgment
         self._multi_choice_response_format = multi_choice_response_format or MultiChoiceJudgment

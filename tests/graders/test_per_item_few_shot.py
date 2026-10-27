@@ -674,9 +674,13 @@ class TestGreedyCoverage:
         picks = names(picked(self.grader(n, balance=False), "default"))
         assert picks == COVERAGE_ORDER
 
-    def test_n_examples_zero_selects_nothing(self):
-        assert self.grader(0)._item_examples["default"] == []
-        assert self.grader(0, balance=False)._item_examples["default"] == []
+    @pytest.mark.parametrize("n", [0, -2])
+    @pytest.mark.parametrize("balance", [True, False])
+    def test_n_examples_below_one_is_refused(self, n, balance):
+        # A count below one used to select nothing (0) or all but the last few items (a
+        # negative count slices from the end), #39.
+        with pytest.raises(ValueError, match=r"n_examples must be an integer >= 1"):
+            self.grader(n, balance=balance)
 
 
 # A crafted pool over [binary, multi-choice Unclear/Mostly clear/Very clear] (LIGHT, CLARITY)
