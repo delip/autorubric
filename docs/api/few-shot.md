@@ -81,6 +81,12 @@ An example whose item has no reason for the criterion is shown with its label al
 reasons in the training data the prompts are the same whether `include_reason` is `True` or
 `False`. Reasons never change which examples are selected.
 
+A multi-choice label names one of the options the judge is shown. With `auto_na_option=True`
+(the default) that includes the NA option the grader adds to a criterion without one, so an
+item that `fill_ground_truth` labelled with that option can be an example, shown as that
+option. With `auto_na_option=False` the judge is shown no such option, and the item is not used
+as an example for that criterion. An item whose label names no option shown is left out.
+
 ## Ensemble + Few-Shot
 
 Few-shot works orthogonally with ensemble mode. Each LLM judge gets its own examples, drawn from

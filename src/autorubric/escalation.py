@@ -1104,10 +1104,16 @@ def _labels(item: DataItem, criteria: list[Criterion]) -> list[CriterionVerdict 
 
 
 def _abstains(label: CriterionVerdict | int, criterion: Criterion) -> bool:
-    """Whether a resolved label abstains: ``CANNOT_ASSESS``, or an NA option."""
+    """Whether a resolved label abstains: ``CANNOT_ASSESS``, or an NA option.
+
+    A multi-choice label is an index among the options ``resolve_ground_truth`` resolves
+    it among, those of ``Criterion.with_guaranteed_na_option()``, so the NA option the
+    grader adds to a criterion without one is among them.
+    """
     if criterion.options is None:
         return label == CriterionVerdict.CANNOT_ASSESS
-    return isinstance(label, int) and criterion.options[label].na
+    options = criterion.with_guaranteed_na_option().options or []
+    return isinstance(label, int) and options[label].na
 
 
 def _vote_prediction(vote: JudgeVote | MultiChoiceJudgeVote) -> CriterionVerdict | int | None:

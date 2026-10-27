@@ -1741,17 +1741,35 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
             identity=lambda item: item.submission,
         )
 
-    def _label_to_option_index(self, criterion_idx: int, label: str) -> int | None:
-        """Map a ground truth label string to a 0-based option index."""
+    def _label_to_option_index(self, criterion_idx: int, label: str | int) -> int | None:
+        """Map a ground-truth label to a 0-based option index among the options shown.
+
+        The options are those the judge is shown (``_effective_criterion``), as
+        ``_item_labels`` resolves a whole item's labels: with ``auto_na_option`` they include
+        the NA option it guarantees, so the label ``fill_ground_truth`` records when a judge
+        chose that option resolves to it (index ``len(criterion.options)``); with
+        ``auto_na_option=False`` no NA option is shown, so that label names none. The label
+        is an option label, resolved as ``Criterion.find_option_by_label`` resolves it, or an
+        option index in range (``DataItem`` takes labels only, so an index is one set on an
+        item after it was built, as ``resolve_ground_truth`` also reads).
+
+        Returns:
+            The index, or ``None`` when the label names no option shown.
+        """
         if self._training_data is None or self._training_data.rubric is None:
             return None
         criteria = self._training_data.rubric.rubric
         if criterion_idx >= len(criteria):
             return None
-        try:
-            return criteria[criterion_idx].find_option_by_label(label)
-        except ValueError:
-            return None
+        shown = self._effective_criterion(criteria[criterion_idx])
+        if isinstance(label, str):
+            try:
+                return shown.find_option_by_label(label)
+            except ValueError:
+                return None
+        if isinstance(label, int) and not isinstance(label, bool):
+            return label if 0 <= label < len(shown.options or []) else None
+        return None
 
     def _select_multi_choice_examples(
         self, criterion_idx: int, judge_id: str
@@ -1760,7 +1778,9 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
 
         Groups training items by their selected option index and balances
         across options when configured. Ground truth labels are converted
-        to 0-based option indices. Each example carries its item's reason for
+        to 0-based option indices among the options the judge is shown
+        (``_label_to_option_index``), and an item whose label names none of them is left
+        out of this criterion's examples. Each example carries its item's reason for
         this criterion (``DataItem.ground_truth_reasons``), if it has one;
         reasons never affect the draw.
         """
@@ -1779,12 +1799,7 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         for item in self._training_data:
             if item.ground_truth is None:
                 continue
-            label = item.ground_truth[criterion_idx]
-            idx = (
-                self._label_to_option_index(criterion_idx, label)
-                if isinstance(label, str)
-                else label
-            )
+            idx = self._label_to_option_index(criterion_idx, item.ground_truth[criterion_idx])
             if idx is None:
                 continue
             option_groups.setdefault(idx, []).append((item, idx))

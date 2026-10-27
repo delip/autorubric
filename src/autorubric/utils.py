@@ -394,8 +394,13 @@ async def fill_ground_truth(
         are items with a criterion whose every judge call failed: the verdict a
         grader stands in for failed calls (CANNOT_ASSESS, the NA option, or the
         worst case) is never saved as a label. A criterion that at least one
-        judge judged is labelled as graded. Items with existing ground_truth
-        (when force=False) are included unchanged.
+        judge judged is labelled as graded. A judge's choice of the NA option the
+        grader adds to a multi-choice criterion without one (``auto_na_option``) is
+        recorded as that option's label (``CANONICAL_NA_OPTION``), which the returned
+        dataset's rubric does not list but every label reader resolves to that option
+        (``RubricDataset.from_json``, scoring, metrics, few-shot selection), so the
+        dataset round-trips. Items with existing ground_truth (when force=False) are
+        included unchanged.
 
     Raises:
         ValueError: If dataset has no items, or if a judge's call fails with a

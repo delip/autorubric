@@ -412,7 +412,11 @@ class Rubric:
         Args:
             verdicts: One value per criterion. Binary criteria accept
                 CriterionVerdict or its string form; multi-choice criteria
-                accept an option label string.
+                accept an option label string, which for a criterion without an
+                NA option may also be the label of the NA option the grader adds
+                (``CANONICAL_NA_OPTION``, see
+                ``Criterion.with_guaranteed_na_option``): it scores as an NA
+                abstention.
             normalize: If True, normalise to [0, 1]. If False, return the raw
                 weighted sum.
             cannot_assess_strategy: How to handle CANNOT_ASSESS / NA verdicts.
@@ -434,14 +438,17 @@ class Rubric:
                         f"Multi-choice criterion '{criterion.name}' requires a "
                         f"label string, got {type(verdict).__name__}"
                     )
-                idx = criterion.find_option_by_label(verdict)
-                opt = criterion.options[idx]  # type: ignore[index]
+                # Resolved among the options a judge is shown, so the label of the NA
+                # option the grader adds to a criterion without one names that option.
+                shown = criterion.with_guaranteed_na_option()
+                idx = shown.find_option_by_label(verdict)
+                opt = shown.options[idx]  # type: ignore[index]
                 reports.append(
                     CriterionReport(
                         requirement=criterion.requirement,
                         name=criterion.name,
                         weight=criterion.weight,
-                        options=criterion.options,
+                        options=shown.options,
                         scale_type=criterion.scale_type,
                         aggregation=criterion.aggregation,
                         multi_choice_verdict=MultiChoiceVerdict(

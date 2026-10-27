@@ -198,6 +198,16 @@ grader_forced_choice = CriterionGrader(
     `auto_na_option=False` removes the abstain channel for multi-choice criteria that
     didn't author one, forcing a scored option.
 
+The added option's label is also a valid ground-truth label. When a judge chooses it,
+`fill_ground_truth` records `"Cannot assess / not applicable"`, and the dataset still loads
+with `RubricDataset.from_json` / `from_file` although its rubric does not list that option.
+Wherever a label is read (scoring, `compute_metrics`, few-shot examples), it names the NA option
+the grader adds, so it counts as an NA label, as an NA option written into the rubric would.
+This holds only for a criterion with no NA option of its own; a criterion that declares one gets
+nothing added, so its labels must name its own options. A grader built with
+`auto_na_option=False` offers no NA option, so it does not use an item with that label as a
+few-shot example.
+
 ### Step 5: Compare Strategy Effects
 
 See how different strategies affect the same response:

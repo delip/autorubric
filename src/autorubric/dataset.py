@@ -562,9 +562,12 @@ class RubricDataset:
                                 f"Item {i}, ground_truth[{j}]: multi-choice criterion "
                                 f"expects option label string, got {type(v).__name__}"
                             )
-                        # Validate that the label exists
+                        # Validate that the label names an option, among the options a
+                        # judge is shown: the label of the NA option the grader adds to a
+                        # criterion without one (CANONICAL_NA_OPTION, which
+                        # fill_ground_truth records when a judge chose it) is one too
                         try:
-                            criterion.find_option_by_label(v)
+                            criterion.with_guaranteed_na_option().find_option_by_label(v)
                         except ValueError as e:
                             raise ValueError(f"Item {i}, ground_truth[{j}]: {e}") from None
                         ground_truth.append(v)
