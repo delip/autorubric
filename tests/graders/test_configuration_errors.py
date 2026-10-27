@@ -19,6 +19,7 @@ import asyncio
 import json
 import socket
 import threading
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any, cast
 
@@ -39,6 +40,7 @@ from autorubric import (
     evaluate,
     fill_ground_truth,
 )
+from autorubric.eval import EvalConfig, EvalRunner
 from autorubric.graders import CriterionGrader, JudgeSpec
 from autorubric.llm import (
     GenerateResult,
@@ -751,3 +753,39 @@ class TestAMissingAzureKey:
 
         assert "Judge 'default' is misconfigured" in str(excinfo.value)
         assert "Missing credentials" in str(excinfo.value)
+
+
+# =============================================================================
+# A fresh start whose manifest cannot be built
+# =============================================================================
+
+
+class TestAFreshStartWhoseManifestCannotBeBuilt:
+    """``EvalRunner._start_fresh_checkpoint`` builds the manifest before it removes the
+    previous run's ``items.jsonl``, so a grader config that cannot be serialized raises with
+    the previous checkpoint still whole."""
+
+    def test_a_fresh_start_writes_the_manifest_before_it_replaces_the_items(
+        self, tmp_path, monkeypatch
+    ):
+        """A manifest that cannot be built leaves the previous run's items in place, never
+        a stale manifest without its items."""
+        runner = EvalRunner(
+            TestRunsStopOnTheFirstItem._dataset(),
+            _grader(judge_model_config=WORKING),
+            EvalConfig(experiment_name="run", experiments_dir=tmp_path, show_progress=False),
+        )
+        run_dir = tmp_path / "run"
+        run_dir.mkdir()
+        (run_dir / "items.jsonl").write_text("previous run\n", encoding="utf-8")
+        (run_dir / "manifest.json").write_text("{}", encoding="utf-8")
+
+        def unserializable(grader: Any) -> Any:
+            raise ValueError("cannot serialize")
+
+        monkeypatch.setattr("autorubric.eval._serialize_grader_config", unserializable)
+        with pytest.raises(ValueError, match="cannot serialize"):
+            runner._start_fresh_checkpoint(datetime.now())
+
+        assert (run_dir / "items.jsonl").read_text(encoding="utf-8") == "previous run\n"
+        assert (run_dir / "manifest.json").read_text(encoding="utf-8") == "{}"

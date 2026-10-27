@@ -232,9 +232,10 @@ def _llm_judge_entry(judge: Any, judge_id: str, model: str, config: Any) -> dict
     ``max_tokens``, ``top_p``, ``thinking`` and ``seed`` (#44). The entry of a judge that
     sets none of them is therefore byte-identical to one written before they were recorded.
     ``thinking`` is the normalized ``get_thinking_config()`` as ``{"level": ...,
-    "budget_tokens": ...}``, the level as its plain string (``budget_tokens``, when not
-    None, is what is sent, the level otherwise). A value that is not a number (a mock), or
-    a ``thinking`` value that cannot be normalized, is not recorded.
+    "budget_tokens": ...}``, the level as its plain string, or None for a budget given with
+    no level (``budget_tokens``, when not None, is what is sent, the level otherwise). A
+    value that is not a number (a mock) is not recorded; a ``thinking`` value that cannot be
+    normalized raises (see ``_thinking_entry``).
     """
     weight = getattr(judge, "weight", 1.0)
     mpr = getattr(config, "max_parallel_requests", None)
@@ -266,20 +267,21 @@ def _llm_judge_entry(judge: Any, judge_id: str, model: str, config: Any) -> dict
 def _thinking_entry(config: Any) -> dict[str, Any] | None:
     """An LLM judge's normalized thinking setting for its manifest entry, None when unset.
 
-    None too for a config without a real ``get_thinking_config`` (a mock) and for a
-    ``thinking`` value it cannot normalize; such a judge's requests fail on their own.
+    None too for a config without a real ``get_thinking_config`` (a mock). ``LLMConfig``
+    refuses a ``thinking`` value it cannot normalize when it is built (a field assigned
+    later is not checked again). Should ``get_thinking_config()`` raise all the same, the
+    ``ValueError`` propagates rather than the setting being left out of the manifest of a
+    run whose every request would fail.
     """
     get_thinking_config = getattr(config, "get_thinking_config", None)
     if not callable(get_thinking_config):
         return None
-    try:
-        thinking = get_thinking_config()
-    except (TypeError, ValueError):
-        return None
+    thinking = get_thinking_config()
     if not isinstance(thinking, ThinkingConfig):
         return None
     level = thinking.level
     return {
+        # None for a budget with no level (``ThinkingConfig(level=None, budget_tokens=...)``).
         "level": level.value if isinstance(level, ThinkingLevel) else level,
         "budget_tokens": thinking.budget_tokens,
     }
@@ -1171,15 +1173,11 @@ class EvalRunner:
 
         A previous run's checkpoint in the directory is replaced: its items would otherwise
         stay in ``items.jsonl`` (appended to as items complete) beside this run's, and a
-        reload (``EvalResult.from_experiment``) would count them too.
+        reload (``EvalResult.from_experiment``) would count them too. The manifest is built
+        first, so a grader config that cannot be serialized raises with the previous
+        checkpoint still whole, never leaving its manifest without its items.
         """
-        self._exp_dir.mkdir(parents=True, exist_ok=True)
-        items_path = self._exp_dir / "items.jsonl"
-        if items_path.exists():
-            logger.info(f"Starting fresh: replacing the previous checkpoint in {self._exp_dir}")
-            items_path.unlink()
-
-        # Write initial manifest with full config for reproducibility
+        # Initial manifest with full config for reproducibility
         manifest = ExperimentManifest(
             experiment_name=self._experiment_name,
             created_at=started_at,
@@ -1192,6 +1190,11 @@ class EvalRunner:
             grader_config=_serialize_grader_config(self.grader),
             eval_config=_serialize_eval_config(self.config),
         )
+        self._exp_dir.mkdir(parents=True, exist_ok=True)
+        items_path = self._exp_dir / "items.jsonl"
+        if items_path.exists():
+            logger.info(f"Starting fresh: replacing the previous checkpoint in {self._exp_dir}")
+            items_path.unlink()
         self._write_manifest(manifest)
 
     def _write_manifest(self, manifest: ExperimentManifest) -> None:

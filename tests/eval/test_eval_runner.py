@@ -3,6 +3,7 @@
 import json
 import tempfile
 from pathlib import Path
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -1454,6 +1455,11 @@ class TestManifestJudgeConfig:
                 ThinkingConfig(level=ThinkingLevel.HIGH, budget_tokens=50000),
                 {"level": "high", "budget_tokens": 50000},
             ),
+            # A budget alone: no level is read, and none is recorded.
+            (
+                ThinkingConfig(level=cast(ThinkingLevel, None), budget_tokens=9000),
+                {"level": None, "budget_tokens": 9000},
+            ),
         ],
     )
     def test_a_judge_records_its_thinking(self, thinking, recorded):
@@ -1499,6 +1505,15 @@ class TestManifestJudgeConfig:
         grader._judges = [JudgeSpec(judge_model_config=config, judge_id="mocked")]
         (entry,) = _serialize_grader_config(grader)["judges"]
         assert list(entry)[6:] == []
+
+    def test_a_thinking_value_assigned_after_construction_is_not_left_out(self):
+        """``LLMConfig`` checks ``thinking`` when it is built. A value assigned later that
+        cannot be normalized raises when the manifest is written, before any judge call,
+        rather than being left out of a manifest of a run whose every call would fail."""
+        config = LLMConfig(model="m", thinking="high")
+        setattr(config, "thinking", "extreme")  # a str the annotation does not allow
+        with pytest.raises(ValueError, match=r"LLMConfig\.thinking must be None"):
+            self._judges(config)
 
     @pytest.mark.asyncio
     async def test_a_thinking_judge_manifest_is_written_and_resumed(self, sample_dataset):

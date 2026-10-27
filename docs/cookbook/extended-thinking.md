@@ -107,6 +107,8 @@ grader = CriterionGrader(
 
     For complex technical analysis, consider explicit budgets of 8,000-16,000 tokens.
 
+`LLMConfig` checks `thinking` when it is built, so a value no provider can use fails there with a `ValueError` rather than on every request. Examples are an unknown level such as `"extreme"`, `thinking=True` (a `bool` is not a budget), a budget below -1 and a float budget. A budget below a provider's minimum is not caught there. Anthropic's minimum is 1,024 tokens: a smaller budget passes the check, Anthropic rejects each request with a 400, and every judge call abstains (`CANNOT_ASSESS`, or NA for a multi-choice criterion). Use at least 1,024 for Anthropic models.
+
 ### Step 3: Provider Support
 
 Extended thinking/reasoning is supported across providers:

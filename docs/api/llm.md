@@ -122,6 +122,8 @@ config = LLMConfig(
 
 Supported providers: Anthropic, OpenAI (o-series), Gemini (2.5+), DeepSeek.
 
+`thinking` is checked when the `LLMConfig` is built. It must be `None`, a `ThinkingLevel` or one of the strings `"none"`, `"low"`, `"medium"`, `"high"`, an integer token budget of at least -1, or a `ThinkingConfig`; anything else raises `ValueError` there, before any request. That includes an unknown level such as `"extreme"`, `True` or `False` (a `bool` is not a budget), a budget below -1, and a float such as `32000.0`. A budget of 0 or -1 is accepted because Gemini 2.5 reads 0 as thinking off and -1 as dynamic thinking. A budget smaller than a provider's minimum passes this check. Anthropic's minimum is 1,024 tokens, and it rejects each request with a smaller budget with a 400 (`BadRequestError`). A grade does not raise that error as a configuration error, so every call of such a judge abstains (`CANNOT_ASSESS`, or NA for a multi-choice criterion). Use at least 1,024 for Anthropic models. `ThinkingConfig` checks its own `level` and `budget_tokens` the same way, except that `level=None` is accepted next to a `budget_tokens`, which is sent without reading the level. Both check their values only when they are built, so a field assigned afterwards is not checked again.
+
 ## Response Caching
 
 ```python

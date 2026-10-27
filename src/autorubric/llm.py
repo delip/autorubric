@@ -305,6 +305,9 @@ class ThinkingLevel(str, Enum):
 ThinkingLevelLiteral = Literal["none", "low", "medium", "high"]
 
 
+# The level strings, as error messages list them.
+_THINKING_LEVELS = ", ".join(repr(level.value) for level in ThinkingLevel)
+
 # Token budget mapping for providers that support explicit budgets
 THINKING_LEVEL_BUDGETS: dict[str, int] = {
     "none": 0,
@@ -327,10 +330,19 @@ class ThinkingConfig:
     Attributes:
         level: High-level thinking effort. Used when budget_tokens is not set.
             Defaults to MEDIUM for a good balance of quality and latency.
-        budget_tokens: Explicit token budget for thinking (provider-specific).
+        budget_tokens: Explicit token budget for thinking (provider-specific): None, or
+            an integer >= -1, sent as ``thinking={"type": "enabled", "budget_tokens": ...}``.
             When set, overrides level. Recommended: 10000-50000 for complex tasks.
             Providers that don't support explicit budgets will map this to the
-            nearest level.
+            nearest level. Gemini 2.5 reads 0 as thinking off and -1 as a budget the
+            model sets itself (dynamic thinking); a provider with a minimum budget
+            (Anthropic's is 1024) rejects a smaller one.
+
+    Both fields are checked when the config is built: ``level`` must be a ``ThinkingLevel``
+    or its string value, stored as the member, or None alongside a ``budget_tokens`` (a
+    budget is sent without reading ``level``), and ``budget_tokens`` None or an integer
+    >= -1 (numpy integers too, stored as ``int``; never a ``bool``). Anything else raises
+    ``ValueError``.
 
     Examples:
         # Simple: use a thinking level
@@ -347,9 +359,30 @@ class ThinkingConfig:
     budget_tokens: int | None = None
 
     def __post_init__(self) -> None:
-        """Normalize level to enum."""
-        if isinstance(self.level, str):
-            self.level = ThinkingLevel(self.level)
+        """Validate both fields, storing ``level`` as a ``ThinkingLevel`` member.
+
+        Raises:
+            ValueError: If ``level`` is not a ``ThinkingLevel`` or one of its string values
+                (None is one only with a ``budget_tokens``), or ``budget_tokens`` is
+                neither None nor an integer >= -1.
+        """
+        name = type(self).__name__
+        if self.level is not None or self.budget_tokens is None:
+            try:
+                self.level = ThinkingLevel(self.level)
+            except ValueError as e:
+                raise ValueError(
+                    f"{name}.level must be one of {_THINKING_LEVELS} or a ThinkingLevel "
+                    f"(None only with a budget_tokens); got {self.level!r}"
+                ) from e
+        if self.budget_tokens is not None:
+            budget_tokens = _as_int(self.budget_tokens)
+            if budget_tokens is None or budget_tokens < -1:
+                raise ValueError(
+                    f"{name}.budget_tokens must be None or an integer >= -1; "
+                    f"got {self.budget_tokens!r}"
+                )
+            self.budget_tokens = budget_tokens
 
     def get_effective_budget(self) -> int:
         """Get the effective token budget based on level or explicit budget."""
@@ -370,24 +403,39 @@ Accepts:
 - ThinkingConfig: Full configuration object
 - ThinkingLevel: Enum value (e.g., ThinkingLevel.HIGH)
 - str: Level as string ("low", "medium", "high", "none")
-- int: Direct token budget (e.g., 32000)
+- int: Direct token budget (e.g., 32000), an integer >= -1 (never a bool)
 - None: Disable thinking
 """
 
+_THINKING_FORMS = (
+    f"None, a ThinkingLevel or one of {_THINKING_LEVELS}, "
+    "an integer token budget >= -1, or a ThinkingConfig"
+)
 
-def _normalize_thinking_param(thinking: ThinkingParam) -> ThinkingConfig | None:
-    """Convert various thinking parameter formats to ThinkingConfig."""
-    if thinking is None:
-        return None
-    if isinstance(thinking, ThinkingConfig):
+
+def _normalize_thinking_param(
+    thinking: ThinkingParam, name: str = "thinking"
+) -> ThinkingConfig | None:
+    """Convert various thinking parameter formats to ThinkingConfig.
+
+    A ``ThinkingConfig`` is returned as it is: it checked its own fields when it was built.
+
+    Raises:
+        ValueError: If ``thinking`` is none of the ``ThinkingParam`` forms (a ``bool`` is
+            not a budget), names an unknown level, or is a budget below -1. ``name`` names
+            the setting in the message.
+    """
+    if thinking is None or isinstance(thinking, ThinkingConfig):
         return thinking
-    if isinstance(thinking, ThinkingLevel):
-        return ThinkingConfig(level=thinking)
-    if isinstance(thinking, str):
-        return ThinkingConfig(level=ThinkingLevel(thinking))
-    if isinstance(thinking, int):
-        return ThinkingConfig(budget_tokens=thinking)
-    raise TypeError(f"Invalid thinking parameter type: {type(thinking)}")
+    try:
+        if isinstance(thinking, str):  # a ThinkingLevel member is a str too
+            return ThinkingConfig(level=thinking)
+        budget_tokens = _as_int(thinking)
+        if budget_tokens is not None:
+            return ThinkingConfig(budget_tokens=budget_tokens)
+    except ValueError as e:
+        raise ValueError(f"{name} must be {_THINKING_FORMS}; got {thinking!r}") from e
+    raise ValueError(f"{name} must be {_THINKING_FORMS}; got {thinking!r}")
 
 
 @dataclass
@@ -640,9 +688,12 @@ class LLMConfig:
             multiple formats:
             - ThinkingLevel enum: ThinkingLevel.HIGH, ThinkingLevel.MEDIUM, etc.
             - String: "low", "medium", "high", "none"
-            - Int: Direct token budget (e.g., 32000)
+            - Int: Direct token budget (e.g., 32000), an integer >= -1 (see
+              ``ThinkingConfig.budget_tokens``); a bool is not a budget
             - ThinkingConfig: Full configuration with level and/or budget_tokens
             - None: Disable thinking (default)
+
+            Any other value raises ``ValueError`` when the config is built.
 
             Provider support:
             - Anthropic: Extended thinking (claude-sonnet-4-5, claude-opus-4-5+)
@@ -707,7 +758,7 @@ class LLMConfig:
     extra_params: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        """Validate ``max_tokens`` and ``top_p``, storing them as plain ``int``/``float``.
+        """Validate ``max_tokens``, ``top_p`` and ``thinking``.
 
         Each is sent with every request whenever it is not None, so a value no provider
         can mean is refused here rather than sent or silently dropped. A ``bool`` is
@@ -715,9 +766,16 @@ class LLMConfig:
         ``max_tokens``, stored as ``int``; a ``top_p`` that is a real number other than an
         ``int`` or ``float`` (a numpy float, say) is stored as ``float``.
 
+        ``thinking`` is normalized with ``get_thinking_config()`` here, so a value it
+        cannot normalize raises now instead of when a request is built, where every judge
+        call would fail alike. It is kept as given (a level string stays a string), except
+        that an integer budget that is not an ``int`` (a numpy integer) is stored as ``int``.
+
         Raises:
-            ValueError: If ``max_tokens`` is neither None nor an integer >= 1, or ``top_p``
-                is neither None nor a real number in [0, 1] (NaN is not).
+            ValueError: If ``max_tokens`` is neither None nor an integer >= 1, ``top_p``
+                is neither None nor a real number in [0, 1] (NaN is not), or ``thinking``
+                is not a ``ThinkingParam`` form: an unknown level, a ``bool``, a budget
+                below -1, or a value of any other type.
         """
         name = type(self).__name__
         if self.max_tokens is not None:
@@ -734,10 +792,19 @@ class LLMConfig:
                 raise ValueError(f"{name}.top_p must be None or a number in [0, 1]; got {top_p!r}")
             if type(top_p) not in (int, float):
                 self.top_p = float(top_p)
+        self.get_thinking_config()
+        if not isinstance(self.thinking, (str, ThinkingConfig)) and self.thinking is not None:
+            self.thinking = _as_int(self.thinking)
 
     def get_thinking_config(self) -> ThinkingConfig | None:
-        """Get normalized thinking configuration."""
-        return _normalize_thinking_param(self.thinking)
+        """Get normalized thinking configuration.
+
+        Raises:
+            ValueError: If ``thinking`` is not a ``ThinkingParam`` form. ``__post_init__``
+                refuses such a value, so only one assigned to ``thinking`` after
+                construction can raise (fields assigned later are not checked again).
+        """
+        return _normalize_thinking_param(self.thinking, f"{type(self).__name__}.thinking")
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> LLMConfig:

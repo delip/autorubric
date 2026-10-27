@@ -3,13 +3,20 @@
 import hashlib
 import json
 import tempfile
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from pydantic import BaseModel
 
-from autorubric.llm import GenerateResult, LLMClient, LLMConfig, _provider_response_format
+from autorubric.llm import (
+    GenerateResult,
+    LLMClient,
+    LLMConfig,
+    ThinkingConfig,
+    ThinkingLevel,
+    _provider_response_format,
+)
 
 
 class MockResponse(BaseModel):
@@ -321,6 +328,16 @@ class TestLLMClientGenerate:
                     and kw["thinking"]["budget_tokens"] == 10000
                 ),
                 id="budget_tokens",
+            ),
+            pytest.param(
+                "anthropic/claude-sonnet-4-5-20250929",
+                # A budget with no level: the level is never read.
+                ThinkingConfig(level=cast(ThinkingLevel, None), budget_tokens=9000),
+                lambda kw: (
+                    kw["thinking"] == {"type": "enabled", "budget_tokens": 9000}
+                    and "reasoning_effort" not in kw
+                ),
+                id="budget_tokens-without-level",
             ),
             pytest.param(
                 "openai/responses/gpt-5-mini",
