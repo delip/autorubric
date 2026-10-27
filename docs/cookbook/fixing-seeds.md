@@ -197,6 +197,13 @@ print(manifest["grader_config"]["judges"][0]["temperature"])  # 0.3 (None = prov
 
 A grader built with `llm_calls="per_item"` also records `"llm_calls": "per_item"` in `grader_config`; a grader that calls its LLM judges per criterion, the default, records no `llm_calls` key.
 
+Each LLM judge's entry in `judges` (and in a cascade's `escalation` judges) also records the settings that change its requests, but only those that are set. A judge with `max_tokens`, `top_p`, `thinking` or a provider `seed` gets a key of the same name, after `max_parallel_requests` and in that order. `thinking` is recorded in its normalized form, so `thinking="high"`, `ThinkingLevel.HIGH` and `ThinkingConfig(level="high")` all appear as `{"level": "high", "budget_tokens": null}`, and `thinking=32000` as `{"level": "medium", "budget_tokens": 32000}` (a budget, when there is one, is what is sent). A judge that sets none of the four has the entry it had before these keys were recorded, so two runs that differ only in reasoning effort can now be told apart from their manifests.
+
+```python
+judge = manifest["grader_config"]["judges"][0]
+print(judge.get("thinking"))  # {'level': 'high', 'budget_tokens': None}, or None when unset
+```
+
 When resuming an interrupted evaluation, the same seed produces the same shuffle orders for remaining items—no special handling required.
 
 ### Step 7: Coordinate with Few-Shot Selection

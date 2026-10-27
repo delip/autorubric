@@ -1352,6 +1352,32 @@ class TestCascadePersistence:
         }
         assert API_KEY not in json.dumps(config)
 
+    def test_the_escalation_judges_record_thinking_and_sampling_settings(self, make_grader):
+        """An escalation judge goes through the LLM judge entry, so its thinking, max_tokens,
+        top_p and seed are recorded when set, and a judge without them has none of the keys."""
+        grader = make_grader(
+            judge_model_config=dm(),
+            escalation=EscalationConfig(
+                judges=[
+                    JudgeSpec(
+                        LLMConfig(model="a", thinking=4096, max_tokens=900, top_p=0.5, seed=1),
+                        "a",
+                    ),
+                    JudgeSpec(LLMConfig(model="b"), "b"),
+                ],
+                threshold=0.72,
+            ),
+        )
+        a, b = _serialize_grader_config(grader)["escalation"]["judges"]
+        assert {key: a[key] for key in list(a)[6:]} == {
+            "max_tokens": 900,
+            "top_p": 0.5,
+            "thinking": {"level": "medium", "budget_tokens": 4096},
+            "seed": 1,
+        }
+        assert list(b)[6:] == []
+        assert "thinking" not in _serialize_grader_config(grader)["judges"][0]
+
     def test_a_bare_escalation_judge_and_no_overrides(self, make_grader):
         grader = make_grader(judge_model_config=dm(), escalation=cascade(0.5))
         escalation = _serialize_grader_config(grader)["escalation"]

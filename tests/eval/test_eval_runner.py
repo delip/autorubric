@@ -21,8 +21,8 @@ from autorubric import (
     evaluate,
 )
 from autorubric.dataset import DataItem, RubricDataset
-from autorubric.eval import _compute_dataset_hash
-from autorubric.llm import LLMConfig
+from autorubric.eval import _compute_dataset_hash, _serialize_grader_config
+from autorubric.llm import LLMConfig, ThinkingConfig, ThinkingLevel
 from autorubric.types import (
     AggregatedMultiChoiceVerdict,
     CriterionOption,
@@ -1416,6 +1416,124 @@ class TestManifestJudgeConfig:
             assert "temperature" in judges["default"]
             assert judges["default"]["temperature"] is None
             assert judges["explicit"]["temperature"] == 0.0
+
+    @staticmethod
+    def _judges(*configs: LLMConfig) -> dict[str, dict]:
+        """The manifest entries of LLM judges with ``configs``, by judge id."""
+        from autorubric.graders import JudgeSpec
+
+        grader = create_mock_grader()
+        grader._judges = [
+            JudgeSpec(judge_model_config=config, judge_id=f"j{i}")
+            for i, config in enumerate(configs)
+        ]
+        entries = _serialize_grader_config(grader)["judges"]
+        return {entry["judge_id"]: entry for entry in entries}
+
+    def test_a_judge_without_these_settings_has_the_keys_it_had_before(self):
+        """Without thinking, max_tokens, top_p or seed the entry has exactly its six keys,
+        in their order, so its manifest is byte-identical to one written before #44."""
+        (entry,) = self._judges(LLMConfig(model="m")).values()
+        assert list(entry) == [
+            "judge_id",
+            "judge_kind",
+            "model",
+            "temperature",
+            "weight",
+            "max_parallel_requests",
+        ]
+
+    @pytest.mark.parametrize(
+        ("thinking", "recorded"),
+        [
+            ("high", {"level": "high", "budget_tokens": None}),
+            (ThinkingLevel.LOW, {"level": "low", "budget_tokens": None}),
+            ("none", {"level": "none", "budget_tokens": None}),
+            (32000, {"level": "medium", "budget_tokens": 32000}),
+            (
+                ThinkingConfig(level=ThinkingLevel.HIGH, budget_tokens=50000),
+                {"level": "high", "budget_tokens": 50000},
+            ),
+        ],
+    )
+    def test_a_judge_records_its_thinking(self, thinking, recorded):
+        """Every form of ``thinking`` is recorded as its normalized ``ThinkingConfig``, the
+        level as its plain string value, so the entry dumps as plain JSON."""
+        (entry,) = self._judges(LLMConfig(model="m", thinking=thinking)).values()
+        assert entry["thinking"] == recorded
+        assert json.loads(json.dumps(entry))["thinking"] == recorded
+
+    def test_runs_at_different_reasoning_efforts_have_different_manifests(self):
+        judges = self._judges(
+            LLMConfig(model="m"),
+            LLMConfig(model="m", thinking="medium"),
+            LLMConfig(model="m", thinking="high"),
+        )
+        assert "thinking" not in judges["j0"]
+        assert judges["j1"]["thinking"]["level"] == "medium"
+        assert judges["j2"]["thinking"]["level"] == "high"
+
+    def test_a_judge_records_max_tokens_top_p_and_seed_when_set(self):
+        judges = self._judges(
+            LLMConfig(model="m", max_tokens=512),
+            LLMConfig(model="m", top_p=0.9),
+            LLMConfig(model="m", seed=0),
+            LLMConfig(model="m", max_tokens=512, top_p=0.9, thinking="low", seed=7),
+        )
+        assert judges["j0"]["max_tokens"] == 512
+        assert judges["j1"]["top_p"] == 0.9
+        assert judges["j2"]["seed"] == 0  # 0 is a seed, recorded
+        for absent in ("top_p", "seed", "thinking"):
+            assert absent not in judges["j0"]
+        # Added after the existing keys, in LLMConfig's field order.
+        assert list(judges["j3"])[6:] == ["max_tokens", "top_p", "thinking", "seed"]
+        assert judges["j3"]["seed"] == 7
+
+    def test_a_mocked_config_records_none_of_the_optional_settings(self):
+        """A judge config that is a mock (no real values) adds none of the optional keys."""
+        from autorubric.graders import JudgeSpec
+
+        config = MagicMock()
+        config.model = "m"
+        grader = create_mock_grader()
+        grader._judges = [JudgeSpec(judge_model_config=config, judge_id="mocked")]
+        (entry,) = _serialize_grader_config(grader)["judges"]
+        assert list(entry)[6:] == []
+
+    @pytest.mark.asyncio
+    async def test_a_thinking_judge_manifest_is_written_and_resumed(self, sample_dataset):
+        """The recorded settings reach manifest.json, load back, and do not stop a resume."""
+        from autorubric.graders import JudgeSpec
+
+        def grader() -> MagicMock:
+            mock = create_mock_grader()
+            mock._judges = [
+                JudgeSpec(
+                    judge_model_config=LLMConfig(model="m", thinking="high", seed=3),
+                    judge_id="thinker",
+                )
+            ]
+            return mock
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            for run in range(2):
+                regrader = grader()
+                await evaluate(
+                    dataset=sample_dataset,
+                    grader=regrader,
+                    show_progress=False,
+                    experiment_name="thinking",
+                    experiments_dir=tmp_dir,
+                )
+            assert regrader.grade.await_count == 0  # the second run resumed
+
+            manifest_path = Path(tmp_dir) / "thinking" / "manifest.json"
+            data = json.loads(manifest_path.read_text(encoding="utf-8"))
+            (entry,) = data["grader_config"]["judges"]
+            assert entry["thinking"] == {"level": "high", "budget_tokens": None}
+            assert entry["seed"] == 3
+            loaded = ExperimentManifest.from_dict(data)
+            assert loaded.grader_config == data["grader_config"]
 
 
 # -----------------------------------------------------------------------------
