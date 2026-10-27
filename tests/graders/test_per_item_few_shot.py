@@ -6,8 +6,10 @@ than examples drawn per criterion (which would put N x k example submissions in 
 
 Selection (``_select_item_examples``) happens once per LLM judge at construction:
 
-- An item is eligible when it has ground truth and every label is usable for its criterion's
-  kind in the training rubric (a criterion the training rubric lacks counts as binary): a
+- An item is eligible when it has ground truth and a label for at least one criterion of
+  the training rubric (labels beyond it are not read; an item whose own rubric is shorter or
+  poses another question at an index has none there), each label usable for its criterion's
+  kind: a
   ``CriterionVerdict``, or its value, for a binary criterion; for a multi-choice one, an
   option label that resolves or an ``int`` (not ``bool``) option index in range, among the
   options the judge is shown (with ``auto_na_option``, the NA option it adds too).
@@ -16,7 +18,8 @@ Selection (``_select_item_examples``) happens once per LLM judge at construction
   ``_derive_shuffle_rng(few_shot_seed, "few_shot", -1, judge_id)``.
 - ``balance_verdicts=False`` takes the first ``n_examples`` of that order.
 - ``balance_verdicts=True`` picks by greedy label coverage over (criterion index, label)
-  pairs, a multi-choice label being the option index it resolves to however it is named,
+  pairs (none for a criterion the item has no label for), a multi-choice label being the
+  option index it resolves to however it is named,
   earliest in the seeded order on a tie, never an item whose submission was already picked,
   then fills the remaining slots in the seeded order.
 
@@ -539,8 +542,9 @@ class TestEligibility:
 
     @staticmethod
     def longer_rubric_pool() -> RubricDataset:
-        """Items with their own rubric, one criterion longer than the training rubric: the
-        extra criterion is one the training rubric lacks, so it counts as binary."""
+        """Items with their own rubric, one criterion longer than the training rubric: its
+        first four criteria pose the training rubric's questions, so their labels are labels
+        of the training rubric, and the extra criterion is one no example describes."""
         dataset = RubricDataset(prompt=QUERY, rubric=Rubric(TRAIN_RUBRIC))
         dataset.add_item("global text", "global", ground_truth=[MET, "Very clear", UNMET, "Formal"])
         dataset.add_item(
@@ -558,12 +562,19 @@ class TestEligibility:
         return dataset
 
     @pytest.mark.parametrize("balance", [True, False])
-    def test_a_label_the_training_rubric_has_no_criterion_for_counts_as_binary(self, balance):
-        """A verdict there keeps the item eligible; an option label, no verdict, does not."""
+    def test_a_label_the_training_rubric_has_no_criterion_for_is_not_read(self, balance):
+        """A verdict or an option label there: the item is eligible either way."""
         data = self.longer_rubric_pool()
         grader = per_item_grader(RubricLLM(), data, few_shot(50, balance=balance))
-        assert sorted(names(picked(grader, "default"))) == ["extra verdict", "global"]
+        assert sorted(names(picked(grader, "default"))) == [
+            "extra option label",
+            "extra verdict",
+            "global",
+        ]
+        # One label per criterion of the training rubric.
+        assert {len(labels) for _, labels, _ in grader._item_examples["default"]} == {4}
 
+    @pytest.mark.filterwarnings("ignore:Few-shot examples are not shown:UserWarning")
     @pytest.mark.asyncio
     async def test_a_label_the_training_rubric_has_no_criterion_for_gets_no_judgment(self):
         """Even when the graded rubric has a binary criterion at that index."""
@@ -573,7 +584,7 @@ class TestEligibility:
         (call,) = fake.calls
         assert '<rubric_criterion id="c4">' in call.user_prompt
         examples = dict(shown_examples(call.user_prompt))
-        assert set(examples) == {"global text", "extra verdict text"}
+        assert set(examples) == {"global text", "extra verdict text", "extra option label text"}
         assert list(examples["extra verdict text"]) == ["c0", "c1", "c2", "c3"]
         assert examples["extra verdict text"]["c0"] == "<verdict>UNMET</verdict>"
 
@@ -1002,9 +1013,12 @@ class TestRendering:
         assert fake.calls == []
 
 
+# Each criterion shown no examples warns (tests/graders/test_few_shot_rubric_match.py).
+@pytest.mark.filterwarnings("ignore:Few-shot examples are not shown:UserWarning")
 class TestGradedRubricDiffersFromTraining:
-    """A judgment appears only for a criterion index both rubrics have, with a criterion of
-    the same kind, and (multi-choice) whose option the graded criterion has."""
+    """A judgment appears only for a criterion that poses the training rubric's question at
+    its index: the same kind and requirement, the same criterion type (binary), the same
+    options in the same order (multi-choice)."""
 
     @staticmethod
     async def prompt(rubric: list[Criterion]) -> tuple[str, str]:
@@ -1048,7 +1062,7 @@ class TestGradedRubricDiffersFromTraining:
             assert judgments["c0"] == f"<verdict>{labels[0].value}</verdict>"
 
     @pytest.mark.asyncio
-    async def test_an_option_the_graded_criterion_lacks_gets_no_judgment(self):
+    async def test_a_criterion_with_other_options_gets_no_judgment(self):
         two_options = Criterion(
             name="clarity",
             weight=2.0,
@@ -1061,16 +1075,12 @@ class TestGradedRubricDiffersFromTraining:
         )
         _, prompt = await self.prompt([LIGHT, two_options, JARGON, TONE])
         examples = shown_examples(prompt)
-        # Only the judgment is left out, never the example: all four items are still shown,
-        # the one labelled "Very clear" (an option the graded criterion lacks) among them.
+        # The question has other options, so no training label is a label of it, not even
+        # "Unclear" or "Mostly clear", which the graded criterion also has: only the
+        # judgments are left out, never the examples.
         assert len(examples) == 4
-        assert list(dict(examples)["Plants use sunlight to make sugar."]) == ["c0", "c2", "c3"]
-        for submission, judgments in examples:
-            labels, _ = TRAINING[submission]
-            if labels[1] == "Very clear":
-                assert list(judgments) == ["c0", "c2", "c3"]
-            else:
-                assert list(judgments) == ["c0", "c1", "c2", "c3"]
+        for _submission, judgments in examples:
+            assert list(judgments) == ["c0", "c2", "c3"]
 
     @pytest.mark.asyncio
     async def test_no_judgment_left_means_no_examples(self):

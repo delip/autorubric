@@ -126,6 +126,53 @@ def _ground_truth_reason(item: DataItem, criterion_idx: int) -> str | None:
     return reasons[criterion_idx] if reasons is not None else None
 
 
+def _posed_question(criterion: Criterion) -> tuple[object, ...]:
+    """The question an LLM judge is asked about a criterion, which its labels answer.
+
+    Two criteria pose the same question when a ground-truth label of one is a label of the
+    other, so a few-shot example of one is an example of the other. That is what the judge
+    is shown and what a label names: the criterion's kind and requirement; for a binary
+    criterion its criterion type (a negative weight asks whether the submission makes an
+    error, which changes what MET means); for a multi-choice criterion its options, each
+    option's label and NA flag, in order, since a label is resolved to an option's position.
+    Pass the criterion as the judge is shown it (``CriterionGrader._effective_criterion``).
+    The weight's magnitude, the name, option values, ``scale_type`` and ``aggregation`` are
+    not shown to the judge and do not change what a label means, so they are left out.
+    """
+    if criterion.options is None:
+        return ("binary", criterion.requirement, criterion.weight < 0)
+    options = tuple((option.label, option.na) for option in criterion.options)
+    return ("multi_choice", criterion.requirement, options)
+
+
+def _why_examples_do_not_apply(
+    question: tuple[object, ...], training_question: tuple[object, ...] | None
+) -> str:
+    """Why a graded criterion's question is not the training criterion's, for a warning.
+
+    Args:
+        question: The graded criterion's ``_posed_question``.
+        training_question: The training rubric's criterion's at the same index, or ``None``
+            when the training rubric has none there.
+    """
+    if training_question is None:
+        return "the training rubric has no criterion at its index"
+    kind, requirement, rest = question
+    training_kind, training_requirement, training_rest = training_question
+    if kind != training_kind:
+        return (
+            f"it is {str(kind).replace('_', '-')} and the training rubric's criterion at "
+            f"its index is {str(training_kind).replace('_', '-')}"
+        )
+    differences = []
+    if requirement != training_requirement:
+        differences.append("requirement")
+    if rest != training_rest:
+        differences.append("criterion type" if kind == "binary" else "options")
+    what = " and ".join(differences)
+    return f"it differs from the training rubric's criterion at its index in its {what}"
+
+
 _ESCALATION_NAMES_CHECKED: ContextVar[bool] = ContextVar("_ESCALATION_NAMES_CHECKED", default=False)
 """True while a batch (``EvalRunner.run``, ``fill_ground_truth``) grades a dataset's items.
 The batch checked the cascade's ``EscalationConfig.per_criterion`` names against the union
@@ -1123,6 +1170,13 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
     _escalation: EscalationConfig | None = None
     _escalation_names_warned: bool = False
     _llm_calls: LLMCalls = "per_criterion"
+    # The question each criterion of the training rubric posed when the few-shot examples
+    # were drawn (``_prepare_examples``); ``None`` for a grader whose ``__init__`` never ran,
+    # which reads the training rubric as it is now (``_training_question``).
+    _training_questions: tuple[tuple[object, ...], ...] | None = None
+    # The (criterion index, graded question) pairs ``judge`` has warned get no few-shot
+    # examples (``_warn_examples_not_shown``); none for a grader whose ``__init__`` never ran.
+    _examples_not_shown_warned: frozenset[tuple[int, tuple[object, ...]]] = frozenset()
 
     def __init__(
         self,
@@ -1189,10 +1243,28 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 criterion, a judge is shown examples drawn for each criterion separately.
                 Under ``llm_calls="per_item"`` an example is a whole training item, shown
                 once in the judge's one call per item with its ground truth (and reason) for
-                every criterion; only an item whose ground truth resolves for every
-                criterion (a verdict for a binary criterion, an option for a multi-choice
-                one) is eligible. Either way each judge draws its own examples, and the
-                training data needs a global rubric, which says what each label means.
+                every criterion it has a label for; only an item with at least one label,
+                each of which resolves (a verdict for a binary criterion, an option for a
+                multi-choice one), is eligible. Either way each judge draws its own
+                examples, and the training data needs a global rubric, which says what each
+                label means.
+                Examples are drawn for that rubric's criteria and shown for the criterion at
+                the same index of the rubric being graded only when the two pose the same
+                question, as the judge is shown each: the same kind and requirement, for a
+                binary criterion the same criterion type (a negative weight or not), for a
+                multi-choice criterion the same options (labels and NA flags) in the same
+                order, the NA option ``auto_na_option`` adds included. Any other graded
+                criterion, or one beyond the training rubric, gets no examples (no judgment
+                in a whole-rubric example); weight magnitude, name, option values,
+                ``scale_type`` and ``aggregation`` do not matter. Likewise a training item
+                with its own rubric (``DataItem.rubric``) lends its label for a criterion
+                only when its own criterion at that index poses the training rubric's
+                question (under ``llm_calls="per_item"``, its example has no judgment for
+                the others). Both rubrics are read as they are when the grader is built:
+                changing the training rubric afterwards changes no prompt. Grading a
+                criterion shown no examples this way warns (``UserWarning``, once per grader
+                per criterion index and graded question), naming the criterion and why; a
+                training item's own rubric that lends no label warns nothing.
             few_shot_config: Configuration for few-shot example selection (LLM judges only).
                 The grader validates and keeps its own copy, so changing the config after
                 the grader is built does not affect it.
@@ -1525,9 +1597,10 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         self._multi_choice_examples: dict[tuple[int, str], list[tuple[str, int, str | None]]] = {}
         # Under llm_calls="per_item": each LLM judge's examples, whole training items in the
         # order its one call per item shows them, each as (submission, labels, reasons): a
-        # label per criterion (_item_labels) and the item's reason for it, if any
+        # label per criterion of the training rubric (_item_labels; None where the item has
+        # none) and the item's reason for it, if any
         self._item_examples: dict[
-            str, list[tuple[str, list[CriterionVerdict | int], list[str | None]]]
+            str, list[tuple[str, list[CriterionVerdict | int | None], list[str | None]]]
         ] = {}
         if training_data is not None:
             self._prepare_examples()
@@ -1585,7 +1658,10 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
 
         Either way an example is taken as the training item is now, its submission, labels
         and reasons: the examples are a fixed property of the judge, so changing a training
-        item after the grader is built changes no prompt.
+        item after the grader is built changes no prompt. So is the question each of the
+        training rubric's criteria poses (``_training_questions``), which says which graded
+        criterion the examples describe: changing the training rubric after the grader is
+        built changes no prompt either.
 
         Raises:
             ValueError: If the training data has no global rubric, which says what each
@@ -1598,6 +1674,10 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         # Raises without a global rubric, however the judges are called.
         n_criteria = training_data.num_criteria
         rubric_criteria = training_data.rubric.rubric if training_data.rubric else []
+        # Taken before any example is drawn: drawing reads it (_training_label).
+        self._training_questions = tuple(
+            _posed_question(self._effective_criterion(criterion)) for criterion in rubric_criteria
+        )
         llm_judges = [
             j
             for j in (*self._judges, *self._escalation_judges)
@@ -1611,7 +1691,10 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                     (
                         item.submission,
                         labels,
-                        [_ground_truth_reason(item, idx) for idx in range(len(labels))],
+                        [
+                            None if label is None else _ground_truth_reason(item, idx)
+                            for idx, label in enumerate(labels)
+                        ],
                     )
                     for item in self._select_item_examples(judge.judge_id)
                     if (labels := self._item_labels(item)) is not None
@@ -1660,9 +1743,9 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         }
 
         for item in self._training_data:
-            if item.ground_truth is None:
+            verdict = self._training_label(item, criterion_idx)
+            if verdict is None:
                 continue
-            verdict = item.ground_truth[criterion_idx]
             verdict_groups[verdict].append(item)
 
         available_verdicts = [v for v, items in verdict_groups.items() if items]
@@ -1755,6 +1838,101 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
             identity=lambda item: item.submission,
         )
 
+    def _poses_training_question(self, criterion_idx: int, criterion: Criterion) -> bool:
+        """Whether ``criterion`` poses the question of the training rubric's criterion there.
+
+        Few-shot examples are drawn for the training data's rubric and shown for the
+        criterion at the same index of the rubric being graded; they describe it only when
+        both pose the same question (``_posed_question``), each as the judge is shown it
+        (``_effective_criterion``).
+
+        Args:
+            criterion_idx: The criterion's index.
+            criterion: The criterion as the judge is shown it, at that index of its rubric.
+
+        Returns:
+            ``False`` too when there is no training rubric or it has no criterion there.
+        """
+        training_question = self._training_question(criterion_idx)
+        return training_question is not None and training_question == _posed_question(criterion)
+
+    def _warn_examples_not_shown(self, rubric: list[Criterion]) -> None:
+        """Warn about each graded criterion the few-shot examples do not describe.
+
+        Such a criterion is shown no examples (``_poses_training_question``), whichever way
+        the judges are called, so the user learns that the examples are not used for it
+        and why: it poses another question than the training rubric's criterion at its
+        index (another kind, requirement, criterion type or options), or the training
+        rubric has no criterion there. A ``UserWarning`` attributed to the code that asked
+        for grading (``_caller_stacklevel``), issued once per grader per (criterion index,
+        graded question), not once per item. A pair is recorded only once the warning is
+        issued, so under a warnings-as-errors filter it raises on every call. Nothing is
+        checked without training data.
+
+        Args:
+            rubric: The criteria being graded, as the judges are shown them
+                (``_effective_criterion``).
+        """
+        if self._training_data is None:
+            return
+        for criterion_idx, criterion in enumerate(rubric):
+            question = _posed_question(criterion)
+            training_question = self._training_question(criterion_idx)
+            key = (criterion_idx, question)
+            if question == training_question or key in self._examples_not_shown_warned:
+                continue
+            warnings.warn(
+                f"Few-shot examples are not shown for {_describe(criterion, criterion_idx)}: "
+                f"{_why_examples_do_not_apply(question, training_question)}, so the "
+                "training labels do not answer it",
+                UserWarning,
+                stacklevel=_caller_stacklevel(),
+            )
+            self._examples_not_shown_warned = self._examples_not_shown_warned | {key}
+
+    def _training_question(self, criterion_idx: int) -> tuple[object, ...] | None:
+        """The question the training rubric's criterion at ``criterion_idx`` poses.
+
+        Read from the training rubric as it was when the examples were drawn
+        (``_training_questions``), so a later change to it, which changes no example, does
+        not change which criteria the examples are shown for. A grader whose ``__init__``
+        never ran has no such record and reads the training rubric as it is now.
+
+        Returns:
+            ``None`` when there is no training rubric or it has no criterion there.
+        """
+        questions = self._training_questions
+        if questions is None:
+            if self._training_data is None or self._training_data.rubric is None:
+                return None
+            criteria = self._training_data.rubric.rubric
+            if criterion_idx >= len(criteria):
+                return None
+            return _posed_question(self._effective_criterion(criteria[criterion_idx]))
+        return questions[criterion_idx] if criterion_idx < len(questions) else None
+
+    def _training_label(self, item: DataItem, criterion_idx: int) -> CriterionVerdict | str | None:
+        """A training item's ground-truth label for the training rubric's criterion, as given.
+
+        An item's labels answer its own rubric's questions (``DataItem.rubric``, or the
+        training data's rubric when it has none), so its label at ``criterion_idx`` is a
+        label of the training rubric's criterion there only when the item's criterion there
+        poses the same question (``_poses_training_question``).
+
+        Returns:
+            The label, or ``None`` when the item has no ground truth or no label there, or
+            its own rubric poses another question there.
+        """
+        if item.ground_truth is None or criterion_idx >= len(item.ground_truth):
+            return None
+        if item.rubric is not None:
+            own_criteria = item.rubric.rubric
+            if criterion_idx >= len(own_criteria) or not self._poses_training_question(
+                criterion_idx, self._effective_criterion(own_criteria[criterion_idx])
+            ):
+                return None
+        return item.ground_truth[criterion_idx]
+
     def _label_to_option_index(self, criterion_idx: int, label: str | int) -> int | None:
         """Map a ground-truth label to a 0-based option index among the options shown.
 
@@ -1811,9 +1989,10 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         # Group items by option index (converting label to index)
         option_groups: dict[int, list] = {}
         for item in self._training_data:
-            if item.ground_truth is None:
+            label = self._training_label(item, criterion_idx)
+            if label is None:
                 continue
-            idx = self._label_to_option_index(criterion_idx, item.ground_truth[criterion_idx])
+            idx = self._label_to_option_index(criterion_idx, label)
             if idx is None:
                 continue
             option_groups.setdefault(idx, []).append((item, idx))
@@ -1853,15 +2032,16 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         """Select the whole training items a judge's one call per item shows as examples.
 
         Under ``llm_calls="per_item"`` an example is a training item labelled on every
-        criterion (``_item_labels``); only an item with a usable label for every criterion
-        is eligible. The eligible items, in dataset order, are shuffled by
+        criterion of the training rubric it has a label for (``_item_labels``); only an item
+        with at least one label, each of them usable, is eligible. The eligible items, in
+        dataset order, are shuffled by
         ``_derive_shuffle_rng(few_shot_seed, FEW_SHOT_DOMAIN, -1, judge_id)``: ``-1`` stands
         for the whole rubric and is no criterion's index, and each judge draws its own
         examples. Then, up to ``n_examples`` items:
 
         - With ``balance_verdicts=False``, the first items of that seeded order.
         - With ``balance_verdicts=True``, greedy label coverage. Balancing each criterion's
-          labels is impossible when every example carries every criterion's label, so each
+          labels is impossible when an example carries every criterion's label, so each
           pick is the item showing the most (criterion index, label) pairs that no picked
           item shows yet, the earliest in the seeded order on a tie. Once no item adds a
           pair, the remaining slots are filled in the seeded order. An item whose submission
@@ -1894,7 +2074,10 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         if not config.balance_verdicts:
             return [item for item, _labels in candidates[:n_examples]]
 
-        pairs = [set(enumerate(labels)) for _item, labels in candidates]
+        pairs = [
+            {(idx, label) for idx, label in enumerate(labels) if label is not None}
+            for _item, labels in candidates
+        ]
         shown: set[tuple[int, CriterionVerdict | int]] = set()
         picked: list[DataItem] = []
         picked_submissions: set[str] = set()
@@ -1922,33 +2105,39 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 picked_submissions.add(item.submission)
         return picked
 
-    def _item_labels(self, item: DataItem) -> list[CriterionVerdict | int] | None:
+    def _item_labels(self, item: DataItem) -> list[CriterionVerdict | int | None] | None:
         """A training item's ground truth as few-shot labels, one per criterion.
 
-        A criterion's kind is the training rubric's (a criterion it lacks counts as
-        binary). A binary criterion's label is its ``CriterionVerdict``, given as one or as
-        its value (``"MET"``), as ``resolve_ground_truth`` reads it. A multi-choice
-        criterion's label is the 0-based index of its option among the options the judge is
-        shown (``_effective_criterion``), which with ``auto_na_option`` include the NA option
-        it guarantees, so the label ``fill_ground_truth`` records when a judge chose that
-        option resolves too. The index is resolved from an option label as
+        One entry per criterion of the training rubric: the item's label for it
+        (``_training_label``), read by the criterion's kind, or ``None`` when it has none
+        there (its own rubric is shorter or poses another question there), as with the
+        examples drawn per criterion. A binary criterion's label is its ``CriterionVerdict``,
+        given as one or as its value (``"MET"``), as ``resolve_ground_truth`` reads it. A
+        multi-choice criterion's label is the 0-based index of its option among the options
+        the judge is shown (``_effective_criterion``), which with ``auto_na_option`` include
+        the NA option it guarantees, so the label ``fill_ground_truth`` records when a judge
+        chose that option resolves too. The index is resolved from an option label as
         ``Criterion.find_option_by_label`` resolves it, or given as an index in range: a
         ``DataItem`` takes labels only, so an index is one set on an item after it was
         built, which ``resolve_ground_truth`` reads too.
 
         Returns:
             The labels, in criterion order, or ``None`` when the item cannot be a
-            whole-rubric example: it has no ground truth, or a label is unusable (a binary
-            criterion's names no verdict, a multi-choice criterion's no option).
+            whole-rubric example: it has no ground truth, no label for any criterion, or a
+            label that is unusable (a binary criterion's names no verdict, a multi-choice
+            criterion's no option).
         """
         if self._training_data is None or item.ground_truth is None:
             return None
-        rubric = self._training_data.rubric
-        criteria = rubric.rubric if rubric else []
-        labels: list[CriterionVerdict | int] = []
-        for criterion_idx, label in enumerate(item.ground_truth):
-            criterion = criteria[criterion_idx] if criterion_idx < len(criteria) else None
-            if criterion is None or criterion.options is None:
+        if self._training_data.rubric is None:
+            return None
+        labels: list[CriterionVerdict | int | None] = []
+        for criterion_idx, criterion in enumerate(self._training_data.rubric.rubric):
+            label = self._training_label(item, criterion_idx)
+            if label is None:
+                labels.append(None)
+                continue
+            if criterion.options is None:
                 try:
                     labels.append(CriterionVerdict(label))
                 except ValueError:
@@ -1966,6 +2155,8 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
             if option_idx is None:
                 return None
             labels.append(option_idx)
+        if all(label is None for label in labels):
+            return None
         return labels
 
     # =========================================================================
@@ -2025,8 +2216,14 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         *,
         guidelines: str | None = None,
     ) -> CriterionResult:
-        """Judge a binary (MET/UNMET) criterion."""
+        """Judge a binary (MET/UNMET) criterion.
+
+        The judge's few-shot examples for the criterion's index are shown only when the
+        criterion poses the training rubric's question there (``_poses_training_question``).
+        """
         examples = self._criterion_examples.get((criterion_idx, judge.judge_id), [])
+        if examples and not self._poses_training_question(criterion_idx, criterion):
+            examples = []
 
         # Build prompt (with or without few-shot examples)
         if examples:
@@ -2090,6 +2287,11 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         If shuffle_options is enabled, options are presented to the LLM in a
         randomized order to mitigate position bias. The response is mapped back
         to the original option indices.
+
+        The judge's few-shot examples for the criterion's index are shown only when the
+        criterion poses the training rubric's question there (``_poses_training_question``),
+        which has the same options in the same order, so each example's option index names
+        the same option here.
         """
         # Shuffle options to mitigate position bias
         # shuffled_indices[shuffled_pos] = original_pos
@@ -2098,6 +2300,8 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         )
 
         examples = self._multi_choice_examples.get((criterion_idx, judge.judge_id), [])
+        if examples and not self._poses_training_question(criterion_idx, criterion):
+            examples = []
 
         # Build prompt (with or without few-shot examples)
         if examples:
@@ -2618,11 +2822,11 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         """The few-shot examples of a judge's one call, each with its judgments as shown.
 
         Each of the judge's examples (``_item_examples``, drawn by
-        ``_select_item_examples``) has a judgment for each criterion index that both the
-        training rubric and ``rubric`` have, with a criterion of the same kind: its verdict,
-        or its option renumbered to the option's position in the call's order, when the
-        graded criterion has that option. As with per-criterion examples, this assumes
-        ``rubric`` is the training data's rubric. An example with no judgment is left out.
+        ``_select_item_examples``) has a judgment for each criterion of ``rubric`` that
+        poses the training rubric's question at its index (``_poses_training_question``),
+        as per-criterion examples are shown: its verdict, or its option renumbered to the
+        option's position in the call's order, when the example has a label for it. Any
+        other criterion gets no judgment, and an example with no judgment is left out.
 
         Args:
             judge_id: The judge whose examples to show.
@@ -2638,28 +2842,28 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         examples = self._item_examples.get(judge_id, [])
         if self._training_data is None or not examples:
             return []
-        training_rubric = self._training_data.rubric
-        training_criteria = training_rubric.rubric if training_rubric else []
+        # The criteria the examples describe; an example may have no label for some of them.
+        described = [
+            criterion_idx
+            for criterion_idx, criterion in enumerate(rubric)
+            if self._poses_training_question(criterion_idx, criterion)
+        ]
         shown_examples = []
         for submission, labels, reasons in examples:
             judgments: list[tuple[str, Criterion, CriterionVerdict | int, str | None]] = []
-            for criterion_idx, label in enumerate(labels):
-                if criterion_idx >= min(len(training_criteria), len(rubric)):
-                    break
-                if (
-                    training_criteria[criterion_idx].is_multi_choice
-                    != rubric[criterion_idx].is_multi_choice
-                ):
+            for criterion_idx in described:
+                label = labels[criterion_idx]
+                if label is None:
                     continue
                 criterion_id, shown = presented[criterion_idx]
                 shuffled_indices = shuffles[criterion_idx]
                 if shuffled_indices is None:
                     shown_label: CriterionVerdict | int = label
-                elif isinstance(label, int) and label < len(shuffled_indices):
-                    # From the option's original index to its position in the call's order
-                    shown_label = shuffled_indices.index(label)
                 else:
-                    continue
+                    # The same options in the same order as the training criterion's, so the
+                    # label is an option index: from its original index to its position in
+                    # the call's order.
+                    shown_label = shuffled_indices.index(cast(int, label))
                 judgments.append((criterion_id, shown, shown_label, reasons[criterion_idx]))
             if judgments:
                 shown_examples.append((submission, judgments))
@@ -2800,6 +3004,10 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 matches no criterion of ``rubric`` (not while ``EvalRunner`` or
                 ``fill_ground_truth`` grades a dataset, which checks the names against
                 every item's rubric instead).
+            UserWarning: With training data, once per grader per (criterion index, graded
+                question), when a criterion of ``rubric`` is shown no few-shot examples
+                because it does not pose the training rubric's question at its index
+                (``_warn_examples_not_shown``).
         """
         # Checked before any judge runs; blank guidelines become None.
         guidelines = _normalize_guidelines(guidelines)
@@ -2812,6 +3020,7 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         # multi-choice under auto_na_option). Same length/order, so criterion_idx — and
         # thus the shuffle RNG key — stays aligned; the user's rubric is never mutated.
         effective_rubric = [self._effective_criterion(c) for c in rubric]
+        self._warn_examples_not_shown(effective_rubric)
         tasks = [
             self._judge_all_criteria_for_judge(
                 judge,

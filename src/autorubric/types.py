@@ -1304,8 +1304,8 @@ class FewShotConfig:
 
     Under ``CriterionGrader(llm_calls="per_item")``, where an LLM judge grades an item's whole
     rubric in one call, an example is a whole training item, shown once per call and labelled
-    on every criterion, and ``n_examples`` and ``balance_verdicts`` apply to those items (see
-    each attribute).
+    on every criterion it has a label for, and ``n_examples`` and ``balance_verdicts`` apply
+    to those items (see each attribute).
 
     Attributes:
         n_examples: Total number of examples to include per criterion, an integer >= 1

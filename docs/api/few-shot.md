@@ -87,6 +87,49 @@ item that `fill_ground_truth` labelled with that option can be an example, shown
 option. With `auto_na_option=False` the judge is shown no such option, and the item is not used
 as an example for that criterion. An item whose label names no option shown is left out.
 
+## Which Criteria Get Examples
+
+A training label answers the question its criterion poses, so examples are drawn for the
+criteria of the training data's global rubric. A criterion of the rubric being graded is
+shown the examples drawn for the training criterion at the same index only when the two pose
+the same question, as the judge is shown each:
+
+- both binary, with the same requirement and the same criterion type (a negative weight or
+  not, since for a negative criterion MET means the submission makes the error), or
+- both multi-choice, with the same requirement and the same options (labels and NA flags) in
+  the same order. With `auto_na_option=True` this compares the options after the grader adds
+  its NA option, so a criterion that lists that option itself still matches.
+
+The weight's magnitude, the name, option values, `scale_type` and `aggregation` are not
+shown to the judge and do not change what a label means, so changing them keeps the
+examples. A graded criterion that poses another question, such as one with reordered or
+relabelled options, gets no examples, and so does a criterion beyond the length of the
+training rubric. The same rule applies to a training item with its own rubric
+(`DataItem.rubric`), whose labels answer that rubric's questions. Its label for a criterion
+is used only when its own criterion at that index poses the training rubric's question.
+Both rubrics are compared as the judge is shown them, and the training rubric as it was when
+the grader was built: like the examples, which are drawn then, the comparison does not change
+when the training rubric is replaced or edited afterwards.
+
+A graded criterion that gets no examples this way raises a `UserWarning` when it is graded,
+under either `llm_calls` setting. The warning names the criterion (its id, such as `c1`, and
+its name) and says why: it differs from the training rubric's criterion at its index in its
+requirement, criterion type or options, it is of the other kind (binary or multi-choice), or
+the training rubric has no criterion at its index. A grader warns once per criterion index
+and graded question, not once per item, and warns again if a later grade puts another
+question at that index. A training item whose own rubric lends no label does not warn,
+because that item is training data the grader was built with, not part of the rubric being
+graded. Its label is left out of the examples for that criterion, as a missing label is.
+
+```text
+UserWarning: Few-shot examples are not shown for criterion c1 ('tone'): it differs from the training rubric's criterion at its index in its options, so the training labels do not answer it
+```
+
+When the graded rubric is the training rubric, every criterion gets its examples. Releases
+before this check showed the training criterion's examples for whatever criterion stood at
+that index. A different binary criterion got another criterion's verdicts, reordered options
+got the wrong option labels, and fewer options raised `KeyError` while the prompt was built.
+
 ## Ensemble + Few-Shot
 
 Few-shot works orthogonally with ensemble mode. Each LLM judge gets its own examples, drawn from
@@ -127,10 +170,18 @@ grader = CriterionGrader(
 
 - **Eligibility.** An item is shown only if every one of its ground-truth labels resolves for
   its criterion — a verdict (or its value, such as `"MET"`) for a binary criterion, an option
-  for a multi-choice one. An item missing a resolvable label for even one criterion is not
-  used as an example at all. A multi-choice label resolves among the options the judge is
+  for a multi-choice one. An item with a label that does not resolve, even for one criterion,
+  is not used as an example at all. A multi-choice label resolves among the options the judge is
   shown, so with `auto_na_option=True` (the default) the NA option the grader adds counts
-  too: an item that `fill_ground_truth` labelled with that option is a whole example.
+  too: an item that `fill_ground_truth` labelled with that option is a whole example. An
+  item with its own rubric has a label only for the criteria at which its rubric poses the
+  training rubric's question (see *Which Criteria Get Examples* above), so its example shows
+  no judgment for the others; it is eligible when it has at least one label. Labels for
+  criteria beyond the training rubric are not read.
+- **Judgments shown.** An example has a judgment only for the graded criteria that pose the
+  training rubric's question at their index and that it has a label for. A criterion that poses another question, or one
+  the training rubric lacks, gets no judgment, and an example left with no judgment is not
+  shown.
 - **`n_examples`** counts training items per call, not per criterion: `n_examples=3` shows 3
   whole items in each call, however many criteria the rubric has.
 - **`balance_verdicts=True`** (the default) selects by greedy label coverage rather than
