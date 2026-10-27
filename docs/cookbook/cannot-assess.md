@@ -207,7 +207,9 @@ option written into the rubric would.
 This holds only for a criterion with no NA option of its own; a criterion that declares one gets
 nothing added, so its labels must name its own options. A grader built with
 `auto_na_option=False` offers no NA option, so it does not use an item with that label as a
-few-shot example.
+few-shot example. Because that label names the added option, no scored option of a criterion
+without an NA option may have it: such a criterion raises `ValueError` when it is built (see
+[Option Labels](../api/multi-choice.md#option-labels)).
 
 ### Step 5: Compare Strategy Effects
 

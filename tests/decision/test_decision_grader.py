@@ -80,15 +80,13 @@ CLARITY = Criterion(
     ],
 )
 RUBRIC = [LIGHT, MYTH, CLARITY]
-TONE_DUPLICATE_LABELS = Criterion(
+# More options than one Choice question may offer (255): no question can pose it.
+TONE_TOO_MANY_OPTIONS = Criterion(
     name="tone",
     weight=1.0,
     requirement="Which tone?",
     scale_type="nominal",
-    options=[
-        CriterionOption(label="Formal", value=1.0),
-        CriterionOption(label="Formal", value=0.0),
-    ],
+    options=[CriterionOption(label=f"Tone {i}", value=i / 255) for i in range(256)],
 )
 
 
@@ -485,7 +483,7 @@ class TestOneRequestPerItem:
     ):
         fake_sdk.response = response({"c0": noul(0.9), "c2": noul(0.2), "c3": CLARITY_MOSTLY})
         grader = make_grader(judge_model_config=dm())
-        rubric = Rubric([LIGHT, TONE_DUPLICATE_LABELS, MYTH, CLARITY])
+        rubric = Rubric([LIGHT, TONE_TOO_MANY_OPTIONS, MYTH, CLARITY])
         report = await rubric.grade(SUBMISSION, grader=grader, query=QUERY)
 
         assert len(fake_sdk.calls) == 1
@@ -500,7 +498,7 @@ class TestOneRequestPerItem:
     @pytest.mark.asyncio
     async def test_all_criteria_inexpressible_sends_nothing(self, fake_sdk, make_grader):
         grader = make_grader(judge_model_config=dm())
-        report = await Rubric([TONE_DUPLICATE_LABELS]).grade(SUBMISSION, grader=grader)
+        report = await Rubric([TONE_TOO_MANY_OPTIONS]).grade(SUBMISSION, grader=grader)
 
         assert fake_sdk.calls == []
         assert report.report[0].error.startswith("parse: Cannot pose criterion c0")
@@ -729,7 +727,7 @@ class TestWholeRequestFailure:
     async def test_an_inexpressible_criterion_keeps_its_own_error(self, fake_sdk, make_grader):
         fake_sdk.error = RuntimeError("boom")
         grader = make_grader(judge_model_config=dm())
-        report = await Rubric([LIGHT, TONE_DUPLICATE_LABELS]).grade(SUBMISSION, grader=grader)
+        report = await Rubric([LIGHT, TONE_TOO_MANY_OPTIONS]).grade(SUBMISSION, grader=grader)
 
         assert list(fake_sdk.calls[0][1]) == ["c0"]
         assert report.report[0].votes[0].error == "unknown: boom"
@@ -864,7 +862,7 @@ class TestScoringUsageCost:
         asked in, so the item's usage and cost are never lost."""
         fake_sdk.response = response({"c1": noul(0.9)})
         grader = make_grader(judge_model_config=dm(input_cost_per_token=1e-6))
-        rubric = [TONE_DUPLICATE_LABELS, LIGHT]
+        rubric = [TONE_TOO_MANY_OPTIONS, LIGHT]
 
         (judge_results,) = await grader.judge(SUBMISSION, rubric, QUERY)
         first, second = judge_results.criterion_results

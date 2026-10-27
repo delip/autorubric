@@ -690,23 +690,21 @@ class TestEscalatedSet:
     async def test_a_criterion_no_question_can_express_escalates(
         self, fake_sdk, make_grader, llm_log
     ):
-        duplicate = Criterion(
-            name="dup",
+        # More options than one Choice question may offer (255).
+        too_many = Criterion(
+            name="tone",
             weight=1.0,
             requirement="Which tone?",
             scale_type="nominal",
-            options=[
-                CriterionOption(label="Formal", value=1.0),
-                CriterionOption(label="Formal", value=0.0),
-            ],
+            options=[CriterionOption(label=f"Tone {i}", value=i / 255) for i in range(256)],
         )
         fake_sdk.response = response({"c0": noul(0.95)})
         grader = make_grader(
             judge_model_config=dm(),
             escalation=cascade(0.0),
-            scripts={"gemini": {"Which tone?": "Formal"}},
+            scripts={"gemini": {"Which tone?": "Tone 3"}},
         )
-        report = await grade(grader, [LIGHT, duplicate])
+        report = await grade(grader, [LIGHT, too_many])
 
         assert len(fake_sdk.calls) == 1 and list(fake_sdk.calls[0][1]) == ["c0"]
         assert escalated_flags(report) == [False, True]

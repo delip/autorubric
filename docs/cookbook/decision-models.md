@@ -91,10 +91,10 @@ The base URL must be an absolute http(s) URL with no query, fragment or credenti
 
 | Value | Question | Verdict | Can abstain |
 |---|---|---|---|
-| `"choice"` (default) | A choice over the option labels, the NA option included. Needs unique labels and at most 255 options. | the selected option | Yes (the NA option) |
+| `"choice"` (default) | A choice over the option labels, the NA option included. Needs at most 255 options (labels are always unique: `Criterion` refuses repeated ones). | the selected option | Yes (the NA option) |
 | `"score"` | An ordered scale over the non-NA options (2 to 10 of them) | the expected level `s`, snapped to `round(s)` and clamped to the scale | No: the NA option is not offered |
 
-Python's `round` rounds half to even, so an expected level exactly halfway between two levels snaps to the even one. Options are always offered in the rubric's order: `shuffle_options` does not apply to decision models. A criterion its framing cannot express (duplicate labels for a choice, too few or too many levels for a score) is left out of the item's request and fails alone as a `parse` error; the other criteria are still asked.
+Python's `round` rounds half to even, so an expected level exactly halfway between two levels snaps to the even one. Options are always offered in the rubric's order: `shuffle_options` does not apply to decision models. A criterion its framing cannot express (more than 255 options for a choice, too few or too many levels for a score) is left out of the item's request and fails alone as a `parse` error; the other criteria are still asked.
 
 ### Confidence
 

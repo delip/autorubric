@@ -274,6 +274,11 @@ class CriterionOption(BaseModel):
         return self
 
 
+def _normalized_label(label: str) -> str:
+    """An option label as labels are compared: ignoring case and surrounding whitespace."""
+    return label.strip().lower()
+
+
 # Canonical abstain option auto-injected into multi-choice criteria that lack an NA
 # option (see ``Criterion.with_guaranteed_na_option`` and ``CriterionGrader.auto_na_option``).
 # It is the structural analog of binary ``CriterionVerdict.CANNOT_ASSESS``: ``na=True`` so it
@@ -299,6 +304,10 @@ class Criterion(BaseModel):
         name: Optional short identifier for the criterion (e.g., "clarity", "accuracy").
             Useful for referencing criteria in reports and debugging.
         options: List of options for multi-choice criteria. If None, criterion is binary.
+            At least two must be non-NA, and no two may have the same label (compared
+            ignoring case and surrounding whitespace, as ``find_option_by_label`` reads
+            labels). Without an NA option, no option may have the label of
+            ``CANONICAL_NA_OPTION``, the NA option ``with_guaranteed_na_option`` adds.
         scale_type: For multi-choice, indicates if options are ordinal (ordered) or
             nominal (unordered categories). Affects aggregation strategy selection.
         aggregation: For a multi-choice criterion, overrides the grader's
@@ -371,7 +380,10 @@ class Criterion(BaseModel):
     def find_option_by_label(self, label: str) -> int:
         """Find option index by label (case-insensitive, whitespace-normalized).
 
-        Used for resolving ground truth labels to indices for metrics computation.
+        Used for resolving ground truth labels to indices for metrics computation. A label
+        names one option: ``Criterion`` refuses two options whose labels compare equal this
+        way, and a scored option labelled as the NA option
+        :meth:`with_guaranteed_na_option` adds to a criterion without one.
 
         Args:
             label: The label to search for.
@@ -384,9 +396,9 @@ class Criterion(BaseModel):
         """
         if self.options is None:
             raise ValueError("Binary criterion has no options")
-        normalized_label = label.strip().lower()
+        normalized_label = _normalized_label(label)
         for i, opt in enumerate(self.options):
-            if opt.label.strip().lower() == normalized_label:
+            if _normalized_label(opt.label) == normalized_label:
                 return i
         available = [opt.label for opt in self.options]
         raise ValueError(f"Label '{label}' not found. Available: {available}")
@@ -487,18 +499,54 @@ class Criterion(BaseModel):
         grader and the metrics layer can both reconstruct the identical effective
         option set without drifting.
 
+        A criterion with no NA option and a scored option labelled as
+        :data:`CANONICAL_NA_OPTION` (as :meth:`find_option_by_label` compares labels) is
+        refused: beside it the appended option's label would name two options, so a judge's
+        choice of the appended option, recorded under its label, would be read back as the
+        scored one. Validation refuses such a criterion when it is built; this refuses one
+        built without validation (``model_copy``, ``model_construct``).
+
         Returns:
             ``self`` when an NA option is already present, else a new ``Criterion``
             with the canonical NA option appended.
 
         Raises:
-            ValueError: If this is a binary criterion (no options).
+            ValueError: If this is a binary criterion (no options), or if it has no NA
+                option and a scored option has the canonical NA option's label.
         """
         if self.options is None:
             raise ValueError("Binary criterion has no options")
         if self.na_option_index is not None:
             return self
+        self._check_canonical_na_label()
         return self.model_copy(update={"options": [*self.options, CANONICAL_NA_OPTION]})
+
+    def _check_canonical_na_label(self) -> None:
+        """Refuse a scored option labelled as the NA option a criterion without one gets.
+
+        :meth:`with_guaranteed_na_option` appends :data:`CANONICAL_NA_OPTION` to a
+        multi-choice criterion with no NA option, and every label reader resolves labels
+        among the options shown with it appended, whichever way the labels were produced.
+        Beside a scored option with its label, that label would name two options.
+
+        Raises:
+            ValueError: If the criterion has no NA option and a scored option has the
+                canonical NA option's label.
+        """
+        if self.options is None or self.na_option_index is not None:
+            return
+        na_label = _normalized_label(CANONICAL_NA_OPTION.label)
+        for i, opt in enumerate(self.options):
+            if _normalized_label(opt.label) == na_label:
+                name = f"Criterion '{self.name}'" if self.name else "A criterion"
+                raise ValueError(
+                    f"{name} has no NA option, so an NA option labelled "
+                    f"'{CANONICAL_NA_OPTION.label}' is added to the options a judge is shown "
+                    f"and labels are read against, but its scored option {i + 1} "
+                    f"('{opt.label}') already has that label, so the label would name two "
+                    "options. Rename that option, or mark it na=True if it is the "
+                    "criterion's abstain option."
+                )
 
     @model_validator(mode="after")
     def validate_options(self) -> "Criterion":
@@ -510,6 +558,19 @@ class Criterion(BaseModel):
             non_na = [o for o in self.options if not o.na]
             if len(non_na) < 2:
                 raise ValueError("Must have at least 2 non-NA options")
+            # A label names one option: find_option_by_label returns the first match, so a
+            # label shared by two options would read the second as the first.
+            first_with: dict[str, int] = {}
+            for i, opt in enumerate(self.options):
+                earlier = first_with.setdefault(_normalized_label(opt.label), i)
+                if earlier != i:
+                    raise ValueError(
+                        f"Options {earlier + 1} and {i + 1} have the same label "
+                        f"('{self.options[earlier].label}' and '{opt.label}'; labels are "
+                        "compared ignoring case and surrounding whitespace). Give each option "
+                        "its own label."
+                    )
+            self._check_canonical_na_label()
         return self
 
 

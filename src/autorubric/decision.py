@@ -979,7 +979,10 @@ def _choice_labels(criterion: Criterion) -> list[str]:
     Raises:
         ValueError: If a Choice question cannot express the options: a label repeats
             (Choice options are keyed by label) or there are more options than one Choice
-            question may offer.
+            question may offer. ``Criterion`` refuses repeated labels and a scored
+            option labelled as the NA option ``Criterion.with_guaranteed_na_option`` adds to
+            a criterion without one, so a label repeats here only in a criterion built
+            without validation (``model_copy``, ``model_construct``).
     """
     labels = [option.label for option in criterion.options or []]
     repeated = [label for label, count in Counter(labels).items() if count > 1]

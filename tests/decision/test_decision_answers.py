@@ -473,13 +473,21 @@ class TestMalformedAnswers:
         assert_parse_error("score", ladder(), {"c0": answer}, SCORE)
 
     def test_an_inexpressible_criterion_has_no_mapping(self):
+        # Criterion refuses a repeated label; model_copy does not validate.
         duplicates = Criterion(
             requirement="Which?",
             options=[
                 CriterionOption(label="Same", value=0.0),
-                CriterionOption(label="Same", value=1.0),
+                CriterionOption(label="Other", value=1.0),
             ],
             scale_type="nominal",
+        ).model_copy(
+            update={
+                "options": [
+                    CriterionOption(label="Same", value=0.0),
+                    CriterionOption(label="Same", value=1.0),
+                ]
+            }
         )
         answer = choice("Same", {"Same": 1.0})
         assert_parse_error("not unique", duplicates, answers(c0=answer), config())
