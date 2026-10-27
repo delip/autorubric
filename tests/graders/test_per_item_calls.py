@@ -1687,3 +1687,75 @@ class TestEndToEnd:
             assert (report.token_usage, report.completion_cost) == (None, None)
             assert report.error is not None
             assert report.error.startswith("Every criterion's judgment failed")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("reasoning", [None, "One at a time."], ids=["no_trace", "trace"])
+    @pytest.mark.parametrize(
+        "shape, error",
+        [
+            ("content_parts", "parse: LLM reply content is not a string (got list)"),
+            ("no_choices", "parse: LLM reply has no choices"),
+        ],
+    )
+    async def test_a_reply_with_no_text_or_no_choices_fails_every_criterion(
+        self, shape, error, reasoning
+    ):
+        """A reply whose content is not a string (here a list of content parts), or a
+        response with no choices, fails the whole call as ``parse``: every criterion
+        abstains, the negatively weighted one included."""
+
+        async def fake_acompletion(**params: Any) -> ModelResponse:
+            if shape == "no_choices":
+                return ModelResponse(model="gpt-4.1-mini", choices=[])
+            response = model_response("placeholder", reasoning=reasoning)
+            # LiteLLM types ``content`` as a string; a provider transform can still set this.
+            content_parts = [{"type": "text", "text": '{"judgments": []}'}]
+            setattr(response.choices[0].message, "content", content_parts)
+            return response
+
+        with patch("litellm.acompletion", side_effect=fake_acompletion):
+            grader = CriterionGrader(judge_model_config=real_llm(), llm_calls="per_item")
+            report = await Rubric(MIXED).grade(SUBMISSION, grader=grader, query=QUERY)
+
+        assert report.report is not None
+        assert {cr.error for cr in report.report} == {error}
+        light, clarity, jargon, tone = report.report
+        assert light.final_verdict == jargon.final_verdict == CriterionVerdict.CANNOT_ASSESS
+        for multi_choice in (clarity, tone):
+            verdict = multi_choice.final_multi_choice_verdict
+            assert verdict is not None and verdict.na
+        assert report.score is None
+        assert report.error is not None
+        assert report.error.startswith("Every criterion's judgment failed")
+
+    @pytest.mark.asyncio
+    async def test_a_trace_that_is_not_text_keeps_every_judgment(self):
+        """A non-string ``reasoning_content`` is dropped rather than injected into
+        ``RubricJudgment.reasoning``, so the usable reply is mapped as without a trace."""
+        content = json.dumps(
+            {
+                "judgments": [
+                    {"criterion_id": "c0", "criterion_status": "MET", "explanation": "Light."},
+                    {"criterion_id": "c1", "selected_option": 1, "explanation": "Clear."},
+                    {"criterion_id": "c2", "criterion_status": "UNMET", "explanation": "None."},
+                    {"criterion_id": "c3", "selected_option": 1, "explanation": "Plain."},
+                ]
+            }
+        )
+
+        async def fake_acompletion(**params: Any) -> ModelResponse:
+            response = model_response(content)
+            setattr(response.choices[0].message, "reasoning_content", ["One", "at a time."])
+            return response
+
+        with patch("litellm.acompletion", side_effect=fake_acompletion):
+            grader = CriterionGrader(judge_model_config=real_llm(), llm_calls="per_item")
+            report = await Rubric(MIXED).grade(SUBMISSION, grader=grader, query=QUERY)
+
+        assert report.report is not None
+        assert [cr.error for cr in report.report] == [None, None, None, None]
+        light, clarity, jargon, tone = report.report
+        assert light.final_verdict == CriterionVerdict.MET
+        assert jargon.final_verdict == CriterionVerdict.UNMET
+        assert light.votes[0].reasoning is None
+        assert report.score is not None

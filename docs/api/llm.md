@@ -238,7 +238,7 @@ Classify an exception raised while grading a single criterion into an [`ErrorCat
 Type alias for the category of a grading failure: `Literal["infrastructure", "parse", "unknown"]`.
 
 - `"infrastructure"`: API/network failure (timeout, connection, rate limit, server error). Not the submission's fault. (A configuration error, e.g. an invalid API key, is not routed at all: `CriterionGrader` raises it.)
-- `"parse"`: the judge responded but its output could not be parsed/validated into the expected schema: a reply that is not JSON, is not a JSON object, or has no content (e.g. a refusal), with or without a thinking trace. Also not the submission's fault.
+- `"parse"`: the judge responded but its output could not be parsed/validated into the expected schema: a reply that is not JSON, is not a JSON object, has no content (e.g. a refusal) or content that is not a string (e.g. a list of content parts), with or without a thinking trace, and a response with no choices at all. Also not the submission's fault. `LLMClient.generate` raises the same `ValueError` for a plain-text call (no `response_format`) whose reply has no content or content that is not a string, rather than returning it, and does not cache it.
 - `"unknown"`: an unexpected error that does not fit the above categories.
 
 ::: autorubric.ErrorCategory

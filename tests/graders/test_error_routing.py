@@ -1297,3 +1297,104 @@ async def test_an_unusable_multi_choice_reply_selects_the_na_option(content, rea
     assert vote.error is not None and vote.error.startswith("parse: ")
     assert vote.na
     assert criterion_report.final_multi_choice_verdict.na
+
+
+def _content_parts_response(reasoning: str | None) -> Any:
+    """A reply whose content a provider transform left as a list of content parts."""
+    response = _model_response("placeholder", reasoning)
+    response.choices[0].message.content = [{"type": "text", "text": '{"criterion_status": "MET"}'}]
+    return response
+
+
+def _no_choices_response(reasoning: str | None) -> Any:
+    from litellm import ModelResponse
+
+    return ModelResponse(model="claude-sonnet-4-5", choices=[])
+
+
+SHAPELESS_REPLIES = pytest.mark.parametrize(
+    "build_response, error",
+    [
+        (_content_parts_response, "parse: LLM reply content is not a string (got list)"),
+        (_no_choices_response, "parse: LLM reply has no choices"),
+    ],
+    ids=["content_parts", "no_choices"],
+)
+
+
+async def _grade_with_response(criteria: list[Criterion], response: Any, thinking: bool) -> Any:
+    async def fake_acompletion(**params: Any) -> Any:
+        return response
+
+    config = LLMConfig(model="anthropic/claude-sonnet-4-5", thinking="low" if thinking else None)
+    grader = CriterionGrader(judge_model_config=config)
+    with patch("litellm.acompletion", side_effect=fake_acompletion):
+        return await Rubric(criteria).grade(to_grade="See Smith (2020).", grader=grader)
+
+
+@pytest.mark.asyncio
+@SHAPELESS_REPLIES
+@WITH_AND_WITHOUT_A_TRACE
+@pytest.mark.parametrize("weight", [1.0, -1.0], ids=["positive", "negative"])
+async def test_a_reply_with_no_text_or_no_choices_abstains(
+    build_response, error, reasoning, weight
+):
+    """A reply whose content is not a string, or a response with no choices, is a ``parse``
+    failure: the binary criterion abstains instead of taking the worst case for its weight
+    sign (``json.loads`` and ``choices[0]`` raised ``TypeError`` and ``IndexError``,
+    ``unknown``, before)."""
+    criteria = [Criterion(name="cites", weight=weight, requirement="Cites a source")]
+    report = await _grade_with_response(criteria, build_response(reasoning), bool(reasoning))
+    assert report.report is not None
+    (criterion_report,) = report.report
+    vote = criterion_report.votes[0]
+    assert vote.verdict == CriterionVerdict.CANNOT_ASSESS
+    assert vote.error == error
+    assert criterion_report.final_verdict == CriterionVerdict.CANNOT_ASSESS
+
+
+@pytest.mark.asyncio
+@SHAPELESS_REPLIES
+@WITH_AND_WITHOUT_A_TRACE
+async def test_a_multi_choice_reply_with_no_text_or_no_choices_selects_the_na_option(
+    build_response, error, reasoning
+):
+    criteria = [
+        Criterion(
+            name="clarity",
+            weight=1.0,
+            requirement="How clear is it?",
+            scale_type="ordinal",
+            options=[
+                CriterionOption(label="Unclear", value=0.0),
+                CriterionOption(label="Clear", value=1.0),
+            ],
+        )
+    ]
+    report = await _grade_with_response(criteria, build_response(reasoning), bool(reasoning))
+    assert report.report is not None
+    (criterion_report,) = report.report
+    vote = criterion_report.multi_choice_votes[0]
+    assert vote.error == error
+    assert vote.na
+    assert criterion_report.final_multi_choice_verdict.na
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("weight", [1.0, -1.0], ids=["positive", "negative"])
+async def test_a_trace_that_is_not_text_keeps_the_verdict(weight):
+    """A non-string ``reasoning_content`` is dropped, not injected into ``reasoning``, so a
+    usable reply keeps its verdict instead of failing validation as ``parse``."""
+    response = _model_response(
+        json.dumps({"criterion_status": "MET", "explanation": "Cites Smith (2020)."}), None
+    )
+    response.choices[0].message.reasoning_content = ["Let me", "think."]
+    criteria = [Criterion(name="cites", weight=weight, requirement="Cites a source")]
+    report = await _grade_with_response(criteria, response, thinking=True)
+    assert report.report is not None
+    (criterion_report,) = report.report
+    vote = criterion_report.votes[0]
+    assert vote.error is None
+    assert vote.verdict == CriterionVerdict.MET
+    assert vote.reason == "Cites Smith (2020)."
+    assert vote.reasoning is None

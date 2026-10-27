@@ -196,9 +196,11 @@ Each judge's reasoning trace is on its vote, next to its explanation:
 for cr in result.report:
     for vote in cr.votes or cr.multi_choice_votes:  # binary / multi-choice criteria
         print(f"{cr.criterion.name} ({vote.judge_id}): {vote.reason}")
-        if vote.reasoning:  # None when the provider returns no trace
+        if vote.reasoning:  # None when the provider returns no trace, or one that is not text
             print(vote.reasoning)
 ```
+
+A trace is kept only as text. The grader takes the provider's `reasoning_content` when it is a string, otherwise the text of LiteLLM's `thinking_blocks` joined with newlines, otherwise a legacy `thinking` string. A trace in any other shape is dropped, and the judge's verdict is kept. The same rule fills `GenerateResult.thinking` on direct `LLMClient.generate` calls.
 
 ### Step 5: Compare With and Without Thinking
 

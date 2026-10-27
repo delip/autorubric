@@ -75,7 +75,9 @@ def classify_grading_error(exc: BaseException) -> ErrorCategory:
     do not. ``LLMClient.generate`` raises one of these for every structured reply it
     cannot use: one that is not JSON, not a JSON object (with or without a thinking
     trace), or that does not match the schema is a ``ValidationError`` or
-    ``JSONDecodeError``, and one with no content (e.g. a refusal) a ``ValueError``.
+    ``JSONDecodeError``. A reply with no content (e.g. a refusal) or whose content is not
+    a string (e.g. a list of content parts) is a ``ValueError``, as is a response with no
+    choices, structured or plain-text alike.
 
     Decision-model failures raised by the optional TypeSafe SDK (``typesafe-sdk``) are
     routed by the SDK's own exception types, ahead of the ``ValueError`` rule:
@@ -417,6 +419,12 @@ def _extract_thinking_content(message: Any) -> str | None:
     - `thinking_blocks`: Anthropic-specific list of thinking blocks (fallback)
     - `thinking`: Legacy Anthropic field (fallback)
 
+    A trace is text. LiteLLM types `reasoning_content` and `thinking` as strings and
+    documents no other shape for them, so only a non-empty string is taken from each
+    source (and from each thinking block); anything else is passed over to the next
+    source. Injected into a response model's string-typed `reasoning` field, a non-string
+    trace would make an otherwise usable reply fail validation.
+
     Args:
         message: The message object from response.choices[0].message
 
@@ -424,25 +432,29 @@ def _extract_thinking_content(message: Any) -> str | None:
         The thinking/reasoning content as a string, or None if not present.
     """
     # Primary: LiteLLM's standardized reasoning_content field
-    if hasattr(message, "reasoning_content") and message.reasoning_content:
-        return message.reasoning_content
+    reasoning_content = getattr(message, "reasoning_content", None)
+    if isinstance(reasoning_content, str) and reasoning_content:
+        return reasoning_content
 
     # Fallback: Anthropic-specific thinking_blocks
-    if hasattr(message, "thinking_blocks") and message.thinking_blocks:
-        blocks = message.thinking_blocks
-        if isinstance(blocks, list):
-            thinking_parts = []
-            for block in blocks:
-                if isinstance(block, dict) and block.get("thinking"):
-                    thinking_parts.append(block["thinking"])
-                elif hasattr(block, "thinking") and block.thinking:
-                    thinking_parts.append(block.thinking)
-            if thinking_parts:
-                return "\n".join(thinking_parts)
+    blocks = getattr(message, "thinking_blocks", None)
+    if isinstance(blocks, list):
+        thinking_parts = []
+        for block in blocks:
+            text = (
+                block.get("thinking")
+                if isinstance(block, dict)
+                else getattr(block, "thinking", None)
+            )
+            if isinstance(text, str) and text:
+                thinking_parts.append(text)
+        if thinking_parts:
+            return "\n".join(thinking_parts)
 
     # Fallback: Legacy thinking field
-    if hasattr(message, "thinking") and message.thinking:
-        return message.thinking
+    thinking = getattr(message, "thinking", None)
+    if isinstance(thinking, str) and thinking:
+        return thinking
 
     return None
 
@@ -934,12 +946,15 @@ class LLMClient:
             If response_format is None: String response from the LLM.
             If response_format is provided: Validated Pydantic model instance.
                 If thinking is enabled and the response_format has a 'reasoning'
-                field, it will be populated with the model's thinking trace.
+                field, it will be populated with the model's thinking trace (a trace
+                that is not a string is dropped).
 
         Raises:
             litellm.APIError: If all retries fail
-            ValueError: If response_format is provided and the reply has no content
-                (e.g. a refusal) or is not JSON (``json.JSONDecodeError``).
+            ValueError: If the response has no choices, or the reply has no content (e.g.
+                a refusal) or content that is not a string (e.g. a list of content parts),
+                with or without response_format; or if response_format is provided and the
+                reply is not JSON (``json.JSONDecodeError``). Such a reply is not cached.
             pydantic.ValidationError: If response doesn't match schema, including a JSON
                 reply that is not an object (with or without a thinking trace).
         """
@@ -1065,7 +1080,13 @@ class LLMClient:
             response = await litellm.acompletion(**params)
             raw_response = response
 
-            message = response.choices[0].message
+            # A response with no choices (empty, ``None`` or missing) carries no reply at all;
+            # like a reply with nothing to parse, it raises ``ValueError`` (``parse``), not the
+            # ``IndexError`` of ``choices[0]``. ``ValueError`` is not retried.
+            choices = getattr(response, "choices", None)
+            if not choices:
+                raise ValueError("LLM reply has no choices")
+            message = choices[0].message
 
             # Extract thinking/reasoning content (standardized across providers)
             # LiteLLM provides unified `reasoning_content` field
@@ -1089,15 +1110,26 @@ class LLMClient:
         usage = _extract_usage_from_response(raw_response)
         cost = _calculate_completion_cost(raw_response)
 
+        # A reply with no content (e.g. a refusal), or whose content is not a string, is no
+        # answer, structured or not: there is no JSON text to parse, and no text for a
+        # plain-text call to return (it returns a ``str``, which callers treat as text). Like
+        # a reply that is not JSON, it raises ``ValueError`` (``parse``), before anything is
+        # cached. LiteLLM types the content as a string; anything else (e.g. a list of
+        # content parts a provider transform left in place) would make ``json.loads`` raise
+        # ``TypeError`` (``unknown``), or a caller's string operations fail.
+        if response_content is None:
+            detail = f" (refusal: {refusal})" if isinstance(refusal, str) and refusal else ""
+            raise ValueError(f"LLM reply has no content{detail}")
+        if not isinstance(response_content, str):
+            raise ValueError(
+                f"LLM reply content is not a string (got {type(response_content).__name__})"
+            )
+
         # Parse structured output if requested
         parsed_response: T | None = None
         if response_format is not None:
             # LiteLLM returns JSON string when response_format is set
-            # Parse it into the Pydantic model. A reply with no content (e.g. a refusal) has
-            # nothing to parse: like a reply that is not JSON, it raises ``ValueError``.
-            if response_content is None:
-                detail = f" (refusal: {refusal})" if isinstance(refusal, str) and refusal else ""
-                raise ValueError(f"LLM reply has no content{detail}")
+            # Parse it into the Pydantic model.
             data = json.loads(response_content)
 
             # Inject thinking content into the reasoning field if available. Only an object
