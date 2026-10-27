@@ -70,7 +70,10 @@ def classify_grading_error(exc: BaseException) -> ErrorCategory:
     ``ServiceUnavailableError``, ``InternalServerError``, status errors, etc.) subclasses
     ``openai.APIError`` (including ``litellm.APIError`` itself), while parse/validation
     failures (``json.JSONDecodeError`` -> ``ValueError``, ``pydantic.ValidationError``)
-    do not.
+    do not. ``LLMClient.generate`` raises one of these for every structured reply it
+    cannot use: one that is not JSON, not a JSON object (with or without a thinking
+    trace), or that does not match the schema is a ``ValidationError`` or
+    ``JSONDecodeError``, and one with no content (e.g. a refusal) a ``ValueError``.
 
     Decision-model failures raised by the optional TypeSafe SDK (``typesafe-sdk``) are
     routed by the SDK's own exception types, ahead of the ``ValueError`` rule:
@@ -784,7 +787,10 @@ class LLMClient:
 
         Raises:
             litellm.APIError: If all retries fail
-            pydantic.ValidationError: If response doesn't match schema
+            ValueError: If response_format is provided and the reply has no content
+                (e.g. a refusal) or is not JSON (``json.JSONDecodeError``).
+            pydantic.ValidationError: If response doesn't match schema, including a JSON
+                reply that is not an object (with or without a thinking trace).
         """
         # Determine caching behavior for this request
         should_cache = use_cache if use_cache is not None else self.config.cache_enabled
@@ -899,11 +905,12 @@ class LLMClient:
         # Make request with retries
         retry_decorator = self._get_retry_decorator()
         thinking_content: str | None = None
+        refusal: Any = None
         raw_response: Any = None
 
         @retry_decorator
         async def _call() -> str:
-            nonlocal thinking_content, raw_response
+            nonlocal thinking_content, refusal, raw_response
             response = await litellm.acompletion(**params)
             raw_response = response
 
@@ -912,6 +919,8 @@ class LLMClient:
             # Extract thinking/reasoning content (standardized across providers)
             # LiteLLM provides unified `reasoning_content` field
             thinking_content = _extract_thinking_content(message)
+            # OpenAI-style structured-output refusals come with no content.
+            refusal = getattr(message, "refusal", None)
 
             return message.content  # type: ignore[return-value]
 
@@ -933,11 +942,20 @@ class LLMClient:
         parsed_response: T | None = None
         if response_format is not None:
             # LiteLLM returns JSON string when response_format is set
-            # Parse it into the Pydantic model
+            # Parse it into the Pydantic model. A reply with no content (e.g. a refusal) has
+            # nothing to parse: like a reply that is not JSON, it raises ``ValueError``.
+            if response_content is None:
+                detail = f" (refusal: {refusal})" if isinstance(refusal, str) and refusal else ""
+                raise ValueError(f"LLM reply has no content{detail}")
             data = json.loads(response_content)
 
-            # Inject thinking content into the reasoning field if available
-            if thinking_content and "reasoning" in response_format.model_fields:
+            # Inject thinking content into the reasoning field if available. Only an object
+            # can take it: any other JSON value is left as it is, to fail validation (#37).
+            if (
+                thinking_content
+                and "reasoning" in response_format.model_fields
+                and isinstance(data, dict)
+            ):
                 data["reasoning"] = thinking_content
 
             parsed_response = response_format.model_validate(data)

@@ -787,44 +787,124 @@ class TestRubricJudgmentResponseFormat:
         assert not hasattr(result.judgments[0], "reasoning")
 
 
+TRACE = "Weighing the criterion before deciding."
+
+
+def _reply(content, reasoning=None, refusal=None):
+    """A mocked LiteLLM response whose one message has ``content`` and, if given, a trace."""
+    mock_message = MagicMock()
+    mock_message.content = content
+    mock_message.reasoning_content = reasoning
+    mock_message.thinking_blocks = None
+    mock_message.thinking = None
+    mock_message.refusal = refusal
+    mock_choice = MagicMock()
+    mock_choice.message = mock_message
+    mock_response = MagicMock()
+    mock_response.choices = [mock_choice]
+    return mock_response
+
+
+async def _generate(response, response_format):
+    client = LLMClient(LLMConfig(model="anthropic/claude-sonnet-5"))
+    with patch("autorubric.llm.litellm.acompletion", new_callable=AsyncMock) as mock_completion:
+        mock_completion.return_value = response
+        return await client.generate(
+            system_prompt="judge", user_prompt="submission", response_format=response_format
+        )
+
+
+RESPONSE_FORMATS = ["CriterionJudgment", "MultiChoiceJudgment", "RubricJudgment"]
+
+
 class TestNonObjectReplies:
     """A structured reply that is JSON but not an object fails validation, which
-    ``classify_grading_error`` routes as ``parse``."""
+    ``classify_grading_error`` routes as ``parse``, whether or not a thinking trace came
+    with it (#37): the trace is injected into an object only."""
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("reasoning", [None, TRACE], ids=["no_trace", "trace"])
     @pytest.mark.parametrize(
         "content", ["[1, 2]", '"MET"', "3", "null"], ids=["array", "string", "number", "null"]
     )
-    @pytest.mark.parametrize(
-        "response_format_name", ["CriterionJudgment", "MultiChoiceJudgment", "RubricJudgment"]
-    )
-    async def test_fails_validation_as_a_parse_error(self, response_format_name, content):
+    @pytest.mark.parametrize("response_format_name", RESPONSE_FORMATS)
+    async def test_fails_validation_as_a_parse_error(
+        self, response_format_name, content, reasoning
+    ):
         from pydantic import ValidationError
 
         from autorubric import types
         from autorubric.llm import classify_grading_error
 
         response_format = getattr(types, response_format_name)
-        mock_message = MagicMock()
-        mock_message.content = content
-        mock_message.reasoning_content = None
-        mock_message.thinking_blocks = None
-        mock_message.thinking = None
-        mock_choice = MagicMock()
-        mock_choice.message = mock_message
-        mock_response = MagicMock()
-        mock_response.choices = [mock_choice]
-
-        client = LLMClient(LLMConfig(model="anthropic/claude-sonnet-5"))
-        with patch("autorubric.llm.litellm.acompletion", new_callable=AsyncMock) as mock_completion:
-            mock_completion.return_value = mock_response
-            with pytest.raises(ValidationError) as caught:
-                await client.generate(
-                    system_prompt="judge",
-                    user_prompt="submission",
-                    response_format=response_format,
-                )
+        with pytest.raises(ValidationError) as caught:
+            await _generate(_reply(content, reasoning), response_format)
         assert classify_grading_error(caught.value) == "parse"
+        # The error names the reply the model sent, not the trace.
+        assert f"input_value={json.loads(content)!r}" in str(caught.value)
+
+    @pytest.mark.asyncio
+    async def test_an_object_reply_still_gets_the_trace(self):
+        from autorubric.types import CriterionJudgment
+
+        content = json.dumps({"criterion_status": "MET", "explanation": "Cites a source."})
+        result = await _generate(_reply(content, TRACE), CriterionJudgment)
+        assert isinstance(result, CriterionJudgment)
+        assert result.reasoning == TRACE
+
+
+class TestRepliesWithNoContent:
+    """A structured call whose reply has no content (``None``, e.g. a refusal) has nothing
+    to parse: it raises ``ValueError``, a ``parse`` failure, with or without a trace (#37).
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("reasoning", [None, TRACE], ids=["no_trace", "trace"])
+    @pytest.mark.parametrize("response_format_name", RESPONSE_FORMATS)
+    async def test_is_a_parse_error(self, response_format_name, reasoning):
+        from autorubric import types
+        from autorubric.llm import classify_grading_error
+
+        response_format = getattr(types, response_format_name)
+        with pytest.raises(ValueError, match=r"^LLM reply has no content$") as caught:
+            await _generate(_reply(None, reasoning), response_format)
+        assert classify_grading_error(caught.value) == "parse"
+
+    @pytest.mark.asyncio
+    async def test_a_refusal_is_named(self):
+        from autorubric.llm import classify_grading_error
+        from autorubric.types import CriterionJudgment
+
+        response = _reply(None, refusal="I can't help with that.")
+        with pytest.raises(ValueError) as caught:
+            await _generate(response, CriterionJudgment)
+        assert str(caught.value) == "LLM reply has no content (refusal: I can't help with that.)"
+        assert classify_grading_error(caught.value) == "parse"
+
+    @pytest.mark.asyncio
+    async def test_a_real_litellm_response_with_no_content(self):
+        """The same through LiteLLM's own response type, whose ``refusal`` is ``None``."""
+        from litellm import ModelResponse
+
+        from autorubric.types import CriterionJudgment
+
+        response = ModelResponse(
+            model="claude-sonnet-5",
+            choices=[
+                {
+                    "message": {"role": "assistant", "content": None, "reasoning_content": TRACE},
+                    "finish_reason": "stop",
+                    "index": 0,
+                }
+            ],
+        )
+        with pytest.raises(ValueError, match=r"^LLM reply has no content$"):
+            await _generate(response, CriterionJudgment)
+
+    @pytest.mark.asyncio
+    async def test_a_plain_text_call_still_returns_the_content(self):
+        """Without a response format nothing is parsed, so ``None`` comes back as before."""
+        assert await _generate(_reply(None), None) is None
 
 
 class TestCacheNamespace:

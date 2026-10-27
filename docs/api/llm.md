@@ -238,7 +238,7 @@ Classify an exception raised while grading a single criterion into an [`ErrorCat
 Type alias for the category of a grading failure: `Literal["infrastructure", "parse", "unknown"]`.
 
 - `"infrastructure"`: API/network failure (timeout, connection, rate limit, server error). Not the submission's fault.
-- `"parse"`: the judge responded but its output could not be parsed/validated into the expected schema. Also not the submission's fault.
+- `"parse"`: the judge responded but its output could not be parsed/validated into the expected schema: a reply that is not JSON, is not a JSON object, or has no content (e.g. a refusal), with or without a thinking trace. Also not the submission's fault.
 - `"unknown"`: an unexpected error that does not fit the above categories.
 
 ::: autorubric.ErrorCategory
