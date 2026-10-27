@@ -255,7 +255,7 @@ The user prompt lists every criterion of the effective rubric under an id, `c0`,
 
 The judge answers with one structured judgment per criterion: `RubricJudgment`, an internal response format holding a list of per-criterion entries (a `criterion_id`, a `criterion_status` or `selected_option`, and an explanation). The grader maps that answer back to one `CriterionResult` per criterion, in rubric order, the same way it maps a decision model's answers.
 
-### Cost
+### Tokens and cost
 
 With N criteria, a submission (with its input and reference) of S tokens, a system prompt of P tokens, and about c tokens per criterion block, a per-criterion judge's input tokens per item and judge scale as N·(P + S + c); a `per_item` judge's scale as P_w + S + N·c, where P_w is the wrapped system prompt (the preamble, the guide for each kind of criterion present, and the closing format). For N = 10 and S = 1,000, that is roughly 26,700 input tokens per item and judge called per criterion, against roughly 3,400 (a rubric of one kind) to 5,000 (both kinds) under `per_item`. [Prompt caching](cost-optimization.md#step-5-enable-prompt-caching-anthropic) narrows the gap only for the system-prompt part: under `per_criterion` the submission follows the criterion in every call and is re-sent each time, so caching never covers it.
 
@@ -271,13 +271,13 @@ Output grows with N: roughly 80-100 tokens per criterion (its id, verdict fields
 
 ### Failure scoping
 
-A criterion whose answer is missing, duplicated, or otherwise unusable fails alone, as an abstention (`CANNOT_ASSESS`, or the NA option), exactly as an unusable per-criterion answer does. A failed call fails every criterion of that call with the same error, sorted as a failed per-criterion call's error is ([Failures](#standalone-use)). An API error, or a reply that is not a valid `RubricJudgment` (one cut off at `max_tokens`, one that is not a JSON object, one with no content or with content that is not text, or a response with no reply at all, with or without [extended thinking](#extended-thinking)), is `infrastructure` or `parse`, so every criterion abstains; a configuration error, such as a rejected key, raises instead. Any other exception is `unknown` and gives every criterion the worst case for its weight sign. With a single judge, a failed call leaves the item with no score at all (its report's `error` reads `"Every criterion's judgment failed: ..."`). In a panel the other judges still grade the item, as they do when per-criterion calls fail, but only abstentions are set aside when votes are aggregated: an `unknown` failure's worst-case stand-ins count as votes on every criterion of the call.
+A criterion whose answer is missing, duplicated, or otherwise unusable fails alone, as an abstention (`CANNOT_ASSESS`, or the NA option), exactly as an unusable per-criterion answer does. A failed call fails every criterion of that call with the same error, sorted as a failed per-criterion call's error is ([Failures](#standalone-use)). An API error, or a reply that is not a valid `RubricJudgment` (one cut off at `max_tokens`, one that is not a JSON object, one with no content or with content that is not text, or a response with no reply at all, with or without [extended thinking](#one-thinking-trace-per-call)), is `infrastructure` or `parse`, so every criterion abstains; a configuration error, such as a rejected key, raises instead. Any other exception is `unknown` and gives every criterion the worst case for its weight sign. With a single judge, a failed call leaves the item with no score at all (its report's `error` reads `"Every criterion's judgment failed: ..."`). In a panel the other judges still grade the item, as they do when per-criterion calls fail, but only abstentions are set aside when votes are aggregated: an `unknown` failure's worst-case stand-ins count as votes on every criterion of the call.
 
 ### Few-shot examples
 
 With `training_data`, an example under `per_item` is a whole training item instead of one criterion's submission: each of the judge's `n_examples` items is shown once, labelled on every criterion it and the graded rubric share. With `balance_verdicts=True` (the default), the items are chosen by greedy label coverage — repeatedly picking the item that adds the most (criterion, label) pairs not yet shown, until `n_examples` are picked — since balancing each criterion's labels on their own is impossible when the same k items must carry every criterion's labels.
 
-### Extended thinking
+### One thinking trace per call
 
 A `per_item` call produces one thinking trace for the whole rubric. It is copied onto the `reasoning` of every criterion judged from a usable answer in that call (not onto a criterion that failed alone), so one thinking budget now covers the whole rubric instead of one per criterion. See [Extended Thinking](extended-thinking.md).
 
