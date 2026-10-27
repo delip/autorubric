@@ -42,6 +42,7 @@ from autorubric.graders.criterion_grader import (
     EscalationConfig,
     _escalation_names_checked,
 )
+from autorubric.llm import ThinkingConfig, ThinkingLevel
 from autorubric.types import (
     CriterionReport,
     EnsembleCriterionReport,
@@ -98,10 +99,12 @@ def _serialize_grader_config(grader: Grader) -> dict[str, Any]:
     Captures key configuration for reproducibility without storing sensitive data.
     For each judge this records ``judge_id``, ``judge_kind`` (``"llm"`` or
     ``"decision_model"``), ``model``, ``weight`` and ``max_parallel_requests``. An LLM judge
-    adds ``temperature`` (None when the provider default is used). A decision-model judge
-    adds ``binary_framing``, ``ordinal_framing``, ``decision_threshold`` and
-    ``api_base_host``, the host of the endpoint it was built against; the rest of its base
-    URL, its API key and its ``extra_headers`` are not recorded. A cascade adds
+    adds ``temperature`` (None when the provider default is used), then, each only when set,
+    ``max_tokens``, ``top_p``, ``thinking`` (``{"level": ..., "budget_tokens": ...}``) and
+    ``seed`` (see ``_llm_judge_entry``). A decision-model judge adds ``binary_framing``,
+    ``ordinal_framing``, ``decision_threshold`` and ``api_base_host``, the host of the
+    endpoint it was built against; the rest of its base URL, its API key and its
+    ``extra_headers`` are not recorded. A cascade adds
     ``escalation``: its escalation judges (``judges``, LLM entries as above), ``threshold``
     and ``per_criterion`` (None when not set); a grader without a cascade has no such key.
     A grader that calls its LLM judges once per item adds ``llm_calls: "per_item"``; one that
@@ -223,18 +226,64 @@ def _llm_judge_entry(judge: Any, judge_id: str, model: str, config: Any) -> dict
     ``temperature`` is None when the provider default is used (the temperature is not
     sent); a ``weight`` or ``max_parallel_requests`` that is not a number (a mock) is
     recorded as its default.
+
+    Four more settings enter the judge's requests and its response-cache key. They are
+    added after those keys, each only when set (not None), in ``LLMConfig``'s field order:
+    ``max_tokens``, ``top_p``, ``thinking`` and ``seed`` (#44). The entry of a judge that
+    sets none of them is therefore byte-identical to one written before they were recorded.
+    ``thinking`` is the normalized ``get_thinking_config()`` as ``{"level": ...,
+    "budget_tokens": ...}``, the level as its plain string, or None for a budget given with
+    no level (``budget_tokens``, when not None, is what is sent, the level otherwise). A
+    value that is not a number (a mock) is not recorded; a ``thinking`` value that cannot be
+    normalized raises (see ``_thinking_entry``).
     """
     weight = getattr(judge, "weight", 1.0)
     mpr = getattr(config, "max_parallel_requests", None)
     temp = getattr(config, "temperature", None)
     is_number = isinstance(temp, (int, float)) and not isinstance(temp, bool)
-    return {
+    entry: dict[str, Any] = {
         "judge_id": judge_id,
         "judge_kind": "llm",
         "model": model,
         "temperature": temp if is_number else None,
         "weight": weight if isinstance(weight, (int, float)) else 1.0,
         "max_parallel_requests": mpr if isinstance(mpr, int) else None,
+    }
+    max_tokens = getattr(config, "max_tokens", None)
+    if isinstance(max_tokens, int) and not isinstance(max_tokens, bool):
+        entry["max_tokens"] = max_tokens
+    top_p = getattr(config, "top_p", None)
+    if isinstance(top_p, (int, float)) and not isinstance(top_p, bool):
+        entry["top_p"] = top_p
+    thinking = _thinking_entry(config)
+    if thinking is not None:
+        entry["thinking"] = thinking
+    seed = getattr(config, "seed", None)
+    if isinstance(seed, int) and not isinstance(seed, bool):
+        entry["seed"] = seed
+    return entry
+
+
+def _thinking_entry(config: Any) -> dict[str, Any] | None:
+    """An LLM judge's normalized thinking setting for its manifest entry, None when unset.
+
+    None too for a config without a real ``get_thinking_config`` (a mock). ``LLMConfig``
+    refuses a ``thinking`` value it cannot normalize when it is built (a field assigned
+    later is not checked again). Should ``get_thinking_config()`` raise all the same, the
+    ``ValueError`` propagates rather than the setting being left out of the manifest of a
+    run whose every request would fail.
+    """
+    get_thinking_config = getattr(config, "get_thinking_config", None)
+    if not callable(get_thinking_config):
+        return None
+    thinking = get_thinking_config()
+    if not isinstance(thinking, ThinkingConfig):
+        return None
+    level = thinking.level
+    return {
+        # None for a budget with no level (``ThinkingConfig(level=None, budget_tokens=...)``).
+        "level": level.value if isinstance(level, ThinkingLevel) else level,
+        "budget_tokens": thinking.budget_tokens,
     }
 
 
@@ -909,7 +958,7 @@ class EvalRunner:
         >>> dataset = RubricDataset.from_file("data.json")
         >>> grader = CriterionGrader(
         ...     judge_model_config=LLMConfig(
-        ...         model="openai/gpt-4",
+        ...         model="openai/gpt-4.1-mini",
         ...         max_parallel_requests=10,
         ...     )
         ... )
@@ -1124,15 +1173,11 @@ class EvalRunner:
 
         A previous run's checkpoint in the directory is replaced: its items would otherwise
         stay in ``items.jsonl`` (appended to as items complete) beside this run's, and a
-        reload (``EvalResult.from_experiment``) would count them too.
+        reload (``EvalResult.from_experiment``) would count them too. The manifest is built
+        first, so a grader config that cannot be serialized raises with the previous
+        checkpoint still whole, never leaving its manifest without its items.
         """
-        self._exp_dir.mkdir(parents=True, exist_ok=True)
-        items_path = self._exp_dir / "items.jsonl"
-        if items_path.exists():
-            logger.info(f"Starting fresh: replacing the previous checkpoint in {self._exp_dir}")
-            items_path.unlink()
-
-        # Write initial manifest with full config for reproducibility
+        # Initial manifest with full config for reproducibility
         manifest = ExperimentManifest(
             experiment_name=self._experiment_name,
             created_at=started_at,
@@ -1145,6 +1190,11 @@ class EvalRunner:
             grader_config=_serialize_grader_config(self.grader),
             eval_config=_serialize_eval_config(self.config),
         )
+        self._exp_dir.mkdir(parents=True, exist_ok=True)
+        items_path = self._exp_dir / "items.jsonl"
+        if items_path.exists():
+            logger.info(f"Starting fresh: replacing the previous checkpoint in {self._exp_dir}")
+            items_path.unlink()
         self._write_manifest(manifest)
 
     def _write_manifest(self, manifest: ExperimentManifest) -> None:

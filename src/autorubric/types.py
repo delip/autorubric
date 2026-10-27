@@ -1,5 +1,7 @@
 """Type definitions for rubrics and evaluation components."""
 
+import numbers
+import operator
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from enum import Enum
@@ -16,6 +18,17 @@ from pydantic import (
 )
 
 CountFn = Callable[[str], int]
+
+
+def _as_int(value: object) -> int | None:
+    """``value`` as a plain ``int`` if it is an integer, else None.
+
+    Any ``numbers.Integral`` counts (numpy integers too, through ``operator.index``), never
+    a ``bool``.
+    """
+    if isinstance(value, numbers.Integral) and not isinstance(value, bool):
+        return operator.index(value)
+    return None
 
 
 def _setstate_with_field_defaults(self: BaseModel, state: dict[Any, Any]) -> None:
@@ -261,6 +274,11 @@ class CriterionOption(BaseModel):
         return self
 
 
+def _normalized_label(label: str) -> str:
+    """An option label as labels are compared: ignoring case and surrounding whitespace."""
+    return label.strip().lower()
+
+
 # Canonical abstain option auto-injected into multi-choice criteria that lack an NA
 # option (see ``Criterion.with_guaranteed_na_option`` and ``CriterionGrader.auto_na_option``).
 # It is the structural analog of binary ``CriterionVerdict.CANNOT_ASSESS``: ``na=True`` so it
@@ -286,6 +304,10 @@ class Criterion(BaseModel):
         name: Optional short identifier for the criterion (e.g., "clarity", "accuracy").
             Useful for referencing criteria in reports and debugging.
         options: List of options for multi-choice criteria. If None, criterion is binary.
+            At least two must be non-NA, and no two may have the same label (compared
+            ignoring case and surrounding whitespace, as ``find_option_by_label`` reads
+            labels). Without an NA option, no option may have the label of
+            ``CANONICAL_NA_OPTION``, the NA option ``with_guaranteed_na_option`` adds.
         scale_type: For multi-choice, indicates if options are ordinal (ordered) or
             nominal (unordered categories). Affects aggregation strategy selection.
         aggregation: For a multi-choice criterion, overrides the grader's
@@ -358,7 +380,10 @@ class Criterion(BaseModel):
     def find_option_by_label(self, label: str) -> int:
         """Find option index by label (case-insensitive, whitespace-normalized).
 
-        Used for resolving ground truth labels to indices for metrics computation.
+        Used for resolving ground truth labels to indices for metrics computation. A label
+        names one option: ``Criterion`` refuses two options whose labels compare equal this
+        way, and a scored option labelled as the NA option
+        :meth:`with_guaranteed_na_option` adds to a criterion without one.
 
         Args:
             label: The label to search for.
@@ -371,9 +396,9 @@ class Criterion(BaseModel):
         """
         if self.options is None:
             raise ValueError("Binary criterion has no options")
-        normalized_label = label.strip().lower()
+        normalized_label = _normalized_label(label)
         for i, opt in enumerate(self.options):
-            if opt.label.strip().lower() == normalized_label:
+            if _normalized_label(opt.label) == normalized_label:
                 return i
         available = [opt.label for opt in self.options]
         raise ValueError(f"Label '{label}' not found. Available: {available}")
@@ -474,18 +499,54 @@ class Criterion(BaseModel):
         grader and the metrics layer can both reconstruct the identical effective
         option set without drifting.
 
+        A criterion with no NA option and a scored option labelled as
+        :data:`CANONICAL_NA_OPTION` (as :meth:`find_option_by_label` compares labels) is
+        refused: beside it the appended option's label would name two options, so a judge's
+        choice of the appended option, recorded under its label, would be read back as the
+        scored one. Validation refuses such a criterion when it is built; this refuses one
+        built without validation (``model_copy``, ``model_construct``).
+
         Returns:
             ``self`` when an NA option is already present, else a new ``Criterion``
             with the canonical NA option appended.
 
         Raises:
-            ValueError: If this is a binary criterion (no options).
+            ValueError: If this is a binary criterion (no options), or if it has no NA
+                option and a scored option has the canonical NA option's label.
         """
         if self.options is None:
             raise ValueError("Binary criterion has no options")
         if self.na_option_index is not None:
             return self
+        self._check_canonical_na_label()
         return self.model_copy(update={"options": [*self.options, CANONICAL_NA_OPTION]})
+
+    def _check_canonical_na_label(self) -> None:
+        """Refuse a scored option labelled as the NA option a criterion without one gets.
+
+        :meth:`with_guaranteed_na_option` appends :data:`CANONICAL_NA_OPTION` to a
+        multi-choice criterion with no NA option, and every label reader resolves labels
+        among the options shown with it appended, whichever way the labels were produced.
+        Beside a scored option with its label, that label would name two options.
+
+        Raises:
+            ValueError: If the criterion has no NA option and a scored option has the
+                canonical NA option's label.
+        """
+        if self.options is None or self.na_option_index is not None:
+            return
+        na_label = _normalized_label(CANONICAL_NA_OPTION.label)
+        for i, opt in enumerate(self.options):
+            if _normalized_label(opt.label) == na_label:
+                name = f"Criterion '{self.name}'" if self.name else "A criterion"
+                raise ValueError(
+                    f"{name} has no NA option, so an NA option labelled "
+                    f"'{CANONICAL_NA_OPTION.label}' is added to the options a judge is shown "
+                    f"and labels are read against, but its scored option {i + 1} "
+                    f"('{opt.label}') already has that label, so the label would name two "
+                    "options. Rename that option, or mark it na=True if it is the "
+                    "criterion's abstain option."
+                )
 
     @model_validator(mode="after")
     def validate_options(self) -> "Criterion":
@@ -497,6 +558,19 @@ class Criterion(BaseModel):
             non_na = [o for o in self.options if not o.na]
             if len(non_na) < 2:
                 raise ValueError("Must have at least 2 non-NA options")
+            # A label names one option: find_option_by_label returns the first match, so a
+            # label shared by two options would read the second as the first.
+            first_with: dict[str, int] = {}
+            for i, opt in enumerate(self.options):
+                earlier = first_with.setdefault(_normalized_label(opt.label), i)
+                if earlier != i:
+                    raise ValueError(
+                        f"Options {earlier + 1} and {i + 1} have the same label "
+                        f"('{self.options[earlier].label}' and '{opt.label}'; labels are "
+                        "compared ignoring case and surrounding whitespace). Give each option "
+                        "its own label."
+                    )
+            self._check_canonical_na_label()
         return self
 
 
@@ -1291,11 +1365,12 @@ class FewShotConfig:
 
     Under ``CriterionGrader(llm_calls="per_item")``, where an LLM judge grades an item's whole
     rubric in one call, an example is a whole training item, shown once per call and labelled
-    on every criterion, and ``n_examples`` and ``balance_verdicts`` apply to those items (see
-    each attribute).
+    on every criterion it has a label for, and ``n_examples`` and ``balance_verdicts`` apply
+    to those items (see each attribute).
 
     Attributes:
-        n_examples: Total number of examples to include per criterion. Under
+        n_examples: Total number of examples to include per criterion, an integer >= 1
+            (fewer are shown when fewer training items are eligible). Under
             ``llm_calls="per_item"``, the number of examples per call: whole training items,
             each labelled on every criterion.
         balance_verdicts: If True, attempt to balance examples across label classes — verdicts
@@ -1315,7 +1390,17 @@ class FewShotConfig:
             entry or the whole list is None) is shown without one, so with no reasons in the
             training data the prompts are the same as with False. Reasons never change which
             examples are selected.
-        seed: Random seed for reproducible sampling.
+        seed: Random seed for reproducible sampling: None or an integer. When None,
+            ``CriterionGrader`` uses its own ``seed``.
+
+    Raises:
+        ValueError: On construction (and on ``dataclasses.replace``) if ``n_examples`` is
+            not an integer >= 1, ``balance_verdicts`` or ``include_reason`` is not a
+            ``bool``, or ``seed`` is neither None nor an integer. Any integer type counts
+            (numpy integers too) and is stored as a plain ``int``; a ``bool`` is never taken
+            for an integer. ``CriterionGrader`` checks its config again, so a field set
+            after construction is refused there. The grader's own ``seed``, which fills an
+            unset ``seed``, is not checked here.
 
     Example:
         >>> config = FewShotConfig(
@@ -1329,3 +1414,26 @@ class FewShotConfig:
     balance_verdicts: bool = True
     include_reason: bool = False
     seed: int | None = None
+
+    def __post_init__(self) -> None:
+        """Validate the configuration, storing integer fields as plain ``int``.
+
+        Raises:
+            ValueError: If ``n_examples`` is not an integer >= 1, ``seed`` is neither None
+                nor an integer, or ``balance_verdicts`` or ``include_reason`` is not a bool
+                (``bool`` is never taken for an integer).
+        """
+        name = type(self).__name__
+        n_examples = _as_int(self.n_examples)
+        if n_examples is None or n_examples < 1:
+            raise ValueError(f"{name}.n_examples must be an integer >= 1; got {self.n_examples!r}")
+        self.n_examples = n_examples
+        for flag in ("balance_verdicts", "include_reason"):
+            value = getattr(self, flag)
+            if not isinstance(value, bool):
+                raise ValueError(f"{name}.{flag} must be True or False; got {value!r}")
+        if self.seed is not None:
+            seed = _as_int(self.seed)
+            if seed is None:
+                raise ValueError(f"{name}.seed must be None or an integer; got {self.seed!r}")
+            self.seed = seed

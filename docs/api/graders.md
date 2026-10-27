@@ -91,6 +91,8 @@ grader = CriterionGrader(
 
 With `auto_na_option=True`, an auto-injected NA option is appended at the end (highest index), so existing option indices are preserved; an author-supplied NA option is never stripped.
 
+`seed` must be `None` or an integer. Numpy integers are accepted and kept as a plain `int`, so `seed=np.int64(42)` shuffles and selects examples exactly as `seed=42` does, and the experiment manifest records it as `master_seed`. The grader raises `ValueError` for a `bool`, a float such as `1.0`, or a string. The seed is hashed as text, so earlier releases accepted a `bool` or a float and silently produced different shuffles and few-shot draws from the equal integer (`True` from `1`, `1.0` from `1`).
+
 ---
 
 ## CriterionGrader

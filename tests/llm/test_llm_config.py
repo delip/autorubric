@@ -1,9 +1,11 @@
 """Tests for LLMConfig class."""
 
 import tempfile
-from dataclasses import MISSING, asdict, fields
+from dataclasses import MISSING, asdict, fields, replace
 from pathlib import Path
+from typing import cast
 
+import numpy as np
 import pytest
 import yaml
 
@@ -60,6 +62,232 @@ class TestLLMConfigCreation:
         assert config.seed == 42
         assert config.extra_headers == {"X-Custom": "header"}
         assert config.extra_params == {"custom_param": "value"}
+
+
+class TestLLMConfigValidation:
+    """``max_tokens`` and ``top_p`` are refused at construction when they mean nothing."""
+
+    @pytest.mark.parametrize(
+        "max_tokens",
+        [0, -1, True, False, np.bool_(True), np.int64(0), 1.5, 1024.0, "1024", float("nan")],
+    )
+    def test_max_tokens_that_is_not_a_positive_integer_is_refused(self, max_tokens):
+        with pytest.raises(ValueError, match=r"LLMConfig\.max_tokens must be None or an integer"):
+            LLMConfig(model="openai/gpt-5.2", max_tokens=max_tokens)
+
+    @pytest.mark.parametrize(
+        "top_p",
+        [
+            -0.1,
+            1.1,
+            2,
+            float("nan"),
+            float("inf"),
+            True,
+            False,
+            np.bool_(True),
+            "0.9",
+            complex(0.5, 0),
+        ],
+    )
+    def test_top_p_outside_zero_to_one_is_refused(self, top_p):
+        with pytest.raises(ValueError, match=r"LLMConfig\.top_p must be None or a number in"):
+            LLMConfig(model="openai/gpt-5.2", top_p=top_p)
+
+    @pytest.mark.parametrize("max_tokens", [None, 1, 1024])
+    def test_valid_max_tokens_is_kept_unchanged(self, max_tokens):
+        assert LLMConfig(model="openai/gpt-5.2", max_tokens=max_tokens).max_tokens == max_tokens
+
+    @pytest.mark.parametrize("top_p", [None, 0, 0.0, 0.5, 1, 1.0])
+    def test_valid_top_p_is_kept_unchanged(self, top_p):
+        config = LLMConfig(model="openai/gpt-5.2", top_p=top_p)
+        assert config.top_p == top_p
+        assert type(config.top_p) is type(top_p)
+
+    def test_a_numpy_integer_max_tokens_is_stored_as_int(self):
+        max_tokens = cast(int, np.int64(256))  # accepted, though the annotation names only int
+        config = LLMConfig(model="openai/gpt-5.2", max_tokens=max_tokens)
+        assert config.max_tokens == 256
+        assert type(config.max_tokens) is int
+
+    @pytest.mark.parametrize("top_p", [np.float64(0.5), np.float32(0.5)])
+    def test_a_numpy_float_top_p_is_stored_as_float(self, top_p):
+        config = LLMConfig(model="openai/gpt-5.2", top_p=top_p)
+        assert config.top_p == 0.5
+        assert type(config.top_p) is float
+
+    def test_replace_validates_again(self):
+        config = LLMConfig(model="openai/gpt-5.2", top_p=0.5)
+        with pytest.raises(ValueError, match="top_p"):
+            replace(config, top_p=1.5)
+
+    def test_from_yaml_refuses_a_zero_max_tokens(self, tmp_path):
+        path = tmp_path / "llm.yaml"
+        path.write_text("model: openai/gpt-5.2\nmax_tokens: 0\n", encoding="utf-8")
+        with pytest.raises(ValueError, match="max_tokens"):
+            LLMConfig.from_yaml(path)
+
+
+class TestThinkingValidation:
+    """``thinking`` is refused at construction when no provider can mean it.
+
+    It used to be normalized only when a request was built, so a value such as
+    ``"extreme"`` raised there, and every judge call failed as a ``parse`` abstention.
+    """
+
+    @pytest.mark.parametrize(
+        "thinking",
+        [
+            "extreme",
+            "HIGH",
+            "",
+            True,
+            False,
+            np.bool_(True),
+            -2,
+            -1024,
+            np.int64(-2),
+            32000.0,
+            1.5,
+            "32000",
+            {"level": "high"},
+            [1024],
+            object(),
+        ],
+    )
+    def test_a_thinking_value_no_provider_can_mean_is_refused(self, thinking):
+        with pytest.raises(ValueError, match=r"LLMConfig\.thinking must be None"):
+            LLMConfig(model="m", thinking=thinking)
+
+    @pytest.mark.parametrize(
+        ("thinking", "expected"),
+        [
+            pytest.param(None, None, id="none"),
+            pytest.param("none", ThinkingConfig(level=ThinkingLevel.NONE), id="level-none"),
+            pytest.param("low", ThinkingConfig(level=ThinkingLevel.LOW), id="level-string"),
+            pytest.param(ThinkingLevel.HIGH, ThinkingConfig(level=ThinkingLevel.HIGH), id="enum"),
+            pytest.param(32000, ThinkingConfig(budget_tokens=32000), id="budget"),
+            pytest.param(1, ThinkingConfig(budget_tokens=1), id="budget-one"),
+            # Gemini 2.5 reads a zero budget as thinking off and -1 as dynamic thinking.
+            pytest.param(0, ThinkingConfig(budget_tokens=0), id="budget-zero"),
+            pytest.param(-1, ThinkingConfig(budget_tokens=-1), id="budget-dynamic"),
+            pytest.param(
+                ThinkingConfig(level="low", budget_tokens=500),
+                ThinkingConfig(level=ThinkingLevel.LOW, budget_tokens=500),
+                id="config",
+            ),
+        ],
+    )
+    def test_every_valid_form_is_kept_unchanged(self, thinking, expected):
+        config = LLMConfig(model="m", thinking=thinking)
+        assert config.thinking is thinking
+        assert config.get_thinking_config() == expected
+
+    def test_a_numpy_integer_budget_is_stored_as_int(self):
+        thinking = cast(int, np.int64(8000))  # accepted, though the annotation names only int
+        config = LLMConfig(model="m", thinking=thinking)
+        assert config.thinking == 8000
+        assert type(config.thinking) is int
+        budget = config.get_thinking_config()
+        assert budget is not None
+        assert type(budget.budget_tokens) is int
+
+    def test_the_error_chains_from_the_thinking_config_error(self):
+        thinking = cast(ThinkingLevel, "extreme")  # a str the annotation does not allow
+        with pytest.raises(ValueError, match="'extreme'") as excinfo:
+            LLMConfig(model="m", thinking=thinking)
+        assert isinstance(excinfo.value.__cause__, ValueError)
+
+    def test_the_forms_name_every_level(self):
+        with pytest.raises(ValueError) as excinfo:
+            LLMConfig(model="m", thinking=cast(ThinkingLevel, "extreme"))
+        for level in ThinkingLevel:
+            assert repr(level.value) in str(excinfo.value)
+
+    def test_replace_validates_again(self):
+        config = LLMConfig(model="m", thinking="high")
+        with pytest.raises(ValueError, match="thinking"):
+            replace(config, thinking="extreme")
+
+    def test_from_yaml_refuses_an_unknown_level(self, tmp_path):
+        path = tmp_path / "llm.yaml"
+        path.write_text("model: m\nthinking: extreme\n", encoding="utf-8")
+        with pytest.raises(ValueError, match="thinking"):
+            LLMConfig.from_yaml(path)
+
+    @pytest.mark.parametrize(
+        "mapping", ["{level: extreme}", "{budget_tokens: true}", "{budget_tokens: -5}"]
+    )
+    def test_from_yaml_refuses_an_invalid_thinking_mapping(self, tmp_path, mapping):
+        path = tmp_path / "llm.yaml"
+        path.write_text(f"model: m\nthinking: {mapping}\n", encoding="utf-8")
+        with pytest.raises(ValueError, match=r"ThinkingConfig\.(level|budget_tokens) must be"):
+            LLMConfig.from_yaml(path)
+
+
+class TestThinkingConfigValidation:
+    """``ThinkingConfig`` refuses a level or budget no provider can mean."""
+
+    @pytest.mark.parametrize("level", ["extreme", "HIGH", "", None, 2, True])
+    def test_an_unknown_level_is_refused(self, level):
+        with pytest.raises(ValueError, match=r"ThinkingConfig\.level must be one of"):
+            ThinkingConfig(level=level)
+
+    @pytest.mark.parametrize("level", ["extreme", "", 2, True])
+    def test_an_unknown_level_is_refused_with_a_budget_too(self, level):
+        """A level string always had to name a level. A value of another type alongside a
+        budget is refused too: only None says "no level"."""
+        with pytest.raises(ValueError, match=r"ThinkingConfig\.level must be one of"):
+            ThinkingConfig(level=level, budget_tokens=9000)
+
+    def test_no_level_with_a_budget_is_kept(self):
+        """A budget is sent without reading ``level``, so ``level=None`` alongside one (as
+        in a YAML ``{level: null, budget_tokens: 9000}``) has always worked and still does."""
+        config = ThinkingConfig(level=cast(ThinkingLevel, None), budget_tokens=9000)
+        assert config.level is None
+        assert config.budget_tokens == 9000
+        assert config.get_effective_budget() == 9000
+        llm = LLMConfig(model="m", thinking=config)
+        assert llm.get_thinking_config() == config
+
+    def test_no_level_with_a_budget_loads_from_yaml(self, tmp_path):
+        path = tmp_path / "llm.yaml"
+        path.write_text("model: m\nthinking: {level: null, budget_tokens: 9000}\n")
+        thinking = LLMConfig.from_yaml(path).get_thinking_config()
+        assert thinking == ThinkingConfig(level=cast(ThinkingLevel, None), budget_tokens=9000)
+
+    def test_the_level_message_lists_every_level(self):
+        with pytest.raises(ValueError) as excinfo:
+            ThinkingConfig(level=cast(ThinkingLevel, "extreme"))
+        for level in ThinkingLevel:
+            assert repr(level.value) in str(excinfo.value)
+
+    @pytest.mark.parametrize(
+        "budget_tokens", [True, False, np.bool_(False), -2, 1024.0, "1024", float("nan")]
+    )
+    def test_a_budget_that_is_not_an_integer_from_minus_one_is_refused(self, budget_tokens):
+        with pytest.raises(ValueError, match=r"ThinkingConfig\.budget_tokens must be None or"):
+            ThinkingConfig(budget_tokens=budget_tokens)
+
+    @pytest.mark.parametrize("budget_tokens", [None, -1, 0, 1, 1024, 50000])
+    def test_a_valid_budget_is_kept_unchanged(self, budget_tokens):
+        assert ThinkingConfig(budget_tokens=budget_tokens).budget_tokens == budget_tokens
+
+    def test_a_numpy_integer_budget_is_stored_as_int(self):
+        budget_tokens = cast(int, np.int32(4096))
+        config = ThinkingConfig(budget_tokens=budget_tokens)
+        assert config.budget_tokens == 4096
+        assert type(config.budget_tokens) is int
+        # The response-cache key renders the config with str(); a plain int keeps it plain.
+        assert str(config) == str(ThinkingConfig(budget_tokens=4096))
+
+    @pytest.mark.parametrize("level", ["low", ThinkingLevel.LOW])
+    def test_a_level_string_or_member_is_stored_as_the_member(self, level):
+        assert ThinkingConfig(level=level).level is ThinkingLevel.LOW
+
+    def test_replace_validates_again(self):
+        with pytest.raises(ValueError, match="budget_tokens"):
+            replace(ThinkingConfig(), budget_tokens=-7)
 
 
 class TestLLMConfigDefaults:

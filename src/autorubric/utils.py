@@ -394,11 +394,19 @@ async def fill_ground_truth(
         are items with a criterion whose every judge call failed: the verdict a
         grader stands in for failed calls (CANNOT_ASSESS, the NA option, or the
         worst case) is never saved as a label. A criterion that at least one
-        judge judged is labelled as graded. Items with existing ground_truth
-        (when force=False) are included unchanged.
+        judge judged is labelled as graded. A judge's choice of the NA option the
+        grader adds to a multi-choice criterion without one (``auto_na_option``) is
+        recorded as that option's label (``CANONICAL_NA_OPTION``), which the returned
+        dataset's rubric does not list but every label reader resolves to that option
+        (``RubricDataset.from_json``, scoring, metrics, few-shot selection, held-out
+        validation), so the dataset round-trips. Items with existing ground_truth (when
+        force=False) are included unchanged.
 
     Raises:
-        ValueError: If dataset has no items.
+        ValueError: If dataset has no items, or if a judge's call fails with a
+            configuration error (an unsupported parameter, an invalid API key, an unknown
+            model: see ``CriterionGrader.judge``), which would fail every item alike. The
+            items still being graded are then cancelled.
 
     Warns:
         UserWarning: Once, before grading, when ``grader`` is a confidence cascade whose
@@ -417,7 +425,10 @@ async def fill_ground_truth(
         >>> labeled.to_file("labeled.json")
     """
     from autorubric.dataset import RubricDataset
-    from autorubric.graders.criterion_grader import _escalation_names_checked
+    from autorubric.graders.criterion_grader import (
+        _escalation_names_checked,
+        _is_judge_configuration_error,
+    )
 
     if len(dataset) == 0:
         raise ValueError("Dataset has no items")
@@ -456,6 +467,10 @@ async def fill_ground_truth(
                 new_item = dataclasses.replace(item, ground_truth=gt, ground_truth_reasons=None)
                 return (idx, new_item, None)
             except Exception as e:
+                # A judge's configuration error fails every item alike: it is raised, never
+                # treated as one item that failed to grade.
+                if _is_judge_configuration_error(e):
+                    raise
                 return (idx, None, str(e))
 
         # A cascade's per-criterion escalation thresholds are keyed by criterion name, and
@@ -473,48 +488,55 @@ async def fill_ground_truth(
                     async with semaphore:
                         return await grade_item(idx, item)
 
-                tasks = [limited_grade(idx, item) for idx, item in items_to_grade]
+                coros = [limited_grade(idx, item) for idx, item in items_to_grade]
             else:
-                tasks = [grade_item(idx, item) for idx, item in items_to_grade]
+                coros = [grade_item(idx, item) for idx, item in items_to_grade]
+            # Tasks, so that the ones still running are cancelled when one raises.
+            tasks = [asyncio.ensure_future(coro) for coro in coros]
 
-            # Execute with optional progress
-            if show_progress:
-                try:
-                    from rich.console import Console
-                    from rich.progress import (
-                        BarColumn,
-                        MofNCompleteColumn,
-                        Progress,
-                        SpinnerColumn,
-                        TextColumn,
-                    )
+            try:
+                # Execute with optional progress
+                if show_progress:
+                    try:
+                        from rich.console import Console
+                        from rich.progress import (
+                            BarColumn,
+                            MofNCompleteColumn,
+                            Progress,
+                            SpinnerColumn,
+                            TextColumn,
+                        )
 
-                    progress = Progress(
-                        SpinnerColumn(),
-                        TextColumn("[bold blue]Filling ground truth"),
-                        BarColumn(bar_width=40),
-                        MofNCompleteColumn(),
-                        console=Console(stderr=True),
-                    )
+                        progress = Progress(
+                            SpinnerColumn(),
+                            TextColumn("[bold blue]Filling ground truth"),
+                            BarColumn(bar_width=40),
+                            MofNCompleteColumn(),
+                            console=Console(stderr=True),
+                        )
 
-                    with progress:
-                        task_id = progress.add_task("Grading", total=len(tasks))
-                        for coro in asyncio.as_completed(tasks):
-                            idx, new_item, error = await coro
+                        with progress:
+                            task_id = progress.add_task("Grading", total=len(tasks))
+                            for coro in asyncio.as_completed(tasks):
+                                idx, new_item, error = await coro
+                                if new_item is not None:
+                                    graded_items[idx] = new_item
+                                progress.update(task_id, advance=1)
+                    except ImportError:
+                        # Fall back to no progress if rich is not available
+                        results = await asyncio.gather(*tasks)
+                        for idx, new_item, error in results:
                             if new_item is not None:
                                 graded_items[idx] = new_item
-                            progress.update(task_id, advance=1)
-                except ImportError:
-                    # Fall back to no progress if rich is not available
+                else:
                     results = await asyncio.gather(*tasks)
                     for idx, new_item, error in results:
                         if new_item is not None:
                             graded_items[idx] = new_item
-            else:
-                results = await asyncio.gather(*tasks)
-                for idx, new_item, error in results:
-                    if new_item is not None:
-                        graded_items[idx] = new_item
+            except BaseException:
+                for task in tasks:
+                    task.cancel()
+                raise
 
     # Combine preserved and graded items, maintaining order
     all_items: dict[int, DataItem] = {**preserved_items, **graded_items}

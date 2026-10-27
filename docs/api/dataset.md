@@ -38,6 +38,13 @@ dataset.to_file("dataset.json")
 loaded = RubricDataset.from_file("dataset.json")
 ```
 
+A multi-choice criterion's ground truth is an option label. `from_json` and `from_file` check
+each label against the criterion's options. For a criterion without an NA option of its own,
+the label of the NA option the grader adds (`"Cannot assess / not applicable"`,
+`CANONICAL_NA_OPTION`) is accepted too, because `fill_ground_truth` records it when a judge
+chooses that option. It is read as an NA label everywhere (see
+[CANNOT_ASSESS handling](../cookbook/cannot-assess.md)).
+
 ## Per-Item Rubrics
 
 For datasets where each item requires a unique rubric (e.g., question-specific evaluation):

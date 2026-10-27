@@ -756,7 +756,10 @@ def render_improvement_report_html(
                     if cr.accuracy >= 0.9
                     else ("var(--yellow)" if cr.accuracy >= 0.7 else "var(--red)")
                 )
-                cm = cr.confusion_matrix
+                # Precision and the 2x2 cells are binary only: a multi-choice criterion's
+                # matrix ranges over its options, with no positive class, and its
+                # false-positive rate is None (a binary criterion's is always a float).
+                cm = cr.confusion_matrix if cr.false_positive_rate is not None else None
                 precision = cm.precision if cm is not None else None
                 tp = cm.tp if cm is not None else None
                 fp = cm.fp if cm is not None else None
@@ -770,8 +773,8 @@ def render_improvement_report_html(
                     f"<td>{_fmt_pct(cr.coverage)}</td>"
                     f"<td>{_fmt_pct(cr.ca_rate)}</td>"
                     f"<td>{_fmt_pct(precision)}</td>"
-                    f"<td>{cr.false_positive_rate:.0%}</td>"
-                    f"<td>{cr.false_negative_rate:.0%}</td>"
+                    f"<td>{_fmt_pct(cr.false_positive_rate)}</td>"
+                    f"<td>{_fmt_pct(cr.false_negative_rate)}</td>"
                     f"<td>{_fmt_int(tp)}</td>"
                     f"<td>{_fmt_int(fp)}</td>"
                     f"<td>{_fmt_int(tn)}</td>"

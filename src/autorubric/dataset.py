@@ -18,6 +18,27 @@ from autorubric.types import CriterionVerdict
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from autorubric.types import Criterion
+
+
+def _criterion_scale_data(criterion: Criterion) -> dict[str, Any]:
+    """A multi-choice criterion's scale as rubric files record it, for ``Rubric.from_dict``.
+
+    ``scale_type``, ``options`` (each option's ``label``, ``value`` and ``na``) and, when set,
+    ``aggregation``. Empty for a binary criterion, whose entry has none of these keys.
+    """
+    if criterion.options is None:
+        return {}
+    data: dict[str, Any] = {
+        "scale_type": criterion.scale_type,
+        "options": [
+            {"label": opt.label, "value": opt.value, "na": opt.na} for opt in criterion.options
+        ],
+    }
+    if criterion.aggregation is not None:
+        data["aggregation"] = criterion.aggregation
+    return data
+
 
 @dataclass
 class DataItem:
@@ -403,14 +424,8 @@ class RubricDataset:
                 "name": c.name,
                 "weight": c.weight,
                 "requirement": c.requirement,
+                **_criterion_scale_data(c),
             }
-            if c.options is not None:
-                criterion_data["scale_type"] = c.scale_type
-                criterion_data["options"] = [
-                    {"label": opt.label, "value": opt.value, "na": opt.na} for opt in c.options
-                ]
-                if c.aggregation is not None:
-                    criterion_data["aggregation"] = c.aggregation
             rubric_data.append(criterion_data)
         if rubric.guidelines is None:
             return rubric_data
@@ -562,9 +577,12 @@ class RubricDataset:
                                 f"Item {i}, ground_truth[{j}]: multi-choice criterion "
                                 f"expects option label string, got {type(v).__name__}"
                             )
-                        # Validate that the label exists
+                        # Validate that the label names an option, among the options a
+                        # judge is shown: the label of the NA option the grader adds to a
+                        # criterion without one (CANONICAL_NA_OPTION, which
+                        # fill_ground_truth records when a judge chose it) is one too
                         try:
-                            criterion.find_option_by_label(v)
+                            criterion.with_guaranteed_na_option().find_option_by_label(v)
                         except ValueError as e:
                             raise ValueError(f"Item {i}, ground_truth[{j}]: {e}") from None
                         ground_truth.append(v)

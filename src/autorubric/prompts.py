@@ -1125,6 +1125,19 @@ narrow — broaden the acceptance criteria or clarify edge cases.
 - Each criterion should target a single, observable quality verifiable from the submission text.
 - Avoid subjective language, hedging words, or vague qualifiers."""
 
+HELD_OUT_REVISION_SCALES_BLOCK = """\
+<multi_choice_scales>
+Some criteria in the current rubric are multi-choice: their entries list a "scale_type" and \
+"options". A judge answers such a criterion by choosing one of its options, and the diagnostics \
+name the option the judge chose and the labelled one. The options are fixed and not part of your \
+output: keep each multi-choice criterion's requirement a question its listed options answer, and \
+do not output "scale_type", "options" or "aggregation". The false positive and false negative \
+rates apply to binary criteria only (n/a for a multi-choice criterion); for a multi-choice \
+criterion, compare the option the judge chose with the labelled one.
+</multi_choice_scales>
+
+"""
+
 HELD_OUT_REVISION_USER_PROMPT_TEMPLATE = """\
 You are revising an evaluation rubric to fix grading errors identified on held-out data.
 

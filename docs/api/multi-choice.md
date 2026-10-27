@@ -63,6 +63,22 @@ options:
     na: true
 ```
 
+## Option Labels
+
+Each option needs its own label. Labels are compared ignoring case and surrounding
+whitespace, as ground-truth labels are matched to options, so `"Good"` and `" good "` count as
+the same label, and a criterion with both raises `ValueError`. Otherwise a label meant for the
+second option would be read as the first.
+
+A criterion without an NA option of its own is shown to the judge with an NA option added
+(`"Cannot assess / not applicable"`, under the default `auto_na_option=True`), and ground-truth
+labels are read against the options with that one added. So in such a criterion no scored
+option may have that label, and a criterion that gives one the label raises `ValueError` when it
+is built (including from a rubric file), whatever `auto_na_option` is. Otherwise a judge's choice
+of the added option would be read back as your scored option. Rename the option, or mark it
+`na: true` if it is meant as the criterion's abstain option. A criterion with its own NA option
+gets none added, so there a scored option may use the label.
+
 ## Ensemble Aggregation
 
 ```python

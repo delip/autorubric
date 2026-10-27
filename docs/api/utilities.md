@@ -79,10 +79,19 @@ async def generate_labels():
         show_progress=True,
     )
     # Items that fail to label, failed judge calls included, are left out,
-    # so len(labeled) can be < len(dataset)
+    # so len(labeled) can be < len(dataset). A misconfigured judge (a refused
+    # parameter, an invalid key, an unknown model) instead makes the call raise
+    # ValueError naming the judge: fix the config and rerun.
 
     labeled.to_file("labeled.json")
 ```
+
+When a judge picks the NA option that the default `auto_na_option=True` adds to a
+multi-choice criterion without one, `fill_ground_truth` records the label
+`"Cannot assess / not applicable"`. The saved file reloads with
+`RubricDataset.from_file`, and the label counts as an NA label. See
+[Handling Uncertain Assessments](../cookbook/cannot-assess.md#step-4-one-abstain-concept-two-surfaces)
+for when this label is accepted.
 
 ## Verdict Helpers
 

@@ -57,6 +57,8 @@ Every field after `model` is keyword-only. Field names match `LLMConfig` whereve
 | `decision_threshold` | `0.5` | P(MET) cut for the Noul framings |
 | `input_cost_per_token` | `None` | Price in USD per input token |
 
+`max_retries` and `max_parallel_requests` must be integers of at least 1. Numpy integers are accepted and stored as plain `int`; a `bool` or a float raises `ValueError`.
+
 ### Self-hosted endpoints
 
 Any served model that implements the System One protocol works. Point `api_base` at it:
@@ -89,10 +91,10 @@ The base URL must be an absolute http(s) URL with no query, fragment or credenti
 
 | Value | Question | Verdict | Can abstain |
 |---|---|---|---|
-| `"choice"` (default) | A choice over the option labels, the NA option included. Needs unique labels and at most 255 options. | the selected option | Yes (the NA option) |
+| `"choice"` (default) | A choice over the option labels, the NA option included. Needs at most 255 options (labels are always unique: `Criterion` refuses repeated ones). | the selected option | Yes (the NA option) |
 | `"score"` | An ordered scale over the non-NA options (2 to 10 of them) | the expected level `s`, snapped to `round(s)` and clamped to the scale | No: the NA option is not offered |
 
-Python's `round` rounds half to even, so an expected level exactly halfway between two levels snaps to the even one. Options are always offered in the rubric's order: `shuffle_options` does not apply to decision models. A criterion its framing cannot express (duplicate labels for a choice, too few or too many levels for a score) is left out of the item's request and fails alone as a `parse` error; the other criteria are still asked.
+Python's `round` rounds half to even, so an expected level exactly halfway between two levels snaps to the even one. Options are always offered in the rubric's order: `shuffle_options` does not apply to decision models. A criterion its framing cannot express (more than 255 options for a choice, too few or too many levels for a score) is left out of the item's request and fails alone as a `parse` error; the other criteria are still asked.
 
 ### Confidence
 
@@ -129,7 +131,7 @@ print(vote.verdict, vote.probabilities, vote.confidence, vote.reason)
 
 `probabilities` is keyed by verdict for binary criteria (`"MET"`, `"UNMET"`, and `"CANNOT_ASSESS"` for the `"choice"` framing), and by the original option index as a string (`"0"`, `"1"`, ...) for multi-choice criteria.
 
-**Failures.** A failed request abstains every criterion of that item for that judge, and each records the `error`: `infrastructure` for authentication, rate-limit, timeout, connection and server errors, `parse` for a request the endpoint rejected. An answer that is missing or of the wrong type abstains only its own criterion, as a `parse` error. Under the default `CannotAssessStrategy.SKIP` abstentions are left out of the score. A failed request leaves the decision model with nothing judged on that item, so its `judge_scores` entry there is `None`. When no other judge answered either, the item has no score under any strategy: its report's `error` begins `Every criterion's judgment failed:`, and an `EvalRunner` run counts it as failed. A request that the endpoint answered, and billed, without a usable answer for any criterion fails the item the same way, and its cost still counts in the run's totals.
+**Failures.** A failed request abstains every criterion of that item for that judge, and each records the `error`: `infrastructure` for rate-limit, timeout, connection and server errors, `parse` for a request the endpoint rejected. Authentication, permission and not-found errors (401, 403, 404: a revoked key, or a base URL that names no System One endpoint) fail every request alike, so the grade raises a `ValueError` naming the judge instead, as for a misconfigured [LLM judge](llm-judges.md#standalone-use); in a cascade this raises rather than escalating every criterion. An answer that is missing or of the wrong type abstains only its own criterion, as a `parse` error. Under the default `CannotAssessStrategy.SKIP` abstentions are left out of the score. A failed request leaves the decision model with nothing judged on that item, so its `judge_scores` entry there is `None`. When no other judge answered either, the item has no score under any strategy: its report's `error` begins `Every criterion's judgment failed:`, and an `EvalRunner` run counts it as failed. A request that the endpoint answered, and billed, without a usable answer for any criterion fails the item the same way, and its cost still counts in the run's totals.
 
 ## Mixed ensembles
 

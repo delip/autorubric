@@ -107,6 +107,8 @@ grader = CriterionGrader(
 
     For complex technical analysis, consider explicit budgets of 8,000-16,000 tokens.
 
+`LLMConfig` checks `thinking` when it is built, so a value no provider can use fails there with a `ValueError` rather than on every request. Examples are an unknown level such as `"extreme"`, `thinking=True` (a `bool` is not a budget), a budget below -1 and a float budget. A budget below a provider's minimum is not caught there. Anthropic's minimum is 1,024 tokens: a smaller budget passes the check, Anthropic rejects each request with a 400, and every judge call abstains (`CANNOT_ASSESS`, or NA for a multi-choice criterion). Use at least 1,024 for Anthropic models.
+
 ### Step 3: Provider Support
 
 Extended thinking/reasoning is supported across providers:
@@ -116,7 +118,7 @@ Extended thinking/reasoning is supported across providers:
 LLMConfig(model="anthropic/claude-sonnet-4-5-20250929", thinking="high")
 
 # OpenAI - Reasoning (o-series, GPT-5 models)
-LLMConfig(model="openai/o1-preview", thinking="high")
+LLMConfig(model="openai/gpt-5-mini", thinking="high")
 
 # Gemini - Thinking Mode (2.5+, 3.0+ models)
 LLMConfig(model="gemini/gemini-2.5-pro", thinking="high")
@@ -196,9 +198,11 @@ Each judge's reasoning trace is on its vote, next to its explanation:
 for cr in result.report:
     for vote in cr.votes or cr.multi_choice_votes:  # binary / multi-choice criteria
         print(f"{cr.criterion.name} ({vote.judge_id}): {vote.reason}")
-        if vote.reasoning:  # None when the provider returns no trace
+        if vote.reasoning:  # None when the provider returns no trace, or one that is not text
             print(vote.reasoning)
 ```
+
+A trace is kept only as text. The grader takes the provider's `reasoning_content` when it is a string, otherwise the text of LiteLLM's `thinking_blocks` joined with newlines, otherwise a legacy `thinking` string. A trace in any other shape is dropped, and the judge's verdict is kept. The same rule fills `GenerateResult.thinking` on direct `LLMClient.generate` calls.
 
 ### Step 5: Compare With and Without Thinking
 

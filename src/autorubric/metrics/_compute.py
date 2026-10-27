@@ -1495,11 +1495,14 @@ def _compute_per_item_pooled_metrics(
                 if pred_opt.na:
                     n_abstain[scale] += 1
                     continue
-                # resolve_ground_truth already validated the multi-choice index; this only
-                # narrows the type (tv: CriterionVerdict | int, options: list | None).
-                if not isinstance(tv, int) or crit.options is None:
+                # resolve_ground_truth already validated the multi-choice index among the
+                # options of the effective criterion (the label of the NA option the grader
+                # adds names that option); this only narrows the type (tv:
+                # CriterionVerdict | int, options: list | None).
+                true_options = crit.with_guaranteed_na_option().options
+                if not isinstance(tv, int) or true_options is None:
                     continue
-                true_opt = crit.options[tv]
+                true_opt = true_options[tv]
                 pred_v = float(pred_opt.value) if pred_opt.value is not None else 0.0
                 true_v = float(true_opt.value) if true_opt.value is not None else 0.0
                 val_true[scale].append(true_v)
@@ -1925,14 +1928,18 @@ def compute_metrics(
             if criterion_types[c_idx] == "binary":
                 true_score_verdicts.append(true_all[c_idx])
             else:
-                # For multi-choice, pass the option label (string)
-                criterion = criteria[c_idx]
+                # For multi-choice, pass the option label (string). The index is among the
+                # options of the effective criterion, as resolve_ground_truth resolves it:
+                # the label of the NA option the grader adds names that option, which
+                # compute_weighted_score scores as an NA abstention.
+                shown = criteria[c_idx].with_guaranteed_na_option()
+                shown_options = shown.options or []
                 opt_idx = true_all[c_idx]
-                if isinstance(opt_idx, int) and 0 <= opt_idx < len(criterion.options):
-                    true_score_verdicts.append(criterion.options[opt_idx].label)
+                if isinstance(opt_idx, int) and 0 <= opt_idx < len(shown_options):
+                    true_score_verdicts.append(shown_options[opt_idx].label)
                 else:
                     # Default to first option if index is invalid
-                    true_score_verdicts.append(criterion.options[0].label)
+                    true_score_verdicts.append(shown_options[0].label)
         true_score = dataset.compute_weighted_score(
             true_score_verdicts, rubric=dataset.get_item_rubric(idx)
         )
@@ -2073,15 +2080,20 @@ def compute_metrics(
         )
 
     # Reconstruct the effective criterion for any multi-choice criterion whose graded
-    # reports used an auto-injected NA option OR produced a genuine None error-abstain.
+    # reports used an auto-injected NA option OR produced a genuine None error-abstain, or
+    # whose ground truth names that option (#38).
     # The grader appends an auto-injected NA at index N = len(author.options) — out of
     # range for the author rubric used above — and emits selected_index=None when it had to
     # abstain with no NA option. We normalize only when an out-of-range OR a None prediction
     # is actually observed, so forced-choice runs without abstains are unaffected and never
     # gain a spurious NA column. Only a judgment some metric reads is observed: a failed
     # cell's stand-in (the NA option, or no option at all) is no prediction, so it never adds
-    # the NA option, and neither does a judge's failed vote. ``with_guaranteed_na_option`` is
-    # the same pure helper the grader uses, so the two layers cannot drift.
+    # the NA option, and neither does a judge's failed vote. A ground-truth label is observed
+    # the same way: resolve_ground_truth resolves the label of the added NA option (which
+    # fill_ground_truth records when a judge chose it) to index N, so a judged cell whose
+    # label is N adds the option too, and a failed cell's label, read by no metric, does
+    # not. ``with_guaranteed_na_option`` is the same pure helper the grader uses, so the two
+    # layers cannot drift.
     effective_criteria = list(criteria)
     for c_idx in range(n_criteria):
         if criterion_types[c_idx] == "binary":
@@ -2096,6 +2108,12 @@ def compute_metrics(
             _needs_na(v)
             for v, failed in zip(
                 per_criterion_pred[c_idx], per_criterion_failed[c_idx], strict=True
+            )
+            if not failed
+        ) or any(
+            isinstance(t, int) and t >= n_author
+            for t, failed in zip(
+                per_criterion_true[c_idx], per_criterion_failed[c_idx], strict=True
             )
             if not failed
         )

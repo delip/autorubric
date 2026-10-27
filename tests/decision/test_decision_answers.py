@@ -11,8 +11,9 @@ from __future__ import annotations
 
 import json
 import math
-from typing import Any
+from typing import Any, cast
 
+import numpy as np
 import pytest
 from typesafe_sdk import ChoiceAnswer, NoulAnswer, ScoreAnswer, SystemOneResponse
 
@@ -472,13 +473,21 @@ class TestMalformedAnswers:
         assert_parse_error("score", ladder(), {"c0": answer}, SCORE)
 
     def test_an_inexpressible_criterion_has_no_mapping(self):
+        # Criterion refuses a repeated label; model_copy does not validate.
         duplicates = Criterion(
             requirement="Which?",
             options=[
                 CriterionOption(label="Same", value=0.0),
-                CriterionOption(label="Same", value=1.0),
+                CriterionOption(label="Other", value=1.0),
             ],
             scale_type="nominal",
+        ).model_copy(
+            update={
+                "options": [
+                    CriterionOption(label="Same", value=0.0),
+                    CriterionOption(label="Same", value=1.0),
+                ]
+            }
         )
         answer = choice("Same", {"Same": 1.0})
         assert_parse_error("not unique", duplicates, answers(c0=answer), config())
@@ -514,7 +523,13 @@ class TestSelectionConfidence:
         for p in (0.5, 0.62, 0.97):
             assert selection_confidence(p, 2) == pytest.approx(2 * abs(p - 0.5))
 
-    @pytest.mark.parametrize(("p", "n"), [(0.5, 1), (0.5, 0), (1.2, 3), (-0.1, 3), (math.nan, 3)])
+    def test_a_numpy_integer_count_is_accepted(self):
+        assert selection_confidence(0.75, cast(int, np.int64(2))) == pytest.approx(0.5)
+
+    @pytest.mark.parametrize(
+        ("p", "n"),
+        [(0.5, 1), (0.5, 0), (1.2, 3), (-0.1, 3), (math.nan, 3), (0.5, True), (0.5, 3.0)],
+    )
     def test_rejects_invalid_input(self, p, n):
         with pytest.raises(ValueError):
             selection_confidence(p, n)

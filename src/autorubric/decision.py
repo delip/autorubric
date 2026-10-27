@@ -60,6 +60,7 @@ from autorubric.types import (
     CriterionVerdict,
     MultiChoiceVerdict,
     TokenUsage,
+    _as_int,
     _binary_worst_verdict,
 )
 from autorubric.utils import (
@@ -94,10 +95,6 @@ _DEFAULT_PORTS = {"http": 80, "https": 443}
 
 def _is_real_number(value: object) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
-
-
-def _is_positive_int(value: object) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool) and value >= 1
 
 
 _SYSTEM_ONE_PATH = "/v1/systemone"
@@ -304,6 +301,8 @@ class DecisionModelConfig:
             not made, and the request fails with its last error (its criteria abstain), so
             a ``Retry-After`` beyond the budget fails the request at once instead of
             stalling the run, much as ``LLMConfig`` caps each wait at ``retry_max_wait``.
+            An integer >= 1; numpy integers are accepted and kept as a plain ``int``, a
+            ``bool`` or a float is refused.
         max_parallel_requests: Maximum concurrent requests to the endpoint, as in
             ``LLMConfig``. The limit is shared by every decision-model config whose resolved
             base URL has the same host, whatever its model name; the strictest limit wins.
@@ -313,7 +312,8 @@ class DecisionModelConfig:
             size of the SDK's default pool). A limit sizes the pool instead, so one above
             100 is honoured. A request waits for its turn before it is sent, so the wait,
             however long, counts against neither ``timeout`` nor the retry budget: those
-            measure the endpoint.
+            measure the endpoint. ``None`` or an integer >= 1; numpy integers are accepted
+            and kept as a plain ``int``, a ``bool`` or a float is refused.
         cache_enabled: Cache responses on disk, as in ``LLMConfig``. There is one entry per
             request, keyed by the model, the resolved base URL, the state and the questions,
             plus the ``judge_id`` of any judge other than a lone ``judge_model_config``
@@ -437,18 +437,23 @@ class DecisionModelConfig:
             raise ValueError(
                 f"{name}.timeout must be a positive, finite number of seconds; got {self.timeout!r}"
             )
-        if not _is_positive_int(self.max_retries):
+        # Integer counts take any integer but a bool (numpy integers too) and are kept as a
+        # plain int, as ``FewShotConfig``'s are.
+        max_retries = _as_int(self.max_retries)
+        if max_retries is None or max_retries < 1:
             raise ValueError(
                 f"{name}.max_retries is the total number of attempts and must be an "
                 f"integer >= 1; got {self.max_retries!r}"
             )
-        if self.max_parallel_requests is not None and not _is_positive_int(
-            self.max_parallel_requests
-        ):
-            raise ValueError(
-                f"{name}.max_parallel_requests must be None or an integer >= 1; "
-                f"got {self.max_parallel_requests!r}"
-            )
+        self.max_retries = max_retries
+        if self.max_parallel_requests is not None:
+            max_parallel_requests = _as_int(self.max_parallel_requests)
+            if max_parallel_requests is None or max_parallel_requests < 1:
+                raise ValueError(
+                    f"{name}.max_parallel_requests must be None or an integer >= 1; "
+                    f"got {self.max_parallel_requests!r}"
+                )
+            self.max_parallel_requests = max_parallel_requests
         if self.cache_ttl is not None and not (
             _is_real_number(self.cache_ttl) and self.cache_ttl > 0
         ):
@@ -974,7 +979,10 @@ def _choice_labels(criterion: Criterion) -> list[str]:
     Raises:
         ValueError: If a Choice question cannot express the options: a label repeats
             (Choice options are keyed by label) or there are more options than one Choice
-            question may offer.
+            question may offer. ``Criterion`` refuses repeated labels and a scored
+            option labelled as the NA option ``Criterion.with_guaranteed_na_option`` adds to
+            a criterion without one, so a label repeats here only in a criterion built
+            without validation (``model_copy``, ``model_construct``).
     """
     labels = [option.label for option in criterion.options or []]
     repeated = [label for label, count in Counter(labels).items() if count > 1]
@@ -1149,11 +1157,12 @@ def selection_confidence(p_selected: float, n_outcomes: int) -> float:
         ValueError: If ``n_outcomes`` is not an integer >= 2 or ``p_selected`` is not a
             number in [0, 1].
     """
-    if not (_is_positive_int(n_outcomes) and n_outcomes >= 2):
+    n = _as_int(n_outcomes)
+    if n is None or n < 2:
         raise ValueError(f"n_outcomes must be an integer >= 2; got {n_outcomes!r}")
     if not (_is_real_number(p_selected) and 0 <= p_selected <= 1):
         raise ValueError(f"p_selected must be a number in [0, 1]; got {p_selected!r}")
-    return min(1.0, max(0.0, (n_outcomes * p_selected - 1) / (n_outcomes - 1)))
+    return min(1.0, max(0.0, (n * p_selected - 1) / (n - 1)))
 
 
 def _checked_probability(value: object, what: str) -> float:

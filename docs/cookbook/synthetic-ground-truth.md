@@ -130,6 +130,10 @@ print(f"Items labeled: {len(labeled_dataset)}/{len(dataset)}")
 item raises an error, when every judge call for one of its criteria fails, or
 when its report can't otherwise be turned into a label for every criterion, the
 item is left out of the result rather than returned with `ground_truth=None`.
+A misconfigured judge (a refused parameter, an invalid key, an unknown model) is
+the exception: it would fail every item, so `fill_ground_truth()` raises a
+`ValueError` naming the judge instead of leaving items out. Fix the judge's
+config and rerun.
 For a failed call a grader stands in a verdict so that grading can go on
 (`CANNOT_ASSESS`, the not-applicable option, or the worst case), but that
 stand-in is never saved as a label. In a panel, a criterion that at least one
@@ -199,6 +203,14 @@ labeled_dataset.to_file("product_descriptions_labeled.json")
 #   ]
 # }
 ```
+
+This rubric is binary, but a multi-choice criterion can get a label its rubric
+does not list. Under the default `auto_na_option=True` the grader adds an NA
+option to every multi-choice criterion that has none, and when the judge picks it,
+the saved label is `"Cannot assess / not applicable"`. The file still reloads with
+`RubricDataset.from_file`, and the label counts as an NA label in scoring, metrics,
+few-shot examples and held-out rubric improvement. [Handling Uncertain Assessments](cannot-assess.md#step-4-one-abstain-concept-two-surfaces)
+explains when the label is accepted.
 
 ### Step 5: Evaluate a Cheaper Model
 
@@ -299,7 +311,7 @@ GPT-4-mini (prod)         89.0%      0.762   $0.0124
 - **`fill_ground_truth()`** automates label generation with any grader
 - **Use powerful models** for ground truth (GPT-4, Claude Opus/Sonnet)
 - **`force=True`** regenerates labels for already-labeled items
-- **Failed items are left out** of the result, so retry only the missing ones
+- **Failed items are left out** of the result, so retry only the missing ones; a misconfigured judge raises instead
 - **Save labeled datasets** to avoid regenerating expensive labels
 - **Compare model costs** against accuracy when choosing production models
 - **Synthetic labels have limitations**—validate a sample when possible

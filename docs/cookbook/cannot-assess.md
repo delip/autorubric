@@ -74,7 +74,9 @@ The specific data can be found on page 47 of the annual report.
     *synthesizes* it from judge-call failures: failures are routed through
     `classify_grading_error`, where `infrastructure`/`parse` errors map to
     `CANNOT_ASSESS` (excluded from scoring under the default `SKIP`), while an
-    `unknown` error maps to the conservative worst case instead. `cannot_assess_count`
+    `unknown` error maps to the conservative worst case instead. A judge's
+    configuration error (an invalid API key, an unknown model, a parameter LiteLLM
+    refuses) is never an abstention: the grade raises `ValueError`. `cannot_assess_count`
     counts both genuine and error-induced abstains. To tell them apart, inspect each
     report's `criterion.is_error` (or the category-prefixed `criterion.error` string):
     `True` means the verdict was driven entirely by a judge-call failure rather than a
@@ -195,6 +197,19 @@ grader_forced_choice = CriterionGrader(
     criteria are unaffected: `CANNOT_ASSESS` is always available to a binary judge. Setting
     `auto_na_option=False` removes the abstain channel for multi-choice criteria that
     didn't author one, forcing a scored option.
+
+The added option's label is also a valid ground-truth label. When a judge chooses it,
+`fill_ground_truth` records `"Cannot assess / not applicable"`, and the dataset still loads
+with `RubricDataset.from_json` / `from_file` although its rubric does not list that option.
+Wherever a label is read (scoring, `compute_metrics`, few-shot examples, held-out rubric
+improvement), it names the NA option the grader adds, so it counts as an NA label, as an NA
+option written into the rubric would.
+This holds only for a criterion with no NA option of its own; a criterion that declares one gets
+nothing added, so its labels must name its own options. A grader built with
+`auto_na_option=False` offers no NA option, so it does not use an item with that label as a
+few-shot example. Because that label names the added option, no scored option of a criterion
+without an NA option may have it: such a criterion raises `ValueError` when it is built (see
+[Option Labels](../api/multi-choice.md#option-labels)).
 
 ### Step 5: Compare Strategy Effects
 

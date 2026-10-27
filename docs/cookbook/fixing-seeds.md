@@ -44,6 +44,8 @@ print(f"Seed: {grader.seed}")  # 42
 
 If you omit `seed`, one is auto-generated and accessible via `grader.seed`. This means randomness is always pinned after construction—you just need to record the seed to reproduce later.
 
+The seed must be `None` or an integer. A numpy integer such as `np.int64(42)` is kept as a plain `int`, so it shuffles exactly as `42` does and the manifest records it as `master_seed` (Step 6). A `bool`, a float or a string raises `ValueError`; see [Graders](../api/graders.md) for why.
+
 ```python
 grader = CriterionGrader(
     judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
@@ -197,6 +199,13 @@ print(manifest["grader_config"]["judges"][0]["temperature"])  # 0.3 (None = prov
 
 A grader built with `llm_calls="per_item"` also records `"llm_calls": "per_item"` in `grader_config`; a grader that calls its LLM judges per criterion, the default, records no `llm_calls` key.
 
+Each LLM judge's entry in `judges` (and in a cascade's `escalation` judges) also records the settings that change its requests, but only those that are set. A judge with `max_tokens`, `top_p`, `thinking` or a provider `seed` gets a key of the same name, after `max_parallel_requests` and in that order. `thinking` is recorded in its normalized form, so `thinking="high"`, `ThinkingLevel.HIGH` and `ThinkingConfig(level="high")` all appear as `{"level": "high", "budget_tokens": null}`, and `thinking=32000` as `{"level": "medium", "budget_tokens": 32000}` (a budget, when there is one, is what is sent). A judge that sets none of the four has the entry it had before these keys were recorded, so two runs that differ only in reasoning effort can now be told apart from their manifests.
+
+```python
+judge = manifest["grader_config"]["judges"][0]
+print(judge.get("thinking"))  # {'level': 'high', 'budget_tokens': None}, or None when unset
+```
+
 When resuming an interrupted evaluation, the same seed produces the same shuffle orders for remaining items—no special handling required.
 
 ### Step 7: Coordinate with Few-Shot Selection
@@ -223,7 +232,7 @@ If you set `FewShotConfig(seed=99)` explicitly, the master seed does not overrid
 
 | Concept | Detail |
 |---------|--------|
-| `seed` parameter | Single value on `CriterionGrader` that pins all non-LLM randomness |
+| `seed` parameter | Single value on `CriterionGrader` that pins all non-LLM randomness; `None` or an integer (numpy integers kept as plain `int`) |
 | Auto-generation | Omitting `seed` auto-generates one; access via `grader.seed` |
 | Scope | Controls option shuffling and few-shot selection; does not affect LLM sampling |
 | Concurrency-safe | Per-call RNG derived from `(seed, content_hash, criterion_idx, judge_id)` |

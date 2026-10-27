@@ -199,7 +199,13 @@ def resolve_ground_truth(
 
     For binary criteria, keeps CriterionVerdict unchanged.
     For multi-choice criteria, resolves string labels to option indices
-    using Criterion.find_option_by_label().
+    using Criterion.find_option_by_label(), among the options a judge is shown:
+    those of ``Criterion.with_guaranteed_na_option()``. So for a criterion without an
+    NA option of its own, the label of the NA option the grader adds
+    (``CANONICAL_NA_OPTION``, which ``fill_ground_truth`` records when a judge chose it)
+    resolves to that option's index, ``len(criterion.options)``, and that index is in
+    range. A criterion with an NA option of its own gets none added, so there the label
+    must name one of its options.
 
     Args:
         ground_truth: Mixed list of CriterionVerdict (binary) or str labels (multi-choice).
@@ -241,16 +247,19 @@ def resolve_ground_truth(
                     f"got {type(gt).__name__}"
                 )
         else:
-            # Multi-choice criterion - expect string label
+            # Multi-choice criterion - expect string label, resolved among the options a
+            # judge is shown (the NA option the grader adds included)
+            shown = criterion.with_guaranteed_na_option()
+            n_shown = len(shown.options or [])
             if isinstance(gt, str):
                 # Resolve label to index
-                index = criterion.find_option_by_label(gt)
+                index = shown.find_option_by_label(gt)
                 resolved.append(index)
             elif isinstance(gt, int):
                 # Already an index
-                if gt < 0 or gt >= len(criterion.options):
+                if gt < 0 or gt >= n_shown:
                     raise ValueError(
-                        f"Option index {gt} out of range [0, {len(criterion.options)}) "
+                        f"Option index {gt} out of range [0, {n_shown}) "
                         f"for criterion '{criterion.name}'"
                     )
                 resolved.append(gt)

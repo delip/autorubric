@@ -690,23 +690,21 @@ class TestEscalatedSet:
     async def test_a_criterion_no_question_can_express_escalates(
         self, fake_sdk, make_grader, llm_log
     ):
-        duplicate = Criterion(
-            name="dup",
+        # More options than one Choice question may offer (255).
+        too_many = Criterion(
+            name="tone",
             weight=1.0,
             requirement="Which tone?",
             scale_type="nominal",
-            options=[
-                CriterionOption(label="Formal", value=1.0),
-                CriterionOption(label="Formal", value=0.0),
-            ],
+            options=[CriterionOption(label=f"Tone {i}", value=i / 255) for i in range(256)],
         )
         fake_sdk.response = response({"c0": noul(0.95)})
         grader = make_grader(
             judge_model_config=dm(),
             escalation=cascade(0.0),
-            scripts={"gemini": {"Which tone?": "Formal"}},
+            scripts={"gemini": {"Which tone?": "Tone 3"}},
         )
-        report = await grade(grader, [LIGHT, duplicate])
+        report = await grade(grader, [LIGHT, too_many])
 
         assert len(fake_sdk.calls) == 1 and list(fake_sdk.calls[0][1]) == ["c0"]
         assert escalated_flags(report) == [False, True]
@@ -1351,6 +1349,32 @@ class TestCascadePersistence:
             "per_criterion": {"light": 0.95},
         }
         assert API_KEY not in json.dumps(config)
+
+    def test_the_escalation_judges_record_thinking_and_sampling_settings(self, make_grader):
+        """An escalation judge goes through the LLM judge entry, so its thinking, max_tokens,
+        top_p and seed are recorded when set, and a judge without them has none of the keys."""
+        grader = make_grader(
+            judge_model_config=dm(),
+            escalation=EscalationConfig(
+                judges=[
+                    JudgeSpec(
+                        LLMConfig(model="a", thinking=4096, max_tokens=900, top_p=0.5, seed=1),
+                        "a",
+                    ),
+                    JudgeSpec(LLMConfig(model="b"), "b"),
+                ],
+                threshold=0.72,
+            ),
+        )
+        a, b = _serialize_grader_config(grader)["escalation"]["judges"]
+        assert {key: a[key] for key in list(a)[6:]} == {
+            "max_tokens": 900,
+            "top_p": 0.5,
+            "thinking": {"level": "medium", "budget_tokens": 4096},
+            "seed": 1,
+        }
+        assert list(b)[6:] == []
+        assert "thinking" not in _serialize_grader_config(grader)["judges"][0]
 
     def test_a_bare_escalation_judge_and_no_overrides(self, make_grader):
         grader = make_grader(judge_model_config=dm(), escalation=cascade(0.5))

@@ -370,15 +370,20 @@ class TestMultiChoiceFramings:
 
 
 def duplicate_labels() -> Criterion:
-    return Criterion(
-        name="tone",
-        requirement="Which tone?",
-        options=[
-            CriterionOption(label="Formal", value=1.0),
-            CriterionOption(label="Casual", value=0.5),
-            CriterionOption(label="Formal", value=0.0),
-        ],
-        scale_type="nominal",
+    """A criterion with a repeated option label, which ``Criterion`` itself refuses.
+
+    ``model_copy`` does not validate, so this builds the one kind of criterion the Choice
+    framing's own label check still guards against.
+    """
+    options = [
+        CriterionOption(label="Formal", value=1.0),
+        CriterionOption(label="Casual", value=0.5),
+    ]
+    criterion = Criterion(
+        name="tone", requirement="Which tone?", options=options, scale_type="nominal"
+    )
+    return criterion.model_copy(
+        update={"options": [*options, CriterionOption(label="Formal", value=0.0)]}
     )
 
 
@@ -448,18 +453,21 @@ class TestRubricQuestions:
         with pytest.raises(ValueError, match=r"not unique.*\['Formal'\]"):
             build_question(duplicate_labels(), config(), PLAIN)
 
-    def test_auto_na_label_colliding_with_an_author_label_is_inexpressible(self):
-        criterion = Criterion(
-            requirement="Which?",
-            options=[
-                CriterionOption(label="Yes", value=1.0),
-                CriterionOption(label="No", value=0.0),
-                CriterionOption(label=CANONICAL_NA_OPTION.label, value=0.5),
-            ],
-            scale_type="nominal",
-        ).with_guaranteed_na_option()
-        with pytest.raises(ValueError, match="not unique"):
-            build_question(criterion, config(), PLAIN)
+    def test_auto_na_label_colliding_with_an_author_label_never_reaches_a_question(self):
+        # A criterion without an NA option may not label a scored option as the NA option
+        # added to it, so no effective criterion with the label twice is ever framed.
+        options = [
+            CriterionOption(label="Yes", value=1.0),
+            CriterionOption(label="No", value=0.0),
+            CriterionOption(label=CANONICAL_NA_OPTION.label, value=0.5),
+        ]
+        with pytest.raises(ValueError, match="already has that label"):
+            Criterion(requirement="Which?", options=options, scale_type="nominal")
+        unvalidated = Criterion(
+            requirement="Which?", options=options[:2], scale_type="nominal"
+        ).model_copy(update={"options": options})
+        with pytest.raises(ValueError, match="already has that label"):
+            unvalidated.with_guaranteed_na_option()
 
     def test_choice_accepts_up_to_255_options(self):
         question = build_question(many_options(255), config(), PLAIN)

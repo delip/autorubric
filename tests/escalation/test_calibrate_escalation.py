@@ -15,8 +15,9 @@ from __future__ import annotations
 
 import math
 import warnings
-from typing import Any
+from typing import Any, cast
 
+import numpy as np
 import pytest
 
 import autorubric
@@ -894,7 +895,25 @@ class TestPerCriterion:
         assert curve.best().metric == 3 / 4
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("value", [0, -1, 2.5, True, "30", None])
+    async def test_min_pairs_may_be_a_numpy_integer(self, cascade_runs):
+        """As for ``FewShotConfig.n_examples``: any integer but a bool."""
+        runs = await cascade_runs(per_criterion=None)
+        as_numpy = calibrate_escalation(
+            runs.data,
+            runs.dm,
+            runs.llm,
+            per_criterion=True,
+            min_pairs_per_criterion=cast(int, np.int64(2)),
+        )
+        as_int = calibrate_escalation(
+            runs.data, runs.dm, runs.llm, per_criterion=True, min_pairs_per_criterion=2
+        )
+        assert as_numpy == as_int
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "value", [0, -1, 2.5, True, "30", None, np.int64(0), np.bool_(True), np.float64(2.0)]
+    )
     async def test_min_pairs_is_a_positive_integer(self, cascade_runs, value):
         runs = await cascade_runs(per_criterion=None)
         with pytest.raises(ValueError, match=r"min_pairs_per_criterion must be a positive int"):
