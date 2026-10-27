@@ -24,7 +24,7 @@ LLM judges need no extra: `pip install autorubric` installs LiteLLM. A judge's `
 
 When it is imported, AutoRubric loads the nearest `.env` file at or above the working directory, in scripts and notebooks alike. Variables already set in the environment take precedence.
 
-Keys are not checked when a grader is built. With a missing or rejected key every call fails as an `infrastructure` error, so every criterion abstains and no item gets a score (see [Failures](#standalone-use)).
+Keys are not checked when a grader is built, since checking one takes a request. A rejected key (401), or a key, project or region without access to the model (403), fails the first call and the grade raises a `ValueError` that names the judge, as an unknown model name (404) does (see [Failures](#standalone-use)). OpenRouter is the exception for 403, which it answers when moderation flags an input: that is specific to the item, so it abstains. A missing key raises the same way where LiteLLM reports it as an authentication error or the OpenAI SDK refuses to build its client: OpenAI, OpenAI-compatible providers, Azure and Anthropic. For providers where LiteLLM reports a missing key as a connection error (Gemini, Vertex AI and Bedrock, for example), every call fails as an `infrastructure` error and abstains, so check those keys before a long run.
 
 ## Configuration
 
@@ -55,7 +55,7 @@ Every field except `model` has a default. [LLM Infrastructure](../api/llm.md) is
 | `api_base` | `None` | Base URL of the endpoint, for proxies and self-hosted servers |
 | `thinking` | `None` | Extended thinking: a level (`"low"`, `"medium"`, `"high"`, `"none"`), a token budget, or a `ThinkingConfig` |
 | `prompt_caching` | `True` | Mark the system prompt for Anthropic's prompt cache (model ids starting with `anthropic/` or `claude`; others are unaffected) |
-| `seed` | `None` | Sampling seed sent with every call; a provider that takes none, such as Anthropic or Gemini, fails every call unless `extra_params={"drop_params": True}` |
+| `seed` | `None` | Sampling seed sent with every call; for a provider LiteLLM knows takes none, such as Anthropic or Gemini, the first call's grade raises `ValueError` unless `extra_params={"drop_params": True}` |
 | `extra_headers` | `{}` | Additional HTTP headers sent with every call |
 | `extra_params` | `{}` | Additional LiteLLM parameters sent with every call |
 
@@ -65,7 +65,7 @@ Leaving `temperature` at `None` is recommended for reasoning models such as GPT-
 
 ### Extended thinking
 
-`thinking` turns on the provider's reasoning mode through LiteLLM. A level is sent as `reasoning_effort`, which LiteLLM translates for each provider; a token budget, as an int or `ThinkingConfig(budget_tokens=...)`, is sent as an explicit thinking budget; `None`, the default, sends nothing. Set it only for models with a reasoning mode: on others, such as `openai/gpt-4.1-mini`, LiteLLM rejects every value, `"none"` included, and every call fails as `infrastructure`. The trace, when the provider returns one, is in each vote's `reasoning`. [Extended Thinking](extended-thinking.md) covers provider support and budgets.
+`thinking` turns on the provider's reasoning mode through LiteLLM. A level is sent as `reasoning_effort`, which LiteLLM translates for each provider; a token budget, as an int or `ThinkingConfig(budget_tokens=...)`, is sent as an explicit thinking budget; `None`, the default, sends nothing. Set it only for models with a reasoning mode. On others, such as `openai/gpt-4.1-mini`, LiteLLM refuses every value, `"none"` included, so the first call's grade raises `ValueError` (see [Parameters LiteLLM refuses](#parameters-litellm-refuses)). The trace, when the provider returns one, is in each vote's `reasoning`. [Extended Thinking](extended-thinking.md) covers provider support and budgets.
 
 ### Cost
 
@@ -108,7 +108,38 @@ print(vote.reason)
 
 A binary criterion's votes are in `votes`, a multi-choice criterion's in `multi_choice_votes`; with shuffling on, a multi-choice vote also records the order its judge saw (`shuffle_order`). The criterion's `final_reason` joins the votes' reasons, each prefixed with its `judge_id` (a single judge's reads `"default: ..."`), except on a binary criterion every vote abstained on, where it reads `"All judges could not assess"`. [Working with Grading Explanations](explanations.md) puts the reasons to use.
 
-**Failures.** A failed call fails only its own criterion. `classify_grading_error` sorts the exception. Every LiteLLM API error (authentication, rate limit, timeout, connection, server error, rejected request or parameter) is `infrastructure`; a response that does not parse into the response format (one that is not JSON, not a JSON object, or has no content at all, such as a refusal, with or without [extended thinking](#extended-thinking)), or names an option that does not exist, is `parse`. Both abstain: `CANNOT_ASSESS` for a binary criterion; for a multi-choice one, the NA option, or an abstention that selects no option when there is none. Any other exception is `unknown` and gets the worst case for the criterion's weight sign: UNMET for a positive weight, MET for a negative one, the lowest-scoring option for a multi-choice criterion. The category and message are recorded in `error`, e.g. `"infrastructure: ..."`. Under the default `CannotAssessStrategy.SKIP` abstentions are left out of the score; an item whose criteria all abstain has nothing left to score, so its `score` is `None`, never a fabricated 0.0. When every call for an item failed, nothing was judged: the item has no score under any strategy, its report's `error` begins `Every criterion's judgment failed:`, and an `EvalRunner` run counts it as failed. [Handling Uncertain Assessments](cannot-assess.md) covers the other strategies.
+**Failures.** A failed call fails only its own criterion, unless the judge is misconfigured (below). `classify_grading_error` sorts the exception. Every other LiteLLM API error (rate limit, timeout, connection, server error, a rejected request) is `infrastructure`; a response that does not parse into the response format (one that is not JSON, not a JSON object, or has no content at all, such as a refusal, with or without [extended thinking](#extended-thinking)), or names an option that does not exist, is `parse`. Both abstain: `CANNOT_ASSESS` for a binary criterion; for a multi-choice one, the NA option, or an abstention that selects no option when there is none. Any other exception is `unknown` and gets the worst case for the criterion's weight sign: UNMET for a positive weight, MET for a negative one, the lowest-scoring option for a multi-choice criterion. The category and message are recorded in `error`, e.g. `"infrastructure: ..."`. Under the default `CannotAssessStrategy.SKIP` abstentions are left out of the score; an item whose criteria all abstain has nothing left to score, so its `score` is `None`, never a fabricated 0.0. When every call for an item failed, nothing was judged: the item has no score under any strategy, its report's `error` begins `Every criterion's judgment failed:`, and an `EvalRunner` run counts it as failed. [Handling Uncertain Assessments](cannot-assess.md) covers the other strategies.
+
+**A misconfigured judge raises.** Some errors say nothing about the item being graded and fail every call the judge makes: an invalid API key (`litellm.AuthenticationError`, 401), a missing one where LiteLLM can tell (an `AuthenticationError` for Anthropic; for OpenAI, OpenAI-compatible providers and Azure, the OpenAI SDK's refusal to build its client, which LiteLLM reports as an `InternalServerError` or, for Azure, an `APIError`), a key, project or region without access to the model (a 403, which LiteLLM reports as `PermissionDeniedError` for some providers and as another API error for others: an `APIError` for OpenAI-compatible providers, an `APIConnectionError` for Anthropic, a `BadRequestError` for Gemini; the provider's HTTP status in the exception's chain says it was a 403), an unknown model (`NotFoundError`, 404), and a parameter LiteLLM refuses for the model (`UnsupportedParamsError`). Abstaining on them would hide the problem, and in a panel the other judges would score every item while this one contributes nothing. So the grade raises a `ValueError` that names the judge, with LiteLLM's exception as its `__cause__`; the judge's other calls for the item are cancelled. `LLMClient` does not retry one either. `EvalRunner` records it as the item's error, and `fail_fast=True` stops at the first item. Some failures still abstain as `infrastructure`: OpenRouter's 403, which flags an input by moderation, a 400 that can be specific to one item, such as `ContextWindowExceededError` for an over-long submission or `ContentPolicyViolationError`, and a plain `BadRequestError`.
+
+### Parameters LiteLLM refuses
+
+LiteLLM decides on the client whether a model takes a call's parameters. A parameter it refuses makes it raise `UnsupportedParamsError` before it sends any request, so the judge's first call fails and the grade raises `ValueError` naming the judge, as for any [misconfigured judge](#standalone-use). This holds for a single judge, each panel member, and a cascade's escalation judges. The message carries LiteLLM's, which names the parameter and the two ways out:
+
+```python
+from autorubric import LLMConfig
+from autorubric.graders import CriterionGrader
+
+# LiteLLM 1.95.0 knows OpenAI reasoning models by the gpt-5 and o-series names, so it
+# refuses reasoning_effort, which thinking="low" sends, for this model.
+grader = CriterionGrader(judge_model_config=LLMConfig(model="openai/gpt-6-luna", thinking="low"))
+report = await rubric.grade(to_grade=submission, grader=grader, query=prompt)
+# ValueError: Judge 'default' is misconfigured (UnsupportedParamsError), so every call it
+# makes fails: litellm.UnsupportedParamsError: openai does not support parameters:
+# ['reasoning_effort'], for model=gpt-6-luna. ...
+
+# Send it anyway:
+LLMConfig(
+    model="openai/gpt-6-luna",
+    thinking="low",
+    extra_params={"allowed_openai_params": ["reasoning_effort"]},
+)
+# Or leave out whatever the model does not take (litellm.drop_params = True does it for
+# every call):
+LLMConfig(model="openai/gpt-6-luna", thinking="low", extra_params={"drop_params": True})
+```
+
+Other refusals in LiteLLM 1.95.0 include `thinking` for a model without a reasoning mode (`openai/gpt-4o`), `temperature=0.0` for GPT-5 and o-series models, `seed` for Anthropic and Gemini, and the structured output every judge call needs for `openai/gpt-4`. Some refuse a value rather than the parameter. `allowed_openai_params` does not make a GPT-5 model take `temperature=0.0`, so leave `temperature` unset there, or use `drop_params`.
 
 ## Ensembles
 
@@ -238,7 +269,7 @@ Output grows with N: roughly 80-100 tokens per criterion (its id, verdict fields
 
 ### Failure scoping
 
-A criterion whose answer is missing, duplicated, or otherwise unusable fails alone, as an abstention (`CANNOT_ASSESS`, or the NA option), exactly as an unusable per-criterion answer does. A failed call fails every criterion of that call with the same error, sorted as a failed per-criterion call's error is ([Failures](#standalone-use)). An API error, or a reply that is not a valid `RubricJudgment` (one cut off at `max_tokens`, one that is not a JSON object, or one with no content, with or without [extended thinking](#extended-thinking)), is `infrastructure` or `parse`, so every criterion abstains. Any other exception is `unknown` and gives every criterion the worst case for its weight sign. With a single judge, a failed call leaves the item with no score at all (its report's `error` reads `"Every criterion's judgment failed: ..."`). In a panel the other judges still grade the item, as they do when per-criterion calls fail, but only abstentions are set aside when votes are aggregated: an `unknown` failure's worst-case stand-ins count as votes on every criterion of the call.
+A criterion whose answer is missing, duplicated, or otherwise unusable fails alone, as an abstention (`CANNOT_ASSESS`, or the NA option), exactly as an unusable per-criterion answer does. A failed call fails every criterion of that call with the same error, sorted as a failed per-criterion call's error is ([Failures](#standalone-use)). An API error, or a reply that is not a valid `RubricJudgment` (one cut off at `max_tokens`, one that is not a JSON object, or one with no content, with or without [extended thinking](#extended-thinking)), is `infrastructure` or `parse`, so every criterion abstains; a configuration error, such as a rejected key, raises instead. Any other exception is `unknown` and gives every criterion the worst case for its weight sign. With a single judge, a failed call leaves the item with no score at all (its report's `error` reads `"Every criterion's judgment failed: ..."`). In a panel the other judges still grade the item, as they do when per-criterion calls fail, but only abstentions are set aside when votes are aggregated: an `unknown` failure's worst-case stand-ins count as votes on every criterion of the call.
 
 ### Few-shot examples
 
@@ -275,7 +306,7 @@ The upstream `rubric` library, from which AutoRubric was forked, shipped a mode 
 | Custom response formats | Yes, under `llm_calls="per_criterion"` only | No: `ValueError` with any decision-model judge |
 | Meta-rubric evaluation and rubric improvement | Yes | No: `ValueError` |
 | Role in a cascade | Escalation judge | First stage |
-| Missing credentials | Not checked when the grader is built; every call fails as `infrastructure` | `ValueError` when the grader is built |
+| Missing credentials | Not checked when the grader is built; the first call's grade raises `ValueError` for OpenAI, OpenAI-compatible providers, Azure and Anthropic, while providers whose missing key LiteLLM reports as a connection error (e.g. Gemini, Vertex AI, Bedrock) abstain on every call as `infrastructure` | `ValueError` when the grader is built |
 | Providers and endpoints | 100+ providers through LiteLLM; proxies and self-hosted servers through `api_base` | TypeSafe's API, or any System One-compatible endpoint through `api_base`; needs `autorubric[typesafe]` |
 
 An LLM judge fits when you need a written reason for each verdict, want to calibrate the judge with few-shot examples or your own prompts, need meta-rubric evaluation or rubric improvement, or want a particular provider's model. A decision model fits when the cost per item matters, since it sends the submission once for the whole rubric instead of once per criterion, and when you want a probability and a confidence for each verdict; [`llm_calls="per_item"`](#grading-a-whole-rubric-in-one-call) narrows that cost gap for an LLM judge without giving up its written explanations. Which kind is more accurate depends on your rubric and data: grade a labelled sample with each and compare them, as in [Validating Your Judge Against Human Labels](judge-validation.md). To combine the two, let a decision model take the first pass and escalate its uncertain criteria to an LLM, as in [Cheap First-Pass Grading with Jev and an LLM Fallback](cascade-grading.md).

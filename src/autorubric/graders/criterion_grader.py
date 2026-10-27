@@ -13,10 +13,10 @@ import numbers
 import random
 import warnings
 from collections import Counter
-from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Iterator, Mapping, Sequence
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal, cast, get_args, overload
+from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast, get_args, overload
 
 from pydantic import BaseModel
 
@@ -31,7 +31,13 @@ from autorubric.decision import (
     question_id,
 )
 from autorubric.graders.base import Grader, _caller_stacklevel
-from autorubric.llm import GenerateResult, LLMClient, LLMConfig, classify_grading_error
+from autorubric.llm import (
+    GenerateResult,
+    LLMClient,
+    LLMConfig,
+    _is_configuration_error,
+    classify_grading_error,
+)
 from autorubric.prompts import (
     FEW_SHOT_SYSTEM_PROMPT_ADDITION,
     GRADER_SYSTEM_PROMPT_DEFAULT,
@@ -715,6 +721,36 @@ def _escalates(report: CriterionReport, threshold: float) -> bool:
     )
 
 
+_T = TypeVar("_T")
+
+
+async def _gather_or_cancel(*aws: Awaitable[_T]) -> list[_T]:
+    """``asyncio.gather`` that cancels the awaitables still running when one of them raises.
+
+    A grade that raises (a judge's configuration error, see ``_failed_judgment_result``) has
+    no use for its other calls, so they are cancelled instead of being left to run, and
+    bill, after it has failed. What raises is the first exception, as with
+    ``asyncio.gather``; ``asyncio.TaskGroup`` would raise an exception group instead.
+    """
+    tasks = [asyncio.ensure_future(aw) for aw in aws]
+    try:
+        return await asyncio.gather(*tasks)
+    except BaseException:
+        for task in tasks:
+            task.cancel()
+        raise
+
+
+def _is_judge_configuration_error(exc: BaseException) -> bool:
+    """Whether ``exc`` is the ``ValueError`` a grade raises for a judge's configuration error.
+
+    ``_failed_judgment_result`` raises it, chained from the provider's exception, so that
+    callers that keep going past an item that failed to grade (``fill_ground_truth``) can
+    tell it from such a failure: it fails every item alike.
+    """
+    return isinstance(exc, ValueError) and _is_configuration_error(exc.__cause__)
+
+
 def _failed_judgment_result(
     criterion: Criterion,
     judge_id: str,
@@ -728,13 +764,18 @@ def _failed_judgment_result(
     (once for each criterion asked about in it), a decision model's failed request (once
     for each criterion posed in it), an answer that cannot be used, and a criterion a
     decision model cannot be asked about. The failure is classified by
-    ``classify_grading_error`` and logged with the judge's id. Infrastructure
-    (API/network) and parse/validation failures are not the submission's fault, so they
-    abstain: ``CANNOT_ASSESS`` (binary) or ``na=True`` (multi-choice), which the default
-    ``CannotAssessStrategy.SKIP`` excludes from scoring, instead of a score-affecting
-    worst-case verdict. Only truly unknown errors keep the conservative worst case. The
-    report surfaces the failure structurally (``error``, prefixed with the category; see
-    ``is_error``) and in ``reason``, and carries no usage or cost.
+    ``classify_grading_error`` and logged with the judge's id. A configuration error
+    (``_is_configuration_error``: LiteLLM's ``UnsupportedParamsError``, a 401, 403 (but
+    OpenRouter's moderation 403) or 404
+    from the provider or TypeSafe, the OpenAI SDK's refusal to build its client) is not a
+    failed judgment: it fails every call the judge makes, so it is raised, never routed
+    (#40). Infrastructure (API/network) and parse/validation failures are not the
+    submission's fault, so they abstain: ``CANNOT_ASSESS`` (binary) or ``na=True``
+    (multi-choice), which the default ``CannotAssessStrategy.SKIP`` excludes from scoring,
+    instead of a score-affecting worst-case verdict. Only truly unknown errors keep the
+    conservative worst case. The report surfaces the failure structurally (``error``,
+    prefixed with the category; see ``is_error``) and in ``reason``, and carries no usage
+    or cost.
 
     Args:
         criterion: The criterion as evaluated (after its NA option is guaranteed).
@@ -745,7 +786,17 @@ def _failed_judgment_result(
 
     Returns:
         The failure's ``CriterionResult``.
+
+    Raises:
+        ValueError: If ``error`` is a configuration error, naming the judge, chained from
+            ``error``. The grade raises it, so ``EvalRunner`` fails the item with it (and
+            ``fail_fast`` stops the run on the first item).
     """
+    if _is_configuration_error(error):
+        raise ValueError(
+            f"Judge {judge_id!r} is misconfigured ({type(error).__name__}), so every call "
+            f"it makes fails: {error}"
+        ) from error
     category = classify_grading_error(error)
     # The outcome fields each criterion kind's report has always been built with, so the
     # report is the same pydantic object field for field (fields set included).
@@ -1977,7 +2028,8 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
 
         except Exception as e:
             # Classified by classify_grading_error: infrastructure/parse abstain
-            # (CANNOT_ASSESS), unknown keeps the conservative worst case.
+            # (CANNOT_ASSESS), unknown keeps the conservative worst case; a configuration
+            # error raises (_failed_judgment_result).
             return _failed_judgment_result(criterion, judge.judge_id, e)
 
     async def _judge_multi_choice_criterion(
@@ -2047,7 +2099,8 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
 
         except Exception as e:
             # Classified by classify_grading_error: infrastructure/parse abstain (na=True),
-            # unknown keeps the conservative worst case among the scored options.
+            # unknown keeps the conservative worst case among the scored options; a
+            # configuration error raises (_failed_judgment_result).
             return _failed_judgment_result(
                 criterion,
                 judge.judge_id,
@@ -2254,7 +2307,7 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 )
                 for idx, criterion in enumerate(rubric)
             ]
-            results = await asyncio.gather(*tasks)
+            results = await _gather_or_cancel(*tasks)
         return JudgeCriterionResults(
             judge_id=judge.judge_id,
             weight=judge.weight,
@@ -2477,6 +2530,7 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         except Exception as e:
             # Classified by classify_grading_error: infrastructure/parse abstain, unknown
             # keeps the conservative worst case; the same for every criterion of the call.
+            # A configuration error raises (_failed_judgment_result).
             failed = [
                 _failed_judgment_result(
                     criterion,
@@ -2681,6 +2735,24 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
 
         Raises:
             TypeError: If ``guidelines`` is neither a ``str`` nor ``None``.
+            ValueError: If a judge's call or request fails with a configuration error,
+                which would fail every call it makes (#40): LiteLLM's
+                ``UnsupportedParamsError``, or a 401, 403 or 404 from the provider
+                (``litellm.AuthenticationError``, ``PermissionDeniedError``,
+                ``NotFoundError``: e.g. an invalid API key or an unknown model; a 403 also
+                when LiteLLM reports it as another API error, as it does for
+                OpenAI-compatible providers, Anthropic and Gemini, but not OpenRouter's,
+                which flags an input by moderation) or from
+                TypeSafe (``TypeSafeAuthenticationError``, ``TypeSafePermissionDeniedError``,
+                ``TypeSafeNotFoundError``), or the OpenAI SDK's refusal to build its client
+                before any request (e.g. no OpenAI or Azure API key), which LiteLLM wraps
+                in an ``InternalServerError`` (an ``APIError`` for Azure). The message
+                names the judge, and the provider's exception is its ``__cause__``. This
+                holds for every judge (a single judge, a panel member, a decision model, a
+                cascade's escalation judge), never as an abstention; the judge's other
+                calls for the item are cancelled. Every other failure is routed as before
+                (``classify_grading_error``), item-specific 400s such as
+                ``ContextWindowExceededError`` and ``ContentPolicyViolationError`` included.
 
         Warns:
             UserWarning: Once per grader, when an ``EscalationConfig.per_criterion`` name
@@ -2710,7 +2782,7 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
             )
             for judge in self._judges
         ]
-        results = list(await asyncio.gather(*tasks))
+        results = list(await _gather_or_cancel(*tasks))
         escalation = self._escalation
         if escalation is None:
             return results
@@ -2724,7 +2796,7 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
             )
             if _escalates(report, escalation.threshold_for(criterion))
         ]
-        escalation_results = await asyncio.gather(
+        escalation_results = await _gather_or_cancel(
             *(
                 self._judge_escalated_criteria(
                     judge,
@@ -2794,7 +2866,7 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 for criterion_idx in escalated:
                     criterion_results[criterion_idx] = results[criterion_idx]
         else:
-            results = await asyncio.gather(
+            results = await _gather_or_cancel(
                 *(
                     self._judge_single_criterion(
                         judge,

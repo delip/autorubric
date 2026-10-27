@@ -74,7 +74,9 @@ The specific data can be found on page 47 of the annual report.
     *synthesizes* it from judge-call failures: failures are routed through
     `classify_grading_error`, where `infrastructure`/`parse` errors map to
     `CANNOT_ASSESS` (excluded from scoring under the default `SKIP`), while an
-    `unknown` error maps to the conservative worst case instead. `cannot_assess_count`
+    `unknown` error maps to the conservative worst case instead. A judge's
+    configuration error (an invalid API key, an unknown model, a parameter LiteLLM
+    refuses) is never an abstention: the grade raises `ValueError`. `cannot_assess_count`
     counts both genuine and error-induced abstains. To tell them apart, inspect each
     report's `criterion.is_error` (or the category-prefixed `criterion.error` string):
     `True` means the verdict was driven entirely by a judge-call failure rather than a

@@ -27,6 +27,7 @@ from rich.panel import Panel
 from rich.syntax import Syntax
 from tenacity import (
     retry,
+    retry_if_exception,
     retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
@@ -55,7 +56,8 @@ ErrorCategory = Literal["infrastructure", "parse", "unknown"]
 """Category of a failure encountered while grading a single criterion.
 
 - infrastructure: API/network failure (timeout, connection, rate limit, server error).
-  Not the submission's fault; the judge never produced a usable response.
+  Not the submission's fault; the judge never produced a usable response. (A configuration
+  error, e.g. an invalid API key, is not routed at all: ``CriterionGrader`` raises it.)
 - parse: the judge responded but its output could not be parsed/validated into the
   expected schema. Also not the submission's fault.
 - unknown: an unexpected error that does not fit the above categories.
@@ -86,6 +88,17 @@ def classify_grading_error(exc: BaseException) -> ErrorCategory:
       not found, rate limit, server errors, and connection failures and timeouts (which
       subclass ``TypeSafeError`` directly, not ``TypeSafeAPIError``).
 
+    Configuration errors are classified like any other API error (``"infrastructure"``),
+    but ``CriterionGrader`` never routes one: an exception that says the judge is
+    misconfigured (LiteLLM's ``UnsupportedParamsError``, a 401, 403 or 404 from the
+    provider (but OpenRouter's 403, a moderation flag on the input) or from TypeSafe, or
+    the OpenAI SDK's refusal to build its client, e.g. with no OpenAI or Azure API key,
+    which LiteLLM reports as an ``InternalServerError`` or, for Azure, an ``APIError``)
+    fails every call the judge makes, so the grade raises a ``ValueError`` naming the
+    judge, chained from it, instead of abstaining (#40). Item-specific 400s
+    (``ContextWindowExceededError``, ``ContentPolicyViolationError``) and a plain
+    ``BadRequestError`` still abstain.
+
     Args:
         exc: The exception raised during a judge call.
 
@@ -101,6 +114,141 @@ def classify_grading_error(exc: BaseException) -> ErrorCategory:
     if isinstance(exc, (ValidationError, ValueError)):
         return "parse"
     return "unknown"
+
+
+def _is_configuration_error(exc: BaseException | None) -> bool:
+    """Whether ``exc``, raised by a judge call, says the judge is misconfigured.
+
+    Such an error says nothing about the item being graded: it fails every call the judge
+    makes, so ``CriterionGrader`` raises it instead of turning it into an abstention, as it
+    does with the failures ``classify_grading_error`` routes. The configuration errors are:
+
+    - ``litellm.UnsupportedParamsError``: LiteLLM refuses a parameter for the model. It
+      decides this on the client and raises before sending any request, so the judge's
+      first call raises it.
+    - ``openai.AuthenticationError`` (401: a missing or invalid API key),
+      ``openai.PermissionDeniedError`` (403) and ``openai.NotFoundError`` (404: e.g. an
+      unknown model), which LiteLLM's exceptions of the same names subclass.
+    - Any other API error that is the provider's HTTP 403 answer (``_is_forbidden_answer``):
+      a key, project or region without access to the model. LiteLLM reports few 403s as
+      ``PermissionDeniedError`` (Bedrock's ``AccessDeniedException``, for one): an
+      OpenAI-compatible provider's (OpenAI, Groq, DeepSeek) comes back as a plain
+      ``APIError``, Anthropic's as an ``APIConnectionError``, Gemini's as a
+      ``BadRequestError``. OpenRouter's 403 is not one: it flags an input by moderation,
+      which is specific to the item.
+    - The TypeSafe SDK's ``TypeSafeAuthenticationError``, ``TypeSafePermissionDeniedError``
+      and ``TypeSafeNotFoundError`` (e.g. a base URL that names no System One endpoint),
+      for decision-model judges.
+    - The OpenAI SDK's refusal to build its client, before any request (e.g. no API key:
+      "Missing credentials"), for OpenAI, OpenAI-compatible providers and Azure, which
+      LiteLLM wraps in an ``InternalServerError`` (an ``APIError`` for Azure) with the SDK's
+      bare ``openai.OpenAIError`` in its ``__cause__``/``__context__`` chain
+      (``_is_sdk_client_refusal``).
+
+    A provider for which LiteLLM reports a missing key as a connection error (e.g. Gemini,
+    Vertex AI, Bedrock) is not recognized: its calls fail as ``infrastructure`` failures.
+
+    ``litellm.BadRequestError`` (400) is not one, nor are its other subclasses: a 400 can
+    be specific to an item (``ContextWindowExceededError`` for one over-long submission,
+    ``ContentPolicyViolationError``), so it keeps abstaining as an ``infrastructure``
+    failure. ``UnsupportedParamsError`` subclasses ``BadRequestError``, and is the one
+    exception among them.
+
+    Args:
+        exc: The exception raised by a judge call, or None.
+    """
+    if exc is None:
+        return False
+    if _is_sdk_client_refusal(exc):
+        return True
+    if isinstance(
+        exc,
+        (
+            litellm.UnsupportedParamsError,
+            openai.AuthenticationError,
+            openai.PermissionDeniedError,
+            openai.NotFoundError,
+        ),
+    ):
+        return True
+    if _is_forbidden_answer(exc):
+        return True
+    sdk = sys.modules.get("typesafe_sdk")
+    return sdk is not None and isinstance(
+        exc,
+        (
+            sdk.TypeSafeAuthenticationError,
+            sdk.TypeSafePermissionDeniedError,
+            sdk.TypeSafeNotFoundError,
+        ),
+    )
+
+
+# The host whose 403 answers flag an input by moderation, a failure specific to the item.
+_MODERATING_HOST = "openrouter.ai"
+
+
+def _is_forbidden_answer(exc: BaseException) -> bool:
+    """Whether ``exc`` is an API error that is the provider's HTTP 403 answer to a call.
+
+    LiteLLM maps a 403 to different exceptions for different providers, most of them
+    without its status (an ``APIConnectionError`` for Anthropic carries 500), but it keeps
+    the exception its HTTP client raised in the ``__cause__``/``__context__`` chain, and
+    that one holds the provider's HTTP response (``response``): its status is what says the
+    answer was a 403. A 403 from OpenRouter (``llm_provider`` ``"openrouter"``, or a response from
+    ``openrouter.ai`` reached through another prefix) is left out: OpenRouter answers 403
+    when moderation flags the input.
+    """
+    if not isinstance(exc, openai.APIError) or getattr(exc, "llm_provider", None) == "openrouter":
+        return False
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        response = getattr(current, "response", None)
+        if response is not None and getattr(response, "status_code", None) == 403:
+            try:
+                host = str(response.request.url.host)
+            except (AttributeError, RuntimeError):  # a response built without its request
+                host = ""
+            return not (host == _MODERATING_HOST or host.endswith("." + _MODERATING_HOST))
+        current = current.__cause__ or current.__context__
+    return False
+
+
+# The OpenAI SDK modules whose client constructors refuse a configuration that cannot work.
+_SDK_CLIENT_MODULES = frozenset({"openai._client", "openai.lib.azure"})
+
+
+def _is_sdk_client_refusal(exc: BaseException) -> bool:
+    """Whether ``exc`` comes from the OpenAI SDK refusing to build its client.
+
+    ``openai.OpenAI``/``openai.AsyncOpenAI`` and Azure's ``openai.AzureOpenAI``/
+    ``openai.AsyncAzureOpenAI`` raise a bare ``openai.OpenAIError`` (not an
+    ``openai.APIError``: no request was made) when their configuration cannot work, such as
+    missing credentials or conflicting authentication options. LiteLLM builds the client for
+    each call and wraps that error (an ``InternalServerError`` for OpenAI, an ``APIError``
+    for Azure), so it is looked for along the ``__cause__``/``__context__`` chain. The SDK
+    raises a bare ``OpenAIError`` elsewhere too, some of them after a request that can fail
+    transiently (a workload identity's token exchange), so only one raised by a client
+    constructor in ``openai._client`` or ``openai.lib.azure`` counts.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if type(current) is openai.OpenAIError:
+            tb = current.__traceback__
+            while tb is not None and tb.tb_next is not None:
+                tb = tb.tb_next
+            if (
+                tb is not None
+                and tb.tb_frame.f_code.co_name == "__init__"
+                and tb.tb_frame.f_globals.get("__name__") in _SDK_CLIENT_MODULES
+            ):
+                return True
+        current = current.__cause__ or current.__context__
+    return False
 
 
 def _classify_typesafe_error(exc: BaseException) -> ErrorCategory | None:
@@ -726,6 +874,8 @@ class LLMClient:
 
     def _get_retry_decorator(self) -> Any:
         """Build tenacity retry decorator from config."""
+        # A configuration error fails every attempt alike (Anthropic's 403 comes back as an
+        # APIConnectionError): retrying it only delays the failure.
         return retry(
             retry=retry_if_exception_type(
                 (
@@ -734,7 +884,8 @@ class LLMClient:
                     litellm.APIConnectionError,
                     litellm.Timeout,
                 )
-            ),
+            )
+            & retry_if_exception(lambda exc: not _is_configuration_error(exc)),
             stop=stop_after_attempt(self.config.max_retries),
             wait=wait_exponential(
                 min=self.config.retry_min_wait,

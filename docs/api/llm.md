@@ -225,7 +225,7 @@ Type alias for thinking parameter (level or budget).
 
 ## classify_grading_error
 
-Classify an exception raised while grading a single criterion into an [`ErrorCategory`](#errorcategory). The grading pipeline uses the result to route a failed judge call: `infrastructure` and `parse` errors are treated as abstentions (mapped to `CANNOT_ASSESS` / `na=True` and excluded from scoring under the default `SKIP` strategy), while `unknown` errors fall back to a conservative worst-case verdict. These verdicts only stand in for failed calls: an item whose every criterion's judgment failed has no score, and its report's `error` begins `Every criterion's judgment failed:`.
+Classify an exception raised while grading a single criterion into an [`ErrorCategory`](#errorcategory). The grading pipeline uses the result to route a failed judge call: `infrastructure` and `parse` errors are treated as abstentions (mapped to `CANNOT_ASSESS` / `na=True` and excluded from scoring under the default `SKIP` strategy), while `unknown` errors fall back to a conservative worst-case verdict. These verdicts only stand in for failed calls: an item whose every criterion's judgment failed has no score, and its report's `error` begins `Every criterion's judgment failed:`. Configuration errors (LiteLLM's `UnsupportedParamsError`, 401, 403 and 404 errors from the provider or from TypeSafe, and the OpenAI SDK's refusal to build its client, e.g. with no OpenAI or Azure API key, which LiteLLM reports as an `InternalServerError`, or an `APIError` for Azure) still classify as `infrastructure`, but the grader never routes them: they fail every call the judge makes, so the grade raises a `ValueError` naming the judge, chained from the original exception. Item-specific 400s such as `ContextWindowExceededError` still abstain.
 
 ::: autorubric.classify_grading_error
     options:
@@ -237,7 +237,7 @@ Classify an exception raised while grading a single criterion into an [`ErrorCat
 
 Type alias for the category of a grading failure: `Literal["infrastructure", "parse", "unknown"]`.
 
-- `"infrastructure"`: API/network failure (timeout, connection, rate limit, server error). Not the submission's fault.
+- `"infrastructure"`: API/network failure (timeout, connection, rate limit, server error). Not the submission's fault. (A configuration error, e.g. an invalid API key, is not routed at all: `CriterionGrader` raises it.)
 - `"parse"`: the judge responded but its output could not be parsed/validated into the expected schema: a reply that is not JSON, is not a JSON object, or has no content (e.g. a refusal), with or without a thinking trace. Also not the submission's fault.
 - `"unknown"`: an unexpected error that does not fit the above categories.
 

@@ -116,7 +116,7 @@ Extended thinking/reasoning is supported across providers:
 LLMConfig(model="anthropic/claude-sonnet-4-5-20250929", thinking="high")
 
 # OpenAI - Reasoning (o-series, GPT-5 models)
-LLMConfig(model="openai/o1-preview", thinking="high")
+LLMConfig(model="openai/gpt-5-mini", thinking="high")
 
 # Gemini - Thinking Mode (2.5+, 3.0+ models)
 LLMConfig(model="gemini/gemini-2.5-pro", thinking="high")

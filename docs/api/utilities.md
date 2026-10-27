@@ -79,7 +79,9 @@ async def generate_labels():
         show_progress=True,
     )
     # Items that fail to label, failed judge calls included, are left out,
-    # so len(labeled) can be < len(dataset)
+    # so len(labeled) can be < len(dataset). A misconfigured judge (a refused
+    # parameter, an invalid key, an unknown model) instead makes the call raise
+    # ValueError naming the judge: fix the config and rerun.
 
     labeled.to_file("labeled.json")
 ```
