@@ -7,7 +7,9 @@ import sys
 import textwrap
 import tomllib
 from pathlib import Path
+from typing import Any, cast
 
+import numpy as np
 import pytest
 from packaging.requirements import Requirement
 
@@ -137,6 +139,26 @@ class TestValidation:
     def test_max_parallel_requests_must_be_a_positive_int(self, limit):
         with pytest.raises(ValueError, match="max_parallel_requests"):
             DecisionModelConfig(model="m", max_parallel_requests=limit)
+
+    @pytest.mark.parametrize("field", ["max_retries", "max_parallel_requests"])
+    def test_a_numpy_integer_count_is_kept_as_a_plain_int(self, field):
+        """Integer counts follow ``FewShotConfig``: any integer but a bool, kept as ``int``."""
+        fields: dict[str, Any] = {field: np.int64(4)}
+        config = DecisionModelConfig(model="m", **fields)
+        assert getattr(config, field) == 4
+        assert type(getattr(config, field)) is int
+
+    @pytest.mark.parametrize("field", ["max_retries", "max_parallel_requests"])
+    @pytest.mark.parametrize("value", [np.int64(0), np.bool_(True), np.float64(2.0)])
+    def test_a_numpy_count_that_is_not_a_positive_integer_is_refused(self, field, value):
+        fields: dict[str, Any] = {field: value}
+        with pytest.raises(ValueError, match=field):
+            DecisionModelConfig(model="m", **fields)
+
+    def test_a_count_set_after_construction_is_checked_by_replace(self):
+        config = DecisionModelConfig(model="m")
+        config.max_retries = cast(int, np.int64(2))  # a value the annotation does not name
+        assert type(dataclasses.replace(config).max_retries) is int
 
     @pytest.mark.parametrize("ttl", [0, -5])
     def test_cache_ttl_must_be_positive(self, ttl):

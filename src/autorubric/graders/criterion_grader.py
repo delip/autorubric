@@ -75,6 +75,7 @@ from autorubric.types import (
     RubricCriterionJudgment,
     RubricJudgment,
     TokenUsage,
+    _as_int,
     _binary_worst_verdict,
 )
 from autorubric.utils import _normalize_guidelines
@@ -1220,7 +1221,9 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 scored option). Never strips an author-supplied NA option — author intent wins.
             seed: Master seed for all non-LLM randomness (option shuffling, few-shot
                 example selection). Auto-generated when None so that randomness is always
-                pinned and reproducible. Inspect via the ``seed`` property after construction.
+                pinned and reproducible. Any integer is accepted (numpy integers too) and
+                kept as a plain ``int``; a ``bool`` or a float is refused. Inspect via the
+                ``seed`` property after construction.
             binary_response_format: Pydantic model to use as the structured output schema
                 for binary criterion judgments. Must be a subclass of (or compatible with)
                 CriterionJudgment. If the model includes an ``affected_criteria`` field
@@ -1271,7 +1274,9 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 the decision model and the escalation judges, or with a config that no
                 longer validates (its ``judges`` list or ``per_criterion`` dict changed in
                 place since it was built, e.g. emptied); if llm_calls is not
-                ``"per_criterion"`` or ``"per_item"``; if few_shot_config or training_data is
+                ``"per_criterion"`` or ``"per_item"``; if seed is neither None nor an
+                integer (a ``bool`` or a float such as ``1.0`` is refused, since the seed
+                keys the RNGs as text); if few_shot_config or training_data is
                 given while every judge is a decision model (few-shot examples apply to LLM
                 judges only), or training_data has no global rubric; if few_shot_config
                 no longer validates (a field set after it was built, e.g. a negative
@@ -1388,6 +1393,15 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
 
         # Checked before any client is built, as the settings below are.
         _check_llm_calls(llm_calls)
+        # The seed enters every shuffle and few-shot RNG key as text, so a bool or a float
+        # would key other draws than the equal integer. Any integer is kept as a plain int
+        # (as ``FewShotConfig.seed`` is), so a numpy integer keys what the int does and the
+        # manifest records it.
+        if seed is not None:
+            checked_seed = _as_int(seed)
+            if checked_seed is None:
+                raise ValueError(f"seed must be None or an integer; got {seed!r}")
+            seed = checked_seed
 
         # Settings a decision-model judge cannot use, checked before any client is built so
         # that a configuration error is reported as one.
@@ -1464,7 +1478,7 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         if fsc.seed is None and training_data is not None:
             # Set on the copy, not through ``dataclasses.replace``: the check in
             # ``FewShotConfig.__post_init__`` is about a seed the caller set on the config,
-            # and the grader's own ``seed`` is used here exactly as given.
+            # and the grader's own ``seed``, a plain int, was checked above.
             fsc.seed = self._seed
         self._few_shot_config = fsc
         self._binary_response_format = binary_response_format or CriterionJudgment

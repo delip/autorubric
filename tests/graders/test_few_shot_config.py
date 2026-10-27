@@ -163,26 +163,34 @@ class TestTheGrader:
 
 
 class TestTheGraderSeed:
-    """The grader's own ``seed`` fills an unset ``FewShotConfig.seed`` as it did before #39.
+    """The grader's own ``seed`` fills an unset ``FewShotConfig.seed``.
 
-    ``FewShotConfig`` checks a seed the caller set on it; the grader's ``seed`` argument is
-    not part of that check, so coordinating it never raises an error that names
-    ``FewShotConfig.seed``.
+    The grader checks its ``seed`` argument itself (``tests/graders/test_grader_seed.py``),
+    so a bad one is refused as the grader's ``seed``, never as ``FewShotConfig.seed``, and
+    the copy's seed is the grader's plain ``int``.
     """
 
     @staticmethod
-    def _examples(seed: Any) -> list:
-        grader = CriterionGrader(
+    def _grader(seed: Any) -> CriterionGrader:
+        return CriterionGrader(
             judge_model_config=CONFIG,
             seed=seed,
             training_data=_training_data(),
             few_shot_config=FewShotConfig(n_examples=4, balance_verdicts=False),
         )
-        return grader._criterion_examples[(0, "default")]
 
     def test_a_numpy_grader_seed_draws_what_the_equal_int_draws(self) -> None:
-        assert self._examples(np.int64(42)) == self._examples(42)
+        def examples(seed: Any) -> list:
+            return self._grader(seed)._criterion_examples[(0, "default")]
 
-    @pytest.mark.parametrize("seed", [True, 1.0, np.int64(7)])
-    def test_coordinating_the_grader_seed_does_not_raise(self, seed: Any) -> None:
-        assert len(self._examples(seed)) == 4
+        assert examples(np.int64(42)) == examples(42)
+
+    def test_the_coordinated_seed_is_a_plain_int(self) -> None:
+        seed = self._grader(np.int64(7))._few_shot_config.seed
+        assert seed == 7
+        assert type(seed) is int
+
+    @pytest.mark.parametrize("seed", [True, 1.0])
+    def test_a_bad_grader_seed_is_refused_as_the_graders_own(self, seed: Any) -> None:
+        with pytest.raises(ValueError, match=r"^seed must be None or an integer"):
+            self._grader(seed)

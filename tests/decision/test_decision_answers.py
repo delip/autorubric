@@ -11,8 +11,9 @@ from __future__ import annotations
 
 import json
 import math
-from typing import Any
+from typing import Any, cast
 
+import numpy as np
 import pytest
 from typesafe_sdk import ChoiceAnswer, NoulAnswer, ScoreAnswer, SystemOneResponse
 
@@ -514,7 +515,13 @@ class TestSelectionConfidence:
         for p in (0.5, 0.62, 0.97):
             assert selection_confidence(p, 2) == pytest.approx(2 * abs(p - 0.5))
 
-    @pytest.mark.parametrize(("p", "n"), [(0.5, 1), (0.5, 0), (1.2, 3), (-0.1, 3), (math.nan, 3)])
+    def test_a_numpy_integer_count_is_accepted(self):
+        assert selection_confidence(0.75, cast(int, np.int64(2))) == pytest.approx(0.5)
+
+    @pytest.mark.parametrize(
+        ("p", "n"),
+        [(0.5, 1), (0.5, 0), (1.2, 3), (-0.1, 3), (math.nan, 3), (0.5, True), (0.5, 3.0)],
+    )
     def test_rejects_invalid_input(self, p, n):
         with pytest.raises(ValueError):
             selection_confidence(p, n)

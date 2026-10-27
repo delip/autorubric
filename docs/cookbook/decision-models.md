@@ -57,6 +57,8 @@ Every field after `model` is keyword-only. Field names match `LLMConfig` whereve
 | `decision_threshold` | `0.5` | P(MET) cut for the Noul framings |
 | `input_cost_per_token` | `None` | Price in USD per input token |
 
+`max_retries` and `max_parallel_requests` must be integers of at least 1. Numpy integers are accepted and stored as plain `int`; a `bool` or a float raises `ValueError`.
+
 ### Self-hosted endpoints
 
 Any served model that implements the System One protocol works. Point `api_base` at it:

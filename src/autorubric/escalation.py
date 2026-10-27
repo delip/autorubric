@@ -49,7 +49,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, ConfigDict
 
 from autorubric.dataset import DataItem, RubricDataset
-from autorubric.decision import _is_positive_int, _is_real_number
+from autorubric.decision import _is_real_number
 from autorubric.eval import EvalResult, EvalTimingStats, ItemResult
 from autorubric.graders.base import _caller_stacklevel
 from autorubric.graders.criterion_grader import (
@@ -74,6 +74,7 @@ from autorubric.types import (
     LLMCalls,
     MultiChoiceJudgeVote,
     MultiChoiceVerdict,
+    _as_int,
 )
 from autorubric.utils import aggregate_completion_cost
 
@@ -1301,7 +1302,7 @@ def calibrate_escalation(
             ``pooled_by_scale``.
         per_criterion: Whether named criteria get thresholds of their own, fitted as above.
         min_pairs_per_criterion: The labelled pairs a criterion needs for a threshold of
-            its own, a positive int.
+            its own, a positive integer (numpy integers too; never a ``bool``).
         cannot_assess_config: How abstentions score in the replays (``score_reports``), as
             in ``replay_escalation``: the cascade's grader's; default
             ``CannotAssessConfig()``.
@@ -1341,10 +1342,13 @@ def calibrate_escalation(
             "per_criterion must be True or False (whether to fit thresholds per criterion); "
             f"got {per_criterion!r} (thresholds by criterion name go to replay_escalation)"
         )
-    if not _is_positive_int(min_pairs_per_criterion):
+    # Any integer but a bool (numpy integers too), used as a plain int.
+    min_pairs = _as_int(min_pairs_per_criterion)
+    if min_pairs is None or min_pairs < 1:
         raise ValueError(
             f"min_pairs_per_criterion must be a positive int; got {min_pairs_per_criterion!r}"
         )
+    min_pairs_per_criterion = min_pairs
     _check_llm_calls(llm_calls)
 
     fingerprint = _calibration_fingerprint(

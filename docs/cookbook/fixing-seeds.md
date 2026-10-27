@@ -44,6 +44,8 @@ print(f"Seed: {grader.seed}")  # 42
 
 If you omit `seed`, one is auto-generated and accessible via `grader.seed`. This means randomness is always pinned after construction—you just need to record the seed to reproduce later.
 
+The seed must be `None` or an integer. A numpy integer such as `np.int64(42)` is kept as a plain `int`, so it shuffles exactly as `42` does and the manifest records it as `master_seed` (Step 6). A `bool`, a float or a string raises `ValueError`; see [Graders](../api/graders.md) for why.
+
 ```python
 grader = CriterionGrader(
     judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
@@ -230,7 +232,7 @@ If you set `FewShotConfig(seed=99)` explicitly, the master seed does not overrid
 
 | Concept | Detail |
 |---------|--------|
-| `seed` parameter | Single value on `CriterionGrader` that pins all non-LLM randomness |
+| `seed` parameter | Single value on `CriterionGrader` that pins all non-LLM randomness; `None` or an integer (numpy integers kept as plain `int`) |
 | Auto-generation | Omitting `seed` auto-generates one; access via `grader.seed` |
 | Scope | Controls option shuffling and few-shot selection; does not affect LLM sampling |
 | Concurrency-safe | Per-call RNG derived from `(seed, content_hash, criterion_idx, judge_id)` |
