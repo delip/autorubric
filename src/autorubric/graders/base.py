@@ -6,9 +6,10 @@ import os
 import sys
 import warnings
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Any, Generic, TypeVar, cast
 
+from autorubric.content import Content, Image, _load_content_async
 from autorubric.types import (
     Criterion,
     EnsembleEvaluationReport,
@@ -131,6 +132,34 @@ def _warn_ignores_guidelines(grader: object) -> None:
         instance_dict["_guidelines_warned"] = True
 
 
+def _thinking_output_text(fields: ThinkingOutputDict) -> str:
+    """A ``{"thinking", "output"}`` submission as the text ``judge`` receives.
+
+    Each non-empty section is written between its markers (``<thinking>...</thinking>``,
+    then ``<output>...</output>``), joined by a newline; a dict with neither gives ``""``.
+
+    A section that is not text is written as ``str()`` writes it, as it was before
+    submissions could hold images; only an image or a sequence is refused.
+
+    Raises:
+        TypeError: If a section holds an ``Image`` or a sequence (a document, a list of
+            strings): the dict form is text only, and a submission with images is given as
+            ``Content``. The message names the section.
+    """
+    sections = []
+    for key in ("thinking", "output"):
+        value = fields.get(key, "")
+        if isinstance(value, Image) or (isinstance(value, Sequence) and not isinstance(value, str)):
+            raise TypeError(
+                f"The {key!r} section of a {{'thinking', 'output'}} submission must be text, "
+                f"got {type(value).__name__}; give a submission that holds images as Content "
+                "(an Image, or a sequence of str and Image parts) instead"
+            )
+        if value:
+            sections.append(f"<{key}>{value}</{key}>")
+    return "\n".join(sections)
+
+
 ReportT = TypeVar("ReportT", bound=EvaluationReport | EnsembleEvaluationReport)
 """The report type a grader's ``aggregate``, and so its ``grade``, returns."""
 
@@ -167,10 +196,10 @@ class Grader(ABC, Generic[ReportT]):
     @abstractmethod
     async def judge(
         self,
-        to_grade: str,
+        to_grade: Content,
         rubric: list[Criterion],
-        query: str | None = None,
-        reference_submission: str | None = None,
+        query: Content | None = None,
+        reference_submission: Content | None = None,
     ) -> Any:
         """Collect raw judge results for the provided submission.
 
@@ -179,10 +208,16 @@ class Grader(ABC, Generic[ReportT]):
         them, when there are any, only to an implementation that does.
 
         Args:
-            to_grade: The text to evaluate.
+            to_grade: The submission to evaluate, as ``grade`` passes it: text, or a
+                document of text and images in canonical form (a tuple of parts) whose
+                images hold their bytes. A text submission is the ``str`` given to
+                ``grade`` (a sequence of strings alone is joined, a ``{"thinking",
+                "output"}`` dict flattened into marked sections), so a ``judge`` written
+                for text receives text, as before.
             rubric: List of criteria to evaluate against.
-            query: Optional input/query that prompted the response.
-            reference_submission: Optional exemplar response for grading context.
+            query: Optional input/query that prompted the response, in the same form.
+            reference_submission: Optional exemplar response for grading context, in the
+                same form.
 
         Returns:
             Raw judge results (format depends on implementation).
@@ -206,8 +241,8 @@ class Grader(ABC, Generic[ReportT]):
         self,
         to_grade: ToGradeInput,
         rubric: list[Criterion],
-        query: str | None = None,
-        reference_submission: str | None = None,
+        query: Content | None = None,
+        reference_submission: Content | None = None,
         *,
         guidelines: str | None = None,
     ) -> ReportT:
@@ -215,13 +250,24 @@ class Grader(ABC, Generic[ReportT]):
 
         This is the main entry point for the grader.
 
+        Before ``judge`` is called, the submission, query and reference submission are put
+        in canonical form (``_normalize_content``) and every image file they refer to is
+        read, once per grade (``_load_content``), in a worker thread
+        (``asyncio.to_thread``); content without such a file reads nothing and is passed
+        on as it is (text as the same ``str``). A missing, unreadable or unsupported image
+        file therefore raises from ``grade`` before any judge is called: it is a fault of
+        the item's data, never a judge's failed judgment, so it is not routed into a
+        verdict.
+
         Args:
-            to_grade: The text to evaluate. Can be either:
-                - A string (optionally with <thinking>/<output> markers)
-                - A dict with 'thinking' and 'output' keys
+            to_grade: The submission to evaluate. Can be either:
+                - ``Content``: a string (optionally with <thinking>/<output> markers), an
+                  ``Image``, or a sequence of strings and images read in order
+                - A dict with 'thinking' and 'output' keys, both text
             rubric: List of criteria to evaluate against.
-            query: Optional input/query that prompted the response.
-            reference_submission: Optional exemplar response for grading context.
+            query: Optional input/query that prompted the response (``Content``).
+            reference_submission: Optional exemplar response for grading context
+                (``Content``).
             guidelines: Optional rubric guidelines: free text that applies to every
                 criterion (``Rubric.grade`` passes ``Rubric.guidelines``). Blank text means
                 none. They are passed to ``judge`` as ``guidelines=`` only if ``judge``
@@ -238,7 +284,14 @@ class Grader(ABC, Generic[ReportT]):
             length penalty.
 
         Raises:
-            TypeError: If ``guidelines`` is neither a ``str`` nor ``None``.
+            TypeError: If ``guidelines`` is neither a ``str`` nor ``None``; if the
+                submission, query or reference submission is not ``Content`` (e.g. a list
+                holding a part that is neither a ``str`` nor an ``Image``); or if a section
+                of a ``{"thinking", "output"}`` submission holds an image or a sequence.
+            OSError: If an image file cannot be read (``FileNotFoundError`` when it is
+                missing).
+            ValueError: If an image file is empty, not an image, or not PNG, JPEG, GIF or
+                WebP.
 
         Warns:
             UserWarning: "<GraderClass> ignores rubric guidelines", once per grader
@@ -249,31 +302,26 @@ class Grader(ABC, Generic[ReportT]):
             _warn_ignores_guidelines(self)
             guidelines = None
 
-        # Convert to_grade to string for judge() call (maintains compatibility)
-        if isinstance(to_grade, str):
-            to_grade_str = to_grade
+        # The dict form becomes text with section markers, as before Content admitted
+        # images; Content is read once here, its image files off the event loop.
+        submission: Content
+        if isinstance(to_grade, str | Image | Sequence):
+            submission = await _load_content_async(to_grade)
         else:
-            # Dict format - reconstruct string with markers for judge(). Any other to_grade
-            # is read as this form too, as before Content admitted images.
-            fields = cast(ThinkingOutputDict, to_grade)
-            thinking = fields.get("thinking", "")
-            output = fields.get("output", "")
-            parts = []
-            if thinking:
-                parts.append(f"<thinking>{thinking}</thinking>")
-            if output:
-                parts.append(f"<output>{output}</output>")
-            to_grade_str = "\n".join(parts) if parts else ""
+            submission = _thinking_output_text(to_grade)
+        if query is not None:
+            query = await _load_content_async(query)
+        if reference_submission is not None:
+            reference_submission = await _load_content_async(reference_submission)
 
-        # Call judge with string format (maintains compatibility). Guidelines go as a
-        # keyword, and only to a judge that accepts it (checked above); the abstract
-        # signature does not declare it, hence the cast.
+        # Guidelines go as a keyword, and only to a judge that accepts it (checked above);
+        # the abstract signature does not declare it, hence the cast.
         judge = cast(Callable[..., Awaitable[Any]], self.judge)
         if guidelines is None:
-            judge_results = await judge(to_grade_str, rubric, query, reference_submission)
+            judge_results = await judge(submission, rubric, query, reference_submission)
         else:
             judge_results = await judge(
-                to_grade_str, rubric, query, reference_submission, guidelines=guidelines
+                submission, rubric, query, reference_submission, guidelines=guidelines
             )
         report = await self.aggregate(judge_results, normalize=self.normalize)
 
@@ -283,7 +331,8 @@ class Grader(ABC, Generic[ReportT]):
             if report.score is None:
                 return report
 
-            # Normalize to_grade to dict format for penalty calculation
+            # Normalize to_grade to dict format for penalty calculation (text only: an
+            # image counts as the newline _content_text puts in its place)
             to_grade_normalized = normalize_to_grade_input(to_grade)
 
             # Compute penalty

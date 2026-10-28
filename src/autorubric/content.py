@@ -5,13 +5,14 @@ or a sequence of strings and images read in order (a *document*, such as a figur
 by its caption). The helpers here are the one place that reads content: they put it in a
 canonical form (``_normalize_content``), join it (``_concat``), take its text
 (``_content_text``, ``_content_preview``), identify it (``_content_digest``,
-``_content_key``) and read its image files (``_load_content``).
+``_content_key``) and read its image files (``_load_content``, ``_load_content_async``).
 
 This module imports nothing from ``autorubric``, so every other module can import it.
 """
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import io
@@ -202,6 +203,12 @@ class Image:
         self.read_bytes()
         return self.__dict__["digest"]
 
+    @property
+    def _bytes_held(self) -> bool:
+        """Whether the image holds its bytes (bytes-backed, or returned by ``_loaded()``), so
+        that reading them reads no file."""
+        return self._data is not None or "_held" in self.__dict__
+
     def _loaded(self) -> Image:
         """This image with its bytes held: an equal image that reads no file again.
 
@@ -213,7 +220,7 @@ class Image:
             OSError: If the file cannot be read (``FileNotFoundError`` when it is missing).
             ValueError: If the file is empty, not an image, or not PNG, JPEG, GIF or WebP.
         """
-        if self._data is not None or "_held" in self.__dict__:
+        if self._bytes_held:
             return self
         data, media_type = self._read_file()
         assert self._path is not None  # read above
@@ -450,3 +457,24 @@ def _load_content(value: Content) -> _Normalized:
     if isinstance(normalized, str):
         return normalized
     return tuple(part._loaded() if isinstance(part, Image) else part for part in normalized)
+
+
+async def _load_content_async(value: Content) -> _Normalized:
+    """``_load_content(value)``, reading image files in a worker thread.
+
+    Only content holding a file-backed image whose bytes are not held yet reads a file;
+    it is loaded in ``asyncio.to_thread``, so an event loop grading other items keeps
+    running while the files are read. Any other content (text, bytes-backed images,
+    content loaded already) is put in canonical form at once, on the caller's thread,
+    reading nothing: text is returned as the same object, and loading loaded content again
+    gives equal content.
+
+    Raises:
+        As ``_load_content``.
+    """
+    normalized = _normalize_content(value)
+    if isinstance(normalized, str) or all(
+        part._bytes_held for part in normalized if isinstance(part, Image)
+    ):
+        return _load_content(normalized)
+    return await asyncio.to_thread(_load_content, normalized)

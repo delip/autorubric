@@ -1,15 +1,18 @@
 """Tests for length penalty functionality using the new LLMConfig-based API."""
 
-from typing import Any
+import io
+from pathlib import Path
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import PIL.Image as pil_image
 import pytest
 
-from autorubric import Criterion, CriterionVerdict, LengthPenalty, Rubric, TokenUsage
+from autorubric import Criterion, CriterionVerdict, Image, LengthPenalty, Rubric, TokenUsage
 from autorubric.graders import CriterionGrader
 from autorubric.llm import GenerateResult, LLMConfig
 from autorubric.types import CriterionJudgment
-from autorubric.utils import compute_length_penalty, word_count
+from autorubric.utils import compute_length_penalty, normalize_to_grade_input, word_count
 
 
 @pytest.fixture
@@ -397,3 +400,75 @@ class TestLengthPenaltyWithNegativeCriteria:
 
             assert result.raw_score == 5.0
             assert result.score == pytest.approx(-5.0)
+
+
+def png_image() -> Image:
+    buffer = io.BytesIO()
+    pil_image.new("RGB", (2, 2), "red").save(buffer, "PNG")
+    return Image(buffer.getvalue())
+
+
+class TestImagesAreNotCounted:
+    """A submission holding images is counted by its text alone: ``_content_text`` writes a
+    newline where each image is, so the words on either side stay apart and a count of
+    characters gains one per image."""
+
+    def test_the_text_around_an_image_is_the_output(self):
+        document = ["words here", png_image(), "more words"]
+        assert normalize_to_grade_input(document) == {
+            "thinking": "",
+            "output": "words here\nmore words",
+        }
+
+    def test_words_on_either_side_of_an_image_stay_apart(self):
+        config = LengthPenalty(free_budget=1, max_cap=3, penalty_at_cap=1.0, exponent=1.0)
+        # "one" and "two" are two words, not "onetwo": half-way to the cap.
+        assert compute_length_penalty(["one", png_image(), "two"], config) == 0.5
+        # Words alone: as many as there are, the images adding none.
+        normalized = normalize_to_grade_input(["one", png_image(), png_image(), "two"])
+        assert word_count(normalized["output"]) == 2
+
+    def test_a_character_count_gains_one_per_image(self):
+        counted: list[str] = []
+
+        def characters(text: str) -> int:
+            counted.append(text)
+            return len(text)
+
+        config = LengthPenalty(
+            free_budget=0,
+            max_cap=100,
+            penalty_at_cap=1.0,
+            penalty_type="OUTPUT_ONLY",
+            exponent=1.0,
+            count_fn=characters,
+        )
+        assert compute_length_penalty(["ab", png_image(), "cd"], config) == pytest.approx(0.05)
+        assert counted == ["ab\ncd"]
+
+    def test_sections_are_parsed_from_the_text(self):
+        document = ["<thinking>Look at", png_image(), "the axes.</thinking><output>Fine</output>"]
+        assert normalize_to_grade_input(document) == {
+            "thinking": "Look at\nthe axes.",
+            "output": "Fine",
+        }
+
+    def test_an_image_alone_is_an_empty_output_but_its_marker(self):
+        assert normalize_to_grade_input(png_image()) == {"thinking": "", "output": "\n"}
+
+    def test_no_image_file_is_read(self, tmp_path: Path):
+        missing = Image(tmp_path / "missing.png")
+        assert normalize_to_grade_input([missing, "caption"]) == {
+            "thinking": "",
+            "output": "\ncaption",
+        }
+
+    def test_a_list_of_strings_is_their_text(self):
+        assert normalize_to_grade_input(["two ", "words"]) == {
+            "thinking": "",
+            "output": "two words",
+        }
+
+    def test_a_part_that_is_not_content_is_refused(self):
+        with pytest.raises(TypeError, match="A content part must be a str or an Image"):
+            normalize_to_grade_input(cast(Any, ["text", 3]))

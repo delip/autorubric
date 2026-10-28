@@ -6,8 +6,10 @@ import asyncio
 import dataclasses
 import re
 import warnings
-from typing import TYPE_CHECKING, cast
+from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
+from autorubric.content import Content, Image, _content_text
 from autorubric.types import LengthPenalty, ThinkingOutputDict, ToGradeInput, TokenUsage
 
 if TYPE_CHECKING:
@@ -94,26 +96,39 @@ def parse_thinking_output(text: str) -> ThinkingOutputDict:
 def normalize_to_grade_input(to_grade: ToGradeInput) -> ThinkingOutputDict:
     """Normalize to_grade input to dict format.
 
+    A string's sections are parsed by ``parse_thinking_output``. Content that holds images
+    is read as its text alone: its sections are parsed from ``_content_text(to_grade)``,
+    which writes a newline where each image is, so the length penalty counts text only. The
+    newline keeps the words on either side of an image apart (``word_count`` counts them as
+    it counts words around a line break) and is one more character (one more unit for a
+    ``count_fn`` that counts characters, possibly one more token) per image. No image file
+    is read.
+
     Args:
-        to_grade: Either a string (with optional markers) or a dict.
+        to_grade: A string (with optional markers), other ``Content`` (an ``Image``, or a
+            sequence of strings and images), or a dict.
 
     Returns:
         Dict with 'thinking' and 'output' keys.
 
     Raises:
-        ValueError: If dict format is invalid (missing keys, wrong types).
+        ValueError: If to_grade is neither content nor a dict, or the dict format is
+            invalid (missing keys, wrong types).
+        TypeError: If a sequence holds a part that is neither a ``str`` nor an ``Image``.
     """
     if isinstance(to_grade, str):
         return parse_thinking_output(to_grade)
+
+    if isinstance(to_grade, Image | Sequence):
+        return parse_thinking_output(_content_text(to_grade))
 
     # Handle dict input
     if not isinstance(to_grade, dict):
         raise ValueError(f"to_grade must be a string or dict, got {type(to_grade).__name__}")
 
-    # Validate dict has correct keys (the dict form's values are checked below)
-    fields = cast(ThinkingOutputDict, to_grade)
-    thinking = fields.get("thinking", "")
-    output = fields.get("output", "")
+    # Validate dict has correct keys
+    thinking = to_grade.get("thinking", "")
+    output = to_grade.get("output", "")
 
     # Validate types
     if not isinstance(thinking, str):
@@ -123,7 +138,7 @@ def normalize_to_grade_input(to_grade: ToGradeInput) -> ThinkingOutputDict:
 
     # Warn if dict has unexpected keys
     expected_keys = {"thinking", "output"}
-    extra_keys = set(fields.keys()) - expected_keys
+    extra_keys = set(to_grade.keys()) - expected_keys
     if extra_keys:
         warnings.warn(
             f"Unexpected keys in to_grade dict: {extra_keys}. "
@@ -154,7 +169,7 @@ def _normalize_guidelines(guidelines: str | None) -> str | None:
     return guidelines if guidelines.strip() else None
 
 
-def compute_length_penalty(text: str | ThinkingOutputDict, config: LengthPenalty) -> float:
+def compute_length_penalty(text: Content | ThinkingOutputDict, config: LengthPenalty) -> float:
     """Compute the length penalty for the given text based on the config.
 
     The penalty follows an exponential curve:
@@ -165,7 +180,10 @@ def compute_length_penalty(text: str | ThinkingOutputDict, config: LengthPenalty
     Args:
         text: Either a string (backwards compatible) or a dict with 'thinking'
             and 'output' keys. When a string is provided, it's treated as
-            all output (no thinking section).
+            all output (no thinking section). Other ``Content`` (an ``Image``, or a
+            sequence of strings and images) is treated as all output too, its text alone
+            counted: ``_content_text`` writes a newline where each image is (see
+            ``normalize_to_grade_input``).
         config: LengthPenalty configuration specifying thresholds, penalty,
             and which sections to count based on penalty_type.
 
@@ -176,6 +194,8 @@ def compute_length_penalty(text: str | ThinkingOutputDict, config: LengthPenalty
     if isinstance(text, str):
         # Backwards compatibility: treat string as output only
         text_dict = ThinkingOutputDict(thinking="", output=text)
+    elif isinstance(text, Image | Sequence):
+        text_dict = ThinkingOutputDict(thinking="", output=_content_text(text))
     else:
         text_dict = text
 

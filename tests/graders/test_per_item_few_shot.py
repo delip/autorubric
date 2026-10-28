@@ -73,6 +73,7 @@ from autorubric import (
     RubricDataset,
     fill_ground_truth,
 )
+from autorubric.content import _normalize_content
 from autorubric.dataset import DataItem
 from autorubric.graders import CriterionGrader, JudgeSpec
 from autorubric.prompts import (
@@ -222,9 +223,12 @@ def names(items: Sequence[DataItem]) -> list[str]:
 
 def picked(grader: CriterionGrader, judge_id: str) -> list[DataItem]:
     """The training items a judge's examples show, in order: the judge's selection
-    (``_select_item_examples``), which is what the grader keeps as its examples."""
+    (``_select_item_examples``), which is what the grader keeps as its examples, each
+    submission in canonical form with its images loaded (equal to the item's images)."""
     items = grader._select_item_examples(judge_id)
-    assert [s for s, _, _ in grader._item_examples[judge_id]] == [i.submission for i in items]
+    assert [s for s, _, _ in grader._item_examples[judge_id]] == [
+        _normalize_content(i.submission) for i in items
+    ]
     return items
 
 

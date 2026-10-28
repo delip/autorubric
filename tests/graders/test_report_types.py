@@ -16,7 +16,7 @@ import pytest
 MODULE = """
 from typing import Any, assert_type
 
-from autorubric import EnsembleEvaluationReport, EvaluationReport, LLMConfig, Rubric
+from autorubric import Content, EnsembleEvaluationReport, EvaluationReport, LLMConfig, Rubric
 from autorubric.graders import CriterionGrader, Grader
 from autorubric.types import Criterion
 
@@ -24,10 +24,10 @@ from autorubric.types import Criterion
 class PlainGrader(Grader[EvaluationReport]):
     async def judge(
         self,
-        to_grade: str,
+        to_grade: Content,
         rubric: list[Criterion],
-        query: str | None = None,
-        reference_submission: str | None = None,
+        query: Content | None = None,
+        reference_submission: Content | None = None,
     ) -> Any:
         return None
 
