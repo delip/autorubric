@@ -17,6 +17,8 @@ from pydantic import (
     model_validator,
 )
 
+from autorubric.content import Content
+
 CountFn = Callable[[str], int]
 
 
@@ -114,10 +116,11 @@ class ThinkingOutputDict(TypedDict, total=False):
     output: str
 
 
-ToGradeInput = str | ThinkingOutputDict
+ToGradeInput = Content | ThinkingOutputDict
 """Union type for to_grade parameter.
 
-Accepts either a plain string or a dict with thinking/output keys.
+Accepts submission ``Content`` (a string, an ``Image``, or a sequence of strings and images)
+or a dict with thinking/output keys, whose sections are text.
 """
 
 PenaltyType = Literal["ALL", "OUTPUT_ONLY", "THINKING_ONLY"]

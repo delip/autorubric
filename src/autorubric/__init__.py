@@ -1,5 +1,6 @@
 from importlib.metadata import PackageNotFoundError, version
 
+from autorubric.content import Content, Image
 from autorubric.dataset import DataItem, RubricDataset
 from autorubric.decision import DecisionModelConfig
 from autorubric.escalation import (
@@ -165,6 +166,9 @@ __all__ = [
     "ThinkingOutputDict",
     "ToGradeInput",
     "TokenUsage",
+    # Submission content
+    "Content",
+    "Image",
     # Multi-choice types
     "AggregatedMultiChoiceVerdict",
     "MultiChoiceJudgment",

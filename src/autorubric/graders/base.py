@@ -14,6 +14,7 @@ from autorubric.types import (
     EnsembleEvaluationReport,
     EvaluationReport,
     LengthPenalty,
+    ThinkingOutputDict,
     ToGradeInput,
 )
 from autorubric.utils import (
@@ -252,9 +253,11 @@ class Grader(ABC, Generic[ReportT]):
         if isinstance(to_grade, str):
             to_grade_str = to_grade
         else:
-            # Dict format - reconstruct string with markers for judge()
-            thinking = to_grade.get("thinking", "")
-            output = to_grade.get("output", "")
+            # Dict format - reconstruct string with markers for judge(). Any other to_grade
+            # is read as this form too, as before Content admitted images.
+            fields = cast(ThinkingOutputDict, to_grade)
+            thinking = fields.get("thinking", "")
+            output = fields.get("output", "")
             parts = []
             if thinking:
                 parts.append(f"<thinking>{thinking}</thinking>")

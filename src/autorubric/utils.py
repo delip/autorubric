@@ -6,7 +6,7 @@ import asyncio
 import dataclasses
 import re
 import warnings
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from autorubric.types import LengthPenalty, ThinkingOutputDict, ToGradeInput, TokenUsage
 
@@ -110,9 +110,10 @@ def normalize_to_grade_input(to_grade: ToGradeInput) -> ThinkingOutputDict:
     if not isinstance(to_grade, dict):
         raise ValueError(f"to_grade must be a string or dict, got {type(to_grade).__name__}")
 
-    # Validate dict has correct keys
-    thinking = to_grade.get("thinking", "")
-    output = to_grade.get("output", "")
+    # Validate dict has correct keys (the dict form's values are checked below)
+    fields = cast(ThinkingOutputDict, to_grade)
+    thinking = fields.get("thinking", "")
+    output = fields.get("output", "")
 
     # Validate types
     if not isinstance(thinking, str):
@@ -122,7 +123,7 @@ def normalize_to_grade_input(to_grade: ToGradeInput) -> ThinkingOutputDict:
 
     # Warn if dict has unexpected keys
     expected_keys = {"thinking", "output"}
-    extra_keys = set(to_grade.keys()) - expected_keys
+    extra_keys = set(fields.keys()) - expected_keys
     if extra_keys:
         warnings.warn(
             f"Unexpected keys in to_grade dict: {extra_keys}. "
