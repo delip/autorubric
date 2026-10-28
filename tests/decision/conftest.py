@@ -50,7 +50,7 @@ def _calls_the_real_api(request: pytest.FixtureRequest) -> bool:
     """Whether the test is a live one in a run given ``--live``: the only kind that may
     use the developer's ``TYPESAFE_*`` configuration and reach the network."""
     return request.node.get_closest_marker("live") is not None and bool(
-        request.config.getoption("--live")
+        request.config.getoption("--live", default=False)
     )
 
 

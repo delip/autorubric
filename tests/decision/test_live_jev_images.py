@@ -28,8 +28,8 @@ What each test proves:
    ``typesafe/jev-1.14.0`` is judged, and the request carries no assets and no images
    header, so text requests are unchanged by image support.
 2. ``test_an_image_document_is_judged``: ``[Image, caption]`` on a binary and a 5-level
-   ordinal criterion is judged, with one vote per criterion, and is billed more input
-   tokens than the caption alone, so the image reached the model.
+   ordinal criterion is judged, with one vote per criterion, and the request with the
+   image is billed more input tokens than the same caption alone.
 3. ``test_a_strip_outside_the_envelope_is_fitted_and_accepted``: a 953 x 89 strip, whose
    short side is under the model's minimum, is fitted by autorubric and accepted (no 400
    or 413).
@@ -43,7 +43,8 @@ What each test proves:
    the fake SDK (``TestImagesAreRefused`` in ``test_decision_models_registry.py``).
 6. ``test_an_image_outside_the_envelope_is_rejected_by_the_server``: an image outside the
    envelope, sent unfitted (``prepare_assets`` bypassed), is rejected by the server with a
-   4xx that ``_classify_typesafe_error`` routes as ``parse`` or ``infrastructure``. It
+   400, 413 or 422 (not an authentication, permission, not-found or rate-limit error), which
+   ``_classify_typesafe_error`` routes as ``parse`` or ``infrastructure``. It
    documents the server's own limits; if the server accepts the image, its limits have
    changed, and the test is skipped saying so.
 """
@@ -358,7 +359,17 @@ async def test_an_image_outside_the_envelope_is_rejected_by_the_server(live_clie
     try:
         await live_client.system_one(build_state(document), question, assets=assets)
     except typesafe_sdk.TypeSafeAPIError as error:
-        assert 400 <= error.status < 500, f"not a rejection of the request: {error}"
+        # A rejection of the image, not of the key, the model or the request rate.
+        assert not isinstance(
+            error,
+            (
+                typesafe_sdk.TypeSafeAuthenticationError,
+                typesafe_sdk.TypeSafePermissionDeniedError,
+                typesafe_sdk.TypeSafeNotFoundError,
+                typesafe_sdk.TypeSafeRateLimitError,
+            ),
+        ), f"not a rejection of the image: {error}"
+        assert error.status in (400, 413, 422), f"not a rejection of the image: {error}"
         assert _classify_typesafe_error(error) in ("parse", "infrastructure")
     else:
         pytest.skip(
