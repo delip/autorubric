@@ -16,6 +16,34 @@ from autorubric.types import CriterionJudgment
 CriterionList = list[Criterion]
 
 
+def pytest_addoption(parser: pytest.Parser) -> None:
+    """Register ``--live``, the one switch that lets a test marked ``live`` run."""
+    parser.addoption(
+        "--live",
+        action="store_true",
+        default=False,
+        help=(
+            "run the tests marked live, which call real paid APIs (TypeSafe's System One) "
+            "and spend the account's credit; never set in CI"
+        ),
+    )
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Skip every test marked ``live`` unless the run was given ``--live``.
+
+    A live test calls a real paid API, so selecting it (by path, ``-k`` or ``-m live``) is
+    not enough to run it: the run must also pass ``--live``. The guard lives here, not in
+    each live module, so that a live test added anywhere is covered.
+    """
+    if config.getoption("--live"):
+        return
+    skip = pytest.mark.skip(reason="live test: it calls a real paid API; run it with --live")
+    for item in items:
+        if item.get_closest_marker("live") is not None:
+            item.add_marker(skip)
+
+
 def pytest_configure(config: pytest.Config) -> None:
     """Make every ``DeprecationWarning`` attributed to an ``autorubric`` module an error.
 

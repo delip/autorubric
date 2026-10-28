@@ -7,6 +7,11 @@ Nothing here reaches the network. Two independent guards make sure of it:
 - ``_isolate_typesafe_env`` removes the ``TYPESAFE_*`` variables, which autorubric's
   ``.env`` loading may have set from a developer's real credentials.
 
+The one exception is a test marked ``live`` in a run given ``--live`` (``_calls_the_real_api``;
+see ``test_live_jev_images.py``): it is meant to reach TypeSafe with the developer's own
+configuration, so both guards stand aside for it. Without ``--live`` such a test is skipped
+before any fixture is set up (``pytest_collection_modifyitems`` in ``tests/conftest.py``).
+
 Tests either replace ``typesafe_sdk.AsyncTypeSafeClient`` with a recording fake
 (``fake_sdk``) or keep the real SDK client. The real client either sends through an
 in-memory handler in place of the HTTP transport (``http_endpoint``), which exercises the
@@ -41,14 +46,27 @@ TYPESAFE_ENV_VARS = ("TYPESAFE_API_KEY", "TYPESAFE_BASE_URL", "TYPESAFE_DEFAULT_
 _REAL_ASYNC_HANDLE_REQUEST = httpx2.AsyncHTTPTransport.handle_async_request
 
 
+def _calls_the_real_api(request: pytest.FixtureRequest) -> bool:
+    """Whether the test is a live one in a run given ``--live``: the only kind that may
+    use the developer's ``TYPESAFE_*`` configuration and reach the network."""
+    return request.node.get_closest_marker("live") is not None and bool(
+        request.config.getoption("--live")
+    )
+
+
 @pytest.fixture(autouse=True)
-def _isolate_typesafe_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def _isolate_typesafe_env(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> None:
+    if _calls_the_real_api(request):
+        return
     for name in TYPESAFE_ENV_VARS:
         monkeypatch.delenv(name, raising=False)
 
 
 @pytest.fixture(autouse=True)
-def _no_network(monkeypatch: pytest.MonkeyPatch) -> None:
+def _no_network(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> None:
+    if _calls_the_real_api(request):
+        return
+
     async def refuse_async(self: Any, request: httpx2.Request) -> httpx2.Response:
         raise AssertionError(f"a test tried to reach the network: {request.url}")
 
