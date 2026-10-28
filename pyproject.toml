@@ -55,6 +55,9 @@ typesafe = ["typesafe-sdk>=0.7.5", "httpx2>=2.0.0", "h11>=0.16"]
 dev = [
     # The test suite exercises the decision-model client against the real SDK types.
     "autorubric[typesafe]",
+    # Lets the SDK compress request bodies before Python 3.14, as it does on 3.14, so the
+    # tests exercise compressed requests on every supported Python.
+    "backports.zstd; python_version < '3.14'",
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
     "ruff==0.14.1",

@@ -206,17 +206,18 @@ def _check_extra_headers(headers: Mapping[str, str], source: str) -> None:
                 "(letters, digits or !#$%&'*+-.^_`|~) and its value an ASCII string with no "
                 "line breaks or leading or trailing whitespace. The value is not shown."
             ) from None
-        if name.lower() in _SDK_OWNED_HEADERS:
-            if name.lower() == "content-encoding":
-                raise ValueError(
-                    f"{source} cannot set {name!r}: the TypeSafe SDK sets that header on each "
-                    "request body it compresses, and a value given would be sent on bodies it "
-                    "does not compress, which are not encoded."
-                )
+        lowered = name.lower()
+        if lowered == "content-encoding":
+            raise ValueError(
+                f"{source} cannot set {name!r}: the TypeSafe SDK sets that header on each "
+                "request body it compresses, and a value given would be sent on bodies it "
+                "does not compress, which are not encoded."
+            )
+        if lowered in _SDK_OWNED_HEADERS:
             hint = (
                 " The API key is sent as the bearer token of the Authorization header: set "
                 "it with api_key or the TYPESAFE_API_KEY environment variable."
-                if name.lower() == "authorization"
+                if lowered == "authorization"
                 else ""
             )
             raise ValueError(
