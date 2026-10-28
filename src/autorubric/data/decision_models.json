@@ -1,0 +1,25 @@
+{
+  "jev-1.13.0": {
+    "provider": "typesafe",
+    "images": false
+  },
+  "jev-1.14.0": {
+    "provider": "typesafe",
+    "images": true,
+    "image_formats": ["png", "jpeg"],
+    "min_side_px": 280,
+    "max_side_px": 1568,
+    "max_image_bytes": 16777216,
+    "max_request_bytes": 33554432
+  },
+  "jev-latest": {
+    "provider": "typesafe",
+    "images": true,
+    "image_formats": ["png", "jpeg"],
+    "min_side_px": 280,
+    "max_side_px": 1568,
+    "max_image_bytes": 16777216,
+    "max_request_bytes": 33554432,
+    "notes": "Tracks the newest Jev release; re-check its capabilities on every Jev release."
+  }
+}

@@ -426,8 +426,12 @@ async def fill_ground_truth(
     Raises:
         ValueError: If dataset has no items, or if a judge's call fails with a
             configuration error (an unsupported parameter, an invalid API key, an unknown
-            model: see ``CriterionGrader.judge``), which would fail every item alike. The
-            items still being graded are then cancelled.
+            model: see ``CriterionGrader.judge``), which would fail every item alike, as
+            would an item holding images for a decision-model judge whose model is not in
+            autorubric's decision-model registry or does not accept images. The items
+            still being graded are then cancelled.
+        ImportError: If an item holds images for a decision-model judge and the installed
+            TypeSafe SDK cannot send images (before 0.7.5), likewise.
 
     Warns:
         UserWarning: Once, before grading, when ``grader`` is a confidence cascade whose

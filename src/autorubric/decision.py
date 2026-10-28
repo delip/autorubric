@@ -23,13 +23,18 @@ deterministic reference to each image, ``<image:{sha256}>`` (``_state_text``), a
 request sends the images as System One assets under those references: ``state_images``
 collects them, and ``DecisionModelClient.prepare_assets`` fits each into the envelope the
 model accepts (``_fit_for_system_one``), since System One never resizes an image itself.
+Which models accept images, and that envelope, come from autorubric's decision-model
+registry, ``data/decision_models.json`` (``decision_model_capabilities``), which is read
+only for a request that would carry images.
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import hashlib
+import importlib.resources
 import io
 import json
 import logging
@@ -40,7 +45,7 @@ from collections import Counter
 from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import KW_ONLY, dataclass, field
 from pathlib import Path
-from types import ModuleType
+from types import MappingProxyType, ModuleType
 from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast, get_args
 from urllib.parse import urlsplit
 
@@ -80,6 +85,8 @@ from autorubric.utils import (
 )
 
 if TYPE_CHECKING:
+    from importlib.resources.abc import Traversable
+
     import httpx2
     from typesafe_sdk import (
         Answer,
@@ -296,7 +303,14 @@ class DecisionModelConfig:
 
     Attributes:
         model: Model name or alias sent with each request, e.g. ``"jev-latest"`` or the
-            model id a self-hosted endpoint serves. Required.
+            model id a self-hosted endpoint serves. Required. A TypeSafe model may also be
+            named as LiteLLM names an LLM, with its provider first: ``"typesafe/jev-1.14.0"``
+            sends ``"jev-1.14.0"``. The prefix is removed before the id is sent, so both
+            forms make the same request (and share response-cache entries), and an
+            experiment's manifest records the string as given. Any model works for text.
+            Sending images needs a model that autorubric's decision-model registry
+            (``decision_model_capabilities``) lists as accepting them, such as
+            ``"jev-1.14.0"``; the registry is consulted only for a request with images.
         api_key: API key, sent as a bearer token. ``None`` (default) reads the
             ``TYPESAFE_API_KEY`` environment variable, which a ``.env`` file may set, as for
             LLM provider keys. Surrounding whitespace is stripped, as the SDK strips it, so
@@ -453,6 +467,11 @@ class DecisionModelConfig:
         name = type(self).__name__
         if not isinstance(self.model, str) or not self.model:
             raise ValueError(f"{name}.model is required and cannot be empty")
+        if not _api_model_id(self.model):
+            raise ValueError(
+                f"{name}.model {self.model!r} names no model after its provider prefix, "
+                'e.g. "typesafe/jev-1.14.0"'
+            )
         if self.binary_framing not in get_args(BinaryFraming):
             raise ValueError(
                 f"{name}.binary_framing must be one of {get_args(BinaryFraming)}; "
@@ -503,6 +522,212 @@ class DecisionModelConfig:
             raise ValueError(
                 f"{name}.input_cost_per_token must be None or a finite number >= 0; got {price!r}"
             )
+
+
+# =============================================================================
+# The decision-model registry: which models accept images, and the images they accept
+# =============================================================================
+
+_TYPESAFE_PROVIDER = "typesafe"
+"""The provider of TypeSafe's models; ``"typesafe/"`` may prefix their ids (``_api_model_id``)."""
+
+_REGISTRY_RESOURCE: Traversable = (
+    importlib.resources.files("autorubric") / "data" / "decision_models.json"
+)
+"""autorubric's decision-model registry, shipped with the package; read on first use
+(``_decision_model_registry``)."""
+
+_REGISTRY_IN_REPOSITORY = "src/autorubric/data/decision_models.json"
+"""Where the registry lives in autorubric's repository, the file to add a model to."""
+
+_IMAGE_LIMIT_KEYS = (
+    "image_formats",
+    "min_side_px",
+    "max_side_px",
+    "max_image_bytes",
+    "max_request_bytes",
+)
+"""The keys an entry whose model accepts images has, and only such an entry."""
+
+
+def _api_model_id(model: str) -> str:
+    """``model`` as sent to the API: without its optional ``typesafe/`` provider prefix.
+
+    ``DecisionModelConfig.model`` may name a TypeSafe model with its provider first, as
+    LiteLLM names an LLM (``"typesafe/jev-1.14.0"``), or by its bare id (``"jev-1.14.0"``);
+    the API takes the bare id. Only one leading ``typesafe/`` is removed; any other string is
+    returned as it is.
+    """
+    return model.removeprefix(f"{_TYPESAFE_PROVIDER}/")
+
+
+def _object_without_repeated_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """A JSON object's pairs as a dict; ``ValueError`` for a key given twice.
+
+    ``json`` keeps the last of repeated keys, which in a hand-edited file would silently
+    drop an entry or a limit.
+    """
+    counts = Counter(key for key, _ in pairs)
+    repeated = sorted(key for key, count in counts.items() if count > 1)
+    if repeated:
+        raise ValueError(f"repeated keys {repeated!r}")
+    return dict(pairs)
+
+
+def _checked_registry(data: object, source: str) -> Mapping[str, Mapping[str, Any]]:
+    """The registry ``data`` read from ``source``, checked entry by entry, as read-only views.
+
+    Each entry is keyed by a model id as sent to the API (no provider prefix) and has a
+    non-empty ``provider`` string, a ``bool`` ``images`` and optionally a ``notes`` string;
+    an entry with ``images: true`` also has every key of ``_IMAGE_LIMIT_KEYS``, and only
+    such an entry has them: ``image_formats``, a list of ``"png"`` and ``"jpeg"`` (System
+    One's names, the formats an image can be sent in), each at most once, kept as a tuple;
+    and the integers >= 1 ``min_side_px`` <= ``max_side_px`` and ``max_image_bytes`` <=
+    ``max_request_bytes``. Any other key is refused, so a misspelled limit cannot go unread.
+
+    Raises:
+        ValueError: Naming ``source`` and the entry, for the first entry that breaks a rule.
+    """
+    if not isinstance(data, dict):
+        raise ValueError(
+            f"The decision-model registry {source} must be a JSON object of entries keyed "
+            f"by model id; it is a {type(data).__name__}"
+        )
+
+    def malformed(model: str, problem: str) -> ValueError:
+        return ValueError(
+            f"The decision-model registry {source} has a malformed entry {model!r}: {problem}"
+        )
+
+    entries: dict[str, Mapping[str, Any]] = {}
+    # JSON object keys are strings; the values are checked here.
+    for model, entry in cast(dict[str, Any], data).items():
+        if not model or _api_model_id(model) != model:
+            raise malformed(
+                model,
+                f"an entry is keyed by the model id as sent to the API, without a "
+                f'"{_TYPESAFE_PROVIDER}/" prefix',
+            )
+        if not isinstance(entry, dict):
+            raise malformed(model, f"it must be a JSON object; it is a {type(entry).__name__}")
+        entry = cast(dict[str, Any], entry)
+        provider = entry.get("provider")
+        if not isinstance(provider, str) or not provider:
+            raise malformed(model, f'"provider" must be a non-empty string; got {provider!r}')
+        images = entry.get("images")
+        if not isinstance(images, bool):
+            raise malformed(model, f'"images" must be true or false; got {images!r}')
+        allowed = {"provider", "images", "notes", *(_IMAGE_LIMIT_KEYS if images else ())}
+        unknown = sorted(set(entry) - allowed)
+        if unknown:
+            raise malformed(
+                model, f"unknown keys {unknown!r} (an entry can have {sorted(allowed)!r})"
+            )
+        if not isinstance(entry.get("notes", ""), str):
+            raise malformed(model, f'"notes" must be a string; got {entry["notes"]!r}')
+        checked = dict(entry)
+        if images:
+            missing = [key for key in _IMAGE_LIMIT_KEYS if key not in entry]
+            if missing:
+                raise malformed(model, f"it accepts images, so it needs {missing!r}")
+            formats = entry["image_formats"]
+            if not (
+                isinstance(formats, list)
+                and formats
+                and all(f in _SYSTEM_ONE_FORMATS.values() for f in formats)
+                and len(set(formats)) == len(formats)
+            ):
+                raise malformed(
+                    model,
+                    '"image_formats" must be a non-empty list of "png" and "jpeg", each at '
+                    f"most once; got {formats!r}",
+                )
+            for key in _IMAGE_LIMIT_KEYS[1:]:
+                value = entry[key]
+                if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                    raise malformed(model, f'"{key}" must be an integer >= 1; got {value!r}')
+            if entry["min_side_px"] > entry["max_side_px"]:
+                raise malformed(model, '"min_side_px" is over "max_side_px"')
+            if entry["max_image_bytes"] > entry["max_request_bytes"]:
+                raise malformed(model, '"max_image_bytes" is over "max_request_bytes"')
+            checked["image_formats"] = tuple(formats)
+        entries[model] = MappingProxyType(checked)
+    return MappingProxyType(entries)
+
+
+@functools.cache
+def _decision_model_registry() -> Mapping[str, Mapping[str, Any]]:
+    """autorubric's decision-model registry (``_REGISTRY_RESOURCE``), read and checked once.
+
+    Raises:
+        ValueError: If the file is not JSON, repeats a key or has a malformed entry
+            (``_checked_registry``), naming the file. A failed read is not cached.
+    """
+    source = str(_REGISTRY_RESOURCE)
+    try:
+        data = json.loads(
+            _REGISTRY_RESOURCE.read_text(encoding="utf-8"),
+            object_pairs_hook=_object_without_repeated_keys,
+        )
+    except ValueError as error:
+        raise ValueError(f"The decision-model registry {source} cannot be read: {error}") from error
+    return _checked_registry(data, source)
+
+
+def decision_model_capabilities(model: str) -> Mapping[str, Any] | None:
+    """What autorubric's decision-model registry says ``model`` accepts.
+
+    The registry, ``data/decision_models.json`` in the package, lists decision models by
+    the id sent to the API, each with its ``provider``, whether it accepts images
+    (``images``), an optional ``notes`` string and, for a model that accepts images, the
+    images it accepts: ``image_formats`` (System One's names, ``"png"`` and ``"jpeg"``),
+    ``min_side_px`` and ``max_side_px`` (inclusive bounds on each side),
+    ``max_image_bytes`` (per image) and ``max_request_bytes`` (all of a request's images
+    together). ``CriterionGrader`` reads it only for a request that would carry images,
+    and fits each image into the model's entry; text never needs an entry.
+
+    Args:
+        model: The model as ``DecisionModelConfig.model`` names it: its id, or its id with a
+            ``typesafe/`` prefix, which is removed for the lookup (``_api_model_id``) and
+            then matches only an entry whose ``provider`` is ``"typesafe"``.
+
+    Returns:
+        The model's entry as a read-only mapping (``image_formats`` a tuple), or ``None``
+        when the registry does not list it.
+
+    Raises:
+        ValueError: If the registry file is malformed, naming the file and the entry. It is
+            read and checked on the first call.
+    """
+    api_id = _api_model_id(model)
+    entry = _decision_model_registry().get(api_id)
+    if entry is None or (api_id != model and entry["provider"] != _TYPESAFE_PROVIDER):
+        return None
+    return entry
+
+
+_CONFIGURATION_ERROR_NOTE = (
+    "autorubric: a judge configuration error, which fails every item alike, so "
+    "fill_ground_truth raises it instead of leaving the item out"
+)
+"""The note (PEP 678) that marks an error raised from a grade as a judge configuration
+error, one that says nothing about the item (``_configuration_error``)."""
+
+_E = TypeVar("_E", bound=BaseException)
+
+
+def _configuration_error(error: _E) -> _E:
+    """``error``, marked as a judge configuration error by ``_CONFIGURATION_ERROR_NOTE``.
+
+    Such an error is raised from the grade before any request, e.g. a decision model that
+    does not accept images, or an SDK too old to send them; it would fail every item with
+    images alike. The note, shown under the error's traceback, is what
+    ``_is_judge_configuration_error`` recognizes, so ``fill_ground_truth`` raises the error
+    instead of leaving the item out, as it does for a judge's #40 configuration errors. It
+    leaves the error's type and message unchanged.
+    """
+    error.add_note(_CONFIGURATION_ERROR_NOTE)
+    return error
 
 
 def _is_valid_api_key(key: str) -> bool:
@@ -556,18 +781,6 @@ def _canonical_json(value: object) -> str:
 # Images: fitting each image into the envelope System One accepts
 # =============================================================================
 
-_JEV_IMAGE_ENVELOPE: Mapping[str, Any] = {
-    "min_side_px": 280,
-    "max_side_px": 1568,
-    "max_image_bytes": 16 * 1024 * 1024,
-    "image_formats": ["png", "jpeg"],
-}
-"""The images Jev accepts: PNG or JPEG (an animated PNG refused), 280 to 1568 pixels per
-side inclusive, at most 16 MiB each. System One never resizes an image, and one image
-outside these limits fails the whole request, so every image is fitted into them first
-(``_fit_for_system_one``). Keys: ``min_side_px``, ``max_side_px``, ``max_image_bytes`` and
-``image_formats`` (System One's names, ``"png"`` and ``"jpeg"``)."""
-
 _SYSTEM_ONE_FORMATS = {"PNG": "png", "JPEG": "jpeg"}
 """System One's names for the image formats it reads, by Pillow's format names. A JPEG
 holding several pictures (Pillow's ``"MPO"``) is not among them: it is re-encoded as its
@@ -578,12 +791,15 @@ def _sdk_image_type(typesafe: ModuleType) -> type[AssetImage]:
     """The SDK's ``Image`` asset type, or an ``ImportError`` saying which SDK provides it."""
     asset_type = getattr(typesafe, "Image", None)
     if asset_type is None:
-        raise ImportError(
-            "Sending images to a decision model needs typesafe-sdk 0.7.5 or later, whose "
-            "typesafe_sdk.Image carries them, and the installed typesafe-sdk has no Image. "
-            "Upgrade it with: pip install -U 'autorubric[typesafe]' (which requires "
-            "typesafe-sdk>=0.7.5)",
-            name="typesafe_sdk",
+        # Marked as a configuration error: it fails every item with images alike.
+        raise _configuration_error(
+            ImportError(
+                "Sending images to a decision model needs typesafe-sdk 0.7.5 or later, whose "
+                "typesafe_sdk.Image carries them, and the installed typesafe-sdk has no "
+                "Image. Upgrade it with: pip install -U 'autorubric[typesafe]' (which "
+                "requires typesafe-sdk>=0.7.5)",
+                name="typesafe_sdk",
+            )
         )
     return asset_type
 
@@ -657,9 +873,7 @@ def _passes_through(
     )
 
 
-def _fit_for_system_one(
-    image: Image, *, envelope: Mapping[str, Any] = _JEV_IMAGE_ENVELOPE
-) -> tuple[bytes, str]:
+def _fit_for_system_one(image: Image, *, envelope: Mapping[str, Any]) -> tuple[bytes, str]:
     """``image`` as it is sent to System One: its bytes and format (``"png"`` or ``"jpeg"``).
 
     An image System One takes as it is (``_passes_through``) is sent as its original bytes,
@@ -683,7 +897,9 @@ def _fit_for_system_one(
 
     Args:
         image: The image.
-        envelope: The images the model accepts (see ``_JEV_IMAGE_ENVELOPE``).
+        envelope: The images the model accepts: its registry entry
+            (``decision_model_capabilities``), of which ``image_formats``,
+            ``min_side_px``, ``max_side_px`` and ``max_image_bytes`` are read.
 
     Raises:
         ImportError: If an image needs re-encoding and the installed TypeSafe SDK has no
@@ -1001,6 +1217,9 @@ class DecisionModelClient:
     ) -> str:
         """SHA-256 over the model, the resolved base URL, the state and the questions.
 
+        The model is its id as sent (``_api_model_id``), so ``"typesafe/jev-1.14.0"`` and
+        ``"jev-1.14.0"``, which make the same request, share cache entries.
+
         Everything that shapes the request is in the key, and so is the client's
         ``cache_namespace`` when it has one; nothing else is. Framing is already expressed in
         the questions, and ``decision_threshold`` only post-processes answers, so changing it
@@ -1010,7 +1229,7 @@ class DecisionModelClient:
         the image was fitted. A request without images has the key it had before image
         support.
         """
-        parts: list[object] = [self.config.model, self._base_url, state, questions]
+        parts: list[object] = [_api_model_id(self.config.model), self._base_url, state, questions]
         if assets:
             parts.append({"assets": sorted(assets)})
         if self._cache_namespace is not None:
@@ -1018,18 +1237,23 @@ class DecisionModelClient:
         content = _canonical_json(parts)
         return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
-    def prepare_assets(self, images: Mapping[str, Image]) -> dict[str, AssetImage]:
+    def prepare_assets(
+        self, images: Mapping[str, Image], *, envelope: Mapping[str, Any]
+    ) -> dict[str, AssetImage]:
         """The SDK assets of a request carrying ``images``, each fitted for System One.
 
         Each image is fitted into the envelope the model accepts (``_fit_for_system_one``):
         passed through unchanged when System One takes it as it is, else re-encoded, and
         resized or padded when its size is outside the envelope. The decision model judges
         the fitted image. Decoding and encoding are CPU work, so call this off the event
-        loop (``asyncio.to_thread``).
+        loop (``asyncio.to_thread``). The request's limit on all its images together
+        (``max_request_bytes``) is the caller's to check, on the assets returned.
 
         Args:
             images: The images a state refers to, keyed by their references
                 (``state_images``).
+            envelope: The images the model accepts: its registry entry
+                (``decision_model_capabilities``).
 
         Returns:
             ``typesafe_sdk.Image`` assets under the same keys, in the same order.
@@ -1045,7 +1269,7 @@ class DecisionModelClient:
             return {}
         asset_type = _sdk_image_type(self._typesafe)
         return {
-            reference: asset_type(_fit_for_system_one(image, envelope=_JEV_IMAGE_ENVELOPE)[0])
+            reference: asset_type(_fit_for_system_one(image, envelope=envelope)[0])
             for reference, image in images.items()
         }
 
@@ -1113,7 +1337,7 @@ class DecisionModelClient:
             sdk_client = self._typesafe.AsyncTypeSafeClient(
                 api_key=self._api_key,
                 base_url=self._base_url,
-                model=self.config.model,
+                model=_api_model_id(self.config.model),
                 headers=self.config.extra_headers,
                 retry=self._retry_policy,
                 http_client=http_client,  # the SDK takes its timeout from it

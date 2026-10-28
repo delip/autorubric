@@ -24,19 +24,24 @@ from autorubric.content import (
     Content,
     _content_digest,
     _content_identity,
+    _has_images,
     _load_content,
     _load_content_async,
     _normalize_content,
     _Normalized,
 )
 from autorubric.decision import (
+    _CONFIGURATION_ERROR_NOTE,
+    _REGISTRY_IN_REPOSITORY,
     DecisionModelClient,
     DecisionModelConfig,
+    _configuration_error,
     _describe,
     _is_real_number,
     answer_to_report,
     build_questions,
     build_state,
+    decision_model_capabilities,
     question_id,
     state_images,
 )
@@ -800,13 +805,49 @@ async def _gather_or_cancel(*aws: Awaitable[_T]) -> list[_T]:
 
 
 def _is_judge_configuration_error(exc: BaseException) -> bool:
-    """Whether ``exc`` is the ``ValueError`` a grade raises for a judge's configuration error.
+    """Whether ``exc`` is an error a grade raises for a judge's configuration error.
 
-    ``_failed_judgment_result`` raises it, chained from the provider's exception, so that
-    callers that keep going past an item that failed to grade (``fill_ground_truth``) can
-    tell it from such a failure: it fails every item alike.
+    It is either the ``ValueError`` ``_failed_judgment_result`` raises, chained from the
+    provider's exception, or an error marked by ``_configuration_error`` (its
+    ``_CONFIGURATION_ERROR_NOTE``): a decision model that does not accept images or is not
+    in the registry (``_image_capabilities``), or an SDK too old to send images. Callers
+    that keep going past an item that failed to grade (``fill_ground_truth``) can thus tell
+    it from such a failure: it fails every item alike.
     """
+    if _CONFIGURATION_ERROR_NOTE in getattr(exc, "__notes__", ()):
+        return True
     return isinstance(exc, ValueError) and _is_configuration_error(exc.__cause__)
+
+
+def _image_capabilities(judge: JudgeSpec) -> Mapping[str, Any]:
+    """The images decision-model judge ``judge``'s model accepts: its registry entry.
+
+    Read from autorubric's decision-model registry (``decision_model_capabilities``) only
+    for content holding images; text never needs an entry.
+
+    Raises:
+        ValueError: Marked as a configuration error (``_configuration_error``), naming the
+            judge and its model, if the registry does not list the model or lists it as not
+            accepting images.
+    """
+    model = judge.llm_config.model
+    capabilities = decision_model_capabilities(model)
+    if capabilities is None:
+        raise _configuration_error(
+            ValueError(
+                f"Judge {judge.judge_id!r} uses decision model {model!r}, which is not in "
+                f"autorubric's decision-model registry ({_REGISTRY_IN_REPOSITORY}); add an "
+                "entry saying whether it accepts images"
+            )
+        )
+    if not capabilities["images"]:
+        raise _configuration_error(
+            ValueError(
+                f"Judge {judge.judge_id!r} uses {model!r}, which does not accept images; "
+                "use jev-1.14.0 or later"
+            )
+        )
+    return capabilities
 
 
 def _failed_judgment_result(
@@ -2650,10 +2691,13 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
 
         Images in the submission, query or reference submission are written into the state
         as their references (``build_state``) and sent as the request's assets, each fitted
-        into the envelope the model accepts (``DecisionModelClient.prepare_assets``, in a
-        worker thread). Fitting happens before the request and outside its failure
-        handling: an image that cannot be fitted, or an SDK too old to send images, raises
-        from the grade and nothing is sent; it never fails the criteria.
+        into the envelope the model accepts, its registry entry (``_image_capabilities``;
+        ``judge`` has already refused a model that does not accept images), by
+        ``DecisionModelClient.prepare_assets``, in a worker thread. Fitting happens before
+        the request and outside its failure handling: an image that cannot be fitted,
+        fitted images over the entry's ``max_request_bytes`` together, or an SDK too old to
+        send images, raises from the grade and this judge sends nothing; it never fails the
+        criteria.
 
         Args:
             judge: The decision-model judge.
@@ -2670,7 +2714,8 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
             ImportError: If the content holds an image and the installed TypeSafe SDK
                 cannot send images (before 0.7.5).
             ValueError: If an image cannot be fitted for the model (it cannot be decoded, or
-                is still over the size limit once fitted).
+                is still over the size limit once fitted), or the fitted images together are
+                over the model's ``max_request_bytes``.
         """
         client = self._decision_clients[judge.judge_id]
         config = client.config
@@ -2688,7 +2733,20 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
             # Fitted before the request and outside its failure handling, so an image that
             # cannot be sent raises instead of failing the criteria.
             images = state_images(to_grade, query, reference_submission)
-            assets = await asyncio.to_thread(client.prepare_assets, images) if images else None
+            assets = None
+            if images:
+                # ``judge`` has checked the model accepts images; this is its registry entry.
+                envelope = _image_capabilities(judge)
+                assets = await asyncio.to_thread(client.prepare_assets, images, envelope=envelope)
+                # Each asset holds its fitted bytes (``prepare_assets``).
+                total = sum(len(cast(bytes, asset.data)) for asset in assets.values())
+                if total > envelope["max_request_bytes"]:
+                    raise ValueError(
+                        f"Judge {judge.judge_id!r} cannot send this item's images to "
+                        f"{config.model!r}: fitted, they total {total} bytes, over the "
+                        f"{envelope['max_request_bytes']}-byte limit on a request's images "
+                        "(max_request_bytes)"
+                    )
             try:
                 response = await client.system_one(state, questions, assets=assets)
             except Exception as e:
@@ -3068,9 +3126,13 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 missing); raised before any judge is called.
             ImportError: If a decision-model judge is given content holding an image and the
                 installed TypeSafe SDK cannot send images (before its request).
-            ValueError: If an image file is not a supported image (before any judge is
-                called); if a decision-model judge is given an image it cannot fit for its
-                model (before its request); or if a judge's call or request
+            ValueError: If an image file is not a supported image, or the content holds an
+                image and a decision-model judge's model is not in autorubric's
+                decision-model registry or does not accept images
+                (``_check_decision_models_accept_images``), both before any judge is
+                called; if a decision-model judge is given an image it cannot fit for its
+                model, or images over its model's ``max_request_bytes`` together (before
+                its request); or if a judge's call or request
                 fails with a configuration error, which would fail every call it makes
                 (#40): LiteLLM's ``UnsupportedParamsError``, or a 401, 403 or 404 from
                 the provider (``litellm.AuthenticationError``, ``PermissionDeniedError``,
@@ -3109,6 +3171,9 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
             query = await _load_content_async(query)
         if reference_submission is not None:
             reference_submission = await _load_content_async(reference_submission)
+        # Before any judge is called, so that no request at all is sent, an LLM panel
+        # member's included, for images a decision-model judge cannot take.
+        self._check_decision_models_accept_images(to_grade, query, reference_submission)
         if not self._escalation_names_warned and not _ESCALATION_NAMES_CHECKED.get():
             # The flag is set only once the warning is issued, so under a
             # warnings-as-errors filter it raises on every call instead of only once.
@@ -3159,6 +3224,24 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
             )
         )
         return [primary, *escalation_results]
+
+    def _check_decision_models_accept_images(self, *contents: Content | None) -> None:
+        """Refuse content holding images for a decision-model judge that cannot take them.
+
+        Only when one of ``contents`` (the submission, query and reference submission) holds
+        an image is autorubric's decision-model registry consulted, for every judge that
+        judges every criterion (``_judges``: a single judge, a panel member, a cascade's
+        decision model; escalation judges are LLMs). Text never reads the registry.
+
+        Raises:
+            ValueError: As ``_image_capabilities``, for the first decision-model judge whose
+                model the registry does not list or lists as not accepting images.
+        """
+        if not any(content is not None and _has_images(content) for content in contents):
+            return
+        for judge in self._judges:
+            if isinstance(judge.llm_config, DecisionModelConfig):
+                _image_capabilities(judge)
 
     async def _judge_escalated_criteria(
         self,

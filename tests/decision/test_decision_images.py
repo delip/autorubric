@@ -2,9 +2,10 @@
 
 A document's images are written into the decision model's state as deterministic
 references, ``<image:{sha256}>``, and sent as the request's System One assets under those
-references, each fitted into the envelope Jev accepts (System One never resizes an image).
-A request carrying images has the ``TypeSafe-Danger-Zone-Images: true`` header; a text-only
-request, its state and its cache key are exactly what they were before image support.
+references, each fitted into the envelope the model's registry entry gives, Jev's here
+(System One never resizes an image). A request carrying images has the
+``TypeSafe-Danger-Zone-Images: true`` header; a text-only request, its state and its cache
+key are exactly what they were before image support.
 
 Requests go to the recording fake SDK client (``fake_sdk``) or, for the wire test, to the
 real SDK client answered in place of its transport (``http_endpoint``); see
@@ -32,9 +33,9 @@ from autorubric import Criterion, DecisionModelConfig, Image, Rubric
 from autorubric import content as content_module
 from autorubric.decision import (
     _IMAGES_HEADER,
-    _JEV_IMAGE_ENVELOPE,
     DecisionModelClient,
     _canonical_json,
+    _decision_model_registry,
     _fit_for_system_one,
     _system_one_size,
     build_state,
@@ -115,6 +116,9 @@ def make_grader():
         for client in grader._decision_clients.values():
             client.close()
 
+
+JEV_ENVELOPE = _decision_model_registry()["jev-latest"]
+"""The images ``jev-latest``, the model these tests' judges use, accepts: its registry entry."""
 
 FIGURE = Image(encoded((400, 300), "PNG"))
 OTHER = Image(encoded((400, 300), "PNG", color="blue"))
@@ -223,7 +227,7 @@ def test_system_one_size(size, expected):
 
 
 def fit(data: bytes, **envelope: Any) -> tuple[bytes, str]:
-    return _fit_for_system_one(Image(data), envelope={**_JEV_IMAGE_ENVELOPE, **envelope})
+    return _fit_for_system_one(Image(data), envelope={**JEV_ENVELOPE, **envelope})
 
 
 class TestPassThrough:
@@ -418,14 +422,14 @@ class TestFittingFailures:
         data = encoded((400, 300), "PNG")
         truncated = Image(data[: len(data) // 2])
         with pytest.raises(ValueError, match=r"Image\(<\d+ bytes, image/png>\) cannot be sent"):
-            _fit_for_system_one(truncated)
+            _fit_for_system_one(truncated, envelope=JEV_ENVELOPE)
 
     def test_a_file_backed_image_is_named_by_its_path(self, tmp_path):
         data = encoded((400, 300), "PNG")
         path = tmp_path / "broken.png"
         path.write_bytes(data[:100])
         with pytest.raises(ValueError, match="broken.png"):
-            _fit_for_system_one(Image(path))
+            _fit_for_system_one(Image(path), envelope=JEV_ENVELOPE)
 
     def test_an_image_still_over_the_byte_limit_is_refused(self):
         with pytest.raises(ValueError, match=r"still \d+ bytes, over the 100-byte limit"):
@@ -441,7 +445,7 @@ class TestPrepareAssets:
     def test_assets_are_sdk_images_under_the_references(self, make_client):
         tiny = Image(encoded((100, 100), "PNG"))
         images = state_images([FIGURE, tiny])
-        assets = make_client().prepare_assets(images)
+        assets = make_client().prepare_assets(images, envelope=JEV_ENVELOPE)
         assert list(assets) == list(images)
         assert all(isinstance(asset, typesafe_sdk.Image) for asset in assets.values())
         assert assets[reference(FIGURE)].data == FIGURE.read_bytes()  # passed through
@@ -450,7 +454,7 @@ class TestPrepareAssets:
     def test_no_images_need_no_sdk_image(self, make_client, monkeypatch):
         client = make_client()
         monkeypatch.delattr(typesafe_sdk, "Image")
-        assert client.prepare_assets({}) == {}
+        assert client.prepare_assets({}, envelope=JEV_ENVELOPE) == {}
 
     def test_an_sdk_without_image_raises_an_actionable_import_error(self, make_client, monkeypatch):
         client = make_client()
@@ -458,7 +462,7 @@ class TestPrepareAssets:
         with pytest.raises(
             ImportError, match=r"typesafe-sdk 0\.7\.5 or later.*autorubric\[typesafe\]"
         ):
-            client.prepare_assets(state_images([FIGURE]))
+            client.prepare_assets(state_images([FIGURE]), envelope=JEV_ENVELOPE)
 
 
 TEXT_STATE = {"input": "Explain photosynthesis.", "submission": "Plants turn light into sugar."}
@@ -483,7 +487,7 @@ class TestRequests:
     ):
         client = make_client(extra_headers={"X-Team": "evals"})
         state = build_state([FIGURE, CAPTION])
-        assets = client.prepare_assets(state_images([FIGURE, CAPTION]))
+        assets = client.prepare_assets(state_images([FIGURE, CAPTION]), envelope=JEV_ENVELOPE)
         await client.system_one(state, QUESTIONS, assets=assets)
 
         ((sent_state, sent_questions, kwargs),) = fake_sdk.calls
@@ -523,7 +527,7 @@ class TestRequests:
     async def test_a_cached_request_with_images_is_not_sent_again(self, fake_sdk, make_client):
         client = make_client(cache_enabled=True)
         state = build_state([FIGURE, CAPTION])
-        assets = client.prepare_assets(state_images([FIGURE]))
+        assets = client.prepare_assets(state_images([FIGURE]), envelope=JEV_ENVELOPE)
         first = await client.system_one(state, QUESTIONS, assets=assets)
         again = await client.system_one(state, QUESTIONS, assets=assets)
         assert len(fake_sdk.calls) == 1
@@ -550,9 +554,10 @@ class TestGrading:
         threads: list[threading.Thread] = []
         real = DecisionModelClient.prepare_assets
 
-        def recording(self: DecisionModelClient, images: Any) -> Any:
+        def recording(self: DecisionModelClient, images: Any, *, envelope: Any) -> Any:
             threads.append(threading.current_thread())
-            return real(self, images)
+            assert envelope == JEV_ENVELOPE  # the model's registry entry
+            return real(self, images, envelope=envelope)
 
         monkeypatch.setattr(DecisionModelClient, "prepare_assets", recording)
         report = await Rubric([LEGIBLE]).grade([tiny, CAPTION], grader=grader)
@@ -636,7 +641,9 @@ class TestWire:
         client = DecisionModelClient(dm(extra_headers={"X-Team": "evals"}))
         document = [FIGURE, CAPTION]
         state = build_state(document)
-        assets = await asyncio.to_thread(client.prepare_assets, state_images(document))
+        assets = await asyncio.to_thread(
+            client.prepare_assets, state_images(document), envelope=JEV_ENVELOPE
+        )
         await client.system_one(state, {"c0": Noul(instructions="Legible")}, assets=assets)
 
         (request,) = http_endpoint.requests
