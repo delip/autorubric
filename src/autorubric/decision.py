@@ -599,7 +599,12 @@ def _system_one_size(
     side stays at most ``max_side``. A side still shorter than ``min_side`` (an image too
     elongated to fit by scaling, e.g. 953 x 89, scaled to 1568 x 146) is then padded to
     ``min_side`` on a canvas the image is centered on (1568 x 280). Sides are rounded to the
-    nearest pixel (Python's ``round``), never below 1.
+    nearest pixel (Python's ``round``), never below 1, and a side that rounding alone leaves
+    short of ``min_side`` (scaled to more than ``min_side - 1``, e.g. 1600 x 285 to
+    1568 x 279.3) is set to ``min_side`` (1568 x 280) instead of padded by a pixel. An image
+    that scaling up would change by at most one pixel per side (e.g. 1567 x 279, up by a
+    factor of 1.0006) keeps its size and is only padded (1567 x 280): resampling it would
+    blur it for no gain.
 
     Returns:
         ``(new_width, new_height, canvas_width, canvas_height)``: the scaled size, and the
@@ -611,10 +616,19 @@ def _system_one_size(
         scale = max_side / longest
     elif shortest < min_side:
         scale = min(min_side / shortest, max_side / longest)
+        if abs(round(width * scale) - width) <= 1 and abs(round(height * scale) - height) <= 1:
+            scale = 1.0  # a change of a pixel at most: pad only
     else:
         return width, height, width, height
-    new_width = min(max(round(width * scale), 1), max_side)
-    new_height = min(max(round(height * scale), 1), max_side)
+
+    def scaled(side: int) -> int:
+        exact = side * scale
+        rounded = max(round(exact), 1)
+        if rounded < min_side < exact + 1 and scale != 1.0:
+            rounded = min_side  # short of the minimum by rounding alone
+        return min(rounded, max_side)
+
+    new_width, new_height = scaled(width), scaled(height)
     return new_width, new_height, max(new_width, min_side), max(new_height, min_side)
 
 
@@ -653,13 +667,19 @@ def _fit_for_system_one(
     or a JPEG holding several pictures, sends its first), turned upright by its EXIF
     orientation (``ImageOps.exif_transpose``), and resized with Lanczos resampling to the
     size ``_system_one_size`` gives, centered on a canvas padded with white (transparent
-    white for an image with transparency) when a side is padded. It is encoded as a PNG
-    when it came from a PNG, GIF or WebP or has transparency (as RGBA), else as a baseline
-    JPEG in mode L or RGB (a CMYK JPEG, for one, becomes RGB), by
+    white for an image with transparency) when a side is padded. Samples deeper than 8 bits
+    are reduced to 8-bit grayscale first: integer modes (``I``, ``I;16`` and its byte orders)
+    as 16-bit values scaled by 1/256, floating point (``F``) clamped to [0, 255]. It is
+    encoded as a PNG when it came from a PNG, GIF or WebP, was a palette, 1-bit or alpha
+    image, or has transparency (as RGBA), else as a baseline JPEG in mode L or RGB (a CMYK
+    JPEG, for one, becomes RGB), by
     ``typesafe_sdk.Image.from_pil``, with the SDK's encoder settings (JPEG quality 95); when
     the envelope lists only one of the two formats, that one is used, an image with
-    transparency then flattened onto white for a JPEG. Fitting reads no file but the image's
-    own and is deterministic for a given Pillow version.
+    transparency then flattened onto white for a JPEG. An ICC colour profile is not carried
+    into a re-encoded JPEG or a padded image, and colours are not converted to sRGB (no
+    ``ImageCms``), so an image in another colour space (Display P3, say) that is re-encoded
+    is judged with shifted colours. Fitting reads no file but the image's own and is
+    deterministic for a given Pillow version.
 
     Args:
         image: The image.
@@ -689,12 +709,22 @@ def _fit_for_system_one(
         source_format = opened.format
         frame = ImageOps.exif_transpose(opened)  # a copy of the first frame, upright
 
+    # A palette, 1-bit or alpha image is encoded as a PNG, whatever its source format.
+    lossless = frame.mode in ("P", "PA", "1", "LA", "La", "RGBA", "RGBa")
+    if frame.mode.startswith("I"):  # I, I;16, I;16B, I;16L, I;16N: 16-bit samples
+        frame = frame.convert("I").point(lambda value: value * (1 / 256)).convert("L")
+    elif frame.mode == "F":  # floating point: clamped to [0, 255] and rounded
+        frame = frame.convert("L")
     if frame.has_transparency_data:
         frame = frame.convert("RGBA")
     elif frame.mode not in ("L", "RGB"):
         frame = frame.convert("L" if frame.mode == "1" else "RGB")
     formats = envelope["image_formats"]
-    wanted = "png" if source_format in ("PNG", "GIF", "WEBP") or frame.mode == "RGBA" else "jpeg"
+    wanted = (
+        "png"
+        if source_format in ("PNG", "GIF", "WEBP") or lossless or frame.mode == "RGBA"
+        else "jpeg"
+    )
     target = wanted if wanted in formats else ("jpeg" if wanted == "png" else "png")
     if target not in formats:
         raise ValueError(

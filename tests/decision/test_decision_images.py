@@ -29,6 +29,7 @@ from PIL import ExifTags, PngImagePlugin
 from typesafe_sdk import Choice, Noul
 
 from autorubric import Criterion, DecisionModelConfig, Image, Rubric
+from autorubric import content as content_module
 from autorubric.decision import (
     _IMAGES_HEADER,
     _JEV_IMAGE_ENVELOPE,
@@ -210,6 +211,11 @@ class TestStateImages:
         ((1, 1), (280, 280, 280, 280)),
         ((20000, 1), (1568, 1, 1568, 280)),  # a side never rounds below 1 pixel
         ((1, 20000), (1, 1568, 280, 1568)),
+        ((1600, 285), (1568, 280, 1568, 280)),  # 279.3 rounded: set to 280, not padded by 1
+        ((285, 1600), (280, 1568, 280, 1568)),
+        ((1500, 267), (1568, 280, 1568, 280)),  # up to 1568 x 279.1: set to 280
+        ((1567, 279), (1567, 279, 1567, 280)),  # up by 1.0006: kept and padded, not resampled
+        ((279, 279), (279, 279, 280, 280)),
     ],
 )
 def test_system_one_size(size, expected):
@@ -356,6 +362,55 @@ class TestReEncoding:
         pixel = out.getpixel((200, 150))
         assert isinstance(pixel, tuple)
         assert all(channel > 250 for channel in pixel)
+
+
+class TestDeepSamplesAndOtherSources:
+    """Samples deeper than 8 bits are scaled, not clipped, and a palette or 1-bit image is
+    sent as a PNG whatever its source. ``Image`` holds PNG, JPEG, GIF or WebP only, so the
+    TIFF and BMP sources are admitted here by widening its format table: the fitting rule
+    goes by mode, not by what ``Image`` accepts today."""
+
+    @pytest.fixture
+    def tiff_and_bmp(self, monkeypatch):
+        monkeypatch.setitem(content_module._MEDIA_TYPES, "TIFF", "image/tiff")
+        monkeypatch.setitem(content_module._MEDIA_TYPES, "BMP", "image/bmp")
+
+    def test_a_16_bit_image_is_scaled_to_8_bits(self):
+        fitted, image_format = fit(encoded((100, 100), "PNG", mode="I;16", color=32768))
+        out = decoded(fitted)
+        assert (image_format, out.mode, out.size) == ("png", "L", (280, 280))
+        pixel = out.getpixel((140, 140))
+        assert isinstance(pixel, int)
+        assert abs(pixel - 128) <= 2
+
+    @pytest.mark.usefixtures("tiff_and_bmp")
+    @pytest.mark.parametrize(("value", "expected"), [(128.0, 128), (300.0, 255), (-5.0, 0)])
+    def test_a_floating_point_image_is_clamped_to_8_bits(self, value, expected):
+        fitted, image_format = fit(encoded((300, 300), "TIFF", mode="F", color=value))
+        out = decoded(fitted)
+        assert (image_format, out.mode) == ("jpeg", "L")
+        pixel = out.getpixel((150, 150))
+        assert isinstance(pixel, int)
+        assert abs(pixel - expected) <= 2
+
+    @pytest.mark.usefixtures("tiff_and_bmp")
+    @pytest.mark.parametrize(("mode", "color"), [("P", 3), ("1", 1)])
+    def test_a_palette_or_1_bit_image_is_sent_as_a_png(self, mode, color):
+        fitted, image_format = fit(encoded((300, 300), "BMP", mode=mode, color=color))
+        assert (image_format, decoded(fitted).format) == ("png", "PNG")
+
+    def test_an_image_that_scaling_would_barely_change_is_padded_without_resampling(self):
+        width, height = 1567, 279
+        source = pil_image.frombytes(
+            "L", (width, height), bytes((x + y) % 256 for y in range(height) for x in range(width))
+        )
+        buffer = io.BytesIO()
+        source.save(buffer, "PNG")
+        fitted, _ = fit(buffer.getvalue())
+        out = decoded(fitted)
+        assert (out.mode, out.size) == ("L", (1567, 280))
+        assert out.crop((0, 0, width, height)).tobytes() == source.tobytes()  # rows 0-278
+        assert set(out.crop((0, height, width, height + 1)).tobytes()) == {255}  # white
 
 
 class TestFittingFailures:
