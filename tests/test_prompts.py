@@ -27,6 +27,7 @@ def _criterion_with_unmarked_na() -> Criterion:
 def test_na_option_is_marked_in_rendered_options():
     """An NA option is visibly marked so the judge can recognize the abstain choice."""
     prompt = build_multi_choice_user_prompt(_criterion_with_unmarked_na(), "submission")
+    assert isinstance(prompt, str)  # text in, text out
     # The NA option line carries the marker.
     assert f"3. Insufficient data {_NA_MARKER}" in prompt
     # Scored options are NOT marked.
@@ -48,6 +49,7 @@ def test_na_marker_not_doubled_when_label_already_signals_na():
         ],
     )
     prompt = build_multi_choice_user_prompt(criterion, "submission")
+    assert isinstance(prompt, str)
     assert "3. N/A" in prompt
     # No appended "(cannot assess / not applicable)" suffix on the N/A line.
     assert f"N/A {_NA_MARKER}" not in prompt
@@ -66,6 +68,7 @@ def test_scored_only_criterion_has_no_na_marker():
         ],
     )
     prompt = build_multi_choice_user_prompt(criterion, "submission")
+    assert isinstance(prompt, str)
     assert _NA_MARKER not in prompt
 
 

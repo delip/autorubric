@@ -6,6 +6,7 @@ import json
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
+from autorubric.content import Content, _concat, _normalize_content
 from autorubric.types import Criterion, CriterionOption, CriterionVerdict
 from autorubric.utils import _normalize_guidelines
 
@@ -200,6 +201,59 @@ def _guidelines_block(guidelines: str | None) -> str:
     return GUIDELINES_BLOCK.format(guidelines=guidelines)
 
 
+# Every user prompt is assembled with ``_concat`` from the blocks below, the criterion
+# blocks and the few-shot example formatters, in the order its text reads. ``_concat``
+# joins text exactly as ``"".join`` does and returns a ``str`` unless a piece holds an
+# image, so a prompt without images is the same string it was before submissions could hold
+# images; an image sits in the prompt exactly where its text would, inside the same tags.
+
+
+def _input_block(query: Content | None) -> Content:
+    """The ``<input>`` block of a user prompt and the blank line after it, or ``""``.
+
+    A query that is ``None`` or empty (``""``, or a sequence holding no text and no image)
+    is no query.
+    """
+    if query is None or not _normalize_content(query):
+        return ""
+    return _concat("<input>", query, "</input>\n\n")
+
+
+def _reference_block(reference_submission: Content | None) -> Content:
+    """The ``<reference_submission>`` block of a user prompt and the blank line after it.
+
+    ``""`` for a reference submission that is ``None`` or empty, as for ``_input_block``.
+    """
+    if reference_submission is None or not _normalize_content(reference_submission):
+        return ""
+    return _concat(
+        "<reference_submission>\n", reference_submission, "\n</reference_submission>\n\n"
+    )
+
+
+def _submission_block(to_grade: Content) -> Content:
+    """The ``<submission>`` block a user prompt ends with."""
+    return _concat("<submission>\n", to_grade, "\n</submission>")
+
+
+def _example_submission_block(submission: Content) -> Content:
+    """A few-shot example's submission in its ``<example_submission>`` tags."""
+    return _concat("<example_submission>", submission, "</example_submission>")
+
+
+def _lines(lines: Sequence[Content]) -> Content:
+    """``lines`` read one after another with a newline between each two.
+
+    Text lines join exactly as ``"\\n".join(lines)``.
+    """
+    pieces: list[Content] = []
+    for i, line in enumerate(lines):
+        if i:
+            pieces.append("\n")
+        pieces.append(line)
+    return _concat(*pieces)
+
+
 def _binary_criterion_block(criterion: Criterion) -> str:
     """The part of a user prompt that poses a binary criterion.
 
@@ -219,17 +273,17 @@ def _binary_criterion_block(criterion: Criterion) -> str:
 
 def build_user_prompt(
     criterion: Criterion,
-    to_grade: str,
-    query: str | None = None,
-    reference_submission: str | None = None,
+    to_grade: Content,
+    query: Content | None = None,
+    reference_submission: Content | None = None,
     *,
     guidelines: str | None = None,
-) -> str:
+) -> Content:
     """Build the user prompt for single-criterion evaluation.
 
     Args:
         criterion: The criterion to evaluate against.
-        to_grade: The submission text to evaluate.
+        to_grade: The submission to evaluate.
         query: Optional input/query that prompted the submission.
         reference_submission: Optional exemplar response for grading context.
         guidelines: Optional rubric guidelines. When set (not blank), the prompt starts
@@ -237,42 +291,43 @@ def build_user_prompt(
             them.
 
     Returns:
-        The user prompt.
+        The user prompt: a ``str``, exactly as before, unless a part holds an image; then
+        a tuple of text and image parts, each image where its text would be.
 
     Raises:
-        TypeError: If ``guidelines`` is neither a ``str`` nor ``None``.
+        TypeError: If ``guidelines`` is neither a ``str`` nor ``None``, or a submission,
+            query or reference submission is not ``Content``.
     """
     criterion_text = _binary_criterion_block(criterion)
     guidelines_text = _guidelines_block(guidelines)
-    query_text = f"<input>{query}</input>\n\n" if query else ""
-    reference_text = (
-        f"<reference_submission>\n{reference_submission}\n</reference_submission>\n\n"
-        if reference_submission
-        else ""
+    query_text = _input_block(query)
+    reference_text = _reference_block(reference_submission)
+
+    return _concat(
+        guidelines_text,
+        criterion_text,
+        "\n\n",
+        query_text,
+        reference_text,
+        _submission_block(to_grade),
     )
-
-    return f"""{guidelines_text}{criterion_text}
-
-{query_text}{reference_text}<submission>
-{to_grade}
-</submission>"""
 
 
 def build_few_shot_user_prompt(
     criterion: Criterion,
-    to_grade: str,
+    to_grade: Content,
     examples: list[FewShotExample],
-    query: str | None = None,
+    query: Content | None = None,
     include_reason: bool = False,
-    reference_submission: str | None = None,
+    reference_submission: Content | None = None,
     *,
     guidelines: str | None = None,
-) -> str:
+) -> Content:
     """Build user prompt with few-shot examples for single-criterion evaluation.
 
     Args:
         criterion: The criterion to evaluate against.
-        to_grade: The submission text to evaluate.
+        to_grade: The submission to evaluate.
         examples: List of few-shot examples for this criterion.
         query: Optional input/query that prompted the submission.
         include_reason: If True, include reason in example format (if available).
@@ -280,34 +335,36 @@ def build_few_shot_user_prompt(
         guidelines: Optional rubric guidelines, as in ``build_user_prompt``.
 
     Returns:
-        Formatted user prompt with examples section.
+        Formatted user prompt with examples section: a ``str``, exactly as before, unless
+        a part (an example's submission included) holds an image, as in
+        ``build_user_prompt``.
 
     Raises:
-        TypeError: If ``guidelines`` is neither a ``str`` nor ``None``.
+        TypeError: If ``guidelines`` is neither a ``str`` nor ``None``, or a submission,
+            query or reference submission is not ``Content``.
     """
     criterion_text = _binary_criterion_block(criterion)
     guidelines_text = _guidelines_block(guidelines)
-    query_text = f"<input>{query}</input>\n\n" if query else ""
+    query_text = _input_block(query)
     examples_text = _format_few_shot_examples(examples, include_reason)
-    reference_text = (
-        f"<reference_submission>\n{reference_submission}\n</reference_submission>\n\n"
-        if reference_submission
-        else ""
+    reference_text = _reference_block(reference_submission)
+
+    return _concat(
+        guidelines_text,
+        criterion_text,
+        "\n\n",
+        examples_text,
+        "\n\n",
+        query_text,
+        reference_text,
+        _submission_block(to_grade),
     )
-
-    return f"""{guidelines_text}{criterion_text}
-
-{examples_text}
-
-{query_text}{reference_text}<submission>
-{to_grade}
-</submission>"""
 
 
 def _format_few_shot_examples(
     examples: list[FewShotExample],
     include_reason: bool,
-) -> str:
+) -> Content:
     """Format few-shot examples as XML for the prompt.
 
     Args:
@@ -315,20 +372,21 @@ def _format_few_shot_examples(
         include_reason: If True, include reason in format (if available).
 
     Returns:
-        XML-formatted examples section, or empty string if no examples.
+        XML-formatted examples section, or empty string if no examples: a ``str`` unless
+        an example's submission holds an image.
     """
     if not examples:
         return ""
 
-    parts = ["<examples>"]
+    lines: list[Content] = ["<examples>"]
     for i, ex in enumerate(examples, 1):
-        parts.append(f"<example_{i}>")
-        parts.append(f"<example_submission>{ex.submission}</example_submission>")
-        parts.extend(_example_judgment_lines(ex.verdict, None, ex.reason, include_reason))
-        parts.append(f"</example_{i}>")
-    parts.append("</examples>")
+        lines.append(f"<example_{i}>")
+        lines.append(_example_submission_block(ex.submission))
+        lines.extend(_example_judgment_lines(ex.verdict, None, ex.reason, include_reason))
+        lines.append(f"</example_{i}>")
+    lines.append("</examples>")
 
-    return "\n".join(parts)
+    return _lines(lines)
 
 
 def _example_judgment_lines(
@@ -563,59 +621,60 @@ def _multi_choice_criterion_block(criterion: Criterion) -> str:
 
 def build_multi_choice_user_prompt(
     criterion: Criterion,
-    to_grade: str,
-    query: str | None = None,
-    reference_submission: str | None = None,
+    to_grade: Content,
+    query: Content | None = None,
+    reference_submission: Content | None = None,
     *,
     guidelines: str | None = None,
-) -> str:
+) -> Content:
     """Build the user prompt for multi-choice criterion evaluation.
 
     Args:
         criterion: The criterion with options to evaluate against.
-        to_grade: The submission text to evaluate.
+        to_grade: The submission to evaluate.
         query: Optional input/query that prompted the submission.
         reference_submission: Optional exemplar response for grading context.
         guidelines: Optional rubric guidelines, as in ``build_user_prompt``.
 
     Returns:
-        Formatted user prompt with question and numbered options.
+        Formatted user prompt with question and numbered options: a ``str``, exactly as
+        before, unless a part holds an image, as in ``build_user_prompt``.
 
     Raises:
         ValueError: If criterion has no options (is binary).
-        TypeError: If ``guidelines`` is neither a ``str`` nor ``None``.
+        TypeError: If ``guidelines`` is neither a ``str`` nor ``None``, or a submission,
+            query or reference submission is not ``Content``.
     """
     criterion_text = _multi_choice_criterion_block(criterion)
     guidelines_text = _guidelines_block(guidelines)
-    query_text = f"<input>{query}</input>\n\n" if query else ""
-    reference_text = (
-        f"<reference_submission>\n{reference_submission}\n</reference_submission>\n\n"
-        if reference_submission
-        else ""
+    query_text = _input_block(query)
+    reference_text = _reference_block(reference_submission)
+
+    return _concat(
+        guidelines_text,
+        criterion_text,
+        "\n\n",
+        query_text,
+        reference_text,
+        _submission_block(to_grade),
     )
-
-    return f"""{guidelines_text}{criterion_text}
-
-{query_text}{reference_text}<submission>
-{to_grade}
-</submission>"""
 
 
 def build_multi_choice_few_shot_user_prompt(
     criterion: Criterion,
-    to_grade: str,
-    examples: list[tuple[str, int, str | None]],
-    query: str | None = None,
+    to_grade: Content,
+    examples: Sequence[tuple[Content, int, str | None]],
+    query: Content | None = None,
     include_reason: bool = False,
-    reference_submission: str | None = None,
+    reference_submission: Content | None = None,
     *,
     guidelines: str | None = None,
-) -> str:
+) -> Content:
     """Build user prompt with few-shot examples for multi-choice criterion.
 
     Args:
         criterion: The criterion with options to evaluate against.
-        to_grade: The submission text to evaluate.
+        to_grade: The submission to evaluate.
         examples: List of (submission, selected_index, reason) tuples. Index is 0-based.
         query: Optional input/query that prompted the submission.
         include_reason: If True, include reason in example format.
@@ -623,38 +682,40 @@ def build_multi_choice_few_shot_user_prompt(
         guidelines: Optional rubric guidelines, as in ``build_user_prompt``.
 
     Returns:
-        Formatted user prompt with examples section.
+        Formatted user prompt with examples section: a ``str``, exactly as before, unless
+        a part (an example's submission included) holds an image, as in
+        ``build_user_prompt``.
 
     Raises:
         ValueError: If criterion has no options (is binary).
-        TypeError: If ``guidelines`` is neither a ``str`` nor ``None``.
+        TypeError: If ``guidelines`` is neither a ``str`` nor ``None``, or a submission,
+            query or reference submission is not ``Content``.
     """
     criterion_text = _multi_choice_criterion_block(criterion)
     guidelines_text = _guidelines_block(guidelines)
-    query_text = f"<input>{query}</input>\n\n" if query else ""
-    reference_text = (
-        f"<reference_submission>\n{reference_submission}\n</reference_submission>\n\n"
-        if reference_submission
-        else ""
-    )
+    query_text = _input_block(query)
+    reference_text = _reference_block(reference_submission)
 
     # Format examples
     examples_text = _format_multi_choice_examples(criterion, examples, include_reason)
 
-    return f"""{guidelines_text}{criterion_text}
-
-{examples_text}
-
-{query_text}{reference_text}<submission>
-{to_grade}
-</submission>"""
+    return _concat(
+        guidelines_text,
+        criterion_text,
+        "\n\n",
+        examples_text,
+        "\n\n",
+        query_text,
+        reference_text,
+        _submission_block(to_grade),
+    )
 
 
 def _format_multi_choice_examples(
     criterion: Criterion,
-    examples: list[tuple[str, int, str | None]],
+    examples: Sequence[tuple[Content, int, str | None]],
     include_reason: bool,
-) -> str:
+) -> Content:
     """Format multi-choice few-shot examples as XML.
 
     Args:
@@ -663,22 +724,23 @@ def _format_multi_choice_examples(
         include_reason: If True, include reason in format.
 
     Returns:
-        XML-formatted examples section, or empty string if no examples.
+        XML-formatted examples section, or empty string if no examples: a ``str`` unless
+        an example's submission holds an image.
     """
     if not examples or criterion.options is None:
         return ""
 
-    parts = ["<examples>"]
+    lines: list[Content] = ["<examples>"]
     for i, (submission, selected_idx, reason) in enumerate(examples, 1):
-        parts.append(f"<example_{i}>")
-        parts.append(f"<example_submission>{submission}</example_submission>")
-        parts.extend(
+        lines.append(f"<example_{i}>")
+        lines.append(_example_submission_block(submission))
+        lines.extend(
             _example_judgment_lines(selected_idx, criterion.options, reason, include_reason)
         )
-        parts.append(f"</example_{i}>")
-    parts.append("</examples>")
+        lines.append(f"</example_{i}>")
+    lines.append("</examples>")
 
-    return "\n".join(parts)
+    return _lines(lines)
 
 
 # System prompt addition for multi-choice few-shot grading
@@ -863,13 +925,13 @@ def build_rubric_system_prompt(
 
 def build_rubric_user_prompt(
     criteria: Sequence[tuple[str, Criterion]],
-    to_grade: str,
-    query: str | None = None,
-    reference_submission: str | None = None,
+    to_grade: Content,
+    query: Content | None = None,
+    reference_submission: Content | None = None,
     *,
-    examples_text: str = "",
+    examples_text: Content = "",
     guidelines: str | None = None,
-) -> str:
+) -> Content:
     """Build the user prompt of an LLM judge's one call for a whole rubric.
 
     The rubric's guidelines first, when it has any, then every criterion in ``<criteria>``,
@@ -881,7 +943,7 @@ def build_rubric_user_prompt(
     Args:
         criteria: Each criterion with its id, in the order to list them. A multi-choice
             criterion is given as the judge is shown it (its options in the call's order).
-        to_grade: The submission text to evaluate.
+        to_grade: The submission to evaluate.
         query: Optional input/query that prompted the submission.
         reference_submission: Optional exemplar response for grading context.
         examples_text: The rendered few-shot examples (``_format_rubric_examples``), if
@@ -889,11 +951,13 @@ def build_rubric_user_prompt(
         guidelines: Optional rubric guidelines, as in ``build_user_prompt``.
 
     Returns:
-        The user prompt.
+        The user prompt: a ``str``, exactly as before, unless a part (an example's
+        submission included) holds an image, as in ``build_user_prompt``.
 
     Raises:
         ValueError: If ``criteria`` is empty.
-        TypeError: If ``guidelines`` is neither a ``str`` nor ``None``.
+        TypeError: If ``guidelines`` is neither a ``str`` nor ``None``, or a submission,
+            query, reference submission or ``examples_text`` is not ``Content``.
     """
     if not criteria:
         raise ValueError("Cannot build a rubric prompt without criteria")
@@ -907,29 +971,28 @@ def build_rubric_user_prompt(
         blocks.append(f'<rubric_criterion id="{criterion_id}">\n{block}\n</rubric_criterion>')
     criteria_text = "\n\n".join(blocks)
     guidelines_text = _guidelines_block(guidelines)
-    query_text = f"<input>{query}</input>\n\n" if query else ""
-    reference_text = (
-        f"<reference_submission>\n{reference_submission}\n</reference_submission>\n\n"
-        if reference_submission
-        else ""
+    query_text = _input_block(query)
+    reference_text = _reference_block(reference_submission)
+    examples_block = _concat(examples_text, "\n\n") if _normalize_content(examples_text) else ""
+
+    return _concat(
+        guidelines_text,
+        "<criteria>\n",
+        criteria_text,
+        "\n</criteria>\n\n",
+        examples_block,
+        query_text,
+        reference_text,
+        _submission_block(to_grade),
     )
-    examples_block = f"{examples_text}\n\n" if examples_text else ""
-
-    return f"""{guidelines_text}<criteria>
-{criteria_text}
-</criteria>
-
-{examples_block}{query_text}{reference_text}<submission>
-{to_grade}
-</submission>"""
 
 
 def _format_rubric_examples(
     examples: Sequence[
-        tuple[str, Sequence[tuple[str, Criterion, CriterionVerdict | int, str | None]]]
+        tuple[Content, Sequence[tuple[str, Criterion, CriterionVerdict | int, str | None]]]
     ],
     include_reason: bool,
-) -> str:
+) -> Content:
     """Format the few-shot examples of an LLM judge's one call for a whole rubric as XML.
 
     Each example is a whole training item: its submission, then a ``<judgment>`` per
@@ -950,7 +1013,8 @@ def _format_rubric_examples(
         include_reason: If True, a judgment with a reason shows it.
 
     Returns:
-        The ``<examples>`` block, or an empty string if there are no examples.
+        The ``<examples>`` block, or an empty string if there are no examples: a ``str``
+        unless an example's submission holds an image.
 
     Raises:
         ValueError: If a judgment gives an option index for a criterion without options.
@@ -958,18 +1022,18 @@ def _format_rubric_examples(
     if not examples:
         return ""
 
-    parts = ["<examples>"]
+    lines: list[Content] = ["<examples>"]
     for i, (submission, judgments) in enumerate(examples, 1):
-        parts.append(f"<example_{i}>")
-        parts.append(f"<example_submission>{submission}</example_submission>")
+        lines.append(f"<example_{i}>")
+        lines.append(_example_submission_block(submission))
         for criterion_id, criterion, label, reason in judgments:
-            parts.append(f'<judgment id="{criterion_id}">')
-            parts.extend(_example_judgment_lines(label, criterion.options, reason, include_reason))
-            parts.append("</judgment>")
-        parts.append(f"</example_{i}>")
-    parts.append("</examples>")
+            lines.append(f'<judgment id="{criterion_id}">')
+            lines.extend(_example_judgment_lines(label, criterion.options, reason, include_reason))
+            lines.append("</judgment>")
+        lines.append(f"</example_{i}>")
+    lines.append("</examples>")
 
-    return "\n".join(parts)
+    return _lines(lines)
 
 
 # ============================================================================

@@ -1595,13 +1595,15 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         # Pre-compute few-shot examples if training data provided
         # Note: For multi-choice, examples are stored as (submission, selected_index, reason)
         self._criterion_examples: dict[tuple[int, str], list[FewShotExample]] = {}
-        self._multi_choice_examples: dict[tuple[int, str], list[tuple[str, int, str | None]]] = {}
+        self._multi_choice_examples: dict[
+            tuple[int, str], list[tuple[Content, int, str | None]]
+        ] = {}
         # Under llm_calls="per_item": each LLM judge's examples, whole training items in the
         # order its one call per item shows them, each as (submission, labels, reasons): a
         # label per criterion of the training rubric (_item_labels; None where the item has
         # none) and the item's reason for it, if any
         self._item_examples: dict[
-            str, list[tuple[str, list[CriterionVerdict | int | None], list[str | None]]]
+            str, list[tuple[Content, list[CriterionVerdict | int | None], list[str | None]]]
         ] = {}
         if training_data is not None:
             self._prepare_examples()
@@ -1966,7 +1968,7 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
 
     def _select_multi_choice_examples(
         self, criterion_idx: int, judge_id: str
-    ) -> list[tuple[str, int, str | None]]:
+    ) -> list[tuple[Content, int, str | None]]:
         """Select few-shot examples for a multi-choice criterion and judge.
 
         Groups training items by their selected option index and balances
@@ -2821,7 +2823,7 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         rubric: Sequence[Criterion],
         presented: Sequence[tuple[str, Criterion]],
         shuffles: Sequence[list[int] | None],
-    ) -> list[tuple[str, list[tuple[str, Criterion, CriterionVerdict | int, str | None]]]]:
+    ) -> list[tuple[Content, list[tuple[str, Criterion, CriterionVerdict | int, str | None]]]]:
         """The few-shot examples of a judge's one call, each with its judgments as shown.
 
         Each of the judge's examples (``_item_examples``, drawn by

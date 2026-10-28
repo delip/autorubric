@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import json
 import re
 import sys
@@ -638,6 +639,67 @@ def test_user_prompt_builder_with_guidelines_starts_with_the_block(case: str) ->
 
 
 # ---------------------------------------------------------------------------
+# Text given as content parts
+# ---------------------------------------------------------------------------
+# As in ``tests/test_prompt_goldens.py``: every user-prompt and examples case, re-run with each
+# text it is given as content (submission, query, reference submission, ``examples_text`` and
+# every example's submission) passed as ``[text]`` or as ``[text[:k], text[k:]]``, builds
+# exactly the golden ``str``.
+
+TEXT_PART_FORMS: dict[str, Callable[[str], list[str]]] = {
+    "one_part": lambda text: [text],
+    "two_parts": lambda text: [text[: len(text) // 2], text[len(text) // 2 :]],
+}
+CASE_BUILDER_NAMES = ("build_rubric_user_prompt", "_format_rubric_examples")
+
+
+def _text_as_parts(
+    builder: Callable[..., Any], form: Callable[[str], list[str]], calls: list[object]
+) -> Callable[..., Any]:
+    """``builder``, with every text it is given as content passed in ``form`` instead.
+
+    The texts so passed are the submission, the query, the reference submission, the
+    rendered ``examples_text`` and each example's submission. Each call appends ``builder``
+    to ``calls``, so a test can tell the wrapper ran.
+    """
+    signature = inspect.signature(builder)
+
+    def as_parts(value: Any) -> Any:
+        return form(value) if isinstance(value, str) else value
+
+    def wrapped(*args: Any, **kwargs: Any) -> Any:
+        bound = signature.bind(*args, **kwargs)
+        for name in ("to_grade", "query", "reference_submission", "examples_text"):
+            if name in bound.arguments:
+                bound.arguments[name] = as_parts(bound.arguments[name])
+        if "examples" in bound.arguments:
+            bound.arguments["examples"] = [
+                (as_parts(submission), judgments)
+                for submission, judgments in bound.arguments["examples"]
+            ]
+        calls.append(builder)
+        return builder(*bound.args, **bound.kwargs)
+
+    return wrapped
+
+
+@pytest.mark.parametrize("form", sorted(TEXT_PART_FORMS))
+@pytest.mark.parametrize("case", sorted({**USER_CASES, **EXAMPLES_CASES}))
+def test_builder_given_text_as_parts_matches_golden(
+    case: str, form: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Text passed as a list of parts builds the golden prompt, as a ``str``."""
+    calls: list[object] = []
+    for name in CASE_BUILDER_NAMES:
+        wrapped = _text_as_parts(globals()[name], TEXT_PART_FORMS[form], calls)
+        monkeypatch.setitem(globals(), name, wrapped)
+    prompt = BUILDER_CASES[case]()
+    assert len(calls) == 1
+    assert isinstance(prompt, str)
+    assert prompt == _read_golden(BUILDERS_DIR / f"{case}.txt")
+
+
+# ---------------------------------------------------------------------------
 # Literal-text tests: the reviewed prompt text, written out by hand, not read from this
 # module's own golden files or from ``autorubric.prompts`` constants, so they check the text
 # itself where the goldens check only that it is stable. A deliberate change to the prompt
@@ -1020,6 +1082,9 @@ def test_a_judgment_is_rendered_as_a_per_criterion_example_renders_it(
         ],
         include_reason,
     )
+    assert isinstance(binary_example, str)
+    assert isinstance(option_example, str)
+    assert isinstance(whole, str)
 
     def judgment_of(example: str) -> str:
         return example.split("</example_submission>\n", 1)[1].split("\n</example_1>", 1)[0]

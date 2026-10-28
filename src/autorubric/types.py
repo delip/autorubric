@@ -1342,7 +1342,8 @@ class FewShotExample:
     """A single few-shot example for criterion evaluation.
 
     Attributes:
-        submission: The content that was evaluated. Can be plain text or JSON-serialized.
+        submission: The content that was evaluated: text (plain or JSON-serialized), an
+            ``Image``, or a document of text and images (``Content``).
         verdict: The ground truth verdict for this criterion.
         reason: Optional explanation for why the verdict was assigned. ``CriterionGrader``
             takes it from the training item's ``DataItem.ground_truth_reasons`` for this
@@ -1357,7 +1358,7 @@ class FewShotExample:
         ... )
     """
 
-    submission: str
+    submission: Content
     verdict: CriterionVerdict
     reason: str | None = None
 

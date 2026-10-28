@@ -34,7 +34,9 @@ Golden text files are read with universal newlines, so a CRLF checkout (Windows 
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import hashlib
+import inspect
 import json
 import sys
 from collections.abc import Callable
@@ -497,6 +499,7 @@ def test_guidelines_text_goes_into_the_block_verbatim() -> None:
     """Guidelines are never stripped or rewritten; braces are not format fields."""
     text = "  Leading and trailing space.\n\n{0} {name} %s\n"
     prompt = build_user_prompt(POSITIVE, PLAIN, guidelines=text)
+    assert isinstance(prompt, str)
     assert prompt.startswith(f"<guidelines>\n{text}\n\nThese guidelines apply")
     assert prompt.endswith(_read_golden(BUILDERS_DIR / "user__binary_positive.txt"))
 
@@ -524,6 +527,75 @@ async def test_grader_sends_golden_prompts_for_blank_guidelines(blank: str) -> N
     expected = json.loads(GRADER_CALLS_PATH.read_text(encoding="utf-8"))
     actual = await _capture_grader_calls(guidelines=blank)
     assert actual == expected
+
+
+# ---------------------------------------------------------------------------
+# Text given as content parts
+# ---------------------------------------------------------------------------
+# Content holding only text is that text however it is split into parts, so every builder
+# case, re-run with each text it is given as content (submission, query, reference submission
+# and every few-shot example's submission) passed as ``[text]`` or as ``[text[:k], text[k:]]``,
+# builds exactly the golden ``str``. The builders the cases call are wrapped in this module's
+# namespace, where the case lambdas look them up.
+
+TEXT_PART_FORMS: dict[str, Callable[[str], list[str]]] = {
+    "one_part": lambda text: [text],
+    "two_parts": lambda text: [text[: len(text) // 2], text[len(text) // 2 :]],
+}
+CASE_BUILDER_NAMES = (
+    "build_user_prompt",
+    "build_few_shot_user_prompt",
+    "build_multi_choice_user_prompt",
+    "build_multi_choice_few_shot_user_prompt",
+)
+
+
+def _text_as_parts(
+    builder: Callable[..., Any], form: Callable[[str], list[str]], calls: list[object]
+) -> Callable[..., Any]:
+    """``builder``, with every text it is given as content passed in ``form`` instead.
+
+    The texts so passed are the submission, the query, the reference submission and each
+    few-shot example's submission (a ``FewShotExample``'s, or the first element of an example
+    tuple). Each call appends ``builder`` to ``calls``, so a test can tell the wrapper ran.
+    """
+    signature = inspect.signature(builder)
+
+    def as_parts(value: Any) -> Any:
+        return form(value) if isinstance(value, str) else value
+
+    def wrapped(*args: Any, **kwargs: Any) -> Any:
+        bound = signature.bind(*args, **kwargs)
+        for name in ("to_grade", "query", "reference_submission"):
+            if name in bound.arguments:
+                bound.arguments[name] = as_parts(bound.arguments[name])
+        if "examples" in bound.arguments:
+            bound.arguments["examples"] = [
+                dataclasses.replace(example, submission=as_parts(example.submission))
+                if isinstance(example, FewShotExample)
+                else (as_parts(example[0]), *example[1:])
+                for example in bound.arguments["examples"]
+            ]
+        calls.append(builder)
+        return builder(*bound.args, **bound.kwargs)
+
+    return wrapped
+
+
+@pytest.mark.parametrize("form", sorted(TEXT_PART_FORMS))
+@pytest.mark.parametrize("case", sorted(BUILDER_CASES))
+def test_user_prompt_builder_given_text_as_parts_matches_golden(
+    case: str, form: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Text passed as a list of parts builds the golden prompt, as a ``str``."""
+    calls: list[object] = []
+    for name in CASE_BUILDER_NAMES:
+        wrapped = _text_as_parts(globals()[name], TEXT_PART_FORMS[form], calls)
+        monkeypatch.setitem(globals(), name, wrapped)
+    prompt = BUILDER_CASES[case]()
+    assert len(calls) == 1
+    assert isinstance(prompt, str)
+    assert prompt == _read_golden(BUILDERS_DIR / f"{case}.txt")
 
 
 # ---------------------------------------------------------------------------
