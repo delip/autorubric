@@ -1356,7 +1356,14 @@ class TestRealSdkClient:
 # =============================================================================
 
 
-async def _sdk_attempts(headers: dict[str, str]) -> list[httpx2.Request]:
+_LARGE_STATE = {**STATE, "submission": STATE["submission"] * 64}
+"""A state whose request body is large enough for the SDK to compress (at least 1024
+bytes), when it can."""
+
+
+async def _sdk_attempts(
+    headers: dict[str, str], state: dict[str, str] = STATE
+) -> list[httpx2.Request]:
     """A System One request's two attempts (a 503, then a 200) as the installed SDK sends
     them, with ``headers`` as its additional headers."""
     replies = [
@@ -1376,56 +1383,102 @@ async def _sdk_attempts(headers: dict[str, str]) -> list[httpx2.Request]:
         transport=httpx2.MockTransport(handle),
     )
     async with sdk_client:
-        await sdk_client.system_one(state=STATE, questions=QUESTIONS)
+        await sdk_client.system_one(state=state, questions=QUESTIONS)
     return sent
+
+
+async def _plain_request(attempt: httpx2.Request) -> httpx2.Request:
+    """``attempt``'s URL and body as plain ``httpx2`` sends them."""
+    plain: list[httpx2.Request] = []
+
+    def handle(request: httpx2.Request) -> httpx2.Response:
+        plain.append(request)
+        return httpx2.Response(200)
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(handle)) as http_client:
+        await http_client.post(attempt.url, content=attempt.content)
+    (request,) = plain
+    return request
+
+
+async def _sdk_compresses() -> bool:
+    """Whether the installed SDK compresses large request bodies: it does with zstd, which
+    needs Python 3.14 or ``backports.zstd``, and asking for zstd fails without it."""
+    try:
+        sdk_client = typesafe_sdk.AsyncTypeSafeClient(api_key="sk-test", compression="zstd")
+    except typesafe_sdk.TypeSafeError:
+        return False
+    async with sdk_client:
+        return True
 
 
 class TestHeadersTheSdkSets:
     """The client rejects, in ``extra_headers``, exactly the headers the SDK
-    sets on every request, since it replaces any value given for them. Both halves are
-    pinned against the installed SDK."""
+    sets itself, since it replaces any value given for them or, for ``Content-Encoding``,
+    sends it on bodies it does not encode. Both halves are pinned against the installed SDK."""
 
     @pytest.mark.asyncio
     async def test_are_exactly_the_headers_the_config_rejects(self):
         """A header the SDK sets is one a System One request carries (on its first attempt
-        or a retry) that plain ``httpx2`` would not send, or not with that value."""
-        attempts = await _sdk_attempts({})
-        plain: list[httpx2.Request] = []
+        or a retry, with a small body or a large one) that plain ``httpx2`` would not send,
+        or not with that value. ``Content-Encoding`` is set only on a large body, and only
+        where the SDK can compress it."""
+        small = await _sdk_attempts({})
+        large = await _sdk_attempts({}, state=_LARGE_STATE)
+        assert len(small[0].content) < 1024 <= len(json.dumps(_LARGE_STATE))
 
-        def handle(request: httpx2.Request) -> httpx2.Response:
-            plain.append(request)
-            return httpx2.Response(200)
-
-        async with httpx2.AsyncClient(transport=httpx2.MockTransport(handle)) as http_client:
-            await http_client.post(attempts[0].url, content=attempts[0].content)
-        (plain_request,) = plain
-
-        set_by_sdk = {
-            name
-            for attempt in attempts
-            for name, value in attempt.headers.items()
-            if plain_request.headers.get(name) != value
-        }
-        assert set_by_sdk == _SDK_OWNED_HEADERS
-        assert "x-typesafe-retry-count" in attempts[1].headers  # set on retries only
+        set_by_sdk = set()
+        for attempt in small + large:
+            plain_request = await _plain_request(attempt)
+            set_by_sdk |= {
+                name
+                for name, value in attempt.headers.items()
+                if plain_request.headers.get(name) != value
+            }
+        compressed = {"content-encoding"} if await _sdk_compresses() else set()
+        assert set_by_sdk == _SDK_OWNED_HEADERS - ({"content-encoding"} - compressed)
+        assert "x-typesafe-retry-count" in small[1].headers  # set on retries only
+        assert not [attempt for attempt in small if "content-encoding" in attempt.headers]
 
     @pytest.mark.asyncio
     async def test_the_sdk_replaces_any_value_given_for_them(self):
-        given = {name: f"given-{name}" for name in _SDK_OWNED_HEADERS}
+        """Every one but ``Content-Encoding``, which the next test covers."""
+        given = {name: f"given-{name}" for name in _SDK_OWNED_HEADERS - {"content-encoding"}}
         for attempt in await _sdk_attempts(given):
             assert not [value for value in attempt.headers.values() if value.startswith("given-")]
+
+    @pytest.mark.asyncio
+    async def test_a_content_encoding_given_labels_bodies_that_are_not_encoded(self):
+        """The SDK sends a ``Content-Encoding`` given on every body it does not compress,
+        which is plain JSON, so an endpoint would fail to decode it. On a body it compresses
+        the SDK replaces the value with its own."""
+        given = {"Content-Encoding": "gzip"}
+        for attempt in await _sdk_attempts(given):
+            assert attempt.headers["content-encoding"] == "gzip"
+            assert json.loads(attempt.content)["state"] == STATE
+        compresses = await _sdk_compresses()
+        for attempt in await _sdk_attempts(given, state=_LARGE_STATE):
+            if compresses:
+                assert attempt.headers["content-encoding"] == "zstd"
+            else:
+                assert attempt.headers["content-encoding"] == "gzip"
+                assert json.loads(attempt.content)["state"] == _LARGE_STATE
 
     @pytest.mark.parametrize("name", sorted(_SDK_OWNED_HEADERS))
     @pytest.mark.parametrize("case", [str.lower, str.upper, str.title])
     def test_naming_one_fails_at_construction(self, name, case):
         """The value given would never be sent (a gateway expecting it would refuse every
-        request), so naming one, in any letter case, fails instead. The message names the
-        header, never its value."""
+        request), or for ``Content-Encoding`` would mislabel bodies, so naming one, in any
+        letter case, fails instead. The message names the header, never its value."""
         name = case(name)
         with pytest.raises(ValueError, match="extra_headers") as excinfo:
             DecisionModelClient(dm_config(extra_headers={"X-Team": "evals", name: "SECRET"}))
         assert repr(name) in str(excinfo.value)
         assert "SECRET" not in str(excinfo.value)
+
+    def test_a_content_encoding_header_says_the_sdk_compresses_bodies(self):
+        with pytest.raises(ValueError, match="each request body it compresses"):
+            DecisionModelClient(dm_config(extra_headers={"Content-Encoding": "gzip"}))
 
     def test_an_authorization_header_points_to_api_key(self):
         with pytest.raises(ValueError, match="api_key"):

@@ -165,6 +165,7 @@ _SDK_OWNED_HEADERS = frozenset(
     {
         "accept",
         "authorization",
+        "content-encoding",  # on a body the SDK compresses
         "content-type",
         "user-agent",
         "x-typesafe-retry-count",
@@ -172,9 +173,12 @@ _SDK_OWNED_HEADERS = frozenset(
         "x-typesafe-sdk",
     }
 )
-"""The headers (lowercased) the TypeSafe SDK sets on every System One request, replacing
+"""The headers (lowercased) the TypeSafe SDK sets itself on System One requests, replacing
 any value given for them: ``Authorization`` carries the bearer API key, and
-``X-TypeSafe-Retry-Count`` is set on retries only. Header names are case-insensitive."""
+``X-TypeSafe-Retry-Count`` is set on retries only. ``Content-Encoding`` is set only on a
+body the SDK compresses (one of at least 1024 bytes, when zstd is available: Python 3.14 or
+``backports.zstd``); a value given for it would be sent on every other body, which is not
+encoded. Header names are case-insensitive."""
 
 
 def _check_extra_headers(headers: Mapping[str, str], source: str) -> None:
@@ -203,6 +207,12 @@ def _check_extra_headers(headers: Mapping[str, str], source: str) -> None:
                 "line breaks or leading or trailing whitespace. The value is not shown."
             ) from None
         if name.lower() in _SDK_OWNED_HEADERS:
+            if name.lower() == "content-encoding":
+                raise ValueError(
+                    f"{source} cannot set {name!r}: the TypeSafe SDK sets that header on each "
+                    "request body it compresses, and a value given would be sent on bodies it "
+                    "does not compress, which are not encoded."
+                )
             hint = (
                 " The API key is sent as the bearer token of the Authorization header: set "
                 "it with api_key or the TYPESAFE_API_KEY environment variable."
