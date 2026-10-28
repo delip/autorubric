@@ -35,6 +35,13 @@ from tenacity import (
     wait_exponential,
 )
 
+from autorubric.content import (
+    Content,
+    Image,
+    _content_digest,
+    _content_preview,
+    _normalize_content,
+)
 from autorubric.rate_limit import RateLimitPool
 from autorubric.types import _as_int
 
@@ -578,8 +585,36 @@ def _calculate_completion_cost(response: Any) -> float | None:
 _debug_console = Console()
 
 
-def _print_debug_prompt(system_prompt: str, user_prompt: str, model: str) -> None:
-    """Print the fully constructed LLM prompt using Rich formatting."""
+def _user_message(user_prompt: Content) -> dict[str, Any]:
+    """The chat message that carries ``user_prompt`` to the model.
+
+    Text is sent as the message's content, a plain string. A document (content holding an
+    image) is sent as a list of OpenAI-style content parts in the document's order: a
+    ``{"type": "text", "text": ...}`` part for each run of text and an
+    ``{"type": "image_url", "image_url": {"url": ...}}`` part for each image, whose URL is
+    the image's ``data:`` URL (``Image._data_url``). LiteLLM translates these parts for
+    providers with another image format.
+    """
+    user = _normalize_content(user_prompt)
+    if isinstance(user, str):
+        return {"role": "user", "content": user}
+    return {
+        "role": "user",
+        "content": [
+            {"type": "image_url", "image_url": {"url": part._data_url}}
+            if isinstance(part, Image)
+            else {"type": "text", "text": part}
+            for part in user
+        ],
+    }
+
+
+def _print_debug_prompt(system_prompt: str, user_prompt: Content, model: str) -> None:
+    """Print the fully constructed LLM prompt using Rich formatting.
+
+    The user prompt is shown as ``_content_preview`` renders it, with an ``[image: ...]``
+    marker in place of each image.
+    """
     _debug_console.print()
     _debug_console.rule(f"[bold cyan]DEBUG PROMPT — {model}[/bold cyan]")
     _debug_console.print(
@@ -587,7 +622,7 @@ def _print_debug_prompt(system_prompt: str, user_prompt: str, model: str) -> Non
     )
     _debug_console.print(
         Panel(
-            Syntax(user_prompt, "xml", theme="monokai", word_wrap=True),
+            Syntax(_content_preview(user_prompt), "xml", theme="monokai", word_wrap=True),
             title="[bold yellow]User Prompt[/bold yellow]",
             border_style="yellow",
         )
@@ -950,7 +985,7 @@ class LLMClient:
         self,
         model: str,
         system_prompt: str,
-        user_prompt: str,
+        user_prompt: Content,
         response_format: type | None = None,
         overrides: dict[str, Any] | None = None,
     ) -> str:
@@ -963,7 +998,11 @@ class LLMClient:
         Args:
             model: Model identifier sent with the request.
             system_prompt: System message for the LLM.
-            user_prompt: User message for the LLM.
+            user_prompt: User message for the LLM. Text (a sequence of strings alone
+                included, as their concatenation) enters the key as it is, the key it had
+                before images existed; a document holding an image enters it as
+                ``<content sha256=...>`` with its ``_content_digest``, so documents whose
+                images hold the same bytes share a key wherever the images are read from.
             response_format: Optional Pydantic model class for structured output.
             overrides: The per-call overrides passed to ``generate``. A ``temperature``
                 override replaces ``config.temperature`` in the key, so an override never
@@ -974,6 +1013,8 @@ class LLMClient:
                 which earlier releases keyed this way but did not send, gets a key of its
                 own.
         """
+        user = _normalize_content(user_prompt)
+        user_field = user if isinstance(user, str) else f"<content sha256={_content_digest(user)}>"
         temperature = (overrides or {}).get("temperature", self.config.temperature)
         schema_name = response_format.__name__ if response_format else "str"
         thinking_config = self.config.get_thinking_config()
@@ -984,7 +1025,7 @@ class LLMClient:
         top_p = self.config.top_p
         top_p_str = f"{top_p}:top_p_sent=True" if top_p is not None and top_p == 0 else top_p
         content = (
-            f"{model}:{system_prompt}:{user_prompt}:{schema_name}"
+            f"{model}:{system_prompt}:{user_field}:{schema_name}"
             f":temp={temperature}"
             f":top_p={top_p_str}"
             f":max_tokens={self.config.max_tokens}"
@@ -1020,7 +1061,7 @@ class LLMClient:
     async def generate(
         self,
         system_prompt: str,
-        user_prompt: str,
+        user_prompt: Content,
         response_format: type[T] | None = None,
         use_cache: bool | None = None,
         return_thinking: bool = False,
@@ -1031,7 +1072,10 @@ class LLMClient:
 
         Args:
             system_prompt: System message for the LLM.
-            user_prompt: User message for the LLM.
+            user_prompt: User message for the LLM: text, or a document holding images,
+                sent as content parts (see ``_user_message``). Its images are expected
+                to hold their bytes already (``Image._loaded()``); one that does not is
+                read from its file here.
             response_format: Optional Pydantic model class for structured output.
                 When provided, LiteLLM uses the model's JSON schema to constrain
                 the LLM output and returns a validated Pydantic instance.
@@ -1069,6 +1113,8 @@ class LLMClient:
             pydantic.ValidationError: If response doesn't match schema, including a JSON
                 reply that is not an object (with or without a thinking trace).
         """
+        user = _normalize_content(user_prompt)
+
         # Determine caching behavior for this request
         should_cache = use_cache if use_cache is not None else self.config.cache_enabled
 
@@ -1082,7 +1128,7 @@ class LLMClient:
             cache_key = self._cache_key(
                 self.config.model,
                 system_prompt,
-                user_prompt,
+                user,
                 response_format,
                 kwargs,
             )
@@ -1112,14 +1158,14 @@ class LLMClient:
                         }
                     ],
                 },
-                {"role": "user", "content": user_prompt},
+                _user_message(user),
             ]
         else:
             # Standard message format for other providers
             # OpenAI/Deepseek: Caching is automatic for prompts ≥1024 tokens
             messages = [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
+                _user_message(user),
             ]
 
         params: dict[str, Any] = {
@@ -1179,7 +1225,7 @@ class LLMClient:
         import autorubric
 
         if autorubric.debug:
-            _print_debug_prompt(system_prompt, user_prompt, model)
+            _print_debug_prompt(system_prompt, user, model)
 
         # Make request with retries
         retry_decorator = self._get_retry_decorator()
@@ -1335,7 +1381,7 @@ class LLMClient:
 # Convenience function for simple usage
 async def generate(
     system_prompt: str,
-    user_prompt: str,
+    user_prompt: Content,
     model: str,
     response_format: type[T] | None = None,
     **kwargs: Any,
@@ -1346,7 +1392,7 @@ async def generate(
 
     Args:
         system_prompt: System message for the LLM.
-        user_prompt: User message for the LLM.
+        user_prompt: User message for the LLM: text, or a document holding images.
         model: Model identifier (REQUIRED).
         response_format: Optional Pydantic model for structured output.
         **kwargs: Additional LLMConfig parameters.
