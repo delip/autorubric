@@ -17,6 +17,12 @@ included), ``build_questions`` poses each criterion of the effective rubric as o
 (id ``question_id(criterion_idx)``), and ``answer_to_report`` turns each answer into a
 ``CriterionReport`` carrying the answer's ``probabilities`` and the ``selection_confidence``
 of the selected outcome.
+
+A submission, query or reference submission may hold images. The state then carries a
+deterministic reference to each image, ``<image:{sha256}>`` (``_state_text``), and the
+request sends the images as System One assets under those references: ``state_images``
+collects them, and ``DecisionModelClient.prepare_assets`` fits each into the envelope the
+model accepts (``_fit_for_system_one``), since System One never resizes an image itself.
 """
 
 from __future__ import annotations
@@ -24,6 +30,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import io
 import json
 import logging
 import math
@@ -38,8 +45,11 @@ from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast, get_args
 from urllib.parse import urlsplit
 
 import diskcache
+import PIL.Image as pil_image
+from PIL import ExifTags, ImageOps
 from pydantic import BaseModel
 
+from autorubric.content import Content, Image, _images, _normalize_content
 from autorubric.llm import _open_response_cache
 from autorubric.prompts import (
     CANNOT_ASSESS_DEFINITION,
@@ -81,6 +91,7 @@ if TYPE_CHECKING:
         Score,
         SystemOneResponse,
     )
+    from typesafe_sdk import Image as AssetImage
 
 logger = logging.getLogger(__name__)
 
@@ -180,6 +191,12 @@ body the SDK compresses (one of at least 1024 bytes, when zstd is available: Pyt
 ``backports.zstd``); a value given for it would be sent on every other body, which is not
 encoded. Header names are case-insensitive."""
 
+_IMAGES_HEADER = "TypeSafe-Danger-Zone-Images"
+"""The header, sent with the value ``"true"``, that System One requires on every request
+carrying an image. The SDK defines no constant for it. autorubric sets it on a request that
+carries images, and only on such a request, so a text-only request is exactly what it is
+without image support."""
+
 
 def _check_extra_headers(headers: Mapping[str, str], source: str) -> None:
     """Raise ``ValueError`` for a header no request can carry as given.
@@ -207,6 +224,11 @@ def _check_extra_headers(headers: Mapping[str, str], source: str) -> None:
                 "line breaks or leading or trailing whitespace. The value is not shown."
             ) from None
         lowered = name.lower()
+        if lowered == _IMAGES_HEADER.lower():
+            raise ValueError(
+                f"{source} cannot set {name!r}: autorubric sets that header itself on each "
+                "request that carries images, and only on those."
+            )
         if lowered == "content-encoding":
             raise ValueError(
                 f"{source} cannot set {name!r}: the TypeSafe SDK sets that header on each "
@@ -327,10 +349,11 @@ class DecisionModelConfig:
             and kept as a plain ``int``, a ``bool`` or a float is refused.
         cache_enabled: Cache responses on disk, as in ``LLMConfig``. There is one entry per
             request, keyed by the model, the resolved base URL, the state and the questions,
-            plus the ``judge_id`` of any judge other than a lone ``judge_model_config``
-            judge, so that judges of one decision model keep their own answers. A hit
-            returns the stored response, usage included, without a request. Failed requests
-            are never cached.
+            plus, for a request carrying images, their asset references (each image's
+            SHA-256, as given, not as fitted), and the ``judge_id`` of any judge other than
+            a lone ``judge_model_config`` judge, so that judges of one decision model keep
+            their own answers. A hit returns the stored response, usage included, without a
+            request. Failed requests are never cached.
         cache_dir: Directory of the response cache. It is the same store that LLM judges
             use when their ``cache_dir`` matches.
         cache_ttl: Lifetime of a cache entry in seconds; ``None`` (default) never expires.
@@ -345,7 +368,8 @@ class DecisionModelConfig:
             ``api_key``), ``Accept``, ``Content-Type``, ``User-Agent``, ``X-TypeSafe-SDK``,
             ``X-TypeSafe-Runtime`` and ``X-TypeSafe-Retry-Count`` itself on every request,
             replacing any value given, so naming one of them, in any letter case, raises
-            ``ValueError`` too.
+            ``ValueError`` too. So does ``TypeSafe-Danger-Zone-Images``, which autorubric
+            sets itself on each request that carries images, and only on those.
         binary_framing: How a binary criterion is posed. The criterion's ``requirement`` is
             always sent verbatim; only the structure around it differs.
 
@@ -528,6 +552,181 @@ def _canonical_json(value: object) -> str:
     return json.dumps(value, separators=(",", ":"), default=_json_fallback)
 
 
+# =============================================================================
+# Images: fitting each image into the envelope System One accepts
+# =============================================================================
+
+_JEV_IMAGE_ENVELOPE: Mapping[str, Any] = {
+    "min_side_px": 280,
+    "max_side_px": 1568,
+    "max_image_bytes": 16 * 1024 * 1024,
+    "image_formats": ["png", "jpeg"],
+}
+"""The images Jev accepts: PNG or JPEG (an animated PNG refused), 280 to 1568 pixels per
+side inclusive, at most 16 MiB each. System One never resizes an image, and one image
+outside these limits fails the whole request, so every image is fitted into them first
+(``_fit_for_system_one``). Keys: ``min_side_px``, ``max_side_px``, ``max_image_bytes`` and
+``image_formats`` (System One's names, ``"png"`` and ``"jpeg"``)."""
+
+_SYSTEM_ONE_FORMATS = {"PNG": "png", "JPEG": "jpeg"}
+"""System One's names for the image formats it reads, by Pillow's format names. A JPEG
+holding several pictures (Pillow's ``"MPO"``) is not among them: it is re-encoded as its
+first picture."""
+
+
+def _sdk_image_type(typesafe: ModuleType) -> type[AssetImage]:
+    """The SDK's ``Image`` asset type, or an ``ImportError`` saying which SDK provides it."""
+    asset_type = getattr(typesafe, "Image", None)
+    if asset_type is None:
+        raise ImportError(
+            "Sending images to a decision model needs typesafe-sdk 0.7.5 or later, whose "
+            "typesafe_sdk.Image carries them, and the installed typesafe-sdk has no Image. "
+            "Upgrade it with: pip install -U 'autorubric[typesafe]' (which requires "
+            "typesafe-sdk>=0.7.5)",
+            name="typesafe_sdk",
+        )
+    return asset_type
+
+
+def _system_one_size(
+    width: int, height: int, *, min_side: int, max_side: int
+) -> tuple[int, int, int, int]:
+    """The size an image of ``width`` x ``height`` pixels is sent at.
+
+    An image whose sides are all in ``[min_side, max_side]`` keeps its size. Otherwise it is
+    scaled, keeping its aspect ratio: down so that its longest side is ``max_side`` when that
+    side is longer; else up so that its shortest side is ``min_side``, as far as its longest
+    side stays at most ``max_side``. A side still shorter than ``min_side`` (an image too
+    elongated to fit by scaling, e.g. 953 x 89, scaled to 1568 x 146) is then padded to
+    ``min_side`` on a canvas the image is centered on (1568 x 280). Sides are rounded to the
+    nearest pixel (Python's ``round``), never below 1.
+
+    Returns:
+        ``(new_width, new_height, canvas_width, canvas_height)``: the scaled size, and the
+        size of the canvas it is centered on, equal to the scaled size when nothing is
+        padded.
+    """
+    longest, shortest = max(width, height), min(width, height)
+    if longest > max_side:
+        scale = max_side / longest
+    elif shortest < min_side:
+        scale = min(min_side / shortest, max_side / longest)
+    else:
+        return width, height, width, height
+    new_width = min(max(round(width * scale), 1), max_side)
+    new_height = min(max(round(height * scale), 1), max_side)
+    return new_width, new_height, max(new_width, min_side), max(new_height, min_side)
+
+
+def _passes_through(
+    opened: pil_image.Image, system_one_format: str | None, size: int, envelope: Mapping[str, Any]
+) -> bool:
+    """Whether System One takes the decoded image ``opened``, of ``size`` bytes, as it is.
+
+    It does when the image is a PNG or plain JPEG in ``envelope["image_formats"]``, still
+    (one frame), not rotated by its EXIF orientation (System One ignores the tag), a JPEG
+    baseline (not progressive) in mode L or RGB, with every side within the envelope's
+    bounds, and at most ``envelope["max_image_bytes"]`` bytes.
+    """
+    min_side, max_side = envelope["min_side_px"], envelope["max_side_px"]
+    return (
+        system_one_format is not None
+        and system_one_format in envelope["image_formats"]
+        and not getattr(opened, "is_animated", False)
+        and opened.getexif().get(ExifTags.Base.Orientation, 1) == 1
+        and (
+            system_one_format != "jpeg"
+            or (not opened.info.get("progressive") and opened.mode in ("L", "RGB"))
+        )
+        and all(min_side <= side <= max_side for side in opened.size)
+        and size <= envelope["max_image_bytes"]
+    )
+
+
+def _fit_for_system_one(
+    image: Image, *, envelope: Mapping[str, Any] = _JEV_IMAGE_ENVELOPE
+) -> tuple[bytes, str]:
+    """``image`` as it is sent to System One: its bytes and format (``"png"`` or ``"jpeg"``).
+
+    An image System One takes as it is (``_passes_through``) is sent as its original bytes,
+    unchanged. Any other is re-encoded from its first frame (an animated PNG, GIF or WebP,
+    or a JPEG holding several pictures, sends its first), turned upright by its EXIF
+    orientation (``ImageOps.exif_transpose``), and resized with Lanczos resampling to the
+    size ``_system_one_size`` gives, centered on a canvas padded with white (transparent
+    white for an image with transparency) when a side is padded. It is encoded as a PNG
+    when it came from a PNG, GIF or WebP or has transparency (as RGBA), else as a baseline
+    JPEG in mode L or RGB (a CMYK JPEG, for one, becomes RGB), by
+    ``typesafe_sdk.Image.from_pil``, with the SDK's encoder settings (JPEG quality 95); when
+    the envelope lists only one of the two formats, that one is used, an image with
+    transparency then flattened onto white for a JPEG. Fitting reads no file but the image's
+    own and is deterministic for a given Pillow version.
+
+    Args:
+        image: The image.
+        envelope: The images the model accepts (see ``_JEV_IMAGE_ENVELOPE``).
+
+    Raises:
+        ImportError: If an image needs re-encoding and the installed TypeSafe SDK has no
+            ``Image`` (before 0.7.5).
+        OSError: If a file-backed image that does not hold its bytes cannot be read.
+        ValueError: If the image cannot be decoded, if the envelope lists neither PNG nor
+            JPEG, or if the fitted image is still over ``envelope["max_image_bytes"]``. The
+            message names the image.
+    """
+    data = image.read_bytes()
+    try:
+        opened = pil_image.open(io.BytesIO(data))
+        opened.load()
+    except (OSError, SyntaxError, ValueError, EOFError, pil_image.DecompressionBombError) as error:
+        raise ValueError(
+            f"{image!r} cannot be sent to a decision model: Pillow cannot decode it ({error})"
+        ) from error
+    with opened:
+        system_one_format = _SYSTEM_ONE_FORMATS.get(opened.format or "")
+        if _passes_through(opened, system_one_format, len(data), envelope):
+            assert system_one_format is not None  # checked by _passes_through
+            return data, system_one_format
+        source_format = opened.format
+        frame = ImageOps.exif_transpose(opened)  # a copy of the first frame, upright
+
+    if frame.has_transparency_data:
+        frame = frame.convert("RGBA")
+    elif frame.mode not in ("L", "RGB"):
+        frame = frame.convert("L" if frame.mode == "1" else "RGB")
+    formats = envelope["image_formats"]
+    wanted = "png" if source_format in ("PNG", "GIF", "WEBP") or frame.mode == "RGBA" else "jpeg"
+    target = wanted if wanted in formats else ("jpeg" if wanted == "png" else "png")
+    if target not in formats:
+        raise ValueError(
+            f"{image!r} cannot be sent to a decision model: it accepts {list(formats)!r}, "
+            "and an image can be encoded only as PNG or JPEG"
+        )
+    if target == "jpeg" and frame.mode == "RGBA":
+        flattened = pil_image.new("RGB", frame.size, (255, 255, 255))
+        flattened.paste(frame, mask=frame.getchannel("A"))
+        frame = flattened
+
+    new_width, new_height, canvas_width, canvas_height = _system_one_size(
+        *frame.size, min_side=envelope["min_side_px"], max_side=envelope["max_side_px"]
+    )
+    if (new_width, new_height) != frame.size:
+        frame = frame.resize((new_width, new_height), pil_image.Resampling.LANCZOS)
+    if (canvas_width, canvas_height) != frame.size:
+        white = {"RGBA": (255, 255, 255, 0), "RGB": (255, 255, 255), "L": 255}[frame.mode]
+        canvas = pil_image.new(frame.mode, (canvas_width, canvas_height), white)
+        canvas.paste(frame, ((canvas_width - new_width) // 2, (canvas_height - new_height) // 2))
+        frame = canvas
+
+    encoded = cast(bytes, _sdk_image_type(_import_typesafe_sdk()).from_pil(frame, target).data)
+    if len(encoded) > envelope["max_image_bytes"]:
+        raise ValueError(
+            f"{image!r} cannot be sent to a decision model: fitted to "
+            f"{canvas_width} x {canvas_height} pixels it is still {len(encoded)} bytes, over "
+            f"the {envelope['max_image_bytes']}-byte limit"
+        )
+    return encoded, target
+
+
 class DecisionModelClient:
     """Client for a System One-compatible decision model; the counterpart of ``LLMClient``.
 
@@ -674,14 +873,23 @@ class DecisionModelClient:
         state: JSONContent,
         questions: Mapping[str, Question],
         *,
+        assets: Mapping[str, AssetImage] | None = None,
         use_cache: bool | None = None,
     ) -> SystemOneResponse:
         """Send one System One request: ``questions`` about ``state``.
+
+        Without ``assets`` the request is exactly what it was before image support: the SDK
+        is given the state and the questions and nothing else. With ``assets``, the SDK is
+        also given them, keyed by the references ``state`` holds, and the request carries
+        the ``TypeSafe-Danger-Zone-Images: true`` header (``_IMAGES_HEADER``) that System
+        One requires on a request with images, alongside ``config.extra_headers``.
 
         Args:
             state: The material every question sees: text, a JSON object or an array.
             questions: Question objects (``Noul``, ``Choice``, ``Score``) or their dict
                 forms, keyed by the ids the answers come back under.
+            assets: The SDK images the state refers to, keyed by their references
+                (``prepare_assets``). ``None`` or empty (default): a request without images.
             use_cache: Whether to use the response cache for this request. ``None``
                 (default) follows ``config.cache_enabled``.
 
@@ -699,7 +907,7 @@ class DecisionModelClient:
         should_cache = self.config.cache_enabled if use_cache is None else use_cache
         cache_key: str | None = None
         if should_cache:
-            cache_key = self._cache_key(state, questions)
+            cache_key = self._cache_key(state, questions, assets)
             cached = self._cached_response(cache_key)
             if cached is not None:
                 return cached
@@ -710,7 +918,15 @@ class DecisionModelClient:
             )
             shared_limit = semaphore if semaphore is not None else contextlib.nullcontext()
             async with shared_limit, connection_slots:
-                response = await sdk_client.system_one(state=state, questions=questions)
+                if assets:
+                    response = await sdk_client.system_one(
+                        state=state,
+                        questions=questions,
+                        assets=assets,
+                        extra_headers={_IMAGES_HEADER: "true"},
+                    )
+                else:
+                    response = await sdk_client.system_one(state=state, questions=questions)
 
         if cache_key is not None:
             self._ensure_cache().set(
@@ -747,19 +963,61 @@ class DecisionModelClient:
             return None
         return input_tokens * price
 
-    def _cache_key(self, state: JSONContent, questions: Mapping[str, Question]) -> str:
+    def _cache_key(
+        self,
+        state: JSONContent,
+        questions: Mapping[str, Question],
+        assets: Mapping[str, object] | None = None,
+    ) -> str:
         """SHA-256 over the model, the resolved base URL, the state and the questions.
 
         Everything that shapes the request is in the key, and so is the client's
         ``cache_namespace`` when it has one; nothing else is. Framing is already expressed in
         the questions, and ``decision_threshold`` only post-processes answers, so changing it
-        re-reads cached answers instead of asking again.
+        re-reads cached answers instead of asking again. A request carrying images adds
+        ``{"assets": [...]}``, its asset references sorted, after the questions; each
+        reference is the SHA-256 of an image as given, so the key does not depend on how
+        the image was fitted. A request without images has the key it had before image
+        support.
         """
         parts: list[object] = [self.config.model, self._base_url, state, questions]
+        if assets:
+            parts.append({"assets": sorted(assets)})
         if self._cache_namespace is not None:
             parts.append({"namespace": self._cache_namespace})
         content = _canonical_json(parts)
         return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+    def prepare_assets(self, images: Mapping[str, Image]) -> dict[str, AssetImage]:
+        """The SDK assets of a request carrying ``images``, each fitted for System One.
+
+        Each image is fitted into the envelope the model accepts (``_fit_for_system_one``):
+        passed through unchanged when System One takes it as it is, else re-encoded, and
+        resized or padded when its size is outside the envelope. The decision model judges
+        the fitted image. Decoding and encoding are CPU work, so call this off the event
+        loop (``asyncio.to_thread``).
+
+        Args:
+            images: The images a state refers to, keyed by their references
+                (``state_images``).
+
+        Returns:
+            ``typesafe_sdk.Image`` assets under the same keys, in the same order.
+
+        Raises:
+            ImportError: If the installed TypeSafe SDK has no ``Image`` (before 0.7.5); only
+                when ``images`` is not empty.
+            OSError: If a file-backed image that does not hold its bytes cannot be read.
+            ValueError: If an image cannot be decoded, or is over the envelope's size limit
+                even once fitted. The message names the image.
+        """
+        if not images:
+            return {}
+        asset_type = _sdk_image_type(self._typesafe)
+        return {
+            reference: asset_type(_fit_for_system_one(image, envelope=_JEV_IMAGE_ENVELOPE)[0])
+            for reference, image in images.items()
+        }
 
     def _cached_response(self, cache_key: str) -> SystemOneResponse | None:
         """The cached response for ``cache_key``; an unreadable entry counts as a miss."""
@@ -897,11 +1155,62 @@ def question_id(criterion_idx: int) -> str:
     return f"c{criterion_idx}"
 
 
+def _asset_reference(image: Image) -> str:
+    """The text standing for ``image`` in a decision model's state: ``<image:{sha256}>``.
+
+    The reference is the full SHA-256 of the image's bytes (``Image.digest``), so it is the
+    same on every run, and the same for an image that occurs twice. The request sends the
+    image as the asset of that name (``state_images``); System One finds the reference
+    anywhere inside a string of the state.
+
+    Raises:
+        OSError: If a file-backed image that does not hold its bytes cannot be read.
+        ValueError: If that file is not a supported image.
+    """
+    return f"<image:{image.digest}>"
+
+
+def _state_text(content: Content) -> str:
+    """``content`` as a string of the state: its text, each image's reference in its place.
+
+    Text is returned as it is (a ``str`` as the same object), so a text-only state is the
+    state built before images existed.
+
+    Raises:
+        As ``_asset_reference``.
+    """
+    normalized = _normalize_content(content)
+    if isinstance(normalized, str):
+        return normalized
+    return "".join(
+        _asset_reference(part) if isinstance(part, Image) else part for part in normalized
+    )
+
+
+def state_images(*contents: Content | None) -> dict[str, Image]:
+    """The images a state built from ``contents`` refers to, keyed by their references.
+
+    Images are taken in order, ``contents`` one after another (pass the submission, the
+    query and the reference submission, as ``build_state`` lays them out; ``None`` is
+    skipped); an image that occurs again, in any of them, is kept once, where it first
+    occurs. Text-only contents give ``{}``.
+
+    Raises:
+        As ``_asset_reference``.
+    """
+    images: dict[str, Image] = {}
+    for content in contents:
+        if content is not None:
+            for image in _images(content):
+                images.setdefault(_asset_reference(image), image)
+    return images
+
+
 def build_state(
-    to_grade: str,
+    to_grade: Content,
     *,
-    query: str | None = None,
-    reference_submission: str | None = None,
+    query: Content | None = None,
+    reference_submission: Content | None = None,
     guidelines: str | None = None,
 ) -> dict[str, str]:
     """The state a decision model judges: every question of the item's request sees it.
@@ -914,13 +1223,18 @@ def build_state(
       the number of criteria, and, being part of the state, part of the response cache key.
     - ``"input"``: the query that prompted the submission.
     - ``"reference_submission"``: an exemplar response, for calibration.
-    - ``"submission"``: the text to grade, sent unchanged. When ``to_grade`` holds a
-      ``<thinking>`` or ``<output>`` section (``Grader.grade`` flattens a
+    - ``"submission"``: the text to grade, sent unchanged. When ``to_grade`` is text
+      holding a ``<thinking>`` or ``<output>`` section (``Grader.grade`` flattens a
       ``{"thinking", "output"}`` submission into such sections), the parts recovered by
       ``parse_thinking_output`` are sent as ``"thinking"`` and ``"output"`` instead, both
       always, ``"thinking"`` possibly empty. Only an opening marker followed by its
       closing marker is a section; other text, stray markers included, is a plain
-      submission.
+      submission, and so is a document (content holding images), whatever its text.
+
+    Content holding images is written as its text with each image's reference,
+    ``<image:{sha256}>``, where the image is (``_state_text``); the request sends the
+    images as the assets ``state_images`` collects under those references. Text is sent
+    exactly as before images existed.
 
     Args:
         to_grade: The submission, as ``CriterionGrader.judge`` receives it.
@@ -932,22 +1246,28 @@ def build_state(
         The state, a JSON object of strings.
 
     Raises:
-        TypeError: If ``guidelines`` is neither a ``str`` nor ``None``.
+        TypeError: If ``guidelines`` is neither a ``str`` nor ``None``, or a content
+            argument is not ``Content``.
+        OSError: If a file-backed image that does not hold its bytes cannot be read.
+        ValueError: If that file is not a supported image.
     """
     state: dict[str, str] = {}
     guidelines = _normalize_guidelines(guidelines)
     if guidelines is not None:
         state["guidelines"] = guidelines
-    if query:
-        state["input"] = query
-    if reference_submission:
-        state["reference_submission"] = reference_submission
-    if _has_thinking_output_sections(to_grade):
-        sections = parse_thinking_output(to_grade)
+    query_text = None if query is None else _state_text(query)
+    if query_text:
+        state["input"] = query_text
+    reference_text = None if reference_submission is None else _state_text(reference_submission)
+    if reference_text:
+        state["reference_submission"] = reference_text
+    submission = _normalize_content(to_grade)
+    if isinstance(submission, str) and _has_thinking_output_sections(submission):
+        sections = parse_thinking_output(submission)
         state["thinking"] = sections.get("thinking", "")
         state["output"] = sections.get("output", "")
     else:
-        state["submission"] = to_grade
+        state["submission"] = _state_text(submission)
     return state
 
 

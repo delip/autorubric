@@ -36,6 +36,7 @@ from decision.conftest import (  # noqa: F401
     _isolate_typesafe_env,
     _no_network,
     fake_sdk,
+    make_response,
 )
 from litellm import ModelResponse
 
@@ -54,9 +55,8 @@ from autorubric import (
     RubricDataset,
 )
 from autorubric import content as content_module
-from autorubric.content import Content, _content_digest, _normalize_content
+from autorubric.content import _content_digest, _normalize_content
 from autorubric.graders import CriterionGrader, JudgeSpec
-from autorubric.graders.criterion_grader import CriterionResult
 
 SEED = 5
 API_KEY = "ts-test-key-never-persisted-5a1d"
@@ -259,13 +259,21 @@ class TestImagesReachTheProvider:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("llm_calls", ["per_criterion", "per_item"])
-    async def test_a_cascades_escalation_judge_sends_the_loaded_figure(
-        self, tmp_path, provider, reads, llm_calls
+    async def test_a_cascade_sends_the_loaded_figure_to_both_stages(
+        self,
+        tmp_path,
+        provider,
+        reads,
+        llm_calls,
+        fake_sdk: FakeSDK,  # noqa: F811
     ):
-        """The escalation judge goes through the same ``judge`` path as the decision model,
-        so it receives the content ``Grader.grade`` loaded, read once. Decision models take
-        no images yet, so the decision model's request is replaced by one that abstains on
-        every criterion, which escalates them all."""
+        """The decision model and the escalation judge go through the same ``judge`` path,
+        so both receive the content ``Grader.grade`` loaded, read once: the decision model
+        sends the figure as its request's asset, and, unsure of every criterion (P = 0.5,
+        confidence 0), escalates them all to the LLM, which sends it as a content part."""
+        fake_sdk.response = make_response(
+            {"c0": {"type": "noul", "noul": 0.5}, "c1": {"type": "noul", "noul": 0.5}}
+        )
         document, path = figure(tmp_path)
         grader = CriterionGrader(
             judge_model_config=DecisionModelConfig(model="jev-latest", api_key=API_KEY),
@@ -273,28 +281,45 @@ class TestImagesReachTheProvider:
             llm_calls=llm_calls,
             seed=SEED,
         )
-        received: list[Content] = []
-
-        async def abstaining(judge: JudgeSpec, rubric: list[Criterion], to_grade: Content, *a, **k):
-            received.append(to_grade)
-            return [
-                CriterionResult(
-                    report=grader._binary_report(c, CriterionVerdict.CANNOT_ASSESS, "?", None)
-                )
-                for c in rubric
-            ]
 
         rubric = [LEGIBLE, CLUTTERED]
-        with patch.object(grader, "_judge_all_criteria_with_decision_model", abstaining):
-            report = await Rubric(rubric).grade(document, grader=grader)
+        report = await Rubric(rubric).grade(document, grader=grader)
 
         assert report.report is not None
         assert all(criterion.escalated for criterion in report.report)
         calls = len(rubric) if llm_calls == "per_criterion" else 1
         assert provider.image_urls() == [[data_url(encoded_png("red"))]] * calls
-        (loaded,) = received
-        assert loaded == _normalize_content(document)
+        ((state, _, kwargs),) = fake_sdk.calls
+        reference = f"<image:{Image(encoded_png('red')).digest}>"
+        assert state == {"submission": reference + CAPTION}
+        assert list(kwargs["assets"]) == [reference]
         assert reads[path] == 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("where", ["submission", "query", "reference submission"])
+    async def test_a_decision_model_sends_an_image_wherever_it_is(
+        self,
+        fake_sdk: FakeSDK,  # noqa: F811
+        where,
+    ):
+        grader = CriterionGrader(
+            judges=[JudgeSpec(DecisionModelConfig(model="jev-latest", api_key=API_KEY), "jev")],
+            seed=SEED,
+        )
+        image = Image(encoded_png("red"))
+        kwargs: dict[str, Any] = {"to_grade": TEXT}
+        kwargs[{"submission": "to_grade", "query": "query"}.get(where, "reference_submission")] = [
+            image,
+            CAPTION,
+        ]
+        await Rubric([LEGIBLE]).grade(grader=grader, **kwargs)
+
+        ((state, _, sent),) = fake_sdk.calls
+        reference = f"<image:{image.digest}>"
+        field = {"submission": "submission", "query": "input"}.get(where, "reference_submission")
+        assert state[field] == reference + CAPTION
+        assert list(sent["assets"]) == [reference]
+        assert sent["extra_headers"] == {"TypeSafe-Danger-Zone-Images": "true"}
 
 
 # =============================================================================
@@ -435,29 +460,6 @@ class TestRefusals:
         await Rubric([LEGIBLE]).grade(submission, grader=grader)
         text = user_text(provider.calls[0])
         assert "<thinking>Look at the axes.</thinking>\n<output>Legible.</output>" in text
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize("where", ["submission", "query", "reference submission"])
-    async def test_a_decision_model_given_an_image_raises_before_its_request(
-        self,
-        fake_sdk: FakeSDK,  # noqa: F811
-        where,
-    ):
-        grader = CriterionGrader(
-            judges=[JudgeSpec(DecisionModelConfig(model="jev-latest", api_key=API_KEY), "jev")],
-            seed=SEED,
-        )
-        document = [Image(encoded_png("red")), CAPTION]
-        kwargs: dict[str, Any] = {"to_grade": TEXT}
-        kwargs[{"submission": "to_grade", "query": "query"}.get(where, "reference_submission")] = (
-            document
-        )
-        with pytest.raises(
-            ValueError,
-            match=f"Decision-model judge 'jev' does not take images yet: the {where} holds",
-        ):
-            await Rubric([LEGIBLE]).grade(grader=grader, **kwargs)
-        assert fake_sdk.calls == []
 
 
 # =============================================================================

@@ -24,8 +24,6 @@ from autorubric.content import (
     Content,
     _content_digest,
     _content_identity,
-    _content_text,
-    _has_images,
     _load_content,
     _load_content_async,
     _normalize_content,
@@ -40,6 +38,7 @@ from autorubric.decision import (
     build_questions,
     build_state,
     question_id,
+    state_images,
 )
 from autorubric.graders.base import Grader, _caller_stacklevel
 from autorubric.llm import (
@@ -2649,8 +2648,12 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         The request's usage and cost ride on the first result, so the judge's
         ``total_usage``/``total_cost`` are the item's totals.
 
-        A decision-model judge does not take images yet: content holding one raises before
-        the request, so nothing is sent.
+        Images in the submission, query or reference submission are written into the state
+        as their references (``build_state``) and sent as the request's assets, each fitted
+        into the envelope the model accepts (``DecisionModelClient.prepare_assets``, in a
+        worker thread). Fitting happens before the request and outside its failure
+        handling: an image that cannot be fitted, or an SDK too old to send images, raises
+        from the grade and nothing is sent; it never fails the criteria.
 
         Args:
             judge: The decision-model judge.
@@ -2664,28 +2667,17 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
             One ``CriterionResult`` per criterion of ``rubric``, in order.
 
         Raises:
-            ValueError: If the submission, query or reference submission holds an image.
+            ImportError: If the content holds an image and the installed TypeSafe SDK
+                cannot send images (before 0.7.5).
+            ValueError: If an image cannot be fitted for the model (it cannot be decoded, or
+                is still over the size limit once fitted).
         """
         client = self._decision_clients[judge.judge_id]
         config = client.config
-        # Refused before the request, so nothing is sent: a document's text alone would
-        # judge a submission that is not the one given.
-        for field_name, value in (
-            ("submission", to_grade),
-            ("query", query),
-            ("reference submission", reference_submission),
-        ):
-            if value is not None and _has_images(value):
-                raise ValueError(
-                    f"Decision-model judge {judge.judge_id!r} does not take images yet: the "
-                    f"{field_name} holds an image"
-                )
         state = build_state(
-            _content_text(to_grade),
-            query=None if query is None else _content_text(query),
-            reference_submission=(
-                None if reference_submission is None else _content_text(reference_submission)
-            ),
+            to_grade,
+            query=query,
+            reference_submission=reference_submission,
             guidelines=guidelines,
         )
         questions, unposed = build_questions(rubric, config, state)
@@ -2693,8 +2685,12 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         response = None
         request_error: Exception | None = None
         if questions:
+            # Fitted before the request and outside its failure handling, so an image that
+            # cannot be sent raises instead of failing the criteria.
+            images = state_images(to_grade, query, reference_submission)
+            assets = await asyncio.to_thread(client.prepare_assets, images) if images else None
             try:
-                response = await client.system_one(state, questions)
+                response = await client.system_one(state, questions, assets=assets)
             except Exception as e:
                 request_error = e
 
@@ -3045,7 +3041,8 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         content ``Grader.grade`` has loaded reads no file again, so a grade reads each file
         once, and a direct call to ``judge`` is as safe as one through ``grade``. Every
         judge gets the same loaded content; an LLM judge receives a document's images as
-        content parts in its user prompt.
+        content parts in its user prompt, and a decision model as its request's assets,
+        each fitted into the envelope the model accepts.
 
         Args:
             to_grade: The submission, as ``Grader.grade`` passes it: text, or a document
@@ -3069,9 +3066,11 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 submission, query or reference submission is not ``Content``.
             OSError: If an image file cannot be read (``FileNotFoundError`` when it is
                 missing); raised before any judge is called.
+            ImportError: If a decision-model judge is given content holding an image and the
+                installed TypeSafe SDK cannot send images (before its request).
             ValueError: If an image file is not a supported image (before any judge is
-                called); if a decision-model judge is given content holding an image, which
-                it does not take yet (before its request); or if a judge's call or request
+                called); if a decision-model judge is given an image it cannot fit for its
+                model (before its request); or if a judge's call or request
                 fails with a configuration error, which would fail every call it makes
                 (#40): LiteLLM's ``UnsupportedParamsError``, or a 401, 403 or 404 from
                 the provider (``litellm.AuthenticationError``, ``PermissionDeniedError``,
