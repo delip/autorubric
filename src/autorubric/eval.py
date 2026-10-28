@@ -35,6 +35,7 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 
+from autorubric.content import _content_key
 from autorubric.dataset import DataItem, RubricDataset
 from autorubric.decision import DecisionModelConfig, _url_host
 from autorubric.graders.criterion_grader import (
@@ -84,7 +85,7 @@ def _compute_dataset_hash(dataset: RubricDataset) -> str:
     content = json.dumps(
         {
             "name": dataset.name,
-            "prompt": dataset.prompt,
+            "prompt": _content_key(dataset.prompt),
             "num_items": len(dataset),
             "num_criteria": num_criteria,
         },

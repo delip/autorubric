@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast, get_args, overloa
 
 from pydantic import BaseModel
 
+from autorubric.content import Content, _content_digest, _normalize_content
 from autorubric.decision import (
     DecisionModelClient,
     DecisionModelConfig,
@@ -124,6 +125,20 @@ def _ground_truth_reason(item: DataItem, criterion_idx: int) -> str | None:
     """
     reasons = item.ground_truth_reasons
     return reasons[criterion_idx] if reasons is not None else None
+
+
+def _example_identity(submission: Content) -> str | tuple[str, str]:
+    """What identifies a training item's submission among few-shot examples: its content.
+
+    Text is its own identity, compared as it is and never hashed, so any ``str`` serves as
+    it did before images existed. A document is identified by its ``_content_digest``, so two
+    documents holding the same text and image bytes are one example wherever their images
+    are read from.
+    """
+    normalized = _normalize_content(submission)
+    if isinstance(normalized, str):
+        return normalized
+    return ("content_sha256", _content_digest(normalized))
 
 
 def _posed_question(criterion: Criterion) -> tuple[object, ...]:
@@ -1835,7 +1850,7 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 verdict=item.ground_truth[criterion_idx],  # type: ignore
                 reason=_ground_truth_reason(item, criterion_idx),
             ),
-            identity=lambda item: item.submission,
+            identity=lambda item: _example_identity(item.submission),
         )
 
     def _poses_training_question(self, criterion_idx: int, criterion: Criterion) -> bool:
@@ -2014,7 +2029,7 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                     pair[1],
                     _ground_truth_reason(pair[0], criterion_idx),
                 ),
-                identity=lambda pair: pair[0].submission,
+                identity=lambda pair: _example_identity(pair[0].submission),
             )
         else:
             all_pairs = [
@@ -2045,7 +2060,8 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
           pick is the item showing the most (criterion index, label) pairs that no picked
           item shows yet, the earliest in the seeded order on a tie. Once no item adds a
           pair, the remaining slots are filled in the seeded order. An item whose submission
-          was already picked is skipped throughout, so no submission is shown twice.
+          was already picked (the same content, by ``_example_identity``) is skipped
+          throughout, so no submission is shown twice.
 
         Reasons (``DataItem.ground_truth_reasons``) never affect the draw.
 
@@ -2080,13 +2096,14 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         ]
         shown: set[tuple[int, CriterionVerdict | int]] = set()
         picked: list[DataItem] = []
-        picked_submissions: set[str] = set()
-        # Picking by coverage while any item adds a pair; a picked item's submission is
-        # among picked_submissions, so an item is picked at most once.
+        identities = [_example_identity(item.submission) for item, _labels in candidates]
+        picked_identities: set[str | tuple[str, str]] = set()
+        # Picking by coverage while any item adds a pair; a picked item's submission identity
+        # is among picked_identities, so an item is picked at most once.
         while len(picked) < n_examples:
             best, best_gain = None, 0
-            for position, (item, _labels) in enumerate(candidates):
-                if item.submission in picked_submissions:
+            for position, identity in enumerate(identities):
+                if identity in picked_identities:
                     continue
                 gain = len(pairs[position] - shown)
                 if gain > best_gain:
@@ -2094,15 +2111,15 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
             if best is None:
                 break
             picked.append(candidates[best][0])
-            picked_submissions.add(candidates[best][0].submission)
+            picked_identities.add(identities[best])
             shown |= pairs[best]
         # Filling the remaining slots in the seeded order
-        for item, _labels in candidates:
+        for (item, _labels), identity in zip(candidates, identities, strict=True):
             if len(picked) >= n_examples:
                 break
-            if item.submission not in picked_submissions:
+            if identity not in picked_identities:
                 picked.append(item)
-                picked_submissions.add(item.submission)
+                picked_identities.add(identity)
         return picked
 
     def _item_labels(self, item: DataItem) -> list[CriterionVerdict | int | None] | None:
@@ -2360,24 +2377,24 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
     # item), so that a criterion is shown and its answer mapped the same way in both.
 
     def _presented_criterion(
-        self, criterion: Criterion, criterion_idx: int, judge_id: str, to_grade: str
+        self, criterion: Criterion, criterion_idx: int, judge_id: str, to_grade: Content
     ) -> tuple[Criterion, list[int]]:
         """A multi-choice criterion as ``judge_id`` is shown it, with its option permutation.
 
         With ``shuffle_options`` the options are permuted by
         ``_derive_shuffle_rng(seed, item_key, criterion_idx, judge_id)``, where ``item_key``
-        is the first 16 hex digits of the submission's SHA-256, so a criterion's order
-        depends only on the item, the criterion's index and the judge, and is the same
-        whether the judge is asked about it alone or with the whole rubric. The permutation
-        maps each presented position to the original option index
-        (``shuffled_indices[shuffled_pos] = original_pos``). Without shuffling it is the
+        is the first 16 hex digits of ``_content_digest(to_grade)`` (the submission's SHA-256
+        for text), so a criterion's order depends only on the item, the criterion's index
+        and the judge, and is the same whether the judge is asked about it alone or with the
+        whole rubric. The permutation maps each presented position to the original option
+        index (``shuffled_indices[shuffled_pos] = original_pos``). Without shuffling it is the
         identity, the criterion is returned as it is, and the submission is not hashed.
 
         Args:
             criterion: The multi-choice criterion (from the effective rubric).
             criterion_idx: Its index in the effective rubric.
             judge_id: The judge it is shown to.
-            to_grade: The submission, as the judge receives it; its hash keys the shuffle.
+            to_grade: The submission, as the judge receives it; its digest keys the shuffle.
 
         Returns:
             The criterion to put in the prompt, and the permutation.
@@ -2390,7 +2407,7 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         shuffled_indices = list(range(len(criterion.options)))
         if not self._shuffle_options:
             return criterion, shuffled_indices
-        item_key = hashlib.sha256(to_grade.encode()).hexdigest()[:16]
+        item_key = _content_digest(to_grade)[:16]
         rng = _derive_shuffle_rng(self._seed, item_key, criterion_idx, judge_id)
         rng.shuffle(shuffled_indices)
         prompt_criterion = Criterion(

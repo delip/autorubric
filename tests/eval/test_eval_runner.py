@@ -1,11 +1,14 @@
 """Tests for EvalRunner and evaluation infrastructure."""
 
+import hashlib
+import io
 import json
 import tempfile
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
+import PIL.Image as pil_image
 import pytest
 
 from autorubric import (
@@ -16,6 +19,7 @@ from autorubric import (
     EvalRunner,
     EvalTimingStats,
     ExperimentManifest,
+    Image,
     ItemResult,
     Rubric,
     TokenUsage,
@@ -969,6 +973,47 @@ class TestExperimentManifest:
         assert manifest.dataset_name == "my-dataset"
         assert manifest.status == "completed"
         assert manifest.completed_indices == {0, 1, 2, 3, 4}
+
+
+class TestDatasetHash:
+    """The dataset hash a checkpoint's manifest records, which a resumed run must match."""
+
+    @pytest.mark.parametrize("prompt", ["Explain a concept", None], ids=["prompt", "no_prompt"])
+    def test_a_text_datasets_hash_is_unchanged(self, sample_dataset, prompt):
+        """Written out from ``json`` and ``hashlib`` as the hash was computed before prompts
+        could hold images, so checkpoints written then still resume."""
+        sample_dataset.prompt = prompt
+        content = json.dumps(
+            {
+                "name": "test-dataset",
+                "prompt": prompt,
+                "num_items": 3,
+                "num_criteria": 2,
+            },
+            sort_keys=True,
+        )
+        expected = hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
+        assert _compute_dataset_hash(sample_dataset) == expected
+
+    def test_a_document_prompt_is_hashed_by_the_bytes_of_its_images(self, sample_dataset, tmp_path):
+        def png(color: str) -> bytes:
+            buffer = io.BytesIO()
+            pil_image.new("RGB", (2, 2), color).save(buffer, "PNG")
+            return buffer.getvalue()
+
+        def hash_with_prompt(prompt: Any) -> str:
+            sample_dataset.prompt = prompt
+            return _compute_dataset_hash(sample_dataset)
+
+        red_file = tmp_path / "red.png"
+        red_file.write_bytes(png("red"))
+        red = hash_with_prompt([Image(png("red")), "Describe the figure."])
+        assert hash_with_prompt([Image(red_file), "Describe the figure."]) == red
+        assert hash_with_prompt([Image(png("blue")), "Describe the figure."]) != red
+        assert hash_with_prompt("Describe the figure.") != red
+        assert hash_with_prompt(["Describe ", "the figure."]) == hash_with_prompt(
+            "Describe the figure."
+        )
 
 
 # -----------------------------------------------------------------------------

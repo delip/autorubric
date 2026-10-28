@@ -37,11 +37,13 @@ tests' fake SDK client.
 from __future__ import annotations
 
 import hashlib
+import io
 import random
 import re
 from collections.abc import Sequence
 from typing import Any, cast
 
+import PIL.Image as pil_image
 import pytest
 import typesafe_sdk
 
@@ -65,6 +67,7 @@ from autorubric import (
     DecisionModelConfig,
     EscalationConfig,
     FewShotConfig,
+    Image,
     LLMConfig,
     Rubric,
     RubricDataset,
@@ -620,6 +623,13 @@ COVERAGE_SEED = 15
 COVERAGE_ORDER = ["g", "b", "a", "f", "c", "d", "e"]
 
 
+def encoded_png(color: str) -> bytes:
+    """A tiny PNG of one ``color``, encoded by Pillow."""
+    buffer = io.BytesIO()
+    pil_image.new("RGB", (2, 2), color).save(buffer, "PNG")
+    return buffer.getvalue()
+
+
 def coverage_pool() -> RubricDataset:
     dataset = RubricDataset(prompt=QUERY, rubric=Rubric(COVERAGE_RUBRIC))
     for name, (submission, labels) in COVERAGE_ROWS.items():
@@ -684,6 +694,37 @@ class TestGreedyCoverage:
     def test_without_balance_more_slots_than_items_takes_them_all(self, n):
         picks = names(picked(self.grader(n, balance=False), "default"))
         assert picks == COVERAGE_ORDER
+
+    @pytest.mark.parametrize("d_image", ["b_bytes_from_a_file", "other_bytes"])
+    @pytest.mark.parametrize("n", [3, 50])
+    def test_documents_are_the_same_submission_when_their_contents_are(self, tmp_path, d_image, n):
+        """Each submission becomes a document: an image, then the text. d's document is b's
+        when its image holds b's bytes, though read from a file, so d is skipped as for the
+        text pool; with other bytes it is its own submission and shows its 2 new pairs."""
+        palette = ["red", "green", "blue", "purple", "teal", "navy", "gray"]
+        colors = dict(zip(COVERAGE_ROWS, palette, strict=True))
+        b_file = tmp_path / "b.png"
+        b_file.write_bytes(encoded_png(colors["b"]))
+        images = {name: Image(encoded_png(color)) for name, color in colors.items()}
+        images["d"] = Image(b_file) if d_image == "b_bytes_from_a_file" else images["d"]
+        pool = coverage_pool()
+        for item in pool.items:
+            item.submission = cast(Any, [images[item.description], item.submission])
+        grader = make_grader(
+            {"default": RubricLLM()},
+            judge_model_config=LLM,
+            llm_calls="per_item",
+            training_data=pool,
+            few_shot_config=few_shot(n),
+            seed=COVERAGE_SEED,
+        )
+        if d_image == "b_bytes_from_a_file":
+            expected = names(picked(self.grader(n), "default"))
+            assert "d" not in expected
+        else:
+            # Step 3 picks d, which alone shows (0,CANNOT_ASSESS) and (2,Z).
+            expected = ["g", "b", "d"] if n == 3 else ["g", "b", "d", "a", "f", "c", "e"]
+        assert names(picked(grader, "default")) == expected
 
     @pytest.mark.parametrize("n", [0, -2])
     @pytest.mark.parametrize("balance", [True, False])

@@ -48,6 +48,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict
 
+from autorubric.content import Content, _content_digest, _content_key, _normalize_content
 from autorubric.dataset import DataItem, RubricDataset
 from autorubric.decision import _is_real_number
 from autorubric.eval import EvalResult, EvalTimingStats, ItemResult
@@ -624,7 +625,7 @@ def _paired_items(
             )
         submissions = (dm_item.item.submission, llm_item.item.submission)
         # A result loaded with EvalResult.from_experiment records no submission ("").
-        if all(submissions) and submissions[0] != submissions[1]:
+        if all(_normalize_content(s) for s in submissions) and not _same_content(*submissions):
             raise ValueError(
                 f"item {idx} is not the same item in dm_result and llm_result: its "
                 "submissions differ"
@@ -768,9 +769,24 @@ def _checked_dm_judge_id(item_result: ItemResult) -> str:
 def _recorded_item(dm_item: ItemResult, llm_item: ItemResult) -> DataItem:
     """The pair's item, taken from a result that recorded its submission if either did (a
     result loaded with ``EvalResult.from_experiment`` records none)."""
-    if dm_item.item.submission or not llm_item.item.submission:
+    dm_recorded = _normalize_content(dm_item.item.submission)
+    if dm_recorded or not _normalize_content(llm_item.item.submission):
         return dm_item.item
     return llm_item.item
+
+
+def _same_content(a: Content, b: Content) -> bool:
+    """Whether ``a`` and ``b`` are the same content: equal, or with one ``_content_digest``.
+
+    Equality is tried first, so text, and documents whose images have the same sources, are
+    compared without reading a file; two texts are the same only when equal, and are never
+    hashed.
+    """
+    if a == b:
+        return True
+    if isinstance(a, str) and isinstance(b, str):
+        return False
+    return _content_digest(a) == _content_digest(b)
 
 
 def _replayed_item(
@@ -919,6 +935,10 @@ def _calibration_fingerprint(items: Iterable[tuple[DataItem, Iterable[Criterion]
     """SHA-256 over the contents of items, in order: each item's submission, prompt and
     reference submission, and the requirements of the criteria it is graded against.
 
+    The submission, prompt and reference enter as ``_content_key`` gives them: text as it
+    is, so a text dataset's fingerprint is the one computed before images existed, and a
+    document by its ``_content_digest``.
+
     It identifies a set of calibration items where ``autorubric.eval._compute_dataset_hash``
     cannot: that hash covers only a dataset's name, prompt and sizes, which the two halves
     of ``RubricDataset.split_train_test`` share. The prompt and reference are the item's
@@ -930,9 +950,9 @@ def _calibration_fingerprint(items: Iterable[tuple[DataItem, Iterable[Criterion]
     """
     content = [
         [
-            item.submission,
-            item.prompt,
-            item.reference_submission,
+            _content_key(item.submission),
+            _content_key(item.prompt),
+            _content_key(item.reference_submission),
             [criterion.requirement for criterion in criteria],
         ]
         for item, criteria in items
