@@ -23,6 +23,7 @@ from autorubric.content import (
     Image,
     _concat,
     _content_digest,
+    _content_identity,
     _content_key,
     _content_preview,
     _content_text,
@@ -430,6 +431,25 @@ class TestContentDigest:
         assert _content_key(["a", "b"]) == "ab"
         document = ["a", Image(png)]
         assert _content_key(document) == {"content_sha256": _content_digest(document)}
+
+    def test_content_identity_of_text_is_the_text(self) -> None:
+        # A lone surrogate cannot be encoded, so it could not be hashed.
+        unencodable = "Plants use light \ud83d to make sugar."
+        assert _content_identity(unencodable) is unencodable
+        assert _content_identity(["Li", "ght."]) == "Light."
+        assert _content_identity([]) == ""
+
+    def test_content_identity_of_a_document_is_its_digest(
+        self, png: bytes, other_png: bytes, png_file: Path
+    ) -> None:
+        document = [Image(png), "x"]
+        identity = _content_identity(document)
+        assert identity == ("content_sha256", _content_digest(document))
+        assert _content_identity((Image(png_file), "x")) == identity
+        assert _content_identity([Image(other_png), "x"]) != identity
+        assert _content_identity(["x", Image(png)]) != identity
+        # No text, its digest included, is a document's identity.
+        assert _content_identity(_content_digest(document)) != identity
 
 
 class TestLoadContent:

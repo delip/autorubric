@@ -48,7 +48,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict
 
-from autorubric.content import Content, _content_digest, _content_key, _normalize_content
+from autorubric.content import Content, _content_identity, _content_key, _normalize_content
 from autorubric.dataset import DataItem, RubricDataset
 from autorubric.decision import _is_real_number
 from autorubric.eval import EvalResult, EvalTimingStats, ItemResult
@@ -776,17 +776,19 @@ def _recorded_item(dm_item: ItemResult, llm_item: ItemResult) -> DataItem:
 
 
 def _same_content(a: Content, b: Content) -> bool:
-    """Whether ``a`` and ``b`` are the same content: equal, or with one ``_content_digest``.
+    """Whether ``a`` and ``b`` are the same content, as ``_content_identity`` identifies it.
 
-    Equality is tried first, so text, and documents whose images have the same sources, are
-    compared without reading a file; two texts are the same only when equal, and are never
-    hashed.
+    Both are normalized first (``_normalize_content``), and equal canonical forms are the
+    same content, so text, and documents whose images have the same sources, are compared
+    without reading a file. Otherwise text is the same only as equal text, never a document,
+    and is never hashed; two documents are the same when their identities (digests) are.
     """
-    if a == b:
+    left, right = _normalize_content(a), _normalize_content(b)
+    if left == right:
         return True
-    if isinstance(a, str) and isinstance(b, str):
+    if isinstance(left, str) or isinstance(right, str):
         return False
-    return _content_digest(a) == _content_digest(b)
+    return _content_identity(left) == _content_identity(right)
 
 
 def _replayed_item(

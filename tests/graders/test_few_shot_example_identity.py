@@ -1,14 +1,15 @@
 """Few-shot examples identify a training item's submission by its content.
 
-Drawing examples per criterion (``_balanced_pick``), each label's slots are drawn first and
-no remaining slot is filled with an item whose submission is already shown; drawing whole
-items (``_select_item_examples``, tested with the greedy coverage in
-``test_per_item_few_shot.py``), an item whose submission was picked is skipped. A submission's
-identity is ``_example_identity``: text is its own identity, never hashed; a document is
-identified by its ``_content_digest``, so documents whose images hold the same bytes are one
-submission wherever the images are read from. The draws themselves (the RNG and its order)
-do not depend on the content, so a pool of documents gives the examples a pool of texts
-with the same duplicates gives.
+Drawing examples per criterion (``_balanced_pick``), each label's share of the slots is drawn
+first, with no dedup, so two items with one submission can both be drawn in the shares; the
+slots left over are then filled from the items whose submission no share shows, with no dedup
+among the fills either. Drawing whole items (``_select_item_examples``, tested with the
+greedy coverage in ``test_per_item_few_shot.py``), an item whose submission was already
+picked is skipped. Either way a submission's identity is ``_content_identity``: text is its
+own identity, never hashed; a document is identified by its ``_content_digest``, so
+documents whose images hold the same bytes are one submission wherever the images are read
+from. The draws themselves (the RNG and its order) do not depend on the content, so a pool
+of documents gives the examples a pool of texts with the same repeats gives.
 """
 
 from __future__ import annotations
@@ -30,9 +31,7 @@ from autorubric import (
     Rubric,
     RubricDataset,
 )
-from autorubric.content import _content_digest
 from autorubric.graders import CriterionGrader
-from autorubric.graders.criterion_grader import _example_identity
 
 MET = CriterionVerdict.MET
 UNMET = CriterionVerdict.UNMET
@@ -49,9 +48,10 @@ CLARITY = Criterion(
     ],
 )
 
-# (name, text, label): a alone has its label, so once each label has a slot the remaining
-# slots are filled from the others; b repeats a's text, so it never fills one, and e repeats
-# c's, so it fills none once c is shown.
+# (name, text, label): a alone has its label, so once each label has its share the slots
+# left over are filled from the others. b repeats a's text, so it fills no slot once a is
+# drawn in a share (it can still be drawn in a share itself), and e repeats c's, so it fills
+# none once c is drawn in a share.
 BINARY_ROWS = [
     ("a", "A", MET),
     ("b", "A", UNMET),
@@ -129,23 +129,7 @@ def drawn(rubric: Criterion, rows: list[tuple[str, Any, Any]], n: int, seed: int
 SEEDS = range(40)
 
 
-class TestTheIdentity:
-    def test_text_is_its_own_identity(self):
-        # A lone surrogate cannot be encoded, so it could not be hashed.
-        unencodable = "Plants use light \ud83d to make sugar."
-        assert _example_identity(unencodable) is unencodable
-        assert _example_identity(["Li", "ght."]) == "Light."
-
-    def test_a_document_is_identified_by_its_digest(self, tmp_path):
-        red = encoded_png("red")
-        red_file = tmp_path / "red.png"
-        red_file.write_bytes(red)
-        document = [Image(red), "x"]
-        assert _example_identity(document) == ("content_sha256", _content_digest(document))
-        assert _example_identity([Image(red_file), "x"]) == _example_identity(document)
-        assert _example_identity([Image(encoded_png("blue")), "x"]) != _example_identity(document)
-        assert _example_identity(["x", Image(red)]) != _example_identity(document)
-
+class TestTextIsNeverHashed:
     @pytest.mark.parametrize("llm_calls", ["per_criterion", "per_item"])
     def test_training_text_that_cannot_be_encoded_is_drawn(self, llm_calls):
         """Text is never hashed to identify it, so training submissions holding a lone
@@ -164,10 +148,6 @@ class TestTheIdentity:
 
         unencodable = [(name, f"{text} \ud83d", label) for name, text, label in BINARY_ROWS]
         assert names_drawn(unencodable) == names_drawn(BINARY_ROWS)
-
-    def test_no_text_is_a_documents_identity(self):
-        document = [Image(encoded_png("red")), "x"]
-        assert _example_identity(_content_digest(document)) != _example_identity(document)
 
 
 @pytest.mark.parametrize(
@@ -188,9 +168,10 @@ class TestDrawsPerCriterion:
         for seed in SEEDS:
             assert drawn(rubric, own, n, seed) == drawn(rubric, unique_texts(rows), n, seed), seed
 
-    def test_a_repeated_submission_is_not_shown_again(self, rubric, rows):
+    def test_repeated_submissions_change_some_draws(self, rubric, rows):
         """The pools differ only in whether b repeats a's submission and e c's: with the
-        repeats, a remaining slot is never filled with one, so some draws differ."""
+        repeats, b fills no slot left over once a is drawn in a share (nor e once c is), so
+        some draws differ."""
         differing = [
             seed
             for seed in SEEDS

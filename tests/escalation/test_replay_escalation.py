@@ -875,13 +875,24 @@ class TestRequirements:
 
 
 def test_texts_are_compared_as_they_are_never_hashed():
-    """Texts are the same submission only when equal, and are not hashed to find out: a
-    lone surrogate (which cannot be encoded) compares as any text does."""
+    """Texts are the same submission only when equal (after joining a list of strings), and
+    are not hashed to find out: a lone surrogate (which cannot be encoded) compares as any
+    text does."""
     unencodable = "Plants use light \ud83d to make sugar."
     assert _same_content(unencodable, unencodable)
+    assert _same_content(unencodable, [unencodable[:5], unencodable[5:]])
     assert not _same_content(unencodable, unencodable + "!")
     assert _same_content("Light.", ["Li", "ght."])
     assert not _same_content("Light.", "Light!")
+
+
+def test_text_and_documents_of_one_source_are_compared_without_reading_a_file(tmp_path):
+    missing = Image(tmp_path / "missing.png")
+    assert not _same_content("x", [missing, "x"])
+    assert not _same_content([missing, "x"], ["x"])
+    assert _same_content([missing, "x"], (missing, "x"))
+    with pytest.raises(FileNotFoundError):
+        _same_content([missing, "x"], [Image(RED), "x"])
 
 
 # =============================================================================

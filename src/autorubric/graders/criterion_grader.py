@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast, get_args, overloa
 
 from pydantic import BaseModel
 
-from autorubric.content import Content, _content_digest, _normalize_content
+from autorubric.content import Content, _content_digest, _content_identity
 from autorubric.decision import (
     DecisionModelClient,
     DecisionModelConfig,
@@ -125,20 +125,6 @@ def _ground_truth_reason(item: DataItem, criterion_idx: int) -> str | None:
     """
     reasons = item.ground_truth_reasons
     return reasons[criterion_idx] if reasons is not None else None
-
-
-def _example_identity(submission: Content) -> str | tuple[str, str]:
-    """What identifies a training item's submission among few-shot examples: its content.
-
-    Text is its own identity, compared as it is and never hashed, so any ``str`` serves as
-    it did before images existed. A document is identified by its ``_content_digest``, so two
-    documents holding the same text and image bytes are one example wherever their images
-    are read from.
-    """
-    normalized = _normalize_content(submission)
-    if isinstance(normalized, str):
-        return normalized
-    return ("content_sha256", _content_digest(normalized))
 
 
 def _posed_question(criterion: Criterion) -> tuple[object, ...]:
@@ -1850,7 +1836,7 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 verdict=item.ground_truth[criterion_idx],  # type: ignore
                 reason=_ground_truth_reason(item, criterion_idx),
             ),
-            identity=lambda item: _example_identity(item.submission),
+            identity=lambda item: _content_identity(item.submission),
         )
 
     def _poses_training_question(self, criterion_idx: int, criterion: Criterion) -> bool:
@@ -2029,7 +2015,7 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                     pair[1],
                     _ground_truth_reason(pair[0], criterion_idx),
                 ),
-                identity=lambda pair: _example_identity(pair[0].submission),
+                identity=lambda pair: _content_identity(pair[0].submission),
             )
         else:
             all_pairs = [
@@ -2060,7 +2046,7 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
           pick is the item showing the most (criterion index, label) pairs that no picked
           item shows yet, the earliest in the seeded order on a tie. Once no item adds a
           pair, the remaining slots are filled in the seeded order. An item whose submission
-          was already picked (the same content, by ``_example_identity``) is skipped
+          was already picked (the same content, by ``_content_identity``) is skipped
           throughout, so no submission is shown twice.
 
         Reasons (``DataItem.ground_truth_reasons``) never affect the draw.
@@ -2096,7 +2082,7 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         ]
         shown: set[tuple[int, CriterionVerdict | int]] = set()
         picked: list[DataItem] = []
-        identities = [_example_identity(item.submission) for item, _labels in candidates]
+        identities = [_content_identity(item.submission) for item, _labels in candidates]
         picked_identities: set[str | tuple[str, str]] = set()
         # Picking by coverage while any item adds a pair; a picked item's submission identity
         # is among picked_identities, so an item is picked at most once.

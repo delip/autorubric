@@ -416,6 +416,24 @@ def _content_key(value: Content | None) -> str | dict[str, str] | None:
     return {"content_sha256": _content_digest(normalized)}
 
 
+def _content_identity(value: Content) -> str | tuple[str, str]:
+    """A hashable value identifying ``value`` by what it holds, to compare or collect it.
+
+    Text is its own identity, returned as it is (a sequence of strings alone gives its
+    joined text) and never hashed, so any ``str`` serves, an unencodable one included. A
+    document gives ``("content_sha256", _content_digest(value))``, which no text equals, so
+    documents whose images hold the same bytes share an identity wherever the images are
+    read from.
+
+    Raises:
+        As ``_content_digest``, for a document.
+    """
+    normalized = _normalize_content(value)
+    if isinstance(normalized, str):
+        return normalized
+    return ("content_sha256", _content_digest(normalized))
+
+
 def _load_content(value: Content) -> _Normalized:
     """``value`` in canonical form with every image's bytes held (``Image._loaded()``).
 
