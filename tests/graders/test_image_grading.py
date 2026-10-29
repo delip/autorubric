@@ -508,9 +508,12 @@ def training(
     for i, (label, color) in enumerate(zip(labels, colors, strict=True)):
         path = png_file(tmp_path, f"train-{i}.png", color)
         paths.append(path)
-        submission = cast(Any, [Image(path), f"Training caption {i}."])
         dataset.items.append(
-            DataItem(submission=submission, description=str(i), ground_truth=label)
+            DataItem(
+                submission=[Image(path), f"Training caption {i}."],
+                description=str(i),
+                ground_truth=label,
+            )
         )
     return dataset, paths
 
@@ -557,7 +560,7 @@ class TestFewShotImages:
             tmp_path, [LEGIBLE], [[MET], [MET], [UNMET]], ["green", "green", "blue"]
         )
         # Items 0 and 1 hold the same bytes, read from different files, and the same text.
-        data.items[1].submission = cast(Any, [Image(paths[1]), "Training caption 0."])
+        data.items[1].submission = [Image(paths[1]), "Training caption 0."]
         grader = CriterionGrader(
             judge_model_config=llm(),
             training_data=data,

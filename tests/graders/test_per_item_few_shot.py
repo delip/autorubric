@@ -713,7 +713,8 @@ class TestGreedyCoverage:
         images["d"] = Image(b_file) if d_image == "b_bytes_from_a_file" else images["d"]
         pool = coverage_pool()
         for item in pool.items:
-            item.submission = cast(Any, [images[item.description], item.submission])
+            assert isinstance(item.submission, str)  # the pool's submissions are text
+            item.submission = [images[item.description], item.submission]
         grader = make_grader(
             {"default": RubricLLM()},
             judge_model_config=LLM,

@@ -138,6 +138,50 @@ dataset.add_item(
 ref = dataset.get_item_reference_submission(0)
 ```
 
+## Images in Dataset Files
+
+A submission, prompt or reference submission can hold images, at the item level and at the
+dataset level. In Python it is `Content`, which is a string, an `Image`, or a list of strings
+and images read in order (a document, such as a figure followed by its caption):
+
+```python
+from autorubric import Image
+
+dataset.add_item(
+    submission=[Image("figures/fig1.png"), "Figure 1: accuracy by model size."],
+    description="Figure with caption",
+)
+```
+
+A dataset file holds the same three shapes. A string is text. An image is an object whose only
+key is `"image"`, with the image's path as its value. A document is an array of strings and
+image objects:
+
+```json
+{
+  "submission": [{"image": "figures/fig1.png"}, "Figure 1: accuracy by model size."],
+  "description": "Figure with caption"
+}
+```
+
+Paths are written with `/` on every platform. `from_file` resolves a relative path against the
+directory of the dataset file, so the file and its figures can be moved together.
+`from_json(text, base_dir=...)` resolves it against `base_dir`, or against the current working
+directory when `base_dir` is not given. An absolute path is kept as it is. Loading opens no
+image file, so a dataset whose images are missing still loads, and the missing file is
+reported when its item is graded. Any other JSON value, such as an object with other keys or
+an array holding a number, loads unchanged, as it did before images existed; grading such an
+item raises `TypeError`.
+
+When writing, `to_file` stores each image path relative to the file's directory when the image
+is inside it, and as an absolute path otherwise. `to_json(base_dir=...)` does the same relative
+to `base_dir` and writes absolute paths when `base_dir` is not given. An image built from bytes
+(`Image(data)`) has no path, so `to_json` refuses it with a `ValueError` that names the item and
+field. `to_file` saves such an image beside the dataset file as
+`<stem>_images/<sha256>.<ext>` (for `results.json`, the directory `results_images/`), writes the
+file only if it is not there yet, and refers to it by that relative path. A dataset without
+images is written exactly as before.
+
 ## Train/Test Split
 
 ```python

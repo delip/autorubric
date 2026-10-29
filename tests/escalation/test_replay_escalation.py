@@ -22,7 +22,7 @@ import io
 import json
 import warnings
 from collections import Counter
-from typing import Any, cast
+from typing import Any
 
 import PIL.Image as pil_image
 import pytest
@@ -631,12 +631,9 @@ RED, BLUE = encoded_png("red"), encoded_png("blue")
 
 
 def replace_submission(result: EvalResult, idx: int, submission: Content) -> EvalResult:
-    """``result`` with item ``idx`` recording ``submission`` (``DataItem`` is still
-    annotated for text only)."""
+    """``result`` with item ``idx`` recording ``submission``."""
     (item,) = [r.item for r in result.item_results if r.item_idx == idx]
-    return replace_item(
-        result, idx, item=dataclasses.replace(item, submission=cast(Any, submission))
-    )
+    return replace_item(result, idx, item=dataclasses.replace(item, submission=submission))
 
 
 def replace_criterion_report(result: EvalResult, idx: int, c: int, **changes: Any) -> EvalResult:
@@ -972,7 +969,7 @@ class TestCalibrationFingerprint:
         red_file.write_bytes(RED)
 
         def fingerprint_of(submission: Content, **fields: Any) -> str:
-            item = DataItem(submission=cast(Any, submission), description="d", **fields)
+            item = DataItem(submission=submission, description="d", **fields)
             return _calibration_fingerprint([(item, RUBRIC.rubric)])
 
         digest = fingerprint_of([Image(RED), "x"])

@@ -8,17 +8,25 @@ from __future__ import annotations
 
 import json
 import random
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from autorubric.content import Content, Image
 from autorubric.rubric import Rubric
 from autorubric.types import CriterionVerdict
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from autorubric.types import Criterion
+
+# The file extension ``to_file`` gives an image it saves, by the image's media type.
+_IMAGE_EXTENSIONS = {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/gif": "gif",
+    "image/webp": "webp",
+}
 
 
 def _criterion_scale_data(criterion: Criterion) -> dict[str, Any]:
@@ -40,13 +48,98 @@ def _criterion_scale_data(criterion: Criterion) -> dict[str, Any]:
     return data
 
 
+def _image_reference(value: Any) -> str | None:
+    """The path of a dataset file's image object ``{"image": "<path>"}``, else ``None``.
+
+    An image object is a JSON object whose only key is ``"image"``, with a string value.
+    """
+    if isinstance(value, dict) and len(value) == 1:
+        reference = value.get("image")
+        if isinstance(reference, str):
+            return reference
+    return None
+
+
+def _image_from_reference(reference: str, base_dir: Path, where: str) -> Image:
+    """The image a dataset file's ``{"image": reference}`` names, reading no file.
+
+    A relative path (written with ``/``) is resolved against ``base_dir``; an absolute one
+    is kept.
+
+    Raises:
+        ValueError: If ``reference`` is empty.
+    """
+    if not reference:
+        raise ValueError(f"{where}: an image object's path must not be empty")
+    path = Path(reference)
+    return Image(path if path.is_absolute() else base_dir / path)
+
+
+def _content_from_json(value: Any, base_dir: Path, where: str) -> Any:
+    """A dataset file's value for a submission, prompt or reference submission, as content.
+
+    A string is text, returned as it is. An image object (``{"image": "<path>"}``, the only
+    key) is an ``Image`` of that path (``_image_from_reference``). An array whose every
+    element is a string or an image object is a document, returned as a list of its parts
+    in order. Any other value is returned unchanged, so a file that loaded before images
+    existed still loads; a value that is not content raises when the item is graded.
+    """
+    if _image_reference(value) is not None:
+        return _image_from_reference(value["image"], base_dir, where)
+    if isinstance(value, list) and all(
+        isinstance(part, str) or _image_reference(part) is not None for part in value
+    ):
+        return [_content_from_json(part, base_dir, where) for part in value]
+    return value
+
+
+def _content_to_json(value: Any, write_image: Callable[[Image, str], str], where: str) -> Any:
+    """``value`` in the form a dataset file holds it: each ``Image`` as ``{"image": path}``.
+
+    ``write_image(image, where)`` gives the path an image is written as. A sequence (other
+    than text or bytes) becomes a list of its converted parts; any other value is returned
+    unchanged, so text is written exactly as before images existed.
+    """
+    if isinstance(value, Image):
+        return {"image": write_image(value, where)}
+    if isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray):
+        return [_content_to_json(part, write_image, where) for part in value]
+    return value
+
+
+def _image_path_writer(base_dir: str | Path | None) -> Callable[[Image, str], str]:
+    """How ``RubricDataset.to_json`` writes an image: the POSIX path of its file.
+
+    The path is relative to ``base_dir`` when the file is inside it (compared as written,
+    without resolving symlinks or ``..``), else absolute; with no ``base_dir`` it is always
+    absolute. An image held as bytes has no path to write and raises ``ValueError``.
+    """
+    base = None if base_dir is None else Path(base_dir).absolute()
+
+    def write(image: Image, where: str) -> str:
+        path = image.path
+        if path is None:
+            raise ValueError(
+                f"{where} holds an image given as bytes ({image!r}), which to_json cannot "
+                "write: a dataset file refers to images by path. Save the dataset with "
+                "to_file(path), which writes such images beside the file, or build the "
+                "Image from a file path."
+            )
+        if base is not None and path.is_relative_to(base):
+            return path.relative_to(base).as_posix()
+        return path.as_posix()
+
+    return write
+
+
 @dataclass
 class DataItem:
     """A single item to be graded, optionally with ground truth verdicts.
 
     Attributes:
-        submission: The content to be evaluated. Can be plain text or a JSON-serialized
-            string for structured data (e.g., dialogues, multi-part responses).
+        submission: The content to be evaluated (``Content``): plain text (or a
+            JSON-serialized string for structured data, e.g. dialogues), an ``Image``, or a
+            document, a list of text and images read in order.
         description: A brief description of this item (e.g., "High quality response").
         ground_truth: Optional list of ground truth values, one per criterion.
             - For binary criteria: CriterionVerdict (MET, UNMET, CANNOT_ASSESS)
@@ -57,11 +150,11 @@ class DataItem:
             has unique evaluation criteria (e.g., ResearcherBench). It replaces the
             dataset-level rubric entirely, guidelines included: this rubric carries its
             own ``guidelines`` (possibly none) and never inherits the dataset-level ones.
-        reference_submission: Optional exemplar response for grading context. When
-            present, helps calibrate the grader's expectations. Item-level takes
-            precedence over dataset-level reference.
-        prompt: Optional per-item prompt. If provided, overrides the dataset-level
-            prompt for this item.
+        reference_submission: Optional exemplar response for grading context
+            (``Content``, as ``submission``). When present, helps calibrate the grader's
+            expectations. Item-level takes precedence over dataset-level reference.
+        prompt: Optional per-item prompt (``Content``, as ``submission``). If provided,
+            overrides the dataset-level prompt for this item.
         ground_truth_reasons: Optional written reasons for the ground truth, one per
             criterion and aligned index-for-index with ``ground_truth``, which must then be
             set. A ``None`` entry means that criterion's ground truth has no written reason.
@@ -97,12 +190,12 @@ class DataItem:
         ... )
     """
 
-    submission: str
+    submission: Content
     description: str
     ground_truth: list[CriterionVerdict | str] | None = None
     rubric: Rubric | None = None
-    reference_submission: str | None = None
-    prompt: str | None = None
+    reference_submission: Content | None = None
+    prompt: Content | None = None
     ground_truth_reasons: list[str | None] | None = None
 
     def __post_init__(self) -> None:
@@ -159,14 +252,15 @@ class RubricDataset:
     - Benchmarking different grading strategies
 
     Attributes:
-        prompt: Optional global prompt/question that items are responses to. Can be
-            None if all items have their own prompts.
+        prompt: Optional global prompt/question that items are responses to
+            (``Content``: text, an ``Image``, or a document). Can be None if all items have
+            their own prompts.
         rubric: Optional global Rubric used to evaluate items. Can be None if all
             items have their own rubrics.
         items: List of DataItem instances to evaluate.
         name: Optional name for the dataset (e.g., "essay-grading-v1").
-        reference_submission: Optional global exemplar response for grading context.
-            When present, provides calibration for the grader. Item-level reference
+        reference_submission: Optional global exemplar response for grading context
+            (``Content``). When present, provides calibration for the grader. Item-level reference
             takes precedence over this dataset-level reference.
 
     Example:
@@ -186,11 +280,11 @@ class RubricDataset:
         ... )
     """
 
-    prompt: str | None = None
+    prompt: Content | None = None
     rubric: Rubric | None = None
     items: list[DataItem] = field(default_factory=list)
     name: str | None = None
-    reference_submission: str | None = None
+    reference_submission: Content | None = None
 
     def __post_init__(self) -> None:
         """Validate dataset consistency."""
@@ -226,7 +320,7 @@ class RubricDataset:
             return self.rubric
         raise ValueError(f"Item {idx} has no rubric and dataset has no global rubric")
 
-    def get_item_reference_submission(self, idx: int) -> str | None:
+    def get_item_reference_submission(self, idx: int) -> Content | None:
         """Get the effective reference submission for an item.
 
         Item-level reference takes precedence over dataset-level reference.
@@ -243,7 +337,7 @@ class RubricDataset:
             return item.reference_submission
         return self.reference_submission
 
-    def get_item_prompt(self, idx: int) -> str:
+    def get_item_prompt(self, idx: int) -> Content:
         """Get the effective prompt for an item (per-item or global fallback).
 
         Args:
@@ -339,12 +433,12 @@ class RubricDataset:
 
     def add_item(
         self,
-        submission: str,
+        submission: Content,
         description: str,
         ground_truth: list[CriterionVerdict | str] | None = None,
         rubric: Rubric | None = None,
-        reference_submission: str | None = None,
-        prompt: str | None = None,
+        reference_submission: Content | None = None,
+        prompt: Content | None = None,
         *,
         ground_truth_reasons: list[str | None] | None = None,
     ) -> None:
@@ -431,20 +525,38 @@ class RubricDataset:
             return rubric_data
         return {"guidelines": rubric.guidelines, "criteria": rubric_data}
 
-    def to_json(self, indent: int | None = 2) -> str:
+    def to_json(self, indent: int | None = 2, *, base_dir: str | Path | None = None) -> str:
         """Serialize the dataset to a JSON string.
+
+        A submission, prompt or reference submission is written as ``from_json`` reads it:
+        text as a string, an ``Image`` as ``{"image": "<path>"}`` and a document as an
+        array of both. An image's path is written with ``/``, relative to ``base_dir`` when
+        its file is inside that directory (compared as written: symlinks and ``..`` are not
+        resolved), else absolute; with no ``base_dir`` it is always absolute. No image file
+        is read. A dataset without images is written exactly as before images existed.
 
         Args:
             indent: Number of spaces for indentation. None for compact output.
+            base_dir: The directory image paths are written relative to, normally that of
+                the file the JSON is saved in (``to_file`` passes it).
 
         Returns:
             JSON string representation of the dataset.
+
+        Raises:
+            ValueError: If an image is held as bytes, which has no path to write; the
+                message names the item and field. ``to_file`` saves such images.
         """
+        return self._to_json(indent, _image_path_writer(base_dir))
+
+    def _to_json(self, indent: int | None, write_image: Callable[[Image, str], str]) -> str:
+        """``to_json``, writing each image as the path ``write_image(image, where)`` gives
+        (``where`` names the item and field, for messages)."""
         data: dict[str, Any] = {}
         if self.name is not None:
             data["name"] = self.name
         if self.prompt is not None:
-            data["prompt"] = self.prompt
+            data["prompt"] = _content_to_json(self.prompt, write_image, "The dataset prompt")
 
         # Serialize global rubric (can be None)
         if self.rubric is not None:
@@ -454,13 +566,17 @@ class RubricDataset:
 
         # Serialize global reference_submission if present
         if self.reference_submission is not None:
-            data["reference_submission"] = self.reference_submission
+            data["reference_submission"] = _content_to_json(
+                self.reference_submission, write_image, "The dataset reference_submission"
+            )
 
         # Serialize items with ground truth and per-item rubrics
         items_data = []
-        for item in self.items:
+        for i, item in enumerate(self.items):
             item_data: dict[str, Any] = {
-                "submission": item.submission,
+                "submission": _content_to_json(
+                    item.submission, write_image, f"Item {i} submission"
+                ),
                 "description": item.description,
             }
             if item.ground_truth is not None:
@@ -483,10 +599,12 @@ class RubricDataset:
                 item_data["rubric"] = self._serialize_rubric(item.rubric)
             # Serialize per-item reference_submission if present
             if item.reference_submission is not None:
-                item_data["reference_submission"] = item.reference_submission
+                item_data["reference_submission"] = _content_to_json(
+                    item.reference_submission, write_image, f"Item {i} reference_submission"
+                )
             # Serialize per-item prompt if present
             if item.prompt is not None:
-                item_data["prompt"] = item.prompt
+                item_data["prompt"] = _content_to_json(item.prompt, write_image, f"Item {i} prompt")
             items_data.append(item_data)
         data["items"] = items_data
 
@@ -495,19 +613,57 @@ class RubricDataset:
     def to_file(self, path: str | Path) -> None:
         """Save dataset to a JSON file.
 
+        Image paths are written relative to the file's directory when inside it, else
+        absolute (``to_json`` with ``base_dir`` set to that directory), so ``from_file``
+        still finds the images inside the directory after the directory is moved. An
+        image held as bytes is saved beside the file as ``<stem>_images/<digest>.<ext>``
+        (``<stem>`` the file name without its suffix, ``<digest>`` the image's SHA-256,
+        ``<ext>`` one of ``png``, ``jpg``, ``gif`` and ``webp``), written only when no such
+        file exists yet, and referred to by that relative path. The JSON file is written
+        last.
+
         Args:
             path: Path to write the JSON file.
         """
-        from pathlib import Path
+        path = Path(path)
+        base_dir = path.parent
+        write_path = _image_path_writer(base_dir)
+        images_dir = f"{path.stem}_images"
+        pending: dict[Path, bytes] = {}
 
-        Path(path).write_text(self.to_json(), encoding="utf-8")
+        def write_image(image: Image, where: str) -> str:
+            if image.path is not None:
+                return write_path(image, where)
+            name = f"{images_dir}/{image.digest}.{_IMAGE_EXTENSIONS[image.media_type]}"
+            pending[base_dir / name] = image.read_bytes()
+            return name
+
+        text = self._to_json(2, write_image)
+        for image_path, data in pending.items():
+            if not image_path.exists():
+                image_path.parent.mkdir(parents=True, exist_ok=True)
+                image_path.write_bytes(data)
+        path.write_text(text, encoding="utf-8")
 
     @classmethod
-    def from_json(cls, json_string: str) -> RubricDataset:
+    def from_json(cls, json_string: str, *, base_dir: str | Path | None = None) -> RubricDataset:
         """Deserialize a dataset from a JSON string.
+
+        A submission, prompt or reference submission (of an item or of the dataset) is read
+        as content: a string is text; an image object, ``{"image": "<path>"}`` with
+        ``"image"`` its only key and a string value, is an ``Image``; an array whose every
+        element is a string or an image object is a document, read as a list of its parts.
+        Any other value is kept as it is, so every file that loaded before images existed
+        still loads (a value that is not content raises ``TypeError`` when its item is
+        graded). An image path is written with ``/``; a relative one is resolved against
+        ``base_dir``, or the current working directory at the time of the call when
+        ``base_dir`` is None, and an absolute one is kept. No image file is opened: a
+        missing file fails when its item is graded.
 
         Args:
             json_string: JSON string representation of the dataset.
+            base_dir: The directory relative image paths are resolved against, normally
+                that of the file the JSON was read from (``from_file`` passes it).
 
         Returns:
             RubricDataset instance.
@@ -515,8 +671,10 @@ class RubricDataset:
         Raises:
             ValueError: If the JSON is invalid, missing required fields, or if
                 an item has no rubric when no global rubric is set, or if an item's
-                ``ground_truth_reasons`` do not align with its ``ground_truth``.
+                ``ground_truth_reasons`` do not align with its ``ground_truth``, or if an
+                image object's path is empty.
         """
+        base = Path.cwd() if base_dir is None else Path(base_dir).absolute()
         try:
             data = json.loads(json_string)
         except json.JSONDecodeError as e:
@@ -541,7 +699,9 @@ class RubricDataset:
             if not isinstance(item_data, dict):
                 raise ValueError(f"Item {i} must be a dict, got {type(item_data).__name__}")
 
-            submission = item_data.get("submission")
+            submission = _content_from_json(
+                item_data.get("submission"), base, f"Item {i} submission"
+            )
             description = item_data.get("description")
 
             if submission is None:
@@ -600,9 +760,11 @@ class RubricDataset:
             # ground truth)
             ground_truth_reasons = item_data.get("ground_truth_reasons")
             # Parse per-item reference_submission if present
-            item_reference = item_data.get("reference_submission")
+            item_reference = _content_from_json(
+                item_data.get("reference_submission"), base, f"Item {i} reference_submission"
+            )
             # Parse per-item prompt if present
-            item_prompt = item_data.get("prompt")
+            item_prompt = _content_from_json(item_data.get("prompt"), base, f"Item {i} prompt")
 
             items.append(
                 DataItem(
@@ -617,16 +779,21 @@ class RubricDataset:
             )
 
         return cls(
-            prompt=data.get("prompt"),
+            prompt=_content_from_json(data.get("prompt"), base, "The dataset prompt"),
             rubric=rubric,
             items=items,
             name=data.get("name"),
-            reference_submission=data.get("reference_submission"),
+            reference_submission=_content_from_json(
+                data.get("reference_submission"), base, "The dataset reference_submission"
+            ),
         )
 
     @classmethod
     def from_file(cls, path: str | Path) -> RubricDataset:
         """Load dataset from a JSON file.
+
+        Relative image paths are resolved against the file's directory, not the current
+        working directory (``from_json`` with ``base_dir`` set to it).
 
         Args:
             path: Path to the JSON file.
@@ -638,13 +805,11 @@ class RubricDataset:
             FileNotFoundError: If the file doesn't exist.
             ValueError: If the JSON is invalid.
         """
-        from pathlib import Path
-
         path = Path(path)
         if not path.exists():
             raise FileNotFoundError(f"Dataset file not found: {path}")
 
-        return cls.from_json(path.read_text(encoding="utf-8"))
+        return cls.from_json(path.read_text(encoding="utf-8"), base_dir=path.parent)
 
     # =========================================================================
     # Dataset Splitting

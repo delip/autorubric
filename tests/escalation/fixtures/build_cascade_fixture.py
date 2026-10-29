@@ -233,6 +233,7 @@ def recorded_item(
                 llm_verdict=CriterionVerdict(vote["verdict"]),
             )
         )
+    assert isinstance(item.submission, str)  # the fixture's data is text
     return RecordedItem(
         source_item_idx=source_item_idx,
         description=item.description,

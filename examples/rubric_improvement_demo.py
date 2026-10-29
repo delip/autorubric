@@ -146,6 +146,7 @@ async def main() -> None:
     # -- Load dataset and prepare splits --
     dataset = RubricDataset.from_file("examples/data/ricechem/q1.json")
     task_prompt = dataset.prompt
+    assert isinstance(task_prompt, str)  # the ricechem datasets carry a text prompt
     original_rubric = dataset.rubric
 
     val, test = dataset.split_train_test(n_train=N_VAL, seed=42)
