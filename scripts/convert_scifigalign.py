@@ -99,12 +99,13 @@ _PNG_BIT_DEPTHS = {0: {1, 2, 4, 8, 16}, 2: {8, 16}, 3: {1, 2, 4, 8}, 4: {8, 16},
 
 GIT_TIMEOUT_SECONDS = 600
 
-# Each criterion's requirement: the dimension's definition in the paper's section 3.1.
+# Each criterion's requirement: the dimension's definition in the paper's section 3.1,
+# verbatim but for its typographic apostrophes, written here as ASCII.
 REQUIREMENTS = {
     "clarity": (
         "Clarity (CL): whether the figure is clear, readable, and cleanly laid out (fonts, "
-        "contrast, axis labels). A figure may be scientifically dense yet still score poorly "
-        "here if clutter or rendering artefacts obstruct reading."
+        "contrast, legends, axis labels). A figure may be scientifically dense yet still score "
+        "poorly here if clutter or rendering artefacts obstruct reading."
     ),
     "relevance": (
         "Relevance (RE): whether the figure matches the caption, citing paragraphs, and the "

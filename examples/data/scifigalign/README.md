@@ -59,7 +59,7 @@ Every row's `label_source` is `human` (the converter refuses any other), and eve
 
 ## The Rubric
 
-`build_rubric()` in the converter defines the rubric, and every file embeds the same copy. It has four ordinal criteria of weight 1.0, one per dimension, each with five options for scores 1 to 5, valued 0, 0.25, 0.5, 0.75 and 1. There is no "not applicable" option, because the annotators had none. Each criterion's requirement is the dimension's definition in Section 3.1 of the paper, verbatim.
+`build_rubric()` in the converter defines the rubric, and every file embeds the same copy. It has four ordinal criteria of weight 1.0, one per dimension, each with five options for scores 1 to 5, valued 0, 0.25, 0.5, 0.75 and 1. There is no "not applicable" option, because the annotators had none. Each criterion's requirement is the dimension's definition in Section 3.1 of the paper, verbatim except that its typographic apostrophes are written as ASCII.
 
 An option's label is `"Score k: <descriptor>"`. A `CriterionOption` has no description field, and the judge needs to see what each score means, so the descriptor goes into the label. Each descriptor starts with the paper's Table 2 entry for that score. At scores 1, 3 and 5 the sentence the human annotators used as a rationale template for that tier follows it, where one exists. Each template is attached to a fixed level (low-tier templates to 1, mid-tier to 3, high-tier to 5), although the annotators used them with neighbouring scores too.
 
@@ -130,7 +130,8 @@ The paper reports MAE, Spearman's rank correlation (SRCC) and within-paper pairw
 | --- | --- |
 | MAE of one dimension, 1 to 5 scale | `4 × OrdinalCriterionMetrics.mae`; option values are `(score − 1) / 4`, so an error on them times 4 is an error in score points. RMSE likewise: `4 × OrdinalCriterionMetrics.rmse` |
 | Macro MAE | The mean of the four per-dimension MAEs above |
-| SRCC of the overall score | `MetricsResult.score_spearman`. The four weights are equal and the rubric has no abstain option, so an item's normalized score is the mean of its four option values, a linear function of the mean of the four scores, and the rank correlation is the same |
+| SRCC of the baselines (SigLIP2-Ridge, LLM-as-judge): the macro average of the per-dimension Spearman coefficients, as the caption of the paper's Table 4 says | The mean of the four `OrdinalCriterionMetrics.spearman.coefficient` values, which the demo prints as "macro SRCC" |
+| SRCC of SciFigAlign: Spearman on the overall score | `MetricsResult.score_spearman`, which the demo prints as "SRCC of the overall score". The four weights are equal and the rubric has no abstain option, so an item's normalized score is the mean of its four option values, a linear function of the mean of the four scores, and the rank correlation is the same |
 | PA | Not computable. PA counts pairs of figures from the same paper whose gold scores differ by at least 0.5, and the demo's 300 figures come from 300 different papers, so there are 0 such pairs |
 
 Per dimension, `OrdinalCriterionMetrics` also gives `exact_accuracy`, `adjacent_accuracy` (within one point), `weighted_kappa` (quadratic) and `spearman`, which the demo prints.
@@ -139,12 +140,14 @@ Per dimension, `OrdinalCriterionMetrics` also gives `exact_accuracy`, `adjacent_
 
 The paper's results on its own 396-figure test set, as given in the repository (`index.html`, `README.md` and `config/paper_config.json` at the pinned commit):
 
-| Method | Macro MAE | SRCC | PA |
-| --- | :---: | :---: | :---: |
-| Mean / median predictor | 0.90–0.94 | — | 0% |
-| SigLIP2-Ridge | 0.877 | 0.266 | 65.8% |
-| LLM-as-judge (v9) | 0.864 | 0.198 | 63.2% |
-| SciFigAlign (fine-tuned CLIP + SciBERT) | 0.3524 | 0.3088 | 81.64% |
+| Method | Macro MAE | SRCC | Which SRCC | PA |
+| --- | :---: | :---: | :---: | :---: |
+| Mean / median predictor | 0.90–0.94 | — | — | 0% |
+| SigLIP2-Ridge | 0.877 | 0.266 | macro | 65.8% |
+| LLM-as-judge (v9) | 0.864 | 0.198 | macro | 63.2% |
+| SciFigAlign (fine-tuned CLIP + SciBERT) | 0.3524 | 0.3088 | overall | 81.64% |
+
+The repository gives the three SRCCs in one column, but they are two statistics. The caption of the paper's Table 4 says the baselines' SRCC is the macro average of the per-dimension Spearman coefficients and SciFigAlign's is on the overall score. Compare an LLM judge's run with the LLM-as-judge row on its macro SRCC, not on `score_spearman`. The demo prints each reference row next to the same kind of SRCC from the run.
 
 The paper also gives the LLM judge's per-dimension MAE as 0.902 for Clarity, 0.828 for Informativeness and 0.947 for Structure. These three numbers come from the paper and are not in the repository.
 

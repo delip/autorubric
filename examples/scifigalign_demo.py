@@ -90,10 +90,20 @@ POINTS_PER_UNIT = 4
 
 # Rows of the paper's results on its own human-rated test set: 396 figures, each judged with
 # its citing paragraphs. They are for orientation, not comparison (see the README).
-# Columns: macro MAE, SRCC, pairwise accuracy (PA), and per-dimension MAE where reported.
+# Columns: macro MAE, SRCC, which SRCC it is, pairwise accuracy (PA), and per-dimension MAE
+# where reported. The paper's Table 4 gives the baselines' SRCC as the macro average of the
+# per-dimension Spearman coefficients ("macro") and SciFigAlign's on the overall score
+# ("overall"); a run is compared with each row on the same kind.
 REFERENCE_ROWS = (
-    ("LLM-as-judge (v9), paper", 0.864, 0.198, 0.632, {"CL": 0.902, "IN": 0.828, "ST": 0.947}),
-    ("SciFigAlign (fine-tuned), paper", 0.3524, 0.3088, 0.8164, {}),
+    (
+        "LLM-as-judge (v9), paper",
+        0.864,
+        0.198,
+        "macro",
+        0.632,
+        {"CL": 0.902, "IN": 0.828, "ST": 0.947},
+    ),
+    ("SciFigAlign (fine-tuned), paper", 0.3524, 0.3088, "overall", 0.8164, {}),
 )
 SHORT_NAMES = {
     "clarity": "CL",
@@ -550,10 +560,14 @@ def print_metrics(metrics: MetricsResult, dataset: RubricDataset) -> None:
     maes = [m.mae * POINTS_PER_UNIT for m in per_dimension if m.mae is not None]
     srccs = [m.spearman.coefficient for m in per_dimension if m.spearman.coefficient is not None]
     pairs = same_paper_pairs(dataset)
+    run_srcc = {
+        "macro": statistics.mean(srccs) if srccs else None,
+        "overall": metrics.score_spearman.coefficient,
+    }
     print("\nThe paper's metrics")
     print(f"  macro MAE                      {_fmt(statistics.mean(maes) if maes else None)}")
-    print(f"  macro SRCC (mean over dims)    {_fmt(statistics.mean(srccs) if srccs else None)}")
-    print(f"  SRCC of the overall score      {_fmt(metrics.score_spearman.coefficient)}")
+    print(f"  macro SRCC (mean over dims)    {_fmt(run_srcc['macro'])}")
+    print(f"  SRCC of the overall score      {_fmt(run_srcc['overall'])}")
     if pairs:
         print(f"  PA                             not computed ({pairs} same-paper pairs)")
     else:
@@ -563,10 +577,18 @@ def print_metrics(metrics: MetricsResult, dataset: RubricDataset) -> None:
         print(f"  mean weighted kappa {_fmt(metrics.mean_kappa)}, 95% CI [{low:.3f}, {high:.3f}]")
 
     print("\nReference rows (the paper's 396-figure test set, with citing paragraphs)")
-    print(f"  {'method':<34} {'MAE':>6} {'SRCC':>6} {'PA':>7}  per-dimension MAE")
-    for name, mae, srcc, pa, dims in REFERENCE_ROWS:
+    print("  (SRCC is the macro or overall kind the paper reports for the row; 'this run' is")
+    print("  the same kind of SRCC computed on this run)")
+    print(
+        f"  {'method':<34} {'MAE':>6} {'SRCC':>6} {'kind':>8} {'this run':>9} {'PA':>7}"
+        "  per-dimension MAE"
+    )
+    for name, mae, srcc, kind, pa, dims in REFERENCE_ROWS:
         per_dim = ", ".join(f"{dim} {value}" for dim, value in dims.items()) or "-"
-        print(f"  {name:<34} {mae:>6} {srcc:>6} {pa:>7.2%}  {per_dim}")
+        print(
+            f"  {name:<34} {mae:>6} {srcc:>6} {kind:>8} {_fmt(run_srcc[kind]):>9} {pa:>7.2%}"
+            f"  {per_dim}"
+        )
 
 
 def print_usage(result: EvalResult) -> None:
