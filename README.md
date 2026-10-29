@@ -183,6 +183,7 @@ When writing or editing code that uses AutoRubric:
 | Single-call grading        | Grade an item's whole rubric in one LLM call instead of one per criterion (`llm_calls="per_item"`), for lower cost and decision-model parity |
 | Few-shot calibration       | Provide labeled examples to LLM judges to improve grading consistency    |
 | Multi-choice criteria      | Ordinal and nominal scales beyond binary met/unmet verdicts              |
+| Image inputs               | Submissions, prompts and references that hold images (`Image`), graded by vision LLMs and Jev |
 | Batch evaluation           | High-throughput `EvalRunner` with checkpointing and resumption           |
 | Metrics & validation       | Agreement metrics, bootstrap confidence intervals, distribution analysis |
 | Length penalty             | Configurable penalty for overly long responses                           |

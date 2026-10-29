@@ -40,6 +40,7 @@ Sophisticated evaluation techniques.
 | [Multi-Choice Rubrics](multi-choice-rubrics.md) | Restaurant Reviews | Ordinal/nominal scales with Likert ratings |
 | [Extended Thinking](extended-thinking.md) | Security Assessments | Deep reasoning for complex evaluations |
 | [Length Penalty](length-penalty.md) | Executive Summaries | Penalizing verbose responses |
+| [Grading Submissions with Images](image-inputs.md) | Chart Reports | Images in submissions, LLM and decision-model judges, image parts in dataset files |
 
 ### Tier 4: Validation & Production
 

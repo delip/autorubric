@@ -168,6 +168,12 @@ class TestShippedRegistry:
             cast(Any, entry)["images"] = False
         assert entry["image_formats"] == ("png", "jpeg")
 
+    def test_the_lookup_is_exported_from_the_package(self):
+        import autorubric
+
+        assert autorubric.decision_model_capabilities is decision_model_capabilities
+        assert "decision_model_capabilities" in autorubric.__all__
+
 
 class TestLookup:
     def test_the_typesafe_prefix_is_optional(self):
@@ -294,8 +300,8 @@ class TestImagesAreRefused:
             await Rubric([LEGIBLE]).grade([FIGURE, CAPTION], grader=grader)
         assert str(excinfo.value) == (
             "Judge 'mine' uses decision model 'my-org/rubric-dm-7b', which is not in "
-            "autorubric's decision-model registry (src/autorubric/data/decision_models.json); "
-            "add an entry saying whether it accepts images"
+            "autorubric's decision-model registry (autorubric/data/decision_models.json, "
+            "inside the installed package); add an entry saying whether it accepts images"
         )
         assert _is_judge_configuration_error(excinfo.value)
         assert fake_sdk.calls == []
@@ -452,6 +458,10 @@ class TestFillGroundTruth:
         with pytest.raises(ValueError, match="jev") as excinfo:
             await fill_ground_truth(image_dataset(), grader, show_progress=False)
         assert _CONFIGURATION_ERROR_NOTE in excinfo.value.__notes__
+        # The note a traceback shows below the message.
+        assert excinfo.value.__notes__ == [
+            "autorubric: judge configuration error (fails every item alike)"
+        ]
 
     @pytest.mark.asyncio
     async def test_an_sdk_without_image_is_raised(self, fake_sdk, make_grader, monkeypatch):

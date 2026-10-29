@@ -32,7 +32,7 @@ from autorubric.content import (
 )
 from autorubric.decision import (
     _CONFIGURATION_ERROR_NOTE,
-    _REGISTRY_IN_REPOSITORY,
+    _REGISTRY_IN_PACKAGE,
     DecisionModelClient,
     DecisionModelConfig,
     _configuration_error,
@@ -836,8 +836,8 @@ def _image_capabilities(judge: JudgeSpec) -> Mapping[str, Any]:
         raise _configuration_error(
             ValueError(
                 f"Judge {judge.judge_id!r} uses decision model {model!r}, which is not in "
-                f"autorubric's decision-model registry ({_REGISTRY_IN_REPOSITORY}); add an "
-                "entry saying whether it accepts images"
+                f"autorubric's decision-model registry ({_REGISTRY_IN_PACKAGE}, inside the "
+                "installed package); add an entry saying whether it accepts images"
             )
         )
     if not capabilities["images"]:

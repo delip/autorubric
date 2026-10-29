@@ -1,7 +1,8 @@
 """``Rubric.grade`` and ``Grader.grade`` are typed by the grader's report type.
 
 ``Grader`` is generic in the report type its ``aggregate`` returns: ``CriterionGrader``
-returns an ``EnsembleEvaluationReport``, and a custom grader declares its own. The check
+returns an ``EnsembleEvaluationReport``, and a custom grader declares its own, for any
+``Content`` submission (text, an ``Image``, or a document of both). The check
 runs the project's type checker (``ty``) on a small module, because the annotations are
 the feature; nothing changes at runtime.
 """
@@ -16,7 +17,14 @@ import pytest
 MODULE = """
 from typing import Any, assert_type
 
-from autorubric import Content, EnsembleEvaluationReport, EvaluationReport, LLMConfig, Rubric
+from autorubric import (
+    Content,
+    EnsembleEvaluationReport,
+    EvaluationReport,
+    Image,
+    LLMConfig,
+    Rubric,
+)
 from autorubric.graders import CriterionGrader, Grader
 from autorubric.types import Criterion
 
@@ -40,6 +48,23 @@ async def check(rubric: Rubric) -> None:
     assert_type(await rubric.grade(to_grade="x", grader=grader), EnsembleEvaluationReport)
     assert_type(await grader.grade("x", rubric.rubric), EnsembleEvaluationReport)
     assert_type(await rubric.grade(to_grade="x", grader=PlainGrader()), EvaluationReport)
+
+
+async def check_images(rubric: Rubric) -> None:
+    # A submission, query or reference submission may hold images: any Content.
+    grader = CriterionGrader(judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"))
+    figure = Image("figure.png")
+    assert_type(
+        await rubric.grade(to_grade=[figure, "x"], grader=grader), EnsembleEvaluationReport
+    )
+    assert_type(
+        await rubric.grade(
+            to_grade=figure, grader=grader, query=["Describe", figure], reference_submission=figure
+        ),
+        EnsembleEvaluationReport,
+    )
+    assert_type(await grader.grade((figure, "x"), rubric.rubric), EnsembleEvaluationReport)
+    assert_type(await rubric.grade(to_grade=[figure, "x"], grader=PlainGrader()), EvaluationReport)
 """
 
 

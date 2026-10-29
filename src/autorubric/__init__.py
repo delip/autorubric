@@ -2,7 +2,7 @@ from importlib.metadata import PackageNotFoundError, version
 
 from autorubric.content import Content, Image
 from autorubric.dataset import DataItem, RubricDataset
-from autorubric.decision import DecisionModelConfig
+from autorubric.decision import DecisionModelConfig, decision_model_capabilities
 from autorubric.escalation import (
     EscalationCurve,
     EscalationPoint,
@@ -140,6 +140,7 @@ __all__ = [
     "generate",
     # Decision-model judges
     "DecisionModelConfig",
+    "decision_model_capabilities",
     "EscalationConfig",
     # Confidence cascades: offline replay, diagnostics and calibration
     "EscalationCurve",

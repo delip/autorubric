@@ -131,6 +131,7 @@ nav:
           - Multi-Choice Rubrics: cookbook/multi-choice-rubrics.md
           - Extended Thinking: cookbook/extended-thinking.md
           - Length Penalty: cookbook/length-penalty.md
+          - Grading Submissions with Images: cookbook/image-inputs.md
       - Validation & Production:
           - Evaluating Rubric Quality: cookbook/rubric-evaluation.md
           - Automated Rubric Improvement: cookbook/automated-rubric-improvement.md

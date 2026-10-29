@@ -537,8 +537,9 @@ _REGISTRY_RESOURCE: Traversable = (
 """autorubric's decision-model registry, shipped with the package; read on first use
 (``_decision_model_registry``)."""
 
-_REGISTRY_IN_REPOSITORY = "src/autorubric/data/decision_models.json"
-"""Where the registry lives in autorubric's repository, the file to add a model to."""
+_REGISTRY_IN_PACKAGE = "autorubric/data/decision_models.json"
+"""Where the registry lives inside the installed ``autorubric`` package, as error messages
+name it: the file to add a model to."""
 
 _IMAGE_LIMIT_KEYS = (
     "image_formats",
@@ -706,10 +707,7 @@ def decision_model_capabilities(model: str) -> Mapping[str, Any] | None:
     return entry
 
 
-_CONFIGURATION_ERROR_NOTE = (
-    "autorubric: a judge configuration error, which fails every item alike, so "
-    "fill_ground_truth raises it instead of leaving the item out"
-)
+_CONFIGURATION_ERROR_NOTE = "autorubric: judge configuration error (fails every item alike)"
 """The note (PEP 678) that marks an error raised from a grade as a judge configuration
 error, one that says nothing about the item (``_configuration_error``)."""
 

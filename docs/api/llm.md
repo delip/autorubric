@@ -140,6 +140,24 @@ stats = client.cache_stats()
 # {'size': 1024, 'count': 10, 'directory': '.autorubric_cache'}
 ```
 
+## Images in Prompts
+
+`LLMClient.generate` takes the user prompt as `Content`: a string, an `Image`, or a list of strings and images. A text prompt is sent as the message's content string, exactly as before. A prompt holding an image is sent as a list of OpenAI-style content parts in the prompt's order, a `{"type": "text", "text": ...}` part for each run of text and a `{"type": "image_url", "image_url": {"url": "data:<media type>;base64,..."}}` part for each image. LiteLLM translates these parts for providers with another image format (Anthropic, Gemini). The image is sent as its own bytes, neither resized nor re-encoded, so the provider's own limits on format, size and image count apply.
+
+```python
+from autorubric import Image, LLMClient, LLMConfig
+
+client = LLMClient(LLMConfig(model="openai/gpt-4.1-mini"))
+reply = await client.generate(
+    system_prompt="You describe figures.",
+    user_prompt=[Image("figures/fig1.png"), "What does this figure show?"],
+)
+```
+
+The response cache keys a prompt holding an image by the SHA-256 of its content, its text and each image's bytes in order, so an identical prompt hits the cache and a changed image misses it. Text prompts keep their existing cache keys. With `prompt_caching=True`, the system prompt is marked for caching as usual, and the image parts follow it in the user message. `autorubric.debug = True` prints a marker in place of each image, `[image: <file name>]` for a file and `[image: <N> bytes]` for bytes.
+
+A provider that refuses an image (a format it does not read, or a model without vision input) usually answers with a bad-request error. A grader routes it like any other failed call, so the criterion abstains (`CANNOT_ASSESS`, or NA for a multi-choice criterion) and the error is kept on its report. See the [Image Inputs](../cookbook/image-inputs.md) recipe for the formats providers accept.
+
 ## Prompt Caching (Anthropic)
 
 Reduce latency and cost on repeated calls. Enabled by default:

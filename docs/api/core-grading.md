@@ -94,6 +94,26 @@ What each judge sees:
 - **Custom graders** receive them when their `judge` accepts a `guidelines` keyword or `**kwargs`; otherwise grading proceeds without them and warns once per grader that it ignores rubric guidelines.
 - **Meta-rubric evaluation** shows them to the meta-judge as part of the rubric under review. **Rubric improvement** keeps them unchanged on every revised rubric; the revision LLM sees them but does not revise them.
 
+## Submissions with Images
+
+A submission, a query and a reference submission are each `Content`. This is a string, an `Image`, or a list (or tuple) of strings and images read in order. A list such as a figure followed by its caption is called a document:
+
+```python
+from autorubric import Image
+
+result = await rubric.grade(
+    to_grade=[Image("figures/fig1.png"), "Figure 1: accuracy by model size."],
+    grader=grader,
+    query="Make a figure that shows how accuracy grows with model size.",
+)
+```
+
+`Image(path)` refers to a file and reads nothing when it is made. `Image(data)` holds image bytes and checks their format at once. An image is PNG, JPEG, GIF or WebP. A list holding only strings is the same content as their concatenation, so text grades exactly as before.
+
+`Grader.grade` reads every image of the submission, the query and the reference submission once, before any judge is called. A missing or unreadable file, or a file of another format, raises from the grade. It is never turned into a verdict. A value that is not `Content` (a list holding a number, say) raises `TypeError`, for the query and the reference submission too. The `{"thinking": ..., "output": ...}` dict form stays text only. The length penalty counts the words of the text and ignores the images.
+
+LLM judges receive the images in the prompt, where the text would be (see [LLM Infrastructure](llm.md#images-in-prompts)). Decision models receive them as assets fitted to the model's limits (see [Decision Models](decision-models.md#images)). For a walk-through, provider notes and dataset files, see the [Image Inputs](../cookbook/image-inputs.md) recipe.
+
 ---
 
 ## Criterion
@@ -172,9 +192,30 @@ Token usage tracking for LLM calls.
 
 ---
 
+## Image
+
+An image in submission content, read from a file or held as bytes.
+
+::: autorubric.Image
+    options:
+      show_source: true
+      members_order: source
+
+---
+
+## Content
+
+Type alias for a submission, query or reference submission: a string, an `Image`, or a sequence of both.
+
+::: autorubric.Content
+    options:
+      show_source: true
+
+---
+
 ## ToGradeInput
 
-Type alias for the input format accepted by `rubric.grade()`.
+Type alias for the input format accepted by `rubric.grade()`: `Content`, or a dict with thinking and output sections.
 
 ::: autorubric.ToGradeInput
     options:
