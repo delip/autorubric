@@ -6,7 +6,7 @@ import json
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
-from autorubric.content import Content, _concat, _normalize_content
+from autorubric.content import Content, _concat, _is_content, _normalize_content
 from autorubric.types import Criterion, CriterionOption, CriterionVerdict
 from autorubric.utils import _normalize_guidelines
 
@@ -237,7 +237,13 @@ def _submission_block(to_grade: Content) -> Content:
 
 
 def _example_submission_block(submission: Content) -> Content:
-    """A few-shot example's submission in its ``<example_submission>`` tags."""
+    """A few-shot example's submission in its ``<example_submission>`` tags.
+
+    A submission that is not content (a ``{thinking, output}`` dict) is written as Python
+    formats it, as examples showed it before images existed.
+    """
+    if not _is_content(submission):
+        return f"<example_submission>{submission}</example_submission>"
     return _concat("<example_submission>", submission, "</example_submission>")
 
 

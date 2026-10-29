@@ -662,7 +662,10 @@ def _decision_model_registry() -> Mapping[str, Mapping[str, Any]]:
 
     Raises:
         ValueError: If the file is not JSON, repeats a key or has a malformed entry
-            (``_checked_registry``), naming the file. A failed read is not cached.
+            (``_checked_registry``), naming the file. A failed read is not cached. The
+            error is marked as a configuration error (``_configuration_error``): a
+            malformed registry fails every item with images alike, so ``fill_ground_truth``
+            raises it instead of leaving each such item out.
     """
     source = str(_REGISTRY_RESOURCE)
     try:
@@ -671,8 +674,13 @@ def _decision_model_registry() -> Mapping[str, Mapping[str, Any]]:
             object_pairs_hook=_object_without_repeated_keys,
         )
     except ValueError as error:
-        raise ValueError(f"The decision-model registry {source} cannot be read: {error}") from error
-    return _checked_registry(data, source)
+        raise _configuration_error(
+            ValueError(f"The decision-model registry {source} cannot be read: {error}")
+        ) from error
+    try:
+        return _checked_registry(data, source)
+    except ValueError as error:
+        raise _configuration_error(error)
 
 
 def decision_model_capabilities(model: str) -> Mapping[str, Any] | None:

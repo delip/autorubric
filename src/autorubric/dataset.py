@@ -6,6 +6,7 @@ ground truth labels, supporting both training and evaluation workflows.
 
 from __future__ import annotations
 
+import inspect
 import json
 import random
 from collections.abc import Callable, Iterator, Sequence
@@ -13,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from autorubric.content import Content, Image
+from autorubric.content import Content, Image, _has_images, _is_content
 from autorubric.rubric import Rubric
 from autorubric.types import CriterionVerdict
 
@@ -60,11 +61,13 @@ def _image_reference(value: Any) -> str | None:
     return None
 
 
-def _image_from_reference(reference: str, base_dir: Path, where: str) -> Image:
+def _image_from_reference(reference: str, base_dir: str | Path | None, where: str) -> Image:
     """The image a dataset file's ``{"image": reference}`` names, reading no file.
 
-    A relative path (written with ``/``) is resolved against ``base_dir``; an absolute one
-    is kept.
+    A relative path (written with ``/``) is resolved against ``base_dir``, or the current
+    working directory when it is None (``Image`` makes the path absolute); an absolute one
+    is kept. Only a relative path consults the working directory, and only here, so a
+    dataset without one never does.
 
     Raises:
         ValueError: If ``reference`` is empty.
@@ -72,17 +75,19 @@ def _image_from_reference(reference: str, base_dir: Path, where: str) -> Image:
     if not reference:
         raise ValueError(f"{where}: an image object's path must not be empty")
     path = Path(reference)
-    return Image(path if path.is_absolute() else base_dir / path)
+    if path.is_absolute() or base_dir is None:
+        return Image(path)
+    return Image(Path(base_dir) / path)
 
 
-def _content_from_json(value: Any, base_dir: Path, where: str) -> Any:
+def _content_from_json(value: Any, base_dir: str | Path | None, where: str) -> Any:
     """A dataset file's value for a submission, prompt or reference submission, as content.
 
     A string is text, returned as it is. An image object (``{"image": "<path>"}``, the only
     key) is an ``Image`` of that path (``_image_from_reference``). An array whose every
     element is a string or an image object is a document, returned as a list of its parts
     in order. Any other value is returned unchanged, so a file that loaded before images
-    existed still loads; a value that is not content raises when the item is graded.
+    existed still loads, and is graded as it was then (see ``RubricDataset.from_json``).
     """
     if _image_reference(value) is not None:
         return _image_from_reference(value["image"], base_dir, where)
@@ -130,6 +135,43 @@ def _image_path_writer(base_dir: str | Path | None) -> Callable[[Image, str], st
         return path.as_posix()
 
     return write
+
+
+def _dataset_has_images(dataset: RubricDataset) -> bool:
+    """Whether any submission, prompt or reference submission in ``dataset`` holds an image.
+
+    The dataset's own prompt and reference submission count, as do every item's. Nothing is
+    read: an ``Image`` is recognized by its type alone. A value that is not content (a
+    ``{thinking, output}`` dict submission, or a JSON value a dataset file kept as it was)
+    holds no image, so it never counts and never stops an ``EvalRunner`` run: such an
+    item fails alone, when it is graded.
+    """
+    contents = [dataset.prompt, dataset.reference_submission]
+    for item in dataset.items:
+        contents.extend((item.submission, item.prompt, item.reference_submission))
+    return any(
+        content is not None and _is_content(content) and _has_images(content)
+        for content in contents
+    )
+
+
+def _takes_base_dir(from_json: Callable[..., Any]) -> bool:
+    """Whether ``from_json`` (a ``RubricDataset`` class's, bound) can be passed
+    ``base_dir=``: it has a ``base_dir`` parameter that can be passed by keyword, or takes
+    ``**kwargs``. A signature that cannot be read is taken to accept it, as ours does."""
+    try:
+        parameters = inspect.signature(from_json).parameters.values()
+    except (TypeError, ValueError):
+        return True
+    return any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD
+        or (
+            parameter.name == "base_dir"
+            and parameter.kind
+            in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+        )
+        for parameter in parameters
+    )
 
 
 @dataclass
@@ -620,12 +662,16 @@ class RubricDataset:
         (``<stem>`` the file name without its suffix, ``<digest>`` the image's SHA-256,
         ``<ext>`` one of ``png``, ``jpg``, ``gif`` and ``webp``), written only when no such
         file exists yet, and referred to by that relative path. The JSON file is written
-        last.
+        last. A dataset without images is written by ``self.to_json()``, as before images
+        existed, so a subclass's ``to_json`` still writes it.
 
         Args:
             path: Path to write the JSON file.
         """
         path = Path(path)
+        if not _dataset_has_images(self):
+            path.write_text(self.to_json(), encoding="utf-8")
+            return
         base_dir = path.parent
         write_path = _image_path_writer(base_dir)
         images_dir = f"{path.stem}_images"
@@ -654,11 +700,14 @@ class RubricDataset:
         ``"image"`` its only key and a string value, is an ``Image``; an array whose every
         element is a string or an image object is a document, read as a list of its parts.
         Any other value is kept as it is, so every file that loaded before images existed
-        still loads (a value that is not content raises ``TypeError`` when its item is
-        graded). An image path is written with ``/``; a relative one is resolved against
-        ``base_dir``, or the current working directory at the time of the call when
-        ``base_dir`` is None, and an absolute one is kept. No image file is opened: a
-        missing file fails when its item is graded.
+        still loads, and is graded as it was then (``Grader.grade``): an object is read as
+        the ``{thinking, output}`` form, so one with neither key grades as an empty
+        submission, while a number, or an array holding a part that is not content, raises
+        when its item is graded. An image path is written with ``/``; a relative one is
+        resolved against ``base_dir``, or the current working directory at the time of the
+        call when ``base_dir`` is None, and an absolute one is kept; the working directory is
+        consulted only for such a relative path (a relative ``base_dir`` included). No
+        image file is opened: a missing file fails when its item is graded.
 
         Args:
             json_string: JSON string representation of the dataset.
@@ -674,7 +723,6 @@ class RubricDataset:
                 ``ground_truth_reasons`` do not align with its ``ground_truth``, or if an
                 image object's path is empty.
         """
-        base = Path.cwd() if base_dir is None else Path(base_dir).absolute()
         try:
             data = json.loads(json_string)
         except json.JSONDecodeError as e:
@@ -700,7 +748,7 @@ class RubricDataset:
                 raise ValueError(f"Item {i} must be a dict, got {type(item_data).__name__}")
 
             submission = _content_from_json(
-                item_data.get("submission"), base, f"Item {i} submission"
+                item_data.get("submission"), base_dir, f"Item {i} submission"
             )
             description = item_data.get("description")
 
@@ -761,10 +809,10 @@ class RubricDataset:
             ground_truth_reasons = item_data.get("ground_truth_reasons")
             # Parse per-item reference_submission if present
             item_reference = _content_from_json(
-                item_data.get("reference_submission"), base, f"Item {i} reference_submission"
+                item_data.get("reference_submission"), base_dir, f"Item {i} reference_submission"
             )
             # Parse per-item prompt if present
-            item_prompt = _content_from_json(item_data.get("prompt"), base, f"Item {i} prompt")
+            item_prompt = _content_from_json(item_data.get("prompt"), base_dir, f"Item {i} prompt")
 
             items.append(
                 DataItem(
@@ -779,12 +827,12 @@ class RubricDataset:
             )
 
         return cls(
-            prompt=_content_from_json(data.get("prompt"), base, "The dataset prompt"),
+            prompt=_content_from_json(data.get("prompt"), base_dir, "The dataset prompt"),
             rubric=rubric,
             items=items,
             name=data.get("name"),
             reference_submission=_content_from_json(
-                data.get("reference_submission"), base, "The dataset reference_submission"
+                data.get("reference_submission"), base_dir, "The dataset reference_submission"
             ),
         )
 
@@ -793,7 +841,10 @@ class RubricDataset:
         """Load dataset from a JSON file.
 
         Relative image paths are resolved against the file's directory, not the current
-        working directory (``from_json`` with ``base_dir`` set to it).
+        working directory (``from_json`` with ``base_dir`` set to it). A subclass whose
+        ``from_json`` takes no ``base_dir`` (one written before images existed) is called
+        as before, ``from_json(text)``, so its relative image paths resolve against the
+        working directory.
 
         Args:
             path: Path to the JSON file.
@@ -809,7 +860,10 @@ class RubricDataset:
         if not path.exists():
             raise FileNotFoundError(f"Dataset file not found: {path}")
 
-        return cls.from_json(path.read_text(encoding="utf-8"), base_dir=path.parent)
+        text = path.read_text(encoding="utf-8")
+        if not _takes_base_dir(cls.from_json):
+            return cls.from_json(text)
+        return cls.from_json(text, base_dir=path.parent)
 
     # =========================================================================
     # Dataset Splitting

@@ -97,6 +97,29 @@ class TestBuildRubric:
             assert criterion.scale_type == "ordinal"
             assert criterion.requirement == CONVERT.REQUIREMENTS[criterion.name]
 
+    def test_each_requirement_is_the_papers_section_3_1_definition(self):
+        """Typed from the paper's Section 3.1 (arXiv:2607.27066), its typographic
+        apostrophes written as ASCII."""
+        assert CONVERT.REQUIREMENTS == {
+            "clarity": (
+                "Clarity (CL): whether the figure is clear, readable, and cleanly laid out "
+                "(fonts, contrast, legends, axis labels). A figure may be scientifically dense "
+                "yet still score poorly here if clutter or rendering artefacts obstruct reading."
+            ),
+            "relevance": (
+                "Relevance (RE): whether the figure matches the caption, citing paragraphs, and "
+                "the paper's experimental narrative. High-relevance figures do argumentative "
+                "work; low-relevance ones feel incidental or decorative."
+            ),
+            "informativeness": (
+                "Informativeness (IN): how much the figure contributes to the paper's argument "
+                "(comparisons, curves, method details vs. removable schematics)."
+            ),
+            "structure": (
+                "Structure (ST): subfigure organization, reading path, and visual hierarchy."
+            ),
+        }
+
     def test_five_options_labelled_by_score_and_valued_0_to_1(self):
         for criterion in CONVERT.build_rubric().rubric:
             assert criterion.options is not None

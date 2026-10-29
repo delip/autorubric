@@ -330,6 +330,25 @@ class TestImagesAreRefused:
         assert fake_sdk.calls == []
 
     @pytest.mark.asyncio
+    async def test_an_old_sdk_in_a_mixed_panel_sends_no_request_at_all(
+        self, fake_sdk, make_grader, monkeypatch
+    ):
+        """An SDK without ``Image`` is checked before the judges' gather, so the LLM judge
+        listed first is never called (and never billed) for an error every item shares."""
+        grader = make_grader(
+            JudgeSpec(LLMConfig(model="openai/gpt-4.1-mini"), "llm"),
+            JudgeSpec(dm("jev-1.14.0"), "jev"),
+        )
+        monkeypatch.delattr(typesafe_sdk, "Image")
+        completion = AsyncMock(side_effect=AssertionError("an LLM judge was called"))
+        with patch("litellm.acompletion", completion):
+            with pytest.raises(ImportError, match=r"typesafe-sdk 0\.7\.5 or later") as excinfo:
+                await Rubric([LEGIBLE]).grade([FIGURE, CAPTION], grader=grader)
+        assert _is_judge_configuration_error(excinfo.value)
+        completion.assert_not_called()
+        assert fake_sdk.calls == []
+
+    @pytest.mark.asyncio
     async def test_a_cascade_sends_no_request_at_all(self, fake_sdk):
         grader = CriterionGrader(
             judge_model_config=dm("jev-1.13.0"),
@@ -469,6 +488,28 @@ class TestFillGroundTruth:
         monkeypatch.delattr(typesafe_sdk, "Image")
         with pytest.raises(ImportError, match=r"typesafe-sdk 0\.7\.5 or later"):
             await fill_ground_truth(image_dataset(), grader, show_progress=False)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "content",
+        [
+            "not json",
+            {"jev-1.14.0": {**JEV_1_14, "max_side_px": "1568"}},
+        ],
+        ids=["not-json", "malformed-entry"],
+    )
+    async def test_a_malformed_registry_is_raised(
+        self, fake_sdk, make_grader, registry_file, content
+    ):
+        """A malformed registry fails every item with images alike, so it is raised rather
+        than leaving each such item out of the labelled dataset."""
+        path = registry_file(content)
+        grader = make_grader(JudgeSpec(dm("jev-1.14.0"), "jev"))
+        with pytest.raises(ValueError, match="The decision-model registry") as excinfo:
+            await fill_ground_truth(image_dataset(), grader, show_progress=False)
+        assert str(path) in str(excinfo.value)
+        assert _CONFIGURATION_ERROR_NOTE in excinfo.value.__notes__
+        assert _is_judge_configuration_error(excinfo.value)
 
     @pytest.mark.asyncio
     async def test_an_item_whose_images_cannot_be_sent_is_left_out(

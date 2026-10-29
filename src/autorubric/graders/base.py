@@ -285,9 +285,12 @@ class Grader(ABC, Generic[ReportT]):
 
         Raises:
             TypeError: If ``guidelines`` is neither a ``str`` nor ``None``; if the
-                submission, query or reference submission is not ``Content`` (e.g. a list
-                holding a part that is neither a ``str`` nor an ``Image``); or if a section
-                of a ``{"thinking", "output"}`` submission holds an image or a sequence.
+                submission is a sequence holding a part that is neither a ``str`` nor an
+                ``Image``, or the query or reference submission is not ``Content``; or if a
+                section of a ``{"thinking", "output"}`` submission holds an image or a
+                sequence. Any other submission that is not ``Content`` is read as that dict
+                form, as before images existed: a mapping with neither key is graded as
+                ``""``, and a value with no ``get`` (a number) raises ``AttributeError``.
             OSError: If an image file cannot be read (``FileNotFoundError`` when it is
                 missing).
             ValueError: If an image file is empty, not an image, or not PNG, JPEG, GIF or

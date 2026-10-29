@@ -4,8 +4,9 @@ A submission (and a query or reference submission) is ``Content``: a string, an 
 or a sequence of strings and images read in order (a *document*, such as a figure followed
 by its caption). The helpers here are the one place that reads content: they put it in a
 canonical form (``_normalize_content``), join it (``_concat``), take its text
-(``_content_text``, ``_content_preview``), identify it (``_content_digest``,
-``_content_key``) and read its image files (``_load_content``, ``_load_content_async``).
+(``_content_text``, ``_content_preview``), tell it from other values (``_is_content``),
+identify it (``_content_digest``, ``_content_key``) and read its image files
+(``_load_content``, ``_load_content_async``).
 
 This module imports nothing from ``autorubric``, so every other module can import it.
 """
@@ -21,6 +22,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
+from typing import cast
 
 import PIL.Image as pil_image
 
@@ -312,6 +314,20 @@ def _normalize_content(value: Content) -> _Normalized:
     return tuple(parts)
 
 
+def _is_content(value: object) -> bool:
+    """Whether ``value`` is ``Content``, as ``_normalize_content`` accepts it.
+
+    A value it refuses, such as a ``{thinking, output}`` dict submission or a JSON value a
+    dataset file kept as it was, is not content; the helpers that must handle such values
+    as they did before images existed ask this first.
+    """
+    try:
+        _normalize_content(cast(Content, value))
+    except TypeError:
+        return False
+    return True
+
+
 def _concat(*pieces: Content) -> _Normalized:
     """The content of ``pieces`` read one after another, in canonical form.
 
@@ -405,19 +421,25 @@ def _content_digest(value: Content) -> str:
     return digest.hexdigest()
 
 
-def _content_key(value: Content | None) -> str | dict[str, str] | None:
+def _content_key(value: Content | None) -> object:
     """``value`` in a form to embed in JSON that is hashed to identify it.
 
     Text (and ``None``) is returned unchanged, so a key built from text is the key built
     before images existed; a sequence of strings alone gives its joined text. A document
-    gives ``{"content_sha256": _content_digest(value)}``.
+    gives ``{"content_sha256": _content_digest(value)}``. A value that is not content (a
+    ``{thinking, output}`` dict submission, say) is returned unchanged too, as it was
+    embedded before images existed.
 
     Raises:
-        As ``_content_digest``.
+        OSError: If a file-backed image's file cannot be read.
+        ValueError: If an image file is not a supported image.
     """
     if value is None or isinstance(value, str):
         return value
-    normalized = _normalize_content(value)
+    try:
+        normalized = _normalize_content(value)
+    except TypeError:
+        return value
     if isinstance(normalized, str):
         return normalized
     return {"content_sha256": _content_digest(normalized)}

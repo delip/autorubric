@@ -16,7 +16,7 @@ import hashlib
 import json
 import logging
 import time
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -35,8 +35,8 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 
-from autorubric.content import _content_key, _has_images
-from autorubric.dataset import DataItem, RubricDataset
+from autorubric.content import _content_key
+from autorubric.dataset import DataItem, RubricDataset, _dataset_has_images
 from autorubric.decision import DecisionModelConfig, _url_host
 from autorubric.graders.criterion_grader import (
     CriterionGrader,
@@ -72,7 +72,11 @@ def _generate_experiment_name() -> str:
 
 
 def _compute_dataset_hash(dataset: RubricDataset) -> str:
-    """Compute a hash of the dataset for integrity verification."""
+    """Compute a hash of the dataset for integrity verification.
+
+    The prompt enters as ``_content_key`` gives it: text, and a value that is not content,
+    as it is (the hash computed before images existed), and a document by its digest.
+    """
     try:
         num_criteria = dataset.num_criteria
     except ValueError:
@@ -92,22 +96,6 @@ def _compute_dataset_hash(dataset: RubricDataset) -> str:
         sort_keys=True,
     )
     return hashlib.sha256(content.encode()).hexdigest()[:16]
-
-
-def _dataset_has_images(dataset: RubricDataset) -> bool:
-    """Whether any submission, prompt or reference submission in ``dataset`` holds an image.
-
-    The dataset's own prompt and reference submission count, as do every item's. Nothing is
-    read: an ``Image`` is recognized by its type alone. A ``{thinking, output}`` dict
-    submission is text only, so it never counts.
-    """
-    contents = [dataset.prompt, dataset.reference_submission]
-    for item in dataset.items:
-        contents.extend((item.submission, item.prompt, item.reference_submission))
-    return any(
-        content is not None and not isinstance(content, Mapping) and _has_images(content)
-        for content in contents
-    )
 
 
 def _serialize_grader_config(grader: Grader) -> dict[str, Any]:
@@ -420,7 +408,9 @@ class EvalConfig:
             - "detailed": Shows per-judge progress for ensemble mode
         max_concurrent_items: Maximum items to grade concurrently.
             None = grade all items in parallel (default).
-            Set this to limit memory usage for very large datasets.
+            Set this to limit memory usage for very large datasets, and for any dataset
+            with images: each item being graded holds its images (and an LLM judge's
+            base64 copies) until its grade finishes, rate-limit waits included.
         experiment_name: Name for this experiment run.
             If None, auto-generates using coolname.
         experiments_dir: Root directory for experiment outputs.

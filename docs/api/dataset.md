@@ -169,9 +169,13 @@ directory of the dataset file, so the file and its figures can be moved together
 `from_json(text, base_dir=...)` resolves it against `base_dir`, or against the current working
 directory when `base_dir` is not given. An absolute path is kept as it is. Loading opens no
 image file, so a dataset whose images are missing still loads, and the missing file is
-reported when its item is graded. Any other JSON value, such as an object with other keys or
-an array holding a number, loads unchanged, as it did before images existed; grading such an
-item raises `TypeError`.
+reported when its item is graded. Any other JSON value loads unchanged, as it did before
+images existed, and is graded as it was then. A JSON object submission is read as the
+`{"thinking": ..., "output": ...}` form, so an object with neither key, such as a mistyped
+image object like `{"img": "fig.png"}`, grades as an empty submission and raises no error.
+A number raises `AttributeError` when its item is graded. An array holding a number or an
+object raises `TypeError`, as does a prompt or reference submission that is not content.
+`EvalRunner` records each such failure against its own item and grades the others.
 
 When writing, `to_file` stores each image path relative to the file's directory when the image
 is inside it, and as an absolute path otherwise. `to_json(base_dir=...)` does the same relative

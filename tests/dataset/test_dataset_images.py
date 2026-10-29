@@ -13,7 +13,7 @@ import io
 import json
 import pickle
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import PIL.Image as pil_image
 import pytest
@@ -344,3 +344,81 @@ class TestItems:
     def test_an_item_holding_images_pickles_by_its_image_sources(self, tmp_path):
         item = DataItem(submission=[Image(tmp_path / "f.png"), "caption"], description="d")
         assert pickle.loads(pickle.dumps(item)) == item
+
+
+# =============================================================================
+# Subclasses and the working directory
+# =============================================================================
+
+
+class LegacyDataset(RubricDataset):
+    """A subclass written before images existed: its overrides take no ``base_dir``."""
+
+    loaded_with: list[str] = []
+    written: list[str] = []
+
+    @classmethod
+    def from_json(cls, json_string: str) -> RubricDataset:  # ty: ignore[invalid-method-override]
+        cls.loaded_with.append(json_string)
+        return super().from_json(json_string)
+
+    def to_json(self, indent: int | None = 2) -> str:  # ty: ignore[invalid-method-override]
+        text = super().to_json(indent)
+        type(self).written.append(text)
+        return text
+
+
+class TestSubclassesWrittenBeforeImages:
+    def test_from_file_calls_a_from_json_that_takes_no_base_dir(self, tmp_path):
+        path = tmp_path / "data.json"
+        text = dataset_json([{"submission": "An answer."}])
+        path.write_text(text, encoding="utf-8")
+        LegacyDataset.loaded_with = []
+        dataset = LegacyDataset.from_file(path)
+        assert LegacyDataset.loaded_with == [text]
+        assert one_item(dataset).submission == "An answer."
+
+    def test_to_file_writes_a_dataset_without_images_with_its_to_json(self, tmp_path):
+        path = tmp_path / "data.json"
+        dataset = LegacyDataset(prompt="Rate it.", rubric=RUBRIC)
+        dataset.add_item(submission="An answer.", description="d")
+        LegacyDataset.written = []
+        dataset.to_file(path)
+        assert LegacyDataset.written == [path.read_text(encoding="utf-8")]
+
+    def test_from_file_passes_base_dir_to_a_from_json_that_takes_it(self, tmp_path):
+        path = tmp_path / "data" / "figures.json"
+        path.parent.mkdir()
+        path.write_text(dataset_json([{"submission": [{"image": "fig.png"}]}]), encoding="utf-8")
+        (image,) = cast(list[Image], one_item(RubricDataset.from_file(path)).submission)
+        assert image.path == tmp_path / "data" / "fig.png"
+
+
+class TestTheWorkingDirectory:
+    """Only a relative image path is resolved against the working directory, so a text-only
+    load works even when that directory no longer exists."""
+
+    @pytest.fixture
+    def no_working_directory(self, monkeypatch):
+        def cwd() -> Path:
+            raise FileNotFoundError("the working directory was deleted")
+
+        monkeypatch.setattr(Path, "cwd", staticmethod(cwd))
+
+    def test_a_text_only_from_json(self, no_working_directory):
+        text = dataset_json([{"submission": "An answer.", "prompt": "Rate it."}])
+        assert one_item(RubricDataset.from_json(text)).submission == "An answer."
+
+    def test_a_text_only_from_file_with_a_relative_path(
+        self, tmp_path, monkeypatch, no_working_directory
+    ):
+        (tmp_path / "data.json").write_text(dataset_json([{"submission": "An answer."}]))
+        monkeypatch.chdir(tmp_path)
+        assert one_item(RubricDataset.from_file("data.json")).submission == "An answer."
+
+    def test_absolute_image_paths_need_no_working_directory(self, tmp_path, no_working_directory):
+        figure = (tmp_path / "fig.png").as_posix()
+        text = dataset_json([{"submission": [{"image": figure}, "Caption."]}])
+        image, caption = cast(list[Any], one_item(RubricDataset.from_json(text)).submission)
+        assert image.path == tmp_path / "fig.png"
+        assert caption == "Caption."

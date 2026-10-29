@@ -978,10 +978,21 @@ class TestExperimentManifest:
 class TestDatasetHash:
     """The dataset hash a checkpoint's manifest records, which a resumed run must match."""
 
-    @pytest.mark.parametrize("prompt", ["Explain a concept", None], ids=["prompt", "no_prompt"])
+    @pytest.mark.parametrize(
+        "prompt",
+        [
+            "Explain a concept",
+            None,
+            {"system": "Be brief.", "user": "Explain a concept"},
+            [{"role": "user", "content": "Explain a concept"}],
+        ],
+        ids=["prompt", "no_prompt", "object_prompt", "messages_prompt"],
+    )
     def test_a_text_datasets_hash_is_unchanged(self, sample_dataset, prompt):
         """Written out from ``json`` and ``hashlib`` as the hash was computed before prompts
-        could hold images, so checkpoints written then still resume."""
+        could hold images, so checkpoints written then still resume. A prompt that is not
+        content (a JSON object or a list of messages a dataset file kept) is embedded as it
+        is, as it was then."""
         sample_dataset.prompt = prompt
         content = json.dumps(
             {
@@ -1083,6 +1094,18 @@ class TestManifestImages:
             Any, {"thinking": "Let me see.", "output": "An answer."}
         )
         sample_dataset.items[1].submission = ["Text ", "only."]
+        assert _dataset_has_images(sample_dataset) is False
+
+    @pytest.mark.parametrize(
+        "value",
+        [42, [{"role": "user", "content": "hi"}], [1, 2], {"image": 3}],
+        ids=["number", "messages", "numbers", "object"],
+    )
+    def test_values_that_are_not_content_hold_no_images(self, sample_dataset, value):
+        """Values a dataset file keeps as they are never stop the scan (nor a run)."""
+        sample_dataset.items[0].submission = cast(Any, value)
+        sample_dataset.items[1].prompt = cast(Any, value)
+        sample_dataset.reference_submission = cast(Any, value)
         assert _dataset_has_images(sample_dataset) is False
 
     def test_to_dict_writes_the_key_only_when_true(self):
@@ -1813,3 +1836,43 @@ class TestFreshStartInExistingExperiment:
         first, resumed = runs
         assert first.failed_items == resumed.failed_items == loaded.failed_items == 1
         assert resumed.errors == first.errors
+
+
+class TestItemsThatAreNotContent:
+    """An item whose submission is not content fails alone, when it is graded: the run's
+    manifest scan and dataset hash accept any value, as before images existed."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "value, error",
+        [
+            (42, "object has no attribute 'get'"),
+            ([{"role": "user", "content": "hi"}], "A content part must be a str or an Image"),
+        ],
+        ids=["number", "messages"],
+    )
+    async def test_the_other_items_are_graded(self, sample_dataset, tmp_path, value, error):
+        from unittest.mock import patch
+
+        from litellm import ModelResponse
+
+        from autorubric.graders import CriterionGrader
+
+        sample_dataset.items[1].submission = cast(Any, value)
+        content = json.dumps({"criterion_status": "MET", "explanation": "Fine."})
+        reply = ModelResponse(
+            model="gpt-4.1-mini",
+            choices=[
+                {"message": {"role": "assistant", "content": content}, "finish_reason": "stop"}
+            ],
+        )
+        grader = CriterionGrader(judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"))
+        with patch("litellm.acompletion", AsyncMock(return_value=reply)):
+            result = await evaluate(
+                sample_dataset, grader, show_progress=False, experiments_dir=tmp_path
+            )
+        assert result.successful_items == 2
+        assert result.failed_items == 1
+        (failed,) = [r for r in result.item_results if r.error is not None]
+        assert failed.item_idx == 1
+        assert failed.error is not None and error in failed.error

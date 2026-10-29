@@ -130,6 +130,13 @@ result = await evaluate(dataset, grader, show_progress=False)
 
 Loading opens no image, so a dataset whose figures are missing still loads, and the missing file is reported when its item is graded. An image built from bytes has no path; `to_file` saves it beside the dataset file as `chart_reports_images/<sha256>.<ext>`. An experiment's manifest records `"images": true` for a dataset that holds images. [Images in Dataset Files](../api/dataset.md#images-in-dataset-files) covers paths, `from_json` and `to_json` in full.
 
+!!! warning "Bound the number of items graded at once"
+    Each item being graded holds its images in memory from the start of its grade until the grade finishes, including any time it spends waiting on a rate limit. An LLM judge also holds each image as a base64 data URL, about a third larger than the file, and a decision model holds the image as fitted for its request. `EvalRunner` and `evaluate()` start every item at once unless `max_concurrent_items` is set, so by default a dataset's images can all be in memory together. With 10,000 figures of 2 MB each, that is tens of gigabytes. For an image dataset, set `max_concurrent_items` (in `EvalConfig`, or as the `evaluate()` keyword) to a few times the number of requests your provider allows in parallel. Memory then grows with that limit rather than with the size of the dataset:
+
+    ```python
+    result = await evaluate(dataset, grader, max_concurrent_items=32, show_progress=False)
+    ```
+
 ### Step 5: Check the Formats Your Judges Accept
 
 | Judge | Formats sent | What autorubric does |

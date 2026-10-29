@@ -25,6 +25,7 @@ from autorubric.content import (
     _content_digest,
     _content_identity,
     _has_images,
+    _is_content,
     _load_content,
     _load_content_async,
     _normalize_content,
@@ -38,6 +39,7 @@ from autorubric.decision import (
     _configuration_error,
     _describe,
     _is_real_number,
+    _sdk_image_type,
     answer_to_report,
     build_questions,
     build_state,
@@ -1792,11 +1794,15 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         images is loaded (``_load_content``); while ``_prepare_examples`` draws the
         examples, the first load of each submission is kept and reused, so a submission is
         read once however many judges and criteria show it or compare it
-        (``_content_identity`` reads the loaded copy's digests).
+        (``_content_identity`` reads the loaded copy's digests). A submission that is not
+        content (a ``{thinking, output}`` dict) is returned unchanged, as examples showed it
+        before images existed.
 
         Raises:
             As ``_load_content``.
         """
+        if not _is_content(item.submission):
+            return item.submission
         submission = _normalize_content(item.submission)
         if isinstance(submission, str):
             return submission
@@ -3233,15 +3239,22 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         judges every criterion (``_judges``: a single judge, a panel member, a cascade's
         decision model; escalation judges are LLMs). Text never reads the registry.
 
+        The installed TypeSafe SDK is checked here too (``_sdk_image_type``), so an SDK too
+        old to send images fails the grade before any judge, an LLM panel member included,
+        makes a request.
+
         Raises:
             ValueError: As ``_image_capabilities``, for the first decision-model judge whose
                 model the registry does not list or lists as not accepting images.
+            ImportError: Marked as a configuration error, if the installed TypeSafe SDK has
+                no ``Image`` (before 0.7.5).
         """
         if not any(content is not None and _has_images(content) for content in contents):
             return
         for judge in self._judges:
             if isinstance(judge.llm_config, DecisionModelConfig):
                 _image_capabilities(judge)
+                _sdk_image_type(self._decision_clients[judge.judge_id]._typesafe)
 
     async def _judge_escalated_criteria(
         self,

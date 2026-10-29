@@ -32,6 +32,7 @@ from autorubric import (
     RubricDataset,
 )
 from autorubric.graders import CriterionGrader
+from autorubric.prompts import build_few_shot_user_prompt
 
 MET = CriterionVerdict.MET
 UNMET = CriterionVerdict.UNMET
@@ -178,3 +179,28 @@ class TestDrawsPerCriterion:
             if drawn(rubric, rows, 4, seed) != drawn(rubric, unique_texts(rows), 4, seed)
         ]
         assert differing
+
+
+class TestDictSubmissions:
+    """A ``{"thinking", "output"}`` training submission is not ``Content``: its examples
+    hold it unchanged and show it as Python formats it, as before images existed."""
+
+    def test_examples_show_the_dict_as_before(self):
+        submissions = [{"thinking": f"Step {i}.", "output": f"Answer {i}."} for i in range(3)]
+        dataset = RubricDataset(prompt="How do plants make food?", rubric=Rubric([BINARY]))
+        for i, submission in enumerate(submissions):
+            # Datasets are annotated as Content; a dataset file keeps a dict as it is.
+            dataset.add_item(cast(Any, submission), f"item {i}", ground_truth=[MET])
+        grader = CriterionGrader(
+            judge_model_config=LLMConfig(model="test-model"),
+            training_data=dataset,
+            few_shot_config=FewShotConfig(n_examples=2, balance_verdicts=False, seed=0),
+        )
+        examples = grader._criterion_examples[(0, "default")]
+        assert len(examples) == 2
+        assert all(example.submission in submissions for example in examples)
+
+        prompt = build_few_shot_user_prompt(BINARY, "Plants use light.", examples)
+        assert isinstance(prompt, str)
+        for example in examples:
+            assert f"<example_submission>{example.submission}</example_submission>" in prompt
