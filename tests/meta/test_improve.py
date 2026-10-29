@@ -4030,3 +4030,93 @@ class TestValidateGroundTruthWithoutAScore:
                 compute_expected_scores(dataset),
                 CriterionGrader(judge_model_config=LLMConfig(model="test")),
             )
+
+
+# ============================================================================
+# Validation sets holding images
+# ============================================================================
+
+
+class TestValidationItemsHoldingImages:
+    """An item holding an image appears in artifacts and prompts as its text preview."""
+
+    @staticmethod
+    def _dataset(tmp_path: Path) -> tuple[Rubric, RubricDataset]:
+        import PIL.Image as pil_image
+
+        from autorubric import Image
+
+        figure = tmp_path / "figure.png"
+        pil_image.new("RGB", (2, 2), "red").save(figure, "PNG")
+        rubric = Rubric([Criterion(name="a", weight=1.0, requirement="Describes the figure")])
+        dataset = RubricDataset(
+            prompt="task",
+            rubric=rubric,
+            items=[
+                DataItem(
+                    submission=["The chart", Image(figure), "rises."],
+                    description="with an image",
+                    ground_truth=[CriterionVerdict.UNMET],
+                ),
+                DataItem(
+                    submission="Plain text.",
+                    description="text only",
+                    ground_truth=[CriterionVerdict.MET],
+                ),
+            ],
+        )
+        return rubric, dataset
+
+    @staticmethod
+    def _met() -> EnsembleEvaluationReport:
+        return _make_ensemble_report(
+            [_make_ensemble_criterion_report("a", 1.0, CriterionVerdict.MET)],
+            score=1.0,
+            mean_agreement=1.0,
+        )
+
+    @pytest.mark.asyncio
+    async def test_ground_truth_and_held_out_captures_serialize(self, tmp_path):
+        from autorubric.meta._improve import format_held_out_for_prompt, validate_held_out
+
+        rubric, dataset = self._dataset(tmp_path)
+        grader = CriterionGrader(judge_model_config=LLMConfig(model="test"))
+        ground_truth_capture: list = []
+        held_out_capture: list = []
+
+        with patch.object(rubric, "grade", new_callable=AsyncMock, return_value=self._met()):
+            await validate_ground_truth(
+                rubric,
+                dataset,
+                compute_expected_scores(dataset),
+                grader,
+                _capture=ground_truth_capture,
+            )
+            held_out = await validate_held_out(rubric, dataset, grader, _capture=held_out_capture)
+
+        preview = "The chart[image: figure.png]rises."
+        for capture in (ground_truth_capture, held_out_capture):
+            assert json.loads(json.dumps(capture))[0]["submission"] == preview
+            assert capture[1]["submission"] == "Plain text."
+        [exemplar] = held_out.per_criterion[0].disagreement_exemplars
+        assert exemplar.submission_snippet == preview
+        assert f"Submission: {preview!r}" in format_held_out_for_prompt(held_out)
+
+    @pytest.mark.asyncio
+    async def test_agreement_capture_serializes(self, tmp_path):
+        rubric, dataset = self._dataset(tmp_path)
+        capture: list = []
+
+        with patch.object(rubric, "grade", new_callable=AsyncMock, return_value=self._met()):
+            await validate_agreement(
+                rubric,
+                [item.submission for item in dataset.items],
+                [JudgeSpec(judge_model_config=LLMConfig(model="test"), judge_id="j1")],
+                _capture=capture,
+            )
+
+        serialized = json.loads(json.dumps(capture))
+        assert [s["submission"] for s in serialized] == [
+            "The chart[image: figure.png]rises.",
+            "Plain text.",
+        ]

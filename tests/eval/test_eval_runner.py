@@ -26,7 +26,7 @@ from autorubric import (
     evaluate,
 )
 from autorubric.dataset import DataItem, RubricDataset
-from autorubric.eval import _compute_dataset_hash, _serialize_grader_config
+from autorubric.eval import _compute_dataset_hash, _dataset_has_images, _serialize_grader_config
 from autorubric.llm import LLMConfig, ThinkingConfig, ThinkingLevel
 from autorubric.types import (
     AggregatedMultiChoiceVerdict,
@@ -1014,6 +1014,91 @@ class TestDatasetHash:
         assert hash_with_prompt(["Describe ", "the figure."]) == hash_with_prompt(
             "Describe the figure."
         )
+
+
+class TestManifestImages:
+    """The manifest records ``"images": true`` only for a dataset that holds images."""
+
+    TEXT_MANIFEST_KEYS = [
+        "experiment_name",
+        "created_at",
+        "dataset_name",
+        "dataset_hash",
+        "total_items",
+        "status",
+        "completed_indices",
+        "error",
+        "started_at",
+        "completed_at",
+        "total_duration_seconds",
+        "dataset_path",
+        "grader_config",
+        "eval_config",
+    ]
+
+    @staticmethod
+    async def _run_manifest(dataset: RubricDataset, tmp_path: Path) -> dict[str, Any]:
+        config = EvalConfig(
+            show_progress=False, experiments_dir=tmp_path, experiment_name="images-test"
+        )
+        runner = EvalRunner(dataset=dataset, grader=create_mock_grader(), config=config)
+        await runner.run()
+        with open(tmp_path / "images-test" / "manifest.json") as f:
+            return json.load(f)
+
+    @pytest.mark.asyncio
+    async def test_a_text_only_manifest_has_no_images_key(self, sample_dataset, tmp_path):
+        manifest = await self._run_manifest(sample_dataset, tmp_path)
+        assert list(manifest) == self.TEXT_MANIFEST_KEYS
+        assert ExperimentManifest.from_dict(manifest).images is False
+
+    @pytest.mark.asyncio
+    async def test_a_dataset_holding_an_image_records_it(self, sample_dataset, tmp_path):
+        figure = tmp_path / "figure.png"
+        pil_image.new("RGB", (2, 2), "red").save(figure, "PNG")
+        sample_dataset.items[1].submission = ["See the figure:", Image(figure)]
+        manifest = await self._run_manifest(sample_dataset, tmp_path)
+        assert list(manifest) == [*self.TEXT_MANIFEST_KEYS, "images"]
+        assert manifest["images"] is True
+        assert ExperimentManifest.from_dict(manifest).images is True
+
+    @pytest.mark.parametrize(
+        "where", ["prompt", "reference_submission", "item_prompt", "item_reference"]
+    )
+    def test_every_content_field_counts(self, sample_dataset, tmp_path, where):
+        image = Image(tmp_path / "never-written.png")  # recognized by type: nothing is read
+        if where == "prompt":
+            sample_dataset.prompt = image
+        elif where == "reference_submission":
+            sample_dataset.reference_submission = [image]
+        elif where == "item_prompt":
+            sample_dataset.items[0].prompt = image
+        else:
+            sample_dataset.items[2].reference_submission = ["Like this:", image]
+        assert _dataset_has_images(sample_dataset) is True
+
+    def test_text_and_thinking_output_submissions_hold_no_images(self, sample_dataset):
+        assert _dataset_has_images(sample_dataset) is False
+        sample_dataset.items[0].submission = cast(
+            Any, {"thinking": "Let me see.", "output": "An answer."}
+        )
+        sample_dataset.items[1].submission = ["Text ", "only."]
+        assert _dataset_has_images(sample_dataset) is False
+
+    def test_to_dict_writes_the_key_only_when_true(self):
+        from datetime import datetime
+
+        fields: dict[str, Any] = {
+            "experiment_name": "e",
+            "created_at": datetime(2024, 1, 15),
+            "dataset_name": None,
+            "dataset_hash": "abc",
+            "total_items": 1,
+            "status": "running",
+            "completed_indices": set(),
+        }
+        assert "images" not in ExperimentManifest(**fields).to_dict()
+        assert ExperimentManifest(**fields, images=True).to_dict()["images"] is True
 
 
 # -----------------------------------------------------------------------------

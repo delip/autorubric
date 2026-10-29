@@ -16,7 +16,7 @@ import hashlib
 import json
 import logging
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -35,7 +35,7 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 
-from autorubric.content import _content_key
+from autorubric.content import _content_key, _has_images
 from autorubric.dataset import DataItem, RubricDataset
 from autorubric.decision import DecisionModelConfig, _url_host
 from autorubric.graders.criterion_grader import (
@@ -92,6 +92,22 @@ def _compute_dataset_hash(dataset: RubricDataset) -> str:
         sort_keys=True,
     )
     return hashlib.sha256(content.encode()).hexdigest()[:16]
+
+
+def _dataset_has_images(dataset: RubricDataset) -> bool:
+    """Whether any submission, prompt or reference submission in ``dataset`` holds an image.
+
+    The dataset's own prompt and reference submission count, as do every item's. Nothing is
+    read: an ``Image`` is recognized by its type alone. A ``{thinking, output}`` dict
+    submission is text only, so it never counts.
+    """
+    contents = [dataset.prompt, dataset.reference_submission]
+    for item in dataset.items:
+        contents.extend((item.submission, item.prompt, item.reference_submission))
+    return any(
+        content is not None and not isinstance(content, Mapping) and _has_images(content)
+        for content in contents
+    )
 
 
 def _serialize_grader_config(grader: Grader) -> dict[str, Any]:
@@ -816,10 +832,16 @@ class ExperimentManifest:
     dataset_path: str | None = None  # Path if loaded from file
     grader_config: dict[str, Any] | None = None  # Serialized grader configuration
     eval_config: dict[str, Any] | None = None  # Serialized EvalConfig
+    # Whether the dataset holds images (``_dataset_has_images``); written only when True
+    images: bool = False
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialize to dictionary for JSON storage."""
-        return {
+        """Serialize to dictionary for JSON storage.
+
+        The ``"images"`` key is written only when the dataset holds images, so a text-only
+        manifest is byte-identical to one written before images were supported.
+        """
+        data: dict[str, Any] = {
             "experiment_name": self.experiment_name,
             "created_at": self.created_at.isoformat(),
             "dataset_name": self.dataset_name,
@@ -835,6 +857,9 @@ class ExperimentManifest:
             "grader_config": self.grader_config,
             "eval_config": self.eval_config,
         }
+        if self.images:
+            data["images"] = True
+        return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ExperimentManifest:
@@ -858,6 +883,7 @@ class ExperimentManifest:
             dataset_path=data.get("dataset_path"),
             grader_config=data.get("grader_config"),
             eval_config=data.get("eval_config"),
+            images=data.get("images", False),
         )
 
 
@@ -1190,6 +1216,7 @@ class EvalRunner:
             started_at=started_at,
             grader_config=_serialize_grader_config(self.grader),
             eval_config=_serialize_eval_config(self.config),
+            images=_dataset_has_images(self.dataset),
         )
         self._exp_dir.mkdir(parents=True, exist_ok=True)
         items_path = self._exp_dir / "items.jsonl"

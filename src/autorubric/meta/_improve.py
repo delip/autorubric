@@ -1860,6 +1860,10 @@ def format_held_out_for_prompt(
 ) -> str:
     """Format HeldOutValidationResult into text for the revision prompt.
 
+    Each exemplar shows its ``submission_snippet``: a submission's text preview, with a
+    marker such as ``[image: chart.png]`` in place of each image. The revision LLM sees these
+    markers, never the images themselves.
+
     Args:
         result: The held-out validation result.
         max_exemplars_per_criterion: Max exemplars shown per criterion.
