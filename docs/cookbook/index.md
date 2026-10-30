@@ -19,6 +19,7 @@ Start here if you're new to AutoRubric. [LLM Judges](llm-judges.md) and [Decisio
 | [Working with Explanations](explanations.md) | Essay Feedback | Accessing and formatting per-criterion reasons |
 | [Cheap First-Pass Grading with Jev and an LLM Fallback](cascade-grading.md) | Short-Answer Grading | Calibrating and deploying a decision-model cascade |
 | [Grading a Whole Rubric in One Call](single-call-grading.md) | Long-Answer Grading | Switching an LLM judge to one call per item, and validating the switch on labelled data |
+| [Grading Submissions with Images](image-inputs.md) | Chart Reports | Images in submissions, LLM and decision-model judges, image parts in dataset files |
 
 ### Tier 2: Reliability
 
@@ -40,7 +41,6 @@ Sophisticated evaluation techniques.
 | [Multi-Choice Rubrics](multi-choice-rubrics.md) | Restaurant Reviews | Ordinal/nominal scales with Likert ratings |
 | [Extended Thinking](extended-thinking.md) | Security Assessments | Deep reasoning for complex evaluations |
 | [Length Penalty](length-penalty.md) | Executive Summaries | Penalizing verbose responses |
-| [Grading Submissions with Images](image-inputs.md) | Chart Reports | Images in submissions, LLM and decision-model judges, image parts in dataset files |
 
 ### Tier 4: Validation & Production
 
