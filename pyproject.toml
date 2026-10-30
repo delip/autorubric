@@ -113,6 +113,8 @@ pattern = "(?P<version>.+)"
 exclude = [
     "researcher_bench/",
     "examples/",
+    # the explicit glob keeps out files .gitignore re-includes, such as examples/data/scifigalign/README.md
+    "examples/**",
     "experiments/",
     "tests/",
     "docs/",
