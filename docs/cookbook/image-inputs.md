@@ -9,7 +9,7 @@ Students hand in short data-analysis reports, each a chart with a caption that i
 ## What You'll Learn
 
 - Building submissions from `Image` and text with `Content`
-- Grading them with an LLM judge, one call per criterion or the whole rubric in one call, and what each costs in images
+- Grading them with an LLM judge, one call per criterion or the whole rubric in one call
 - Grading them with a decision model (Jev), which fits each image into its limits
 - Writing image parts into a dataset file and loading it back
 - Which image formats each kind of judge accepts
@@ -103,9 +103,6 @@ judge = LLMConfig(model="ollama/llava", images=True)
 ```
 
 The declaration wins over the map, in both directions. `images=False` refuses images for a model the map lists, which is useful when an endpoint serves a text-only variant under a listed name. Training items whose submissions hold images are checked when the grader is built, because every call of the judge shows them.
-
-!!! note "Images per criterion or per item"
-    Both ways of calling an LLM judge take images. By default the judge makes one call per criterion, and every call carries the whole submission, so each image is sent once per criterion: a three-criterion rubric sends every chart three times, and an image often costs more input tokens than the text around it. With `CriterionGrader(..., llm_calls="per_item")` the judge grades the whole rubric in one call and each image is sent once per item. That call costs less, but its criteria share one context and can shift each other's verdicts; [Holistic Rubric grading](single-call-grading.md) explains the risk and shows how to check on labelled data whether the single call grades your rubric as well.
 
 The length penalty counts words of text only, so an image adds nothing to it. Few-shot training items may hold images as well, and an LLM judge sees each example's images in its examples.
 
@@ -218,7 +215,7 @@ def as_png(path: str) -> Image:
 - **`Content`** is a string, an `Image`, or a list of both read in order; it applies to the submission, the query and the reference submission
 - **Images are read once per grade**, and one that cannot be read raises instead of becoming a verdict
 - **LLM judges** are sent images only when LiteLLM's model map lists their model as accepting them, or `LLMConfig(images=True)` says so; any other judge is refused before a request is sent
-- **`llm_calls`** sets how often an LLM judge receives each image: once per criterion by default, once per item with `"per_item"`, at the holistic call's known risk to its verdicts
+- **Both `llm_calls` modes take images**: an LLM judge receives them in each call per criterion by default, or once per item with `"per_item"`
 - **Decision models** get images fitted into the limits their registry entry (or declared `capabilities`) gives (PNG or JPEG, 280 to 1568 pixels per side for Jev)
 - **Dataset files** hold images as `{"image": "<path>"}` parts, resolved against the file's directory
 
