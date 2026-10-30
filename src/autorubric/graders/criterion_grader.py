@@ -1695,6 +1695,7 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
             for j in (*self._judges, *self._escalation_judges)
             if not isinstance(j.llm_config, DecisionModelConfig)
         ]
+        self._warn_unusable_binary_labels(rubric_criteria)
 
         if self._llm_calls == "per_item":
             for judge in llm_judges:
@@ -1728,6 +1729,46 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                         criterion_idx, judge.judge_id
                     )
                     self._criterion_examples[(criterion_idx, judge.judge_id)] = binary_examples
+
+    def _warn_unusable_binary_labels(self, rubric_criteria: Sequence[Criterion]) -> None:
+        """Warn once if a binary training label names no verdict, so its item is left out.
+
+        A binary criterion's label is a ``CriterionVerdict`` or its value (``"MET"``,
+        ``_binary_label``); any other label (``"met"``, ``"yes"``) cannot label a few-shot
+        example, and the item is left out of the examples whether the judge is called per
+        criterion or per item. Called once, when the grader is built, so a grader warns once
+        however many judges draw examples.
+
+        Args:
+            rubric_criteria: The training rubric's criteria.
+        """
+        assert self._training_data is not None
+        unusable: dict[int, set[str]] = {}
+        items_left_out = 0
+        for item in self._training_data:
+            item_has_unusable = False
+            for criterion_idx, criterion in enumerate(rubric_criteria):
+                if not criterion.is_binary:
+                    continue
+                label = self._training_label(item, criterion_idx)
+                if label is not None and _binary_label(label) is None:
+                    unusable.setdefault(criterion_idx, set()).add(repr(label))
+                    item_has_unusable = True
+            items_left_out += item_has_unusable
+        if not unusable:
+            return
+        named = "; ".join(
+            f"{_describe(rubric_criteria[idx], idx)}: {', '.join(sorted(labels))}"
+            for idx, labels in sorted(unusable.items())
+        )
+        items = "1 training item" if items_left_out == 1 else f"{items_left_out} training items"
+        warnings.warn(
+            f"Few-shot examples leave out {items} whose binary label names no verdict "
+            f"(expected MET, UNMET or CANNOT_ASSESS, as a CriterionVerdict or its value): "
+            f"{named}",
+            UserWarning,
+            stacklevel=_caller_stacklevel(),
+        )
 
     def _select_examples_for_criterion(
         self, criterion_idx: int, judge_id: str

@@ -398,9 +398,21 @@ class TestSelectionIsSeededPerJudge:
         assert len(grader._item_examples["llm"]) == 3
 
 
+@pytest.mark.filterwarnings("ignore:Few-shot examples leave out:UserWarning")
 class TestEligibility:
     """Only an item with ground truth whose every label is usable for its criterion's kind
-    can be a whole-rubric example."""
+    can be a whole-rubric example.
+
+    The pool holds binary labels that name no verdict on purpose, so building a grader on it
+    warns; ``test_the_pool_warns_of_its_unusable_binary_labels`` checks that warning, and the
+    other tests ignore it."""
+
+    def test_the_pool_warns_of_its_unusable_binary_labels(self):
+        data, _ = self.pool()
+        with pytest.warns(UserWarning, match="Few-shot examples leave out") as record:
+            per_item_grader(RubricLLM(), data, few_shot(50, balance=False))
+        (warning,) = [w for w in record if "Few-shot examples leave out" in str(w.message)]
+        assert "'nope'" in str(warning.message)
 
     @staticmethod
     def pool() -> tuple[RubricDataset, list[str]]:

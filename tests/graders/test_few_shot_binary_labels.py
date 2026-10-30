@@ -6,7 +6,7 @@ examples from ``training_data`` items either way: a label given as its value mak
 exactly the prompts the ``CriterionVerdict`` makes, whether the judge is called per
 criterion or per item, with or without balanced selection. A label that names no verdict
 (``"yes"``) cannot label an example, so its item is left out of the examples, as if it were
-not in the training data.
+not in the training data, and the grader warns once, naming every such label.
 
 The prompts are the ones the grader sends: ``LLMClient.generate`` is replaced by an
 ``AsyncMock`` that records every user prompt.
@@ -14,6 +14,7 @@ The prompts are the ones the grader sends: ``LLMClient.generate`` is replaced by
 
 from __future__ import annotations
 
+import warnings
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -28,7 +29,7 @@ from autorubric import (
     RubricDataset,
     TokenUsage,
 )
-from autorubric.graders import CriterionGrader
+from autorubric.graders import CriterionGrader, JudgeSpec
 from autorubric.llm import GenerateResult, LLMClient
 from autorubric.types import CriterionJudgment, LLMCalls, RubricJudgment
 
@@ -158,6 +159,66 @@ async def test_a_label_naming_no_verdict_leaves_its_item_out(llm_calls, balance_
     stray = ("Answer G: a stray item.", unusable)
     with_stray = [*_as_values(TRAINING[:2]), stray, *_as_values(TRAINING[2:])]
 
-    assert await _user_prompts(with_stray, llm_calls, balance_verdicts) == await _user_prompts(
-        _as_values(TRAINING), llm_calls, balance_verdicts
-    )
+    with pytest.warns(UserWarning, match="names no verdict"):
+        drawn = await _user_prompts(with_stray, llm_calls, balance_verdicts)
+    assert drawn == await _user_prompts(_as_values(TRAINING), llm_calls, balance_verdicts)
+
+
+def _build(rows: list[tuple[str, Any]], llm_calls: LLMCalls, *, judges: int = 1) -> None:
+    config = FewShotConfig(n_examples=4)
+    if judges == 1:
+        CriterionGrader(
+            judge_model_config=LLMConfig(model="test-model"),
+            training_data=_training_data(rows),
+            few_shot_config=config,
+            llm_calls=llm_calls,
+            seed=0,
+        )
+    else:
+        CriterionGrader(
+            judges=[JudgeSpec(LLMConfig(model="test-model"), f"judge-{i}") for i in range(judges)],
+            training_data=_training_data(rows),
+            few_shot_config=config,
+            llm_calls=llm_calls,
+            seed=0,
+        )
+
+
+@pytest.mark.parametrize("llm_calls", MODES)
+def test_unusable_labels_warn_once_naming_them(llm_calls):
+    """One warning names the criterion and every label that names no verdict."""
+    rows = [*_as_values(TRAINING), ("Answer G.", "yes"), ("Answer H.", "met"), ("Answer I.", "yes")]
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        _build(rows, llm_calls)
+
+    (warning,) = [w for w in caught if "names no verdict" in str(w.message)]
+    assert warning.category is UserWarning
+    message = str(warning.message)
+    assert "3 training items" in message
+    assert "'sources'" in message
+    assert "'met'" in message and "'yes'" in message
+    assert warning.filename == __file__
+
+
+@pytest.mark.parametrize("llm_calls", MODES)
+def test_a_panel_warns_once(llm_calls):
+    """However many judges draw examples, the grader warns once."""
+    rows = [*_as_values(TRAINING), ("Answer G.", "yes")]
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        _build(rows, llm_calls, judges=3)
+
+    assert len([w for w in caught if "names no verdict" in str(w.message)]) == 1
+
+
+@pytest.mark.parametrize("llm_calls", MODES)
+def test_usable_labels_do_not_warn(llm_calls):
+    """Labels given as verdicts or their values raise no warning."""
+    mixed = [(s, label.value if i % 2 else label) for i, (s, label) in enumerate(TRAINING)]
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        _build(mixed, llm_calls)
