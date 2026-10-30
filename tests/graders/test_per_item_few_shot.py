@@ -717,7 +717,8 @@ class TestGreedyCoverage:
             item.submission = [images[item.description], item.submission]
         grader = make_grader(
             {"default": RubricLLM()},
-            judge_model_config=LLM,
+            # "test-model" is not in LiteLLM's model map, so it is declared to take images.
+            judge_model_config=LLMConfig(model="test-model", images=True),
             llm_calls="per_item",
             training_data=pool,
             few_shot_config=few_shot(n),

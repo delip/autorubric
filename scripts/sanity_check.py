@@ -38,7 +38,7 @@ import tempfile
 import time
 import warnings
 from pathlib import Path
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 import litellm
 from dotenv import load_dotenv
@@ -179,7 +179,7 @@ def build_grader(mode: str, think: bool, max_parallel: int, seed: int) -> Criter
     parallelism, SKIP abstain strategy. Thinking jobs enable "low" reasoning with more
     max_tokens headroom for the trace + structured output.
     """
-    hp: dict[str, object] = {"temperature": 1.0, "max_parallel_requests": max_parallel}
+    hp: dict[str, Any] = {"temperature": 1.0, "max_parallel_requests": max_parallel}
     if think:
         hp["thinking"] = "low"
         hp["max_tokens"] = MAX_TOKENS_THINK

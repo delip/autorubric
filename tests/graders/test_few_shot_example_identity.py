@@ -116,7 +116,8 @@ def pool(rubric: Criterion, rows: list[tuple[str, Any, Any]]) -> RubricDataset:
 def drawn(rubric: Criterion, rows: list[tuple[str, Any, Any]], n: int, seed: int) -> list[str]:
     """The names of the items a single judge's examples for criterion 0 show, in order."""
     grader = CriterionGrader(
-        judge_model_config=LLMConfig(model="test-model"),
+        # "test-model" is not in LiteLLM's model map; some pools' submissions hold images.
+        judge_model_config=LLMConfig(model="test-model", images=True),
         training_data=pool(rubric, rows),
         few_shot_config=FewShotConfig(n_examples=n, balance_verdicts=True, seed=seed),
     )

@@ -24,7 +24,9 @@ Usage:
     [--input-cost USD_PER_TOKEN] [--image-tokens N] [--limit N] [--few-shot N] [--run]
 
 The LLM judge needs the provider's key (e.g. ``OPENAI_API_KEY`` for the default model) and
-a model that reads images. Jev needs ``pip install 'autorubric[typesafe]'``,
+a model that LiteLLM's model map lists as accepting images, as it lists the default; with
+any other ``--model``, autorubric refuses the judge with its own error before any request is
+sent. Jev needs ``pip install 'autorubric[typesafe]'``,
 ``TYPESAFE_API_KEY`` and a model that autorubric's decision-model registry lists as
 accepting images: ``typesafe/jev-1.14.0`` does, ``typesafe/jev-1.13.0`` does not, and
 autorubric refuses it with its own error before any request is sent. Keys may be set in a

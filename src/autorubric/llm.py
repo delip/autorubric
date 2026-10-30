@@ -13,6 +13,7 @@ import logging
 import math
 import numbers
 import sys
+import threading
 from dataclasses import asdict, dataclass, field, fields
 from enum import Enum
 from pathlib import Path, PurePath
@@ -746,6 +747,15 @@ class LLMConfig:
         seed: Random seed for reproducible outputs (OpenAI, some other providers).
         extra_headers: Additional HTTP headers for provider-specific features.
         extra_params: Additional provider-specific parameters passed to LiteLLM.
+        images: Whether the model accepts images in its prompts. None (default) asks
+            LiteLLM's model map (``litellm.supports_vision``) the first time a grader is
+            to send this judge an image; ``True`` or ``False`` is your declaration and
+            wins over the map. A judge whose model neither LiteLLM lists nor you declare as
+            accepting images is never sent one: grading an item holding images refuses it
+            before any request (``CriterionGrader``). Set ``images=True`` for a vision
+            model LiteLLM does not map (e.g. a LLaVA or Qwen-VL model served through
+            Ollama, vLLM or OpenRouter). Text-only grading never reads it, so it changes
+            no request. Only ``None``, ``True`` and ``False`` are accepted.
 
     Examples:
         # Basic usage without thinking (provider-default temperature)
@@ -792,14 +802,21 @@ class LLMConfig:
     extra_headers: dict[str, str] = field(default_factory=dict)
     extra_params: dict[str, Any] = field(default_factory=dict)
 
-    def __post_init__(self) -> None:
-        """Validate ``max_tokens``, ``top_p`` and ``thinking``.
+    # Whether the model accepts images: None = ask LiteLLM's model map (last, so that no
+    # positional argument moves)
+    images: bool | None = None
 
-        Each is sent with every request whenever it is not None, so a value no provider
-        can mean is refused here rather than sent or silently dropped. A ``bool`` is
-        never taken for a number. Any ``numbers.Integral`` (numpy integers too) is a
-        ``max_tokens``, stored as ``int``; a ``top_p`` that is a real number other than an
-        ``int`` or ``float`` (a numpy float, say) is stored as ``float``.
+    def __post_init__(self) -> None:
+        """Validate ``max_tokens``, ``top_p``, ``thinking`` and ``images``.
+
+        The first three are sent with every request whenever they are not None, so a value
+        no provider can mean is refused here rather than sent or silently dropped.
+        ``images`` is never sent; it says whether the judge may be sent images, which only
+        a ``bool`` says, so ``1`` or ``"yes"`` is refused rather than read as a
+        declaration. A ``bool`` is never taken for a number. Any ``numbers.Integral``
+        (numpy integers too) is a ``max_tokens``, stored as ``int``; a ``top_p`` that is a
+        real number other than an ``int`` or ``float`` (a numpy float, say) is stored as
+        ``float``.
 
         ``thinking`` is normalized with ``get_thinking_config()`` here, so a value it
         cannot normalize raises now instead of when a request is built, where every judge
@@ -810,9 +827,12 @@ class LLMConfig:
             ValueError: If ``max_tokens`` is neither None nor an integer >= 1, ``top_p``
                 is neither None nor a real number in [0, 1] (NaN is not), or ``thinking``
                 is not a ``ThinkingParam`` form: an unknown level, a ``bool``, a budget
-                below -1, or a value of any other type.
+                below -1, or a value of any other type; or ``images`` is neither None nor
+                a ``bool`` (``1``, ``0`` and numpy booleans are not).
         """
         name = type(self).__name__
+        if self.images is not None and not isinstance(self.images, bool):
+            raise ValueError(f"{name}.images must be None, True or False; got {self.images!r}")
         if self.max_tokens is not None:
             max_tokens = _as_int(self.max_tokens)
             if max_tokens is None or max_tokens < 1:
@@ -927,6 +947,43 @@ class LLMConfig:
 
         with open(path, "w", encoding="utf-8") as f:
             yaml.dump(data, f, Dumper=_LLMConfigDumper, default_flow_style=False, sort_keys=False)
+
+
+# Serializes the lookups' swaps of LiteLLM's global ``suppress_debug_info`` (a lookup can
+# run in several threads at once), so each restores the value it found.
+_LITELLM_LOOKUP_LOCK = threading.Lock()
+
+
+class _DropRecords(logging.Filter):
+    """Drops every record: LiteLLM's own logger, for the length of a lookup."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return False
+
+
+def _litellm_supports_vision(model: str) -> bool:
+    """Whether LiteLLM's model map lists ``model`` as accepting images.
+
+    True only when ``litellm.supports_vision`` answers ``True``; any other answer (``False``,
+    as LiteLLM answers for a model its map does not hold, ``None``, or an exception) is not
+    a confirmation. LiteLLM prints a provider-list banner and logs a debug record for a
+    model it cannot place; the lookup lets neither through (``suppress_debug_info`` and the
+    ``LiteLLM`` logger are quieted for its length, then restored), so it prints and logs
+    nothing. No request is sent: the map ships with LiteLLM.
+    """
+    litellm_logger = logging.getLogger("LiteLLM")
+    drop = _DropRecords()
+    with _LITELLM_LOOKUP_LOCK:
+        suppressed = litellm.suppress_debug_info
+        litellm.suppress_debug_info = True
+        litellm_logger.addFilter(drop)
+        try:
+            return litellm.supports_vision(model=model) is True
+        except Exception:
+            return False
+        finally:
+            litellm_logger.removeFilter(drop)
+            litellm.suppress_debug_info = suppressed
 
 
 def _open_response_cache(cache_dir: str | Path) -> diskcache.Cache:

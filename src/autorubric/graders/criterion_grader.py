@@ -53,6 +53,7 @@ from autorubric.llm import (
     LLMClient,
     LLMConfig,
     _is_configuration_error,
+    _litellm_supports_vision,
     classify_grading_error,
 )
 from autorubric.prompts import (
@@ -813,7 +814,8 @@ def _is_judge_configuration_error(exc: BaseException) -> bool:
     provider's exception, or an error marked by ``_configuration_error`` (its
     ``_CONFIGURATION_ERROR_NOTE``): a decision model that does not accept images or whose
     capabilities neither the registry nor its config declares (``_image_capabilities``),
-    or an SDK too old to send images. Callers
+    an LLM judge not known to accept images (``_llm_image_refusal``), or an SDK too old to
+    send images. Callers
     that keep going past an item that failed to grade (``fill_ground_truth``) can thus tell
     it from such a failure: it fails every item alike.
     """
@@ -859,6 +861,28 @@ def _image_capabilities(judge: JudgeSpec) -> Mapping[str, Any]:
             )
         )
     return capabilities
+
+
+def _llm_image_refusal(judge: JudgeSpec, *, declared: bool) -> ValueError:
+    """The configuration error refusing LLM judge ``judge`` content holding images.
+
+    ``declared`` says whether its ``LLMConfig(images=False)`` says it does not accept them;
+    otherwise LiteLLM's model map does not list its model as accepting them and nothing
+    declares that it does. Marked by ``_configuration_error``, so ``fill_ground_truth``
+    raises it.
+    """
+    model = getattr(judge.llm_config, "model", None)
+    if declared:
+        message = (
+            f"Judge {judge.judge_id!r} uses LLM {model!r}, which does not accept images; "
+            "its LLMConfig(images=False) says so"
+        )
+    else:
+        message = (
+            f"Judge {judge.judge_id!r} uses LLM {model!r}, which LiteLLM does not list as "
+            "accepting images; if it does, pass LLMConfig(images=True)"
+        )
+    return _configuration_error(ValueError(message))
 
 
 def _failed_judgment_result(
@@ -1242,6 +1266,10 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
     # Each training submission holding images, loaded, while ``_prepare_examples`` draws the
     # examples (``_example_submission``); ``None`` at any other time.
     _loaded_example_submissions: dict[_Normalized, _Normalized] | None = None
+    # What LiteLLM's model map said of each LLM judge's model when the grader was first to
+    # send it images (``_llm_accepts_images``), by model; ``None`` until then, and for a
+    # grader whose ``__init__`` never ran.
+    _litellm_image_support: dict[str, bool] | None = None
 
     def __init__(
         self,
@@ -1671,6 +1699,9 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         ] = {}
         if training_data is not None:
             self._prepare_examples()
+            # Training images go out with every call of the judges that show them, text
+            # items' calls included, so those judges are checked now, once.
+            self._check_examples_reach_judges_accepting_images()
 
     @property
     def is_ensemble(self) -> bool:
@@ -3145,12 +3176,15 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
             ImportError: If a decision-model judge is given content holding an image and the
                 installed TypeSafe SDK cannot send images (before its request).
             ValueError: If an image file is not a supported image, or the content holds an
-                image and a decision-model judge's model is neither in autorubric's
-                decision-model registry nor given ``capabilities``, or does not accept images
-                (``_check_decision_models_accept_images``), both before any judge is
-                called; if a decision-model judge is given an image it cannot fit for its
-                model, or images over its model's ``max_request_bytes`` together (before
-                its request); or if a judge's call or request
+                image and a judge that could be sent it does not accept images
+                (``_check_judges_accept_images``), before any judge is called: an LLM judge
+                whose ``LLMConfig(images=False)`` says so, or whose model LiteLLM's model
+                map does not list as accepting images with ``images`` unset; or a
+                decision-model judge whose model is neither in autorubric's decision-model
+                registry nor given ``capabilities``, or does not accept images; if a
+                decision-model judge is given an image it cannot fit for its model, or
+                images over its model's ``max_request_bytes`` together (before its
+                request); or if a judge's call or request
                 fails with a configuration error, which would fail every call it makes
                 (#40): LiteLLM's ``UnsupportedParamsError``, or a 401, 403 or 404 from
                 the provider (``litellm.AuthenticationError``, ``PermissionDeniedError``,
@@ -3189,9 +3223,9 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
             query = await _load_content_async(query)
         if reference_submission is not None:
             reference_submission = await _load_content_async(reference_submission)
-        # Before any judge is called, so that no request at all is sent, an LLM panel
-        # member's included, for images a decision-model judge cannot take.
-        self._check_decision_models_accept_images(to_grade, query, reference_submission)
+        # Before any judge is called, so that no request at all is sent, by any judge, for
+        # images one of the judges that could be sent them does not accept.
+        self._check_judges_accept_images(to_grade, query, reference_submission)
         if not self._escalation_names_warned and not _ESCALATION_NAMES_CHECKED.get():
             # The flag is set only once the warning is issued, so under a
             # warnings-as-errors filter it raises on every call instead of only once.
@@ -3243,32 +3277,106 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         )
         return [primary, *escalation_results]
 
-    def _check_decision_models_accept_images(self, *contents: Content | None) -> None:
-        """Refuse content holding images for a decision-model judge that cannot take them.
+    def _check_judges_accept_images(self, *contents: Content | None) -> None:
+        """Refuse content holding images for any judge that could be sent them but cannot
+        take them.
 
         Only when one of ``contents`` (the submission, query and reference submission) holds
-        an image are a judge's capabilities looked up (``_image_capabilities``: its
-        ``DecisionModelConfig.capabilities``, else autorubric's decision-model registry),
-        for every judge that judges every criterion (``_judges``: a single judge, a panel
-        member, a cascade's decision model; escalation judges are LLMs). Text never reads
-        either.
+        an image is any judge checked, every judge that could be sent it, in order: those
+        that judge every criterion (``_judges``: a single judge, each panel member, a
+        cascade's decision model), then a cascade's escalation judges, which are sent the
+        item whenever a criterion escalates. Text never reads a capability.
 
-        The installed TypeSafe SDK is checked here too (``_sdk_image_type``), so an SDK too
-        old to send images fails the grade before any judge, an LLM panel member included,
-        makes a request.
+        - An LLM judge must be known to accept images (``_llm_accepts_images``: its
+          ``LLMConfig.images``, else LiteLLM's model map, asked once per grader per model).
+        - A decision-model judge's capabilities are looked up (``_image_capabilities``: its
+          ``DecisionModelConfig.capabilities``, else autorubric's decision-model registry),
+          and the installed TypeSafe SDK is checked (``_sdk_image_type``), so an SDK too
+          old to send images fails the grade before any judge makes a request.
 
         Raises:
-            ValueError: As ``_image_capabilities``, for the first decision-model judge whose
-                capabilities are unknown or say it does not accept images.
+            ValueError: Marked as a configuration error, for the first judge that does not
+                accept images: an LLM judge (``_llm_image_refusal``), or a decision-model
+                judge as ``_image_capabilities`` says.
             ImportError: Marked as a configuration error, if the installed TypeSafe SDK has
                 no ``Image`` (before 0.7.5).
         """
         if not any(content is not None and _has_images(content) for content in contents):
             return
-        for judge in self._judges:
+        for judge in (*self._judges, *self._escalation_judges):
             if isinstance(judge.llm_config, DecisionModelConfig):
                 _image_capabilities(judge)
                 _sdk_image_type(self._decision_clients[judge.judge_id]._typesafe)
+            else:
+                self._check_llm_accepts_images(judge)
+
+    def _check_examples_reach_judges_accepting_images(self) -> None:
+        """Refuse, when the grader is built, few-shot examples holding images for an LLM
+        judge not known to accept images (``_check_llm_accepts_images``).
+
+        A judge's examples (``_criterion_examples``, ``_multi_choice_examples``, or
+        ``_item_examples`` under ``llm_calls="per_item"``) are part of every call it makes,
+        so a judge shown an example holding images is checked here, once; a judge whose
+        examples are all text is not, and is checked only when an item holding images is
+        graded.
+
+        Raises:
+            ValueError: As ``_check_llm_accepts_images``.
+        """
+        shown: dict[str, list[Any]] = {}
+        for (_, judge_id), examples in self._criterion_examples.items():
+            shown.setdefault(judge_id, []).extend(e.submission for e in examples)
+        for (_, judge_id), choices in self._multi_choice_examples.items():
+            shown.setdefault(judge_id, []).extend(submission for submission, _, _ in choices)
+        for judge_id, items in self._item_examples.items():
+            shown.setdefault(judge_id, []).extend(submission for submission, _, _ in items)
+        for judge in (*self._judges, *self._escalation_judges):
+            if isinstance(judge.llm_config, DecisionModelConfig):
+                continue
+            if any(
+                _is_content(submission) and _has_images(submission)
+                for submission in shown.get(judge.judge_id, ())
+            ):
+                self._check_llm_accepts_images(judge)
+
+    def _check_llm_accepts_images(self, judge: JudgeSpec) -> None:
+        """Refuse LLM judge ``judge`` content holding images unless it is known to accept
+        them (``_llm_accepts_images``).
+
+        Raises:
+            ValueError: Marked as a configuration error (``_llm_image_refusal``), naming the
+                judge and its model.
+        """
+        declared = getattr(judge.llm_config, "images", None)
+        if declared is False:
+            raise _llm_image_refusal(judge, declared=True)
+        if not self._llm_accepts_images(judge):
+            raise _llm_image_refusal(judge, declared=False)
+
+    def _llm_accepts_images(self, judge: JudgeSpec) -> bool:
+        """Whether LLM judge ``judge`` is known to accept images.
+
+        Its ``LLMConfig.images`` when that is a ``bool`` (the user's declaration, which
+        wins); otherwise whether LiteLLM's model map lists its model as accepting images
+        (``_litellm_supports_vision``: only an answer of ``True`` confirms it). The map is
+        asked once per grader per model, the first time the grader is to send that model
+        images, and the answer kept in ``_litellm_image_support``: by model, because the
+        answer is the model's, so judges sharing one are asked about once and a judge whose
+        config names another model later is asked about that one.
+        """
+        config = judge.llm_config
+        declared = getattr(config, "images", None)
+        if isinstance(declared, bool):
+            return declared
+        model = getattr(config, "model", None)
+        if not isinstance(model, str):
+            return False
+        support = self._litellm_image_support
+        if support is None:
+            support = self._litellm_image_support = {}
+        if model not in support:
+            support[model] = _litellm_supports_vision(model)
+        return support[model]
 
     async def _judge_escalated_criteria(
         self,

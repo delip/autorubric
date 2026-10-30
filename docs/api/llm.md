@@ -158,6 +158,16 @@ The response cache keys a prompt holding an image by the SHA-256 of its content,
 
 A provider that refuses an image (a format it does not read, or a model without vision input) usually answers with a bad-request error. A grader routes it like any other failed call, so the criterion abstains (`CANNOT_ASSESS`, or NA for a multi-choice criterion) and the error is kept on its report. See the [Image Inputs](../cookbook/image-inputs.md) recipe for the formats providers accept.
 
+A grader does not leave the model question to the provider. `CriterionGrader` sends an image to an LLM judge only when the judge is known to accept images, and `LLMConfig.images` says how that is known:
+
+| `images` | Judge accepts images when |
+|----------|---------------------------|
+| `None` (default) | LiteLLM's model map lists the model as accepting images (`litellm.supports_vision(model=...)` answers `True`). The map is asked once per grader per model, the first time the grader is to send that model an image. The lookup reads the map that ships with LiteLLM and prints and logs nothing. |
+| `True` | Always: your declaration, for a vision model the map does not list (for example `ollama/llava`). |
+| `False` | Never: your declaration, even for a model the map lists. |
+
+Any other value raises `ValueError` when the config is built (`1` and `"yes"` are not declarations). A judge that is not known to accept images raises `ValueError` from the grade, naming the judge and the model, before any judge of the grader sends a request. `fill_ground_truth` raises it too, rather than leaving each item with an image out. `LLMClient.generate` itself does not check, so a direct call sends what it is given. Text-only grading never reads `images` or the map, and the field is never sent, so text requests and cache keys are unchanged. An experiment manifest records `images` for a judge only when it is set.
+
 ## Prompt Caching (Anthropic)
 
 Reduce latency and cost on repeated calls. Enabled by default:

@@ -58,6 +58,16 @@ result = await rubric.grade(
 
 The model must accept images; `gpt-4.1-mini` does. The judge receives each image inside the prompt, where it occurs in the submission, as an OpenAI-style content part that LiteLLM translates for other providers (see [Images in Prompts](../api/llm.md#images-in-prompts)).
 
+autorubric never sends an image to an LLM judge that is not known to accept images. The first time a grader is to send a judge an image, it asks LiteLLM's model map (`litellm.supports_vision`) whether the judge's model accepts images, and keeps the answer for every later item. A model the map does not list as accepting images raises `ValueError` naming the judge and the model, before any judge sends a request. The same holds for every judge that could be sent the image, including each member of a panel and a cascade's escalation judges. Text-only grading never asks.
+
+LiteLLM's map does not hold every vision model. Models served through Ollama, vLLM or OpenRouter, such as a LLaVA or Qwen-VL model, are often missing from it, and so are refused. If your model does accept images, declare it on the judge's config:
+
+```python
+judge = LLMConfig(model="ollama/llava", images=True)
+```
+
+The declaration wins over the map, in both directions. `images=False` refuses images for a model the map lists, which is useful when an endpoint serves a text-only variant under a listed name. Training items whose submissions hold images are checked when the grader is built, because every call of the judge shows them.
+
 !!! tip "Use `llm_calls=\"per_item\"` for submissions with images"
     By default an LLM judge makes one call per criterion, and every call carries the whole submission, so each image is sent once per criterion. An image often costs more input tokens than the text around it, and a three-criterion rubric pays for every chart three times. With `llm_calls="per_item"` the judge grades the whole rubric in one call and each image is sent once per item. [Holistic Rubric grading](single-call-grading.md) shows how to check on labelled data that the single call grades your rubric as well.
 
@@ -143,7 +153,7 @@ Loading opens no image, so a dataset whose figures are missing still loads, and 
 
 | Judge | Formats sent | What autorubric does |
 |-------|--------------|----------------------|
-| LLM judges | The image's own format | Sends the original bytes as a `data:` URL, never converted or resized. The provider's limits on formats, size and number of images apply. |
+| LLM judges | The image's own format | Sends the original bytes as a `data:` URL, never converted or resized, and only to a model LiteLLM lists or you declare (`LLMConfig(images=True)`) as accepting images. The provider's limits on formats, size and number of images apply. |
 | Jev (`jev-1.14.0`, `jev-latest`) | PNG and JPEG only | Fits every image: converts GIF, WebP and other unsupported encodings, scales, and pads with white. |
 
 PNG and JPEG are the safe choice for every judge. GIF and WebP are not accepted by every provider or model: some take only still GIFs, some do not list GIF at all, and a local model may read neither. A provider that refuses an image usually answers with a bad-request error, and the criterion then abstains (`CANNOT_ASSESS`) with the error on its report. If that happens, convert those images to PNG before grading:
@@ -171,6 +181,7 @@ def as_png(path: str) -> Image:
 
 - **`Content`** is a string, an `Image`, or a list of both read in order; it applies to the submission, the query and the reference submission
 - **Images are read once per grade**, and one that cannot be read raises instead of becoming a verdict
+- **LLM judges** are sent images only when LiteLLM's model map lists their model as accepting them, or `LLMConfig(images=True)` says so; any other judge is refused before a request is sent
 - **`llm_calls="per_item"`** sends each image to an LLM judge once per item instead of once per criterion
 - **Decision models** get images fitted into the limits their registry entry (or declared `capabilities`) gives (PNG or JPEG, 280 to 1568 pixels per side for Jev)
 - **Dataset files** hold images as `{"image": "<path>"}` parts, resolved against the file's directory

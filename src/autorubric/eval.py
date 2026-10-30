@@ -106,9 +106,10 @@ def _serialize_grader_config(grader: Grader) -> dict[str, Any]:
     For each judge this records ``judge_id``, ``judge_kind`` (``"llm"`` or
     ``"decision_model"``), ``model``, ``weight`` and ``max_parallel_requests``. An LLM judge
     adds ``temperature`` (None when the provider default is used), then, each only when set,
-    ``max_tokens``, ``top_p``, ``thinking`` (``{"level": ..., "budget_tokens": ...}``) and
-    ``seed`` (see ``_llm_judge_entry``). A decision-model judge adds ``binary_framing``,
-    ``ordinal_framing``, ``decision_threshold`` and ``api_base_host``, the host of the
+    ``max_tokens``, ``top_p``, ``thinking`` (``{"level": ..., "budget_tokens": ...}``),
+    ``seed`` and ``images`` (see ``_llm_judge_entry``). A decision-model judge adds
+    ``binary_framing``, ``ordinal_framing``, ``decision_threshold`` and ``api_base_host``,
+    the host of the
     endpoint it was built against; the rest of its base URL, its API key and its
     ``extra_headers`` are not recorded. A cascade adds
     ``escalation``: its escalation judges (``judges``, LLM entries as above), ``threshold``
@@ -237,6 +238,9 @@ def _llm_judge_entry(judge: Any, judge_id: str, model: str, config: Any) -> dict
     added after those keys, each only when set (not None), in ``LLMConfig``'s field order:
     ``max_tokens``, ``top_p``, ``thinking`` and ``seed`` (#44). The entry of a judge that
     sets none of them is therefore byte-identical to one written before they were recorded.
+    Last, ``images`` is recorded when the config declares it (``True`` or ``False``): it
+    decides whether the judge may be sent images, so it is part of how a run was graded,
+    though it enters no request. Unset (None, LiteLLM's model map asked), it is left out.
     ``thinking`` is the normalized ``get_thinking_config()`` as ``{"level": ...,
     "budget_tokens": ...}``, the level as its plain string, or None for a budget given with
     no level (``budget_tokens``, when not None, is what is sent, the level otherwise). A
@@ -267,6 +271,9 @@ def _llm_judge_entry(judge: Any, judge_id: str, model: str, config: Any) -> dict
     seed = getattr(config, "seed", None)
     if isinstance(seed, int) and not isinstance(seed, bool):
         entry["seed"] = seed
+    images = getattr(config, "images", None)
+    if isinstance(images, bool):
+        entry["images"] = images
     return entry
 
 
