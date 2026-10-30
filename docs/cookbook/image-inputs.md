@@ -59,7 +59,7 @@ result = await rubric.grade(
 The model must accept images; `gpt-4.1-mini` does. The judge receives each image inside the prompt, where it occurs in the submission, as an OpenAI-style content part that LiteLLM translates for other providers (see [Images in Prompts](../api/llm.md#images-in-prompts)).
 
 !!! tip "Use `llm_calls=\"per_item\"` for submissions with images"
-    By default an LLM judge makes one call per criterion, and every call carries the whole submission, so each image is sent once per criterion. An image often costs more input tokens than the text around it, and a three-criterion rubric pays for every chart three times. With `llm_calls="per_item"` the judge grades the whole rubric in one call and each image is sent once per item. [Grading a Whole Rubric in One Call](single-call-grading.md) shows how to check on labelled data that the single call grades your rubric as well.
+    By default an LLM judge makes one call per criterion, and every call carries the whole submission, so each image is sent once per criterion. An image often costs more input tokens than the text around it, and a three-criterion rubric pays for every chart three times. With `llm_calls="per_item"` the judge grades the whole rubric in one call and each image is sent once per item. [Holistic Rubric grading](single-call-grading.md) shows how to check on labelled data that the single call grades your rubric as well.
 
 The length penalty counts words of text only, so an image adds nothing to it. Few-shot training items may hold images as well, and an LLM judge sees each example's images in its examples.
 
@@ -177,7 +177,7 @@ def as_png(path: str) -> Image:
 
 ## Going Further
 
-- [Grading a Whole Rubric in One Call](single-call-grading.md) - Validate `llm_calls="per_item"` on labelled data
+- [Holistic Rubric grading](single-call-grading.md) - Validate `llm_calls="per_item"` on labelled data
 - [Decision-Model Judges](decision-models.md) - Jev alone, in a panel, or as a cascade's first pass
 - [Managing Datasets](managing-datasets.md) - Saving, loading and splitting datasets
 - [API Reference: Core Grading](../api/core-grading.md#submissions-with-images) - `Image`, `Content` and `ToGradeInput`

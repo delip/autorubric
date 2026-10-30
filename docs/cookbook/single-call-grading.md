@@ -1,4 +1,7 @@
-# Grading a Whole Rubric in One Call
+# Holistic Rubric grading
+
+!!! warning "Not recommended: offered mainly for completeness"
+    We recommend the default, one call per criterion, and offer holistic grading mainly for completeness. When one call judges every criterion, the criteria share a context window and their verdicts can shift each other; AutoRubric dropped this mode at its fork from the upstream `rubric` library for that reason. The live comparison in this recipe shows the shift is real: on a RiceChem sample the single call marked 45% of cells MET, against 56% for per-criterion calls and 56% in the ground truth, and every holistic run had a lower kappa and a higher score error than every per-criterion run. A single call also fails as a unit, so one failed call leaves every criterion of the item ungraded, and one thinking budget covers the whole rubric instead of each criterion. Use it only where its lower cost matters more than these risks, and only after Step 3 shows no shift you care about on your own labelled data.
 
 Let an LLM judge answer every criterion of an item in one call instead of one call per criterion, and check on labelled data that the cheaper calls still grade the way you need.
 
