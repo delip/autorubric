@@ -394,33 +394,37 @@ Running this pipeline on the flawed rubric above produces dramatic improvement:
 
 ![Rubric Improvement Over Iterations](../images/rubric-improvement-chart.png)
 
-The chart shows how the quality score increases from 0% to 100% while detected issues drop from 21 to 0 over 5 iterations.
+The chart shows how the quality score increases from 0% to 96% while detected issues drop from 24 to 1 over eight revisions. The climb was not steady. The score reached 95% at iteration 4, just under the 0.95 threshold, fell to 85% at iteration 7, and crossed the threshold at iteration 8, where the loop stopped with `thresholds_met`.
 
 | Iteration | Score | Issues | Key Changes |
 |-----------|-------|--------|-------------|
-| 0 (Initial) | 0% | 21 | Generic, vague, double-barreled criteria |
-| 1 | 89% | 2 | Task-specific criteria addressing manufacturing, operation, end-of-life |
-| 2 | 92% | 1 | Split compound criteria, clarified wording |
-| 3 | 95% | 1 | Improved comparative framing |
-| 4 (Final) | 100% | 0 | Balanced weights, fully optimized |
+| 0 (Initial) | 0% | 24 | Generic, vague, double-barreled criteria |
+| 1 | 74% | 5 | 9 task-specific criteria on manufacturing, operation and end-of-life, 3 of them negative |
+| 2 | 75% | 6 | Grew to 13 criteria, with new vague-wording and overlap issues |
+| 3 | 86% | 3 | Rewrote most criteria, down to 12 |
+| 4 | 95% | 1 | Split compound checks into 14 criteria |
+| 5 | 92% | 2 | Reworded 8 of the 14, adding overlap and verbosity issues |
+| 6 | 86% | 3 | Rewrote the criteria as short statements ("States", "Identifies"), down to 13, 2 of them negative |
+| 7 | 85% | 3 | Added upstream-gasoline and tailpipe checks, up to 15 |
+| 8 (Final) | 96% | 1 | Reworded one criterion on the operational phase |
 
 ### Qualitative Transformation
 
 The table below shows how specific criteria evolved through the refinement process:
 
-| Aspect | Initial (Iteration 0) | Final (Iteration 4) |
+| Aspect | Initial (Iteration 0) | Final (Iteration 8) |
 |--------|----------------------|---------------------|
-| **Manufacturing** | Not addressed | "Compares the environmental impacts of manufacturing electric vehicle batteries with the manufacturing processes of gasoline vehicles" |
-| **Operation** | Not addressed | "Contrasts the indirect emissions from electricity generation for EVs against the direct tailpipe emissions of gasoline vehicles" |
-| **End-of-Life** | Not addressed | "Compares the environmental implications of EV battery disposal or recycling against the end-of-life processing of gasoline vehicles" |
-| **Writing Quality** | "well-written, accurate, and demonstrates creativity" (double-barreled, vague) | "Organizes the content using specific headers for manufacturing, operation, and end-of-life phases" (specific, observable) |
-| **Overall Quality** | "The response is of high quality" (circular, generic) | "Provides a concluding assessment that weighs the total environmental footprint of EVs against gasoline vehicles" (task-specific) |
+| **Manufacturing** | Not addressed | "States that the manufacturing phase for an electric vehicle has a higher environmental impact (e.g., carbon footprint) than for a gasoline vehicle." |
+| **Operation** | Not addressed | "States that the operational phase for an electric vehicle has a lower environmental impact (e.g., carbon footprint) than for a gasoline vehicle." |
+| **End-of-Life** | Not addressed | "Mentions either battery recycling or second-life battery applications as an end-of-life consideration for EVs." |
+| **Writing Quality** | "well-written, accurate, and demonstrates creativity" (double-barreled, vague) | No criterion left: the final rubric checks content only |
+| **Overall Quality** | "The response is of high quality" (circular, generic) | Replaced by checks such as the negative criterion "Makes the definitive claim that electric vehicles have zero total environmental impact across their entire lifecycle." |
 
 The transformation illustrates three key improvements:
 
 1. **Generic to task-specific**: Criteria now directly address the EV analysis requirements
-2. **Vague to observable**: "high quality" becomes measurable structural requirements
-3. **Compound to unidimensional**: Multi-aspect criteria split into focused assessments
+2. **Vague to observable**: "high quality" becomes specific claims a judge can check in the text
+3. **Compound to unidimensional**: Multi-aspect criteria split into focused assessments, taking the rubric from 5 criteria to 15
 
 ## Key Takeaways
 

@@ -113,11 +113,11 @@ result = asyncio.run(main())
 The output shows per-section results with verdicts and explanations:
 
 !!! note "Scores and verdicts are illustrative"
-    The verdicts, explanations, and scores shown throughout this page (e.g. `SCORE: 0.42`,
-    and the flawed/improved comparison below) are illustrative outputs from a live LLM judge
-    (`openai/gpt-4.1-mini`). They are not deterministic fixtures and will vary between runs and
-    as the meta-rubric evolves. Treat them as qualitative ("flawed scores much lower than
-    improved"), not as exact numbers to reproduce.
+    The verdicts, explanations, and scores shown throughout this page (e.g. `SCORE: 0.00`,
+    and the flawed/improved comparison below) are abridged outputs from live runs with an LLM
+    judge (`openai/gpt-4.1-mini`). They are not deterministic fixtures and will vary between
+    runs and as the meta-rubric evolves. With this judge, one run's score says little: Step 6
+    shows how far repeats of the same comparison spread.
 
 ```
 ═══════════════════════════════════════════════════════════════
@@ -127,28 +127,33 @@ Evaluating rubric with 5 criteria
 
 Section: Clarity & Precision
 ─────────────────────────────────────────────────────────────────
-[UNMET] clear_requirements (weight: 10)
-  Several criteria use vague language that different raters would
-  interpret differently (e.g., "good", "professional").
+[UNMET] specific_actionable (weight: 10)
+  The provided rubric criteria description uses generic phrases such as
+  'Review is thorough, insightful, and constructive' and 'Good assessment
+  of methodology' without specific guidance or detailed specificity.
 
 [UNMET] unidimensional (weight: 10)
-  Multiple criteria assess several distinct constructs in one
-  requirement ("thorough, insightful, and constructive").
+  The criterion named 'thoroughness' conflates being thorough, insightful,
+  and constructive, which are multiple attributes combined into one criterion.
 
 Section: Anti-Patterns
 ─────────────────────────────────────────────────────────────────
 [MET] double_barreled (weight: -8)
-  "thoroughness" and "strengths_weaknesses" both combine multiple
-  assessments into single criteria.
+  Criterion 1 requires a review that is 'thorough, insightful, and
+  constructive,' which assesses multiple distinct qualities in a single
+  requirement.
 
 [MET] vague_wording (weight: -8)
-  "methodology" uses "good" without defining what constitutes good.
+  The criterion 'Review is thorough, insightful, and constructive' includes
+  vague terms like 'thorough' and 'insightful' that may be interpreted
+  differently by different raters.
 
 [MET] hedging_language (weight: -6)
-  "factual_errors" uses "may" which makes definitive assessment impossible.
+  Criterion 5 includes the phrase 'May contain factual errors,' which uses
+  the hedging word 'May,' making the assessment non-definitive.
 
 ═══════════════════════════════════════════════════════════════
-SCORE: 0.42
+SCORE: 0.00
 ═══════════════════════════════════════════════════════════════
 ```
 
@@ -232,24 +237,30 @@ async def main():
 result = asyncio.run(main())
 ```
 
-In-context evaluation adds two more sections:
+In-context evaluation adds three more sections:
 
 ```
 Section: Construct Alignment (In-Context)
 ─────────────────────────────────────────────────────────────────
-[UNMET] task_aligned (weight: 12)
-  Task requires assessing statistical/technical errors, but rubric
-  only vaguely mentions "methodology".
+[MET] task_aligned (weight: 12)
 
-[UNMET] covers_key_aspects (weight: 10)
-  Missing coverage of: clarity/organization assessment, actionable
-  suggestions, avoiding summary.
+[MET] covers_key_aspects (weight: 10)
+
+Section: Discriminative Power (In-Context)
+─────────────────────────────────────────────────────────────────
+[UNMET] distinguishes_quality (weight: 10)
+  The submission only presents the rubric criteria without demonstrating
+  how these criteria would meaningfully distinguish between good and poor
+  submissions; no evidence is provided that the criteria are discriminative
+  or evaluative in practice.
 
 Section: Anti-Patterns (In-Context)
 ─────────────────────────────────────────────────────────────────
 [MET] missing_critical (weight: -10)
-  Rubric fails to assess statistical/technical errors and
-  actionable suggestions, both explicitly required by the task.
+  The submission does not provide any assessment, failing to explicitly
+  evaluate methodology, statistical or technical errors, clarity, or provide
+  suggestions as required by the task, thus failing to assess critical
+  aspects explicitly required.
 ```
 
 ### Step 5: Comparing Standalone vs In-Context
@@ -268,6 +279,8 @@ Some issues only surface with task context:
 | Missing critical task requirements | Cannot detect | **Detects** |
 | Irrelevant criteria for task | Cannot detect | **Detects** |
 | Poor discriminative power | Cannot detect | **Detects** |
+
+This table says what each mode checks for, not how reliably a given judge finds it. In six repeats on the flawed rubric with `openai/gpt-4.1-mini`, `missing_critical` fired twice and `covers_key_aspects` passed every time, so a clean in-context result from one run is weak evidence.
 
 !!! tip "Use Both"
     Run standalone first to fix intrinsic issues, then in-context to ensure task alignment.
@@ -354,15 +367,17 @@ async def compare_rubrics():
 asyncio.run(compare_rubrics())
 ```
 
-Expected output:
+One run gave:
 
 ```
 SCORE COMPARISON
 ----------------------------------------
-  Flawed:   0.35
-  Improved: 0.89
-  Delta:    +0.54
+  Flawed:   0.25
+  Improved: 0.54
+  Delta:    +0.30
 ```
+
+Do not read much into one run. Over eight repeats of this comparison, the flawed rubric scored from 0.14 to 0.49 (mean 0.26) and the improved rubric from 0.15 to 0.59 (mean 0.37). The improved rubric scored higher in six of the eight, so average several runs before you trust a gain.
 
 ### Step 7: Generating HTML Reports
 
@@ -498,6 +513,8 @@ In your CI configuration:
     you want fast feedback without blocking on marginal issues. For production rubrics,
     raise the bar to 0.85 or higher. The right value depends on your tolerance for false
     positives (rejecting an acceptable rubric) versus false negatives (passing a flawed one).
+    Calibrate it on your own judge: in the eight repeats in Step 6, the improved rubric never
+    reached 0.7 with `openai/gpt-4.1-mini`.
 
 ## Key Takeaways
 

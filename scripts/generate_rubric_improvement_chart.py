@@ -16,9 +16,9 @@ THEME = (
 )
 
 # Data from the cookbook article table
-ITERATIONS = [0, 1, 2, 3, 4]
-QUALITY_SCORES = [0.00, 0.89, 0.92, 0.95, 1.00]
-ISSUES = [21, 2, 1, 1, 0]
+ITERATIONS = [0, 1, 2, 3, 4, 5, 6, 7, 8]
+QUALITY_SCORES = [0.00, 0.74, 0.75, 0.86, 0.95, 0.92, 0.86, 0.85, 0.96]
+ISSUES = [24, 5, 6, 3, 1, 2, 3, 3, 1]
 
 COLOR_BARS = "#e76f51"
 COLOR_LINE = "#2a9d8f"
@@ -52,7 +52,7 @@ def main() -> None:
 
         ax1.set_xlabel("Iteration")
         ax1.set_ylabel("Issues detected")
-        ax1.set_ylim(0, 26)
+        ax1.set_ylim(0, 28)
         ax1.set_xticks(ITERATIONS)
 
         # Line: quality score (right y-axis)

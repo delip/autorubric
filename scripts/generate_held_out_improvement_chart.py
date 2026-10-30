@@ -29,14 +29,14 @@ CRITERIA = [
     "factual_misrepresentation",
 ]
 
-SEED_ACCURACY = [70, 50, 60, 40, 50, 60, 40, 80, 50, 90]
-IMPROVED_ACCURACY = [100, 90, 90, 90, 80, 90, 80, 90, 100, 100]
+SEED_ACCURACY = [83.3, 56.7, 40.0, 86.7, 23.3, 36.7, 23.3, 86.7, 73.3, 70.0]
+IMPROVED_ACCURACY = [63.3, 80.0, 76.7, 96.7, 73.3, 70.0, 53.3, 90.0, 93.3, 74.1]
 
-SEED_FP = [30, 40, 30, 50, 30, 30, 40, 10, 40, 0]
-SEED_FN = [0, 10, 10, 10, 20, 10, 20, 10, 10, 10]
+SEED_FP = [16.7, 43.3, 60.0, 10.0, 76.7, 63.3, 76.7, 13.3, 26.7, 30.0]
+SEED_FN = [0.0, 0.0, 0.0, 3.3, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
 CONVERGENCE_ITERS = [0, 1, 2, 3, 4]
-CONVERGENCE_ACC = [0.59, 0.75, 0.84, 0.91, 0.93]
+CONVERGENCE_ACC = [0.58, 0.66, 0.72, 0.75, 0.77]
 
 COLOR_CORAL = "#e76f51"
 COLOR_TEAL = "#2a9d8f"
@@ -160,7 +160,7 @@ def error_rates() -> None:
                 )
 
         ax.set_xlabel("% of graded items")
-        ax.set_xlim(0, 65)
+        ax.set_xlim(0, 90)
         ax.set_yticks(y)
         ax.set_yticklabels(names)
         ax.legend(

@@ -168,18 +168,20 @@ Sample output:
 
 ```
 Score: 1.00
+Tokens used: 8944
+Cost: $0.0026
 
 [MET] addresses_issue (weight: 10.0)
-  Reason: default: The response directly addresses the WiFi connectivity issue reported after the Windows update.
+  Reason: default: The response directly addresses the customer's issue of WiFi connectivity after an update by providing relevant troubleshooting steps like resetting the network adapter and running the Network Troubleshooter.
 
 [MET] provides_solution (weight: 8.0)
-  Reason: default: Clear step-by-step solutions are provided: resetting the network adapter and running the troubleshooter.
+  Reason: default: The response provides clear next steps including resetting the network adapter and running the Network Troubleshooter, which are actionable solutions for the WiFi connectivity issue.
 
 [MET] professional_tone (weight: 5.0)
-  Reason: default: The response is courteous, empathetic, and maintains professional language throughout.
+  Reason: default: The response uses polite language such as 'I understand how frustrating connectivity issues can be,' and ends with 'Best regards, Support Team,' maintaining a professional and courteous tone throughout.
 
 [UNMET] factual_errors (weight: -15.0)
-  Reason: default: The technical instructions are accurate for Windows troubleshooting.
+  Reason: default: The submission provides accurate technical instructions for resetting the network adapter and running the Network Troubleshooter, without any incorrect information.
 ```
 
 ### Understanding the Score

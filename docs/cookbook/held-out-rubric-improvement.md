@@ -150,58 +150,58 @@ The grouped bar chart shows how each criterion's grading accuracy changed from t
 
 ![Per-criterion accuracy before vs after](../images/held-out-accuracy-before-after.png)
 
-The weakest seed criteria (`strengths_and_weaknesses` at 40%, `specific_references` at 40%) show the largest absolute gains. Criteria that were already precise in the seed (`factual_misrepresentation` at 90%, `concise_review` at 80%) improve only marginally.
+The weakest seed criteria (`constructive_tone` and `specific_references`, both at 23%) gain 50 and 30 points. `statistical_evaluation` (40% to 77%) and `structured_format` (37% to 70%) also gain more than 30 points. Criteria that already graded well in the seed (`strengths_and_weaknesses` at 87%, `concise_review` at 87%) move little. One criterion gets worse: `paper_summary` falls from 83% to 63%, because the revised wording demands research question, methodology and findings all in the opening, and the grader then misses 7 summaries the ground truth accepts.
 
 #### 4b. Error analysis of seed rubric
 
-The initial error report reveals why the seed rubric fails. False positive rates dominate because the vague wording makes criteria too easy to satisfy:
+The initial error report reveals why the seed rubric fails. False positives dominate because the vague wording makes criteria too easy to satisfy:
 
 ![Per-criterion error rates](../images/held-out-error-rates.png)
 
-`strengths_and_weaknesses` has a 50% false positive rate --- the grader marks it MET when the review merely mentions strengths and weaknesses without the specificity the gold standard requires. `specific_references` and `methodology_assessment` follow the same pattern. False negatives are lower across the board because vague criteria rarely fail items that should pass.
+`constructive_tone` and `specific_references` are the worst cases. For each, the grader marked MET on all 23 reviews the ground truth marks UNMET, which is 77% of the graded items. Only one false negative appears in the whole seed report, on `strengths_and_weaknesses`, because vague criteria rarely fail items that should pass.
 
 This FP-heavy error profile is the signature of under-specified rubric wording. The `held_out` strategy feeds these rates and disagreement exemplars directly into the revision prompt, giving the LLM concrete evidence for how to tighten each criterion.
 
 #### 4c. Accuracy convergence
 
-Mean accuracy across all criteria rises from 59% to 93% over 5 iterations, crossing the 90% target at iteration 3:
+Mean accuracy across all criteria rose from 58% to 77% over 5 iterations. It never reached the 90% target, so the loop stopped with `max_iterations` and the last iteration was the best one:
 
 ![Accuracy convergence](../images/held-out-accuracy-convergence.png)
 
-The steepest gains occur in iterations 0-2 as the most egregiously vague criteria get tightened. Iteration 3-4 shows diminishing returns as the remaining errors require subtler wording adjustments.
+The steepest gains came early, at 8.3 and 5.7 points in the first two revisions, as the most vague criteria were tightened. The last two revisions added 2.7 and 2.5 points. This run cost $5.12, so raising `max_iterations` to chase the target has a price, and the shrinking gains give no sign that it would get there.
 
 #### 4d. Wording diff
 
 Inspecting the artifacts directory (`held_out_improvement/rubric-iter-*.json`) reveals how specific criteria evolved. Two examples:
 
-**`strengths_and_weaknesses`** (40% -> 90%):
+**`strengths_and_weaknesses`** (87% -> 97%):
 
 | Seed | Improved |
 |------|----------|
-| "Review discusses strengths and weaknesses of the work" | "Review identifies at least 2 specific strengths and at least 2 specific weaknesses, each with concrete references to sections, methods, or results in the paper" |
+| "Review discusses strengths and weaknesses of the work" | "Review contains separate or clearly distinguishable discussion of both strengths (positive aspects, contributions, or advantages) AND weaknesses (limitations, flaws, or areas needing improvement) of the work. Both must be explicitly present." (first two of five sentences) |
 
-The revision added count thresholds ("at least 2") and a concreteness requirement ("concrete references to sections, methods, or results") --- both recoverable from the false positive exemplars where reviews made generic statements that the ground truth marked UNMET.
+The revision tightened this criterion by requiring both sides to be explicit and specific. It added no count threshold, and 3 false positives at the seed left it little evidence to work from.
 
-**`constructive_tone`** (50% -> 80%):
+**`constructive_tone`** (23% -> 73%):
 
 | Seed | Improved |
 |------|----------|
-| "Review is constructive in tone" | "Weaknesses are accompanied by specific, actionable suggestions for how to address them, rather than merely identifying problems" |
+| "Review is constructive in tone" | "Review is written in formal academic or professional language appropriate for peer review or editorial assessment." (first of five sentences) |
 
-The revision shifted from a subjective tone judgment to an observable behavioral check, closely matching the gold standard's requirement.
+The revision replaced one subjective impression with a checkable register test and lists casual phrases to avoid. Accuracy rose by 50 points, but the wording moved away from the gold rubric's requirement of actionable suggestions, so it matches the labels on this dataset without stating what the labels mean.
 
 ### Step 5: Gold rubric reveal
 
 Comparing the improved wording against the gold rubric (which the system never saw) shows how much precision the `held_out` strategy recovered from behavioral signal alone:
 
-| Criterion | Seed | Improved | Gold |
+| Criterion | Seed | Improved (excerpt) | Gold |
 |-----------|------|----------|------|
-| `strengths_and_weaknesses` | "discusses strengths and weaknesses of the work" | "identifies at least 2 specific strengths and at least 2 specific weaknesses, each with concrete references" | "identifies at least 2 specific strengths and 2 specific weaknesses with concrete references to the paper" |
-| `constructive_tone` | "is constructive in tone" | "weaknesses are accompanied by specific, actionable suggestions for how to address them" | "weaknesses include specific, actionable suggestions for improvement rather than just identifying problems" |
-| `specific_references` | "refers to the paper's content" | "references specific details from the paper such as section numbers, figure references, quoted results, or sample sizes" | "references specific details from the paper (section numbers, figure references, quoted results, sample sizes) rather than making generic statements" |
-| `clear_recommendation` | "provides a recommendation" | "concludes with a definitive recommendation (Accept, Minor Revision, Major Revision, or Reject) with justification" | "concludes with a definitive recommendation (Accept, Minor Revision, Major Revision, or Reject) and a brief justification tied to the analysis" |
+| `strengths_and_weaknesses` | "discusses strengths and weaknesses of the work" | "separate or clearly distinguishable discussion of both strengths ... AND weaknesses" | "identifies at least 2 specific strengths and 2 specific weaknesses with concrete references to the paper" |
+| `constructive_tone` | "is constructive in tone" | "written in formal academic or professional language appropriate for peer review or editorial assessment" | "weaknesses include specific, actionable suggestions for improvement rather than just identifying problems" |
+| `specific_references` | "refers to the paper's content" | "cites or references at least three specific quantitative values, measurements, or named methodological elements from the paper" | "references specific details from the paper (section numbers, figure references, quoted results, sample sizes) rather than making generic statements" |
+| `clear_recommendation` | "provides a recommendation" | "an explicit editorial recommendation using standard terminology (e.g., accept, reject, major revision, minor revision) OR concludes with specific, actionable guidance" | "concludes with a definitive recommendation (Accept, Minor Revision, Major Revision, or Reject) and a brief justification tied to the analysis" |
 
-The improved wording independently converges on the same specificity patterns as the gold rubric: count thresholds, enumerated categories, observable behavioral checks. The convergence is not exact --- the gold rubric uses slightly different phrasing --- but the functional precision is comparable.
+The improved wording recovers some of the gold rubric's patterns: observable checks, enumerated categories, and thresholds such as "at least three" values. The match is partial. `constructive_tone` drifted to a different construct, `strengths_and_weaknesses` has no count threshold, and the improved criteria run to several sentences of edge cases taken from the exemplars, where the gold criteria take one. Read the revised wording before adopting it, since accuracy on the labelled items does not show that a criterion still says what you meant.
 
 ### Step 6 (Optional): Chaining strategies
 
@@ -230,7 +230,7 @@ async def chain():
     return final_result
 ```
 
-The two strategies use complementary signals: `held_out` catches wording that produces incorrect verdicts; `meta_rubric` catches wording that is ambiguous, double-barreled, or overlapping. Running `held_out` first ensures the criteria are functionally correct before `meta_rubric` polishes their structural quality.
+The two strategies use complementary signals: `held_out` catches wording that produces incorrect verdicts; `meta_rubric` catches wording that is ambiguous, double-barreled, or overlapping. Running `held_out` first brings the criteria closer to correct grading before `meta_rubric` polishes their structural quality.
 
 ## Key Takeaways
 

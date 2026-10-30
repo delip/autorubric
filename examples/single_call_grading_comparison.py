@@ -8,8 +8,8 @@ accuracy, agreement, cost and wall-clock time.
 
 WARNING: this script makes real, billed API calls. With the constants below (gpt-6-luna,
 REASONING="low", REPLICATES=2, 11 essay items x 5 criteria, 100 sampled RiceChem items x 8
-criteria) it makes 1,932 calls, which cost about $0.31 in the recipe's run (with OpenAI's
-automatic prompt-caching discount) and about $0.69 at list price, and it takes several
+criteria) it makes 1,932 calls, which cost about $0.23 in the recipe's run (with OpenAI's
+prompt-caching discount) and about $0.63 at list price, and it takes several
 minutes. Set your provider's API key (e.g. OPENAI_API_KEY) before running it.
 
 Each run is a resumable EvalRunner experiment. Its directory is named after MODEL, REASONING

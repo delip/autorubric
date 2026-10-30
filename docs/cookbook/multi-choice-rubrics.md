@@ -238,22 +238,22 @@ for cr in result.report:
 Sample output:
 
 ```
-Overall Score: 0.89
+Overall Score: 0.91
 
-[Excellent] detail_level
-  Value: 1.00
-  Reason: Review provides specific details about dishes, service, ambiance, and pricing.
+[Good] detail_level
+  Value: 0.75
+  Reason: default: The review offers detailed descriptions of the salmon, risotto, service, ambiance, and value, which shows good informativeness, but it does not cover all aspects comprehensively (e.g., limited dessert discussion), so it fits best as 'Good' rather than 'Excellent'.
 
 [Positive] review_tone
   Value: 1.00
-  Reason: Overall positive with only minor criticism of dessert menu.
+  Reason: default: The review uses generally positive language describing the food, service, ambiance, and value, with only a minor criticism of the dessert menu. This indicates an overall positive tone.
 
-[Above Average] food_quality
-  Value: 0.75
-  Reason: Reviewer praises the salmon and risotto highly, mild criticism of dessert.
+[Outstanding] food_quality
+  Value: 1.00
+  Reason: default: The reviewer describes the salmon as perfectly cooked with a crispy skin and buttery interior and the risotto as creamy without being heavy. The overall tone about the food is very positive, indicating an outstanding food quality rating.
 
 [UNMET] spam_content
-  Reason: No promotional or spam content detected.
+  Reason: default: The review provides an honest description of the dining experience without any spam or promotional content.
 ```
 
 ### Step 7: Ensemble Aggregation for Multi-Choice
