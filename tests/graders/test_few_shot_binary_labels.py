@@ -196,10 +196,53 @@ def test_unusable_labels_warn_once_naming_them(llm_calls):
     (warning,) = [w for w in caught if "names no verdict" in str(w.message)]
     assert warning.category is UserWarning
     message = str(warning.message)
-    assert "3 training items" in message
-    assert "'sources'" in message
-    assert "'met'" in message and "'yes'" in message
+    assert "criterion c0 ('sources'): 'met', 'yes' (3 items)" in message
+    if llm_calls == "per_item":
+        assert "leave out 3 training items whose binary label names no verdict" in message
+    else:
+        assert "of a binary criterion leave out each training item whose label for it" in message
+        assert "training items whose" not in message
     assert warning.filename == __file__
+
+
+@pytest.mark.parametrize("llm_calls", MODES)
+def test_the_warning_says_what_each_mode_leaves_out(llm_calls):
+    """Per criterion an item is left out of that criterion's examples only; per item, whole."""
+    second = Criterion(name="tone", weight=1.0, requirement="Is the tone formal?")
+    dataset = RubricDataset(prompt="Is the claim true?", rubric=Rubric([SOURCES, second]))
+    for name, labels in [
+        ("x1", ["yes", "MET"]),
+        ("x2", ["UNMET", "met"]),
+        ("x3", ["MET", "UNMET"]),
+    ]:
+        dataset.add_item(submission=name, description=name, ground_truth=labels)
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        grader = CriterionGrader(
+            judge_model_config=LLMConfig(model="test-model"),
+            training_data=dataset,
+            few_shot_config=FewShotConfig(n_examples=4),
+            llm_calls=llm_calls,
+            seed=0,
+        )
+
+    (warning,) = [w for w in caught if "names no verdict" in str(w.message)]
+    message = str(warning.message)
+    assert "criterion c0 ('sources'): 'yes' (1 item); criterion c1 ('tone'): 'met' (1 item)" in (
+        message
+    )
+    if llm_calls == "per_item":
+        assert "leave out 2 training items" in message
+        (shown,) = grader._item_examples.values()
+        assert [submission for submission, _, _ in shown] == ["x3"]
+    else:
+        assert "training items whose" not in message
+        shown_per_criterion = {
+            idx: sorted(e.submission for e in examples)
+            for (idx, _), examples in grader._criterion_examples.items()
+        }
+        assert shown_per_criterion == {0: ["x2", "x3"], 1: ["x1", "x3"]}
 
 
 @pytest.mark.parametrize("llm_calls", MODES)

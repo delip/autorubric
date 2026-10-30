@@ -126,6 +126,11 @@ def _ground_truth_reason(item: DataItem, criterion_idx: int) -> str | None:
     return reasons[criterion_idx] if reasons is not None else None
 
 
+def _count(n: int, noun: str) -> str:
+    """``n`` and ``noun``, plural unless ``n`` is 1."""
+    return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
+
+
 def _binary_label(label: CriterionVerdict | str) -> CriterionVerdict | None:
     """A binary criterion's training label as its verdict, or ``None`` if it names none.
 
@@ -1731,19 +1736,21 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                     self._criterion_examples[(criterion_idx, judge.judge_id)] = binary_examples
 
     def _warn_unusable_binary_labels(self, rubric_criteria: Sequence[Criterion]) -> None:
-        """Warn once if a binary training label names no verdict, so its item is left out.
+        """Warn once if a binary training label names no verdict, so an item is left out.
 
         A binary criterion's label is a ``CriterionVerdict`` or its value (``"MET"``,
         ``_binary_label``); any other label (``"met"``, ``"yes"``) cannot label a few-shot
-        example, and the item is left out of the examples whether the judge is called per
-        criterion or per item. Called once, when the grader is built, so a grader warns once
-        however many judges draw examples.
+        example. Called per criterion, a judge leaves the item out of that criterion's
+        examples only; called per item, it leaves the whole item out, since each example
+        shows an item's labels for every criterion. The warning says which, naming each
+        criterion with its unusable labels and how many items have one there. Called once,
+        when the grader is built, so a grader warns once however many judges draw examples.
 
         Args:
             rubric_criteria: The training rubric's criteria.
         """
         assert self._training_data is not None
-        unusable: dict[int, set[str]] = {}
+        unusable: dict[int, tuple[set[str], list[int]]] = {}
         items_left_out = 0
         for item in self._training_data:
             item_has_unusable = False
@@ -1752,20 +1759,31 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                     continue
                 label = self._training_label(item, criterion_idx)
                 if label is not None and _binary_label(label) is None:
-                    unusable.setdefault(criterion_idx, set()).add(repr(label))
+                    labels, count = unusable.setdefault(criterion_idx, (set(), [0]))
+                    labels.add(repr(label))
+                    count[0] += 1
                     item_has_unusable = True
             items_left_out += item_has_unusable
         if not unusable:
             return
         named = "; ".join(
-            f"{_describe(rubric_criteria[idx], idx)}: {', '.join(sorted(labels))}"
-            for idx, labels in sorted(unusable.items())
+            f"{_describe(rubric_criteria[idx], idx)}: {', '.join(sorted(labels))} "
+            f"({_count(count[0], 'item')})"
+            for idx, (labels, count) in sorted(unusable.items())
         )
-        items = "1 training item" if items_left_out == 1 else f"{items_left_out} training items"
+        if self._llm_calls == "per_item":
+            left_out = (
+                f"leave out {_count(items_left_out, 'training item')} whose binary label "
+                "names no verdict"
+            )
+        else:
+            left_out = (
+                "of a binary criterion leave out each training item whose label for it "
+                "names no verdict"
+            )
         warnings.warn(
-            f"Few-shot examples leave out {items} whose binary label names no verdict "
-            f"(expected MET, UNMET or CANNOT_ASSESS, as a CriterionVerdict or its value): "
-            f"{named}",
+            f"Few-shot examples {left_out} (expected MET, UNMET or CANNOT_ASSESS, as a "
+            f"CriterionVerdict or its value): {named}",
             UserWarning,
             stacklevel=_caller_stacklevel(),
         )
