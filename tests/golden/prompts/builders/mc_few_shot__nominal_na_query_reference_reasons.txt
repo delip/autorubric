@@ -1,13 +1,12 @@
-<question>
-Which register best describes the answer?
-</question>
+<input>At what temperature does water boil?</input>
 
-<options>
-1. Formal
-2. Conversational
-3. Slang
-4. N/A
-</options>
+<reference_submission>
+At sea level, water boils at 100 °C (212 °F).
+</reference_submission>
+
+<submission>
+Water boils at 100 degrees Celsius at sea level.
+</submission>
 
 <examples>
 <example_1>
@@ -29,12 +28,13 @@ Which register best describes the answer?
 </example_3>
 </examples>
 
-<input>At what temperature does water boil?</input>
+<question>
+Which register best describes the answer?
+</question>
 
-<reference_submission>
-At sea level, water boils at 100 °C (212 °F).
-</reference_submission>
-
-<submission>
-Water boils at 100 degrees Celsius at sea level.
-</submission>
+<options>
+1. Formal
+2. Conversational
+3. Slang
+4. N/A
+</options>

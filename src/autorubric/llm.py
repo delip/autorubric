@@ -7,6 +7,7 @@ and provider-specific features like extended thinking and prompt caching.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import logging
@@ -23,6 +24,7 @@ import litellm
 import openai
 import yaml
 from dotenv import find_dotenv, load_dotenv
+from litellm.constants import DEFAULT_MINIMUM_PROMPT_CACHE_TOKEN_COUNT
 from pydantic import BaseModel, ValidationError
 from rich.console import Console
 from rich.panel import Panel
@@ -49,6 +51,9 @@ logger = logging.getLogger(__name__)
 
 # Type variable for structured output
 T = TypeVar("T", bound=BaseModel)
+
+# Gemini 3.x's minimum for automatic prompt caching; Gemini 2.5's is lower.
+_GEMINI_PROMPT_CACHE_MIN_TOKENS = 4096
 
 
 # ============================================================================
@@ -700,14 +705,18 @@ class LLMConfig:
             - OpenAI: Reasoning for o-series and GPT-5 models
             - Gemini: Thinking mode (2.5+, 3.0+ models)
             - DeepSeek: Reasoning content
-        prompt_caching: Mark the system prompt for Anthropic's prompt cache (default: True).
-            Applies only to model ids that start with ``anthropic/`` or ``claude``: the
-            system message is sent with ``cache_control: {"type": "ephemeral"}``. Prompt
-            caching is generally available, so no beta header is added, and an
-            ``anthropic-beta`` value in ``extra_headers`` is sent unchanged. Other model
-            ids, Claude models served through Bedrock or Vertex AI included, are sent
-            unchanged. Providers that cache long prompts on their own (OpenAI, DeepSeek) do
-            so whatever this setting is.
+        prompt_caching: Arrange requests for the provider's prompt cache (default: True).
+            A per-criterion call sends what an item's calls share as a user message of its
+            own when LiteLLM's model map says the model caches prompts, and
+            ``CriterionGrader`` lets one call finish before the rest when that prefix is long
+            enough to cache. Model ids that start with ``anthropic/``, ``claude`` or
+            ``openrouter/anthropic/`` also get ``cache_control: {"type": "ephemeral"}`` on
+            the system message and that shared message. Prompt caching is generally
+            available, so no beta header is added, and an ``anthropic-beta`` value in
+            ``extra_headers`` is sent unchanged. Claude models served through Bedrock or
+            Vertex AI are sent one user message with no marker. With False every request
+            is one user message; providers that cache long prompts on their own (OpenAI,
+            DeepSeek) still do so, at message endings.
         seed: Random seed for reproducible outputs (OpenAI, some other providers).
         extra_headers: Additional HTTP headers for provider-specific features.
         extra_params: Additional provider-specific parameters passed to LiteLLM.
@@ -894,6 +903,56 @@ class LLMConfig:
             yaml.dump(data, f, Dumper=_LLMConfigDumper, default_flow_style=False, sort_keys=False)
 
 
+def _is_anthropic_model(model: str) -> bool:
+    """Whether ``model`` is Claude reached in a way that honours ``cache_control`` markers.
+
+    Bedrock and Vertex ids are left out and keep their requests as they are.
+    """
+    return model.startswith(("anthropic/", "claude", "openrouter/anthropic/"))
+
+
+@functools.cache
+def _caches_prompts(model: str) -> bool:
+    """Whether a shared prefix sent as its own message can be reused by ``model``'s cache.
+
+    Asks LiteLLM's model map, once per model. A model it does not confirm, or cannot look
+    up, keeps one user message: splitting gains it nothing, and some OpenAI-compatible
+    servers refuse consecutive user messages. DeepSeek always caches automatically, and the
+    map misses some of its ids. Bedrock and Vertex Claude ids keep their requests as they are.
+    """
+    if "claude" in model and not _is_anthropic_model(model):
+        return False
+    if "deepseek" in model:
+        return True
+    try:
+        return litellm.utils.supports_prompt_caching(model=model) is True
+    except Exception:  # LiteLLM's lookups raise assorted errors for an unknown model
+        return False
+
+
+@functools.cache
+def _prompt_cache_min_tokens(model: str) -> int:
+    """The shortest prefix ``model``'s prompt cache stores, in tokens.
+
+    LiteLLM's model map records it for Anthropic-family entries only. Others get Gemini's
+    documented minimum or LiteLLM's general fallback.
+    """
+    try:
+        recorded = litellm.get_model_info(model=model).get("prompt_cache_min_tokens")
+    except Exception:  # as in _caches_prompts
+        recorded = None
+    if recorded:
+        return int(recorded)
+    if "gemini" in model:
+        return _GEMINI_PROMPT_CACHE_MIN_TOKENS
+    return DEFAULT_MINIMUM_PROMPT_CACHE_TOKEN_COUNT
+
+
+def _cache_marked(text: str) -> list[dict[str, Any]]:
+    """``text`` as message content carrying Anthropic's ``cache_control`` marker."""
+    return [{"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}]
+
+
 def _open_response_cache(cache_dir: str | Path) -> diskcache.Cache:
     """Open the on-disk response cache at ``cache_dir``, creating the directory if needed.
 
@@ -1025,6 +1084,8 @@ class LLMClient:
         use_cache: bool | None = None,
         return_thinking: bool = False,
         return_result: bool = False,
+        shared_prefix: str | None = None,
+        pre_1_7_user_prompt: str | None = None,
         **kwargs: Any,
     ) -> str | T | GenerateResult:
         """Generate LLM response with optional structured output.
@@ -1047,6 +1108,13 @@ class LLMClient:
                 including usage statistics and completion cost. This is useful when
                 you need to track token usage. When True, takes precedence over the
                 default return behavior.
+            shared_prefix: The start of ``user_prompt`` shared with other calls, sent as a
+                message of its own where that helps a provider's prompt cache. It does not
+                change the response-cache key, which hashes ``user_prompt``.
+            pre_1_7_user_prompt: The text this ``user_prompt`` had before 1.7.0. On a
+                response-cache miss, the key of that text is read too, so replies cached by
+                earlier releases are reused; nothing is written under it. Kept for backward
+                compatibility and planned for removal in 2.0.0.
             **kwargs: Override any LLMConfig parameters for this call. In particular,
                 ``temperature`` accepts a float to send for this call, or None to omit it
                 so the provider's default applies (regardless of ``config.temperature``).
@@ -1087,6 +1155,19 @@ class LLMClient:
                 kwargs,
             )
             cached = cache.get(cache_key)
+            if cached is None and pre_1_7_user_prompt is not None:
+                # Backward compatibility: read a reply cached before 1.7.0, whose key hashed
+                # the old layout. Nothing is written under that key, and 2.0.0 is planned to
+                # drop this lookup.
+                cached = cache.get(
+                    self._cache_key(
+                        self.config.model,
+                        system_prompt,
+                        pre_1_7_user_prompt,
+                        response_format,
+                        kwargs,
+                    )
+                )
             if cached is not None:
                 logger.debug(f"Cache hit for {cache_key[:8]}...")
                 return cached  # type: ignore[return-value]
@@ -1094,33 +1175,33 @@ class LLMClient:
         # Build request parameters
         model = kwargs.get("model", self.config.model)
 
-        # Check if this is an Anthropic model that supports prompt caching
-        # Anthropic requires cache_control on message content; other providers
-        # handle caching automatically (OpenAI, Deepseek) or don't support it
-        is_anthropic = model.startswith("anthropic/") or model.startswith("claude")
-        use_prompt_caching = self.config.prompt_caching and is_anthropic
-        if use_prompt_caching:
-            # Anthropic requires cache_control on message content
+        split = (
+            shared_prefix is not None
+            and self.config.prompt_caching
+            and user_prompt.startswith(shared_prefix)
+            and _caches_prompts(model)
+        )
+        # Anthropic caches at cache_control markers on message content. The other providers
+        # cache automatically, at message endings, which is why the shared prefix is a
+        # message of its own: a prefix ending inside a message is not reused.
+        mark = self.config.prompt_caching and _is_anthropic_model(model)
+        system_message: dict[str, Any] = {
+            "role": "system",
+            "content": _cache_marked(system_prompt) if mark else system_prompt,
+        }
+        if split:
+            assert shared_prefix is not None
+            tail = user_prompt.removeprefix(shared_prefix).removeprefix("\n\n")
             messages = [
+                system_message,
                 {
-                    "role": "system",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": system_prompt,
-                            "cache_control": {"type": "ephemeral"},
-                        }
-                    ],
+                    "role": "user",
+                    "content": _cache_marked(shared_prefix) if mark else shared_prefix,
                 },
-                {"role": "user", "content": user_prompt},
+                {"role": "user", "content": tail},
             ]
         else:
-            # Standard message format for other providers
-            # OpenAI/Deepseek: Caching is automatic for prompts ≥1024 tokens
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ]
+            messages = [system_message, {"role": "user", "content": user_prompt}]
 
         params: dict[str, Any] = {
             "model": model,

@@ -925,7 +925,7 @@ def test_spec_a_zero_weight_criterion_is_posed_as_positive() -> None:
         f"\n<submission>\n{PLAIN}\n</submission>"
     )
     assert (
-        build_user_prompt(ZERO_WEIGHT, PLAIN) == f"{block}\n\n<submission>\n{PLAIN}\n</submission>"
+        build_user_prompt(ZERO_WEIGHT, PLAIN) == f"<submission>\n{PLAIN}\n</submission>\n\n{block}"
     )
 
 

@@ -1,13 +1,9 @@
-<question>
-How clear is the explanation?
-</question>
+<input>At what temperature does water boil?</input>
 
-<options>
-1. Very unclear
-2. Somewhat clear
-3. Very clear
-4. Cannot assess / not applicable
-</options>
+<submission>
+<thinking>Recall the standard value at one atmosphere.</thinking>
+<output>Water boils at 100 °C at sea level.</output>
+</submission>
 
 <examples>
 <example_1>
@@ -27,9 +23,13 @@ How clear is the explanation?
 </example_3>
 </examples>
 
-<input>At what temperature does water boil?</input>
+<question>
+How clear is the explanation?
+</question>
 
-<submission>
-<thinking>Recall the standard value at one atmosphere.</thinking>
-<output>Water boils at 100 °C at sea level.</output>
-</submission>
+<options>
+1. Very unclear
+2. Somewhat clear
+3. Very clear
+4. Cannot assess / not applicable
+</options>

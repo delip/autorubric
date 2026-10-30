@@ -1,10 +1,9 @@
-<criterion_type>
-positive
-</criterion_type>
+<input>At what temperature does water boil?</input>
 
-<criterion>
-States the boiling point of water at sea level
-</criterion>
+<submission>
+<thinking>Recall the standard value at one atmosphere.</thinking>
+<output>Water boils at 100 °C at sea level.</output>
+</submission>
 
 <examples>
 <example_1>
@@ -21,9 +20,10 @@ States the boiling point of water at sea level
 </example_3>
 </examples>
 
-<input>At what temperature does water boil?</input>
+<criterion_type>
+positive
+</criterion_type>
 
-<submission>
-<thinking>Recall the standard value at one atmosphere.</thinking>
-<output>Water boils at 100 °C at sea level.</output>
-</submission>
+<criterion>
+States the boiling point of water at sea level
+</criterion>

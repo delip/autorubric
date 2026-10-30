@@ -21,8 +21,9 @@ work and make input the dominant cost, so the submission has to be in the shared
 
 ## Non-goals
 
-- Prompts under `llm_calls="per_item"`, decision-model requests, and meta-rubric or revision
-  prompts. All stay byte-identical.
+- Prompts under `llm_calls="per_item"`, decision-model requests and revision prompts. All stay
+  byte-identical. Meta-rubric evaluation grades through `CriterionGrader` per criterion, so its
+  prompts take the new layout like any other per-criterion call.
 - A different few-shot selection. A single example set shared across criteria would cache
   better but changes grading behaviour; it is a possible later change.
 - Gemini explicit context caching. Gemini 3.8 Flash's automatic caching needs 4,096 tokens,

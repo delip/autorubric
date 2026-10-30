@@ -217,6 +217,56 @@ def _binary_criterion_block(criterion: Criterion) -> str:
 </criterion>"""
 
 
+def _shared_user_content(
+    to_grade: str,
+    query: str | None = None,
+    reference_submission: str | None = None,
+    *,
+    guidelines: str | None = None,
+) -> str:
+    """The start of a per-criterion user prompt: the part an item's calls have in common.
+
+    Guidelines, input, reference submission and submission, in that order. Few-shot examples
+    and the criterion follow it, since they differ from one criterion to the next and would
+    end the prefix a provider's prompt cache can reuse across the item's calls.
+    """
+    guidelines_text = _guidelines_block(guidelines)
+    query_text = f"<input>{query}</input>\n\n" if query else ""
+    reference_text = (
+        f"<reference_submission>\n{reference_submission}\n</reference_submission>\n\n"
+        if reference_submission
+        else ""
+    )
+    return f"""{guidelines_text}{query_text}{reference_text}<submission>
+{to_grade}
+</submission>"""
+
+
+def _pre_1_7_user_prompt(
+    user_prompt: str,
+    shared: str,
+    criterion_block: str,
+    guidelines: str | None = None,
+) -> str:
+    """The text a per-criterion ``user_prompt`` had before 1.7.0.
+
+    Used only to compute the response-cache key those releases used, so that replies cached
+    by them are still found (``LLMClient.generate``). They put the criterion and then its
+    examples after the guidelines, ahead of the input. Kept for backward compatibility and
+    planned for removal in 2.0.0.
+
+    Args:
+        user_prompt: The prompt as sent now.
+        shared: Its start (``_shared_user_content``).
+        criterion_block: Its end (``_binary_criterion_block``, ``_multi_choice_criterion_block``).
+        guidelines: The rubric guidelines ``shared`` was built with.
+    """
+    examples_text = user_prompt[len(shared) : -len(criterion_block)].strip("\n")
+    posed = f"{criterion_block}\n\n{examples_text}" if examples_text else criterion_block
+    guidelines_text = _guidelines_block(guidelines)
+    return f"{guidelines_text}{posed}\n\n{shared.removeprefix(guidelines_text)}"
+
+
 def build_user_prompt(
     criterion: Criterion,
     to_grade: str,
@@ -242,20 +292,8 @@ def build_user_prompt(
     Raises:
         TypeError: If ``guidelines`` is neither a ``str`` nor ``None``.
     """
-    criterion_text = _binary_criterion_block(criterion)
-    guidelines_text = _guidelines_block(guidelines)
-    query_text = f"<input>{query}</input>\n\n" if query else ""
-    reference_text = (
-        f"<reference_submission>\n{reference_submission}\n</reference_submission>\n\n"
-        if reference_submission
-        else ""
-    )
-
-    return f"""{guidelines_text}{criterion_text}
-
-{query_text}{reference_text}<submission>
-{to_grade}
-</submission>"""
+    shared = _shared_user_content(to_grade, query, reference_submission, guidelines=guidelines)
+    return f"{shared}\n\n{_binary_criterion_block(criterion)}"
 
 
 def build_few_shot_user_prompt(
@@ -285,23 +323,9 @@ def build_few_shot_user_prompt(
     Raises:
         TypeError: If ``guidelines`` is neither a ``str`` nor ``None``.
     """
-    criterion_text = _binary_criterion_block(criterion)
-    guidelines_text = _guidelines_block(guidelines)
-    query_text = f"<input>{query}</input>\n\n" if query else ""
+    shared = _shared_user_content(to_grade, query, reference_submission, guidelines=guidelines)
     examples_text = _format_few_shot_examples(examples, include_reason)
-    reference_text = (
-        f"<reference_submission>\n{reference_submission}\n</reference_submission>\n\n"
-        if reference_submission
-        else ""
-    )
-
-    return f"""{guidelines_text}{criterion_text}
-
-{examples_text}
-
-{query_text}{reference_text}<submission>
-{to_grade}
-</submission>"""
+    return f"{shared}\n\n{examples_text}\n\n{_binary_criterion_block(criterion)}"
 
 
 def _format_few_shot_examples(
@@ -585,20 +609,8 @@ def build_multi_choice_user_prompt(
         ValueError: If criterion has no options (is binary).
         TypeError: If ``guidelines`` is neither a ``str`` nor ``None``.
     """
-    criterion_text = _multi_choice_criterion_block(criterion)
-    guidelines_text = _guidelines_block(guidelines)
-    query_text = f"<input>{query}</input>\n\n" if query else ""
-    reference_text = (
-        f"<reference_submission>\n{reference_submission}\n</reference_submission>\n\n"
-        if reference_submission
-        else ""
-    )
-
-    return f"""{guidelines_text}{criterion_text}
-
-{query_text}{reference_text}<submission>
-{to_grade}
-</submission>"""
+    shared = _shared_user_content(to_grade, query, reference_submission, guidelines=guidelines)
+    return f"{shared}\n\n{_multi_choice_criterion_block(criterion)}"
 
 
 def build_multi_choice_few_shot_user_prompt(
@@ -629,25 +641,9 @@ def build_multi_choice_few_shot_user_prompt(
         ValueError: If criterion has no options (is binary).
         TypeError: If ``guidelines`` is neither a ``str`` nor ``None``.
     """
-    criterion_text = _multi_choice_criterion_block(criterion)
-    guidelines_text = _guidelines_block(guidelines)
-    query_text = f"<input>{query}</input>\n\n" if query else ""
-    reference_text = (
-        f"<reference_submission>\n{reference_submission}\n</reference_submission>\n\n"
-        if reference_submission
-        else ""
-    )
-
-    # Format examples
+    shared = _shared_user_content(to_grade, query, reference_submission, guidelines=guidelines)
     examples_text = _format_multi_choice_examples(criterion, examples, include_reason)
-
-    return f"""{guidelines_text}{criterion_text}
-
-{examples_text}
-
-{query_text}{reference_text}<submission>
-{to_grade}
-</submission>"""
+    return f"{shared}\n\n{examples_text}\n\n{_multi_choice_criterion_block(criterion)}"
 
 
 def _format_multi_choice_examples(
