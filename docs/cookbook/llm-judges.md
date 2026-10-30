@@ -58,6 +58,7 @@ Every field except `model` has a default. [LLM Infrastructure](../api/llm.md) is
 | `seed` | `None` | Sampling seed sent with every call; for a provider LiteLLM knows takes none, such as Anthropic or Gemini, the first call's grade raises `ValueError` unless `extra_params={"drop_params": True}` |
 | `extra_headers` | `{}` | Additional HTTP headers sent with every call |
 | `extra_params` | `{}` | Additional LiteLLM parameters sent with every call |
+| `images` | `None` | Whether the model accepts images: `None` looks the model up in LiteLLM's model map the first time a grader is to send it an image, and `True` or `False` is your declaration, which wins over the map. Never sent, and read only for content holding images; see [Images in Prompts](../api/llm.md#images-in-prompts) |
 
 ### Temperature
 

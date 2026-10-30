@@ -8,7 +8,7 @@ AutoRubric grades with two kinds of AI judges. **LLM judges** take one criterion
 
 ### Tier 1: Foundation
 
-Start here if you're new to AutoRubric. [LLM Judges](llm-judges.md) and [Decision-Model Judges](decision-models.md) introduce the two kinds of judges, [Cheap First-Pass Grading](cascade-grading.md) combines them, and [Holistic Rubric grading](single-call-grading.md) cuts an LLM judge to one call per item.
+Start here if you're new to AutoRubric. [LLM Judges](llm-judges.md) and [Decision-Model Judges](decision-models.md) introduce the two kinds of judges, and [Cheap First-Pass Grading](cascade-grading.md) combines them.
 
 | Recipe | Domain | What You'll Learn |
 |--------|--------|-------------------|

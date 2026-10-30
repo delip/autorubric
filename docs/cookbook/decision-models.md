@@ -56,6 +56,7 @@ Every field after `model` is keyword-only. Field names match `LLMConfig` whereve
 | `ordinal_framing` | `"choice"` | How ordinal multi-choice criteria are posed |
 | `decision_threshold` | `0.5` | P(MET) cut for the Noul framings |
 | `input_cost_per_token` | `None` | Price in USD per input token |
+| `capabilities` | `None` | What the model accepts, as a registry-shaped entry (`provider`, `images`, and with images the limits `image_formats`, `min_side_px`, `max_side_px`, `max_image_bytes`, `max_request_bytes`). When set it replaces the registry entry for this judge. Read only for content holding images; see [Declaring a model's capabilities](../api/decision-models.md#declaring-a-models-capabilities) |
 
 `max_retries` and `max_parallel_requests` must be integers of at least 1. Numpy integers are accepted and stored as plain `int`; a `bool` or a float raises `ValueError`.
 
@@ -74,6 +75,8 @@ my_dm = DecisionModelConfig(
 ```
 
 The base URL must be an absolute http(s) URL with no query, fragment or credentials; anything else raises `ValueError` when the grader is built. Requests honour the environment's TLS and proxy settings (`SSL_CERT_FILE`, `HTTPS_PROXY` and the like). An experiment's manifest records only the host of the base URL, never the key.
+
+A self-hosted model is not in autorubric's decision-model registry, so grading content that holds images with it raises `ValueError` until you declare what it accepts with `capabilities=`. [Declaring a model's capabilities](../api/decision-models.md#declaring-a-models-capabilities) shows how.
 
 ### Framings
 
