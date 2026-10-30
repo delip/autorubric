@@ -13,6 +13,7 @@ import json
 import logging
 import math
 import numbers
+import re
 import sys
 from dataclasses import asdict, dataclass, field, fields
 from enum import Enum
@@ -52,8 +53,10 @@ logger = logging.getLogger(__name__)
 # Type variable for structured output
 T = TypeVar("T", bound=BaseModel)
 
-# Gemini 3.x's minimum for automatic prompt caching; Gemini 2.5's is lower.
-_GEMINI_PROMPT_CACHE_MIN_TOKENS = 4096
+# OpenAI models whose automatic caching writes a whole prompt at the end of its last message,
+# which calls that differ in their last message never read. They cache a shared prefix only
+# with an explicit breakpoint.
+_EXPLICIT_BREAKPOINT_MODELS = re.compile(r"(openai/)?gpt-(5\.[6-9]|[6-9])")
 
 
 # ============================================================================
@@ -711,7 +714,8 @@ class LLMConfig:
             ``CriterionGrader`` lets one call finish before the rest when that prefix is long
             enough to cache. Model ids that start with ``anthropic/``, ``claude`` or
             ``openrouter/anthropic/`` also get ``cache_control: {"type": "ephemeral"}`` on
-            the system message and that shared message. Prompt caching is generally
+            the system message and that shared message, and OpenAI models from GPT-5.6 on
+            get explicit cache breakpoints there. Prompt caching is generally
             available, so no beta header is added, and an ``anthropic-beta`` value in
             ``extra_headers`` is sent unchanged. Claude models served through Bedrock or
             Vertex AI are sent one user message with no marker. With False every request
@@ -919,8 +923,10 @@ def _caches_prompts(model: str) -> bool:
     up, keeps one user message: splitting gains it nothing, and some OpenAI-compatible
     servers refuse consecutive user messages. DeepSeek always caches automatically, and the
     map misses some of its ids. Bedrock and Vertex Claude ids keep their requests as they are.
+    Gemini's automatic cache was not readable until about a minute after a call, too late for
+    an item's other calls, so it is arranged for no differently from a model without one.
     """
-    if "claude" in model and not _is_anthropic_model(model):
+    if "gemini" in model or ("claude" in model and not _is_anthropic_model(model)):
         return False
     if "deepseek" in model:
         return True
@@ -934,23 +940,24 @@ def _caches_prompts(model: str) -> bool:
 def _prompt_cache_min_tokens(model: str) -> int:
     """The shortest prefix ``model``'s prompt cache stores, in tokens.
 
-    LiteLLM's model map records it for Anthropic-family entries only. Others get Gemini's
-    documented minimum or LiteLLM's general fallback.
+    LiteLLM's model map records it for Anthropic-family entries only. Others get LiteLLM's
+    general fallback.
     """
     try:
         recorded = litellm.get_model_info(model=model).get("prompt_cache_min_tokens")
     except Exception:  # as in _caches_prompts
         recorded = None
-    if recorded:
-        return int(recorded)
-    if "gemini" in model:
-        return _GEMINI_PROMPT_CACHE_MIN_TOKENS
-    return DEFAULT_MINIMUM_PROMPT_CACHE_TOKEN_COUNT
+    return int(recorded) if recorded else DEFAULT_MINIMUM_PROMPT_CACHE_TOKEN_COUNT
 
 
 def _cache_marked(text: str) -> list[dict[str, Any]]:
     """``text`` as message content carrying Anthropic's ``cache_control`` marker."""
     return [{"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}]
+
+
+def _breakpoint_marked(text: str) -> list[dict[str, Any]]:
+    """``text`` as message content carrying OpenAI's explicit cache breakpoint."""
+    return [{"type": "text", "text": text, "prompt_cache_breakpoint": {"mode": "explicit"}}]
 
 
 def _open_response_cache(cache_dir: str | Path) -> diskcache.Cache:
@@ -1184,10 +1191,17 @@ class LLMClient:
         # Anthropic caches at cache_control markers on message content. The other providers
         # cache automatically, at message endings, which is why the shared prefix is a
         # message of its own: a prefix ending inside a message is not reused.
-        mark = self.config.prompt_caching and _is_anthropic_model(model)
+        explicit = split and _EXPLICIT_BREAKPOINT_MODELS.match(model) is not None
+        mark = (
+            _breakpoint_marked
+            if explicit
+            else _cache_marked
+            if self.config.prompt_caching and _is_anthropic_model(model)
+            else None
+        )
         system_message: dict[str, Any] = {
             "role": "system",
-            "content": _cache_marked(system_prompt) if mark else system_prompt,
+            "content": mark(system_prompt) if mark else system_prompt,
         }
         if split:
             assert shared_prefix is not None
@@ -1196,7 +1210,7 @@ class LLMClient:
                 system_message,
                 {
                     "role": "user",
-                    "content": _cache_marked(shared_prefix) if mark else shared_prefix,
+                    "content": mark(shared_prefix) if mark else shared_prefix,
                 },
                 {"role": "user", "content": tail},
             ]
@@ -1212,6 +1226,12 @@ class LLMClient:
             "timeout": kwargs.get("timeout", self.config.timeout),
             **self.config.extra_params,
         }
+
+        if explicit:
+            params["extra_body"] = {
+                **params.get("extra_body", {}),
+                "prompt_cache_options": {"mode": "explicit"},
+            }
 
         # Sent whenever set: LLMConfig refuses values no provider can mean, and a top_p of
         # 0 is a real setting.

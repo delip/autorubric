@@ -26,10 +26,11 @@ work and make input the dominant cost, so the submission has to be in the shared
   prompts take the new layout like any other per-criterion call.
 - A different few-shot selection. A single example set shared across criteria would cache
   better but changes grading behaviour; it is a possible later change.
-- Gemini explicit context caching. Gemini 3.8 Flash's automatic caching needs 4,096 tokens,
-  above the recorded per-criterion prompts of about 2,000-2,800 tokens, which is why those
-  runs show no cached tokens. Explicit caching adds storage cost and per-item cache objects
-  for little gain on such prompts. The docs state the limit.
+- Gemini explicit context caching. Live probes of Gemini 3.8 Flash found its automatic cache
+  was not readable until about a minute after a call, and only for a repeated prefix, even
+  well above its 4,096-token minimum. That is too late for an item's other calls, so Gemini
+  gets one user message and no warm-first. Explicit caching is a possible later change for
+  image submissions. The docs state the limit.
 - Changing the `autorubric-image` branch.
 
 ## Anti-goals
@@ -90,6 +91,13 @@ Gemini models too, and on Gemini LiteLLM acts on `cache_control` by creating exp
 Bedrock and Vertex Claude ids stay sent as they are today (single user message content
 unmarked), because the current docstring promises it and no measurement covers them; they
 still get the new order.
+
+OpenAI models from GPT-5.6 on need one more step. Live probes showed automatic mode writes the
+whole prompt at the end of the last message on every call, at 1.25x the input rate, and calls
+differing in that message never read it. For split requests only, these models get
+`prompt_cache_breakpoint: {"mode": "explicit"}` on the system message and the shared block and
+`prompt_cache_options: {"mode": "explicit"}` in `extra_body`, on Chat Completions. Later calls
+then read the whole shared prefix. Requests that are not split stay in automatic mode.
 
 ### Response cache key
 

@@ -32,22 +32,72 @@ def _response() -> MagicMock:
     return response
 
 
-async def _messages(model: str, *, prompt_caching: bool = True, **generate: Any) -> list[dict]:
-    client = LLMClient(LLMConfig(model=model, prompt_caching=prompt_caching))
+async def _request(
+    model: str,
+    *,
+    prompt_caching: bool = True,
+    extra_params: dict[str, Any] | None = None,
+    **generate: Any,
+) -> dict[str, Any]:
+    client = LLMClient(
+        LLMConfig(model=model, prompt_caching=prompt_caching, extra_params=extra_params or {})
+    )
     with patch("autorubric.llm.litellm.acompletion", new_callable=AsyncMock) as completion:
         completion.return_value = _response()
         await client.generate("SYS", PROMPT, use_cache=False, **generate)
-    return completion.call_args.kwargs["messages"]
+    return completion.call_args.kwargs
+
+
+async def _messages(model: str, **kwargs: Any) -> list[dict]:
+    return (await _request(model, **kwargs))["messages"]
 
 
 class TestMessages:
     @pytest.mark.asyncio
     async def test_split_for_a_caching_model(self) -> None:
-        assert await _messages("gpt-5.6-luna", shared_prefix=SHARED) == [
+        assert await _messages("deepseek/deepseek-chat", shared_prefix=SHARED) == [
             {"role": "system", "content": "SYS"},
             {"role": "user", "content": SHARED},
             {"role": "user", "content": TAIL},
         ]
+
+    @pytest.mark.parametrize("model", ["gpt-5.6-luna", "openai/gpt-5.6-luna", "gpt-6.1-sol"])
+    @pytest.mark.asyncio
+    async def test_explicit_breakpoints_on_recent_openai_models(self, model: str) -> None:
+        with patch("autorubric.llm._caches_prompts", return_value=True):
+            kwargs = await _request(model, shared_prefix=SHARED)
+        mark = {"mode": "explicit"}
+        system, shared, tail = kwargs["messages"]
+        assert system["content"] == [
+            {"type": "text", "text": "SYS", "prompt_cache_breakpoint": mark}
+        ]
+        assert shared["content"] == [
+            {"type": "text", "text": SHARED, "prompt_cache_breakpoint": mark}
+        ]
+        assert tail == {"role": "user", "content": TAIL}
+        assert kwargs["extra_body"] == {"prompt_cache_options": mark}
+
+    @pytest.mark.asyncio
+    async def test_explicit_mode_keeps_the_callers_extra_body(self) -> None:
+        kwargs = await _request(
+            "gpt-5.6-luna", shared_prefix=SHARED, extra_params={"extra_body": {"user": "u"}}
+        )
+        assert kwargs["extra_body"] == {
+            "user": "u",
+            "prompt_cache_options": {"mode": "explicit"},
+        }
+
+    @pytest.mark.asyncio
+    async def test_older_openai_models_stay_automatic(self) -> None:
+        kwargs = await _request("gpt-4.1-mini", shared_prefix=SHARED)
+        assert "extra_body" not in kwargs
+        assert kwargs["messages"][1] == {"role": "user", "content": SHARED}
+
+    @pytest.mark.asyncio
+    async def test_a_call_without_a_shared_prefix_stays_automatic(self) -> None:
+        kwargs = await _request("gpt-5.6-luna")
+        assert "extra_body" not in kwargs
+        assert kwargs["messages"][0] == {"role": "system", "content": "SYS"}
 
     @pytest.mark.parametrize(
         "model",
@@ -96,7 +146,7 @@ class TestMessages:
 
     @pytest.mark.asyncio
     async def test_callers_without_a_shared_prefix_are_unchanged(self) -> None:
-        assert await _messages("gpt-5.6-luna") == [
+        assert await _messages("deepseek/deepseek-chat") == [
             {"role": "system", "content": "SYS"},
             {"role": "user", "content": PROMPT},
         ]
@@ -120,7 +170,6 @@ class TestModelLookups:
         "model",
         [
             "gpt-5.6-luna",
-            "gemini/gemini-3.8-flash",
             "anthropic/claude-sonnet-4-5",
             "openrouter/anthropic/claude-sonnet-4.5",
             "openrouter/deepseek/deepseek-v4.1-flash",
@@ -129,11 +178,13 @@ class TestModelLookups:
     def test_the_real_lookup_confirms_these_models(self, model: str) -> None:
         assert _caches_prompts(model) is True
 
+    def test_gemini_is_arranged_for_like_a_model_without_a_cache(self) -> None:
+        assert _caches_prompts("gemini/gemini-3.8-flash") is False
+
     def test_unknown_model_does_not_cache(self) -> None:
         assert _caches_prompts("no-such-provider/no-such-model") is False
 
-    def test_min_tokens_gemini_and_fallback(self) -> None:
-        assert _prompt_cache_min_tokens("gemini/gemini-3.8-flash") == 4096
+    def test_min_tokens_fallback(self) -> None:
         assert _prompt_cache_min_tokens("gpt-5.6-luna") == 1024
 
     def test_recorded_minimum_wins(self) -> None:

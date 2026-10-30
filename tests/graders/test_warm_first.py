@@ -120,10 +120,9 @@ class TestWarming:
         assert len(_started_before_first_end(recorder)) == rubric_size
 
     @pytest.mark.asyncio
-    async def test_gemini_below_its_minimum_is_not_warmed(self) -> None:
+    async def test_gemini_is_not_warmed(self) -> None:
         grader, recorder = _grader("gemini/gemini-3.8-flash")
-        with patch("autorubric.graders.criterion_grader._caches_prompts", return_value=True):
-            await _judge(grader, [_binary("a"), _binary("b")], "short submission")
+        await _judge(grader, [_binary("a"), _binary("b")])
         assert len(_started_before_first_end(recorder)) == 2
 
     @pytest.mark.asyncio
