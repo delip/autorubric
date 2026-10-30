@@ -162,7 +162,7 @@ A grader does not leave the model question to the provider. `CriterionGrader` se
 
 | `images` | Judge accepts images when |
 |----------|---------------------------|
-| `None` (default) | LiteLLM's model map lists the model as accepting images (`litellm.supports_vision(model=...)` answers `True`). The map is asked once per grader per model, the first time the grader is to send that model an image. The lookup reads the map that ships with LiteLLM and prints and logs nothing. |
+| `None` (default) | LiteLLM's model map lists the model as accepting images (`litellm.supports_vision(model=...)` answers `True`). The map is asked once per grader per model, the first time the grader is to send that model an image. The lookup sends no request; it reads the model map LiteLLM loaded at import, which LiteLLM fetches from its repository unless `LITELLM_LOCAL_MODEL_COST_MAP=True` is set (then the copy installed with LiteLLM is used), and prints and logs nothing. |
 | `True` | Always: your declaration, for a vision model the map does not list (for example `ollama/llava`). |
 | `False` | Never: your declaration, even for a model the map lists. |
 

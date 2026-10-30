@@ -969,7 +969,9 @@ def _litellm_supports_vision(model: str) -> bool:
     a confirmation. LiteLLM prints a provider-list banner and logs a debug record for a
     model it cannot place; the lookup lets neither through (``suppress_debug_info`` and the
     ``LiteLLM`` logger are quieted for its length, then restored), so it prints and logs
-    nothing. No request is sent: the map ships with LiteLLM.
+    nothing. The lookup sends no request: it reads the model map LiteLLM loaded at import,
+    which LiteLLM fetches from its repository unless ``LITELLM_LOCAL_MODEL_COST_MAP`` is set,
+    so the answer can follow the fetched map rather than the installed package's copy.
     """
     litellm_logger = logging.getLogger("LiteLLM")
     drop = _DropRecords()
