@@ -29,6 +29,13 @@ report = [
 ]
 ```
 
+This is Alice's report as the judge receives it, the chart first and then its caption:
+
+<figure markdown="span">
+  ![Alice's chart: a labelled line chart of accuracy (%) against model size (billions of parameters, log scale), rising from 41% at 0.5B to 71% at 7B and levelling off near 74% at 70B](../images/image-inputs-alice-chart.png){ width="640" }
+  <figcaption>Figure 1. Accuracy rises with model size and levels off above 7B parameters.</figcaption>
+</figure>
+
 `Image(path)` reads nothing when it is made. The file is read once per grade, before any judge is called, and a missing or unreadable file raises from the grade instead of turning into a verdict. `Image(data)` takes bytes you already hold (from a database, or rendered by your own code), and its format is checked at once. An image is PNG, JPEG, GIF or WebP.
 
 The query and the reference submission are `Content` too, so a task prompt can show the data the chart was made from, and a reference can be a model answer's chart.
@@ -55,6 +62,38 @@ result = await rubric.grade(
     query="Plot accuracy against model size and interpret the result in a caption.",
 )
 ```
+
+#### The reports against the rubric
+
+Alice and Bob plotted the same results. The tables give the verdict each criterion should get, as a teaching assistant would label them; they are not the output of a model.
+
+=== "Alice"
+
+    <figure markdown="span">
+      ![Alice's chart: a labelled line chart of accuracy (%) against model size (billions of parameters, log scale), rising from 41% at 0.5B to 71% at 7B and levelling off near 74% at 70B](../images/image-inputs-alice-chart.png){ width="560" }
+      <figcaption>Figure 1. Accuracy rises with model size and levels off above 7B parameters.</figcaption>
+    </figure>
+
+    | Criterion | Weight | Requirement | Verdict | Why |
+    |---|---|---|---|---|
+    | `axes` | 5 | Both axes of the chart are labelled, with units | MET | Model size in billions of parameters; accuracy in % |
+    | `trend` | 10 | The caption states the trend the chart shows | MET | The curve climbs to 7B and is nearly flat after it, as the caption says |
+    | `chart_type` | 5 | The chart type suits the data shown | MET | A line over ordered sizes, on a log axis that spaces them evenly |
+
+=== "Bob"
+
+    <figure markdown="span">
+      ![Bob's chart: the same line of accuracy against model size, levelling off above 7B, but with no axis labels and no title](../images/image-inputs-bob-chart.png){ width="560" }
+      <figcaption>Figure 1. Accuracy keeps climbing steadily as the model grows.</figcaption>
+    </figure>
+
+    | Criterion | Weight | Requirement | Verdict | Why |
+    |---|---|---|---|---|
+    | `axes` | 5 | Both axes of the chart are labelled, with units | UNMET | Neither axis has a label, so neither has units |
+    | `trend` | 10 | The caption states the trend the chart shows | UNMET | The curve levels off above 7B; it does not keep climbing steadily |
+    | `chart_type` | 5 | The chart type suits the data shown | MET | The same line chart as Alice's |
+
+Bob's caption reads as a fine caption on its own. Only a judge that sees the chart can tell that the curve flattens above 7B, so a text-only judge cannot grade `trend` at all, and with the image it is the criterion that separates the two reports.
 
 The model must accept images; `gpt-4.1-mini` does. The judge receives each image inside the prompt, where it occurs in the submission, as an OpenAI-style content part that LiteLLM translates for other providers (see [Images in Prompts](../api/llm.md#images-in-prompts)).
 
