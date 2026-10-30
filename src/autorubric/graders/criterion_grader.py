@@ -848,10 +848,14 @@ def _image_capabilities(judge: JudgeSpec) -> Mapping[str, Any]:
             )
         )
     if not capabilities["images"]:
+        remedy = (
+            "its DecisionModelConfig(capabilities=...) says images: false"
+            if config.capabilities is not None
+            else "use jev-1.14.0 or later"
+        )
         raise _configuration_error(
             ValueError(
-                f"Judge {judge.judge_id!r} uses {model!r}, which does not accept images; "
-                "use jev-1.14.0 or later"
+                f"Judge {judge.judge_id!r} uses {model!r}, which does not accept images; {remedy}"
             )
         )
     return capabilities

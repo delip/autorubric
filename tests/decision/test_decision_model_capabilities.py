@@ -189,7 +189,8 @@ class TestCapabilitiesReplaceTheRegistryEntry:
         with pytest.raises(ValueError) as excinfo:
             await Rubric([LEGIBLE]).grade([FIGURE, CAPTION], grader=grader)
         assert str(excinfo.value) == (
-            "Judge 'jev' uses 'jev-1.14.0', which does not accept images; use jev-1.14.0 or later"
+            "Judge 'jev' uses 'jev-1.14.0', which does not accept images; "
+            "its DecisionModelConfig(capabilities=...) says images: false"
         )
         assert _is_judge_configuration_error(excinfo.value)
         assert fake_sdk.calls == []
