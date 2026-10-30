@@ -162,7 +162,7 @@ A grader does not leave the model question to the provider. `CriterionGrader` se
 
 | `images` | Judge accepts images when |
 |----------|---------------------------|
-| `None` (default) | LiteLLM's model map lists the model as accepting images (`litellm.supports_vision(model=...)` answers `True`). The map is asked once per grader per model, the first time the grader is to send that model an image. The lookup sends no request; it reads the model map LiteLLM loaded at import, which LiteLLM fetches from its repository unless `LITELLM_LOCAL_MODEL_COST_MAP=True` is set (then the copy installed with LiteLLM is used), and prints and logs nothing. |
+| `None` (default) | LiteLLM's model map lists the model as accepting images (its entry in `litellm.model_cost` has `supports_vision: true`). The map is read once per grader per model, the first time the grader is to send that model an image. The lookup reads only the model map LiteLLM loaded at import, so it sends no request, never waits on a provider, and prints and logs nothing. LiteLLM fetches that map from its repository at import unless `LITELLM_LOCAL_MODEL_COST_MAP=True` is set (then the copy installed with LiteLLM is used). The model is looked up under its provider-prefixed name and its bare name, and a `responses/` route is looked up by its model (`openai/responses/gpt-5-mini` as `openai/gpt-5-mini`). A model the map does not hold, such as an Ollama model, is not confirmed. |
 | `True` | Always: your declaration, for a vision model the map does not list (for example `ollama/llava`). |
 | `False` | Never: your declaration, even for a model the map lists. |
 

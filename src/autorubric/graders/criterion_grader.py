@@ -3358,7 +3358,8 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
 
         Its ``LLMConfig.images`` when that is a ``bool`` (the user's declaration, which
         wins); otherwise whether LiteLLM's model map lists its model as accepting images
-        (``_litellm_supports_vision``: only an answer of ``True`` confirms it). The map is
+        (``_litellm_supports_vision``, which reads the map LiteLLM loaded at import and
+        sends no request; only an answer of ``True`` confirms it). The map is
         asked once per grader per model, the first time the grader is to send that model
         images, and the answer kept in ``_litellm_image_support``: by model, because the
         answer is the model's, so judges sharing one are asked about once and a judge whose

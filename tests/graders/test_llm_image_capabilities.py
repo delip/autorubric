@@ -2,12 +2,12 @@
 
 An image never reaches an LLM judge not known to accept images. A judge accepts them when
 its ``LLMConfig.images`` says so, or, with ``images`` unset, when LiteLLM's model map lists
-its model as accepting images (``litellm.supports_vision``), asked once per grader per
-model, the first time the grader sees content holding images. Every judge that could be
-sent the images (a single judge, every panel member, a cascade's escalation judges, and
-every decision model) is checked before any judge is called, so a refusal sends no request
-at all; training images, which go out with every call, are checked when the grader is
-built. Text-only grading never asks.
+its model as accepting images (``litellm.model_cost``, read with no request), asked once
+per grader per model, the first time the grader sees content holding images. Every judge
+that could be sent the images (a single judge, every panel member, a cascade's escalation
+judges, and every decision model) is checked before any judge is called, so a refusal
+sends no request at all; training images, which go out with every call, are checked when
+the grader is built. Text-only grading never asks.
 
 Nothing here reaches the network: ``litellm.acompletion`` is patched, and decision-model
 requests go to the recording fake SDK client of the decision-model tests.
@@ -23,6 +23,7 @@ from collections.abc import Iterator
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import litellm
 import PIL.Image as pil_image
 import pytest
@@ -118,25 +119,27 @@ def image_parts(call: Any) -> list[dict[str, Any]]:
 
 
 class Lookup:
-    """``litellm.supports_vision``'s stand-in: answers from ``answers`` (anything else is
-    ``False``, as LiteLLM answers for a model it does not map) and records each model."""
+    """Records each model a grader asks LiteLLM's map about (``models``), answering with the
+    real lookup over a map that also holds an entry for each stand-in model in ``answers``
+    (its ``supports_vision``)."""
 
     def __init__(self) -> None:
         self.answers: dict[str, Any] = {SEEING: True, BLIND: False}
         self.models: list[str] = []
 
-    def __call__(self, model: str, custom_llm_provider: str | None = None) -> Any:
+    def __call__(self, model: str) -> bool:
         self.models.append(model)
-        answer = self.answers.get(model, False)
-        if isinstance(answer, BaseException):
-            raise answer
-        return answer
+        with patch.dict(
+            litellm.model_cost,
+            {name: {"supports_vision": answer} for name, answer in self.answers.items()},
+        ):
+            return _litellm_supports_vision(model)
 
 
 @pytest.fixture
 def vision() -> Iterator[Lookup]:
     lookup = Lookup()
-    with patch("litellm.supports_vision", side_effect=lookup):
+    with patch("autorubric.graders.criterion_grader._litellm_supports_vision", side_effect=lookup):
         yield lookup
 
 
@@ -213,6 +216,32 @@ class TestTheConfigField:
 # =============================================================================
 
 
+class _UnreadableMap(dict):
+    """A model map that cannot be read."""
+
+    def __contains__(self, key: object) -> bool:
+        raise RuntimeError("map unreadable")
+
+
+@pytest.fixture
+def no_requests() -> Iterator[list[Any]]:
+    """Every way LiteLLM sends a request records it and raises. The list of requests is
+    checked by the test itself, because LiteLLM's own lookup swallows the exception."""
+    sent: list[Any] = []
+
+    def refuse(*args: Any, **kwargs: Any) -> Any:
+        sent.append((args, kwargs))
+        raise RuntimeError("the lookup sent a request")
+
+    with (
+        patch.object(litellm.module_level_client, "post", refuse),
+        patch.object(litellm.module_level_client, "get", refuse),
+        patch.object(httpx.Client, "send", refuse),
+        patch.object(httpx.AsyncClient, "send", refuse),
+    ):
+        yield sent
+
+
 class TestTheLiteLLMLookup:
     def test_the_real_map_lists_a_vision_model(self):
         assert _litellm_supports_vision("openai/gpt-4.1-mini") is True
@@ -223,24 +252,102 @@ class TestTheLiteLLMLookup:
     def test_the_real_map_confirms_nothing_else(self, model):
         assert _litellm_supports_vision(model) is False
 
-    @pytest.mark.parametrize(
-        "answer", [False, None, "True", 1, RuntimeError("map unreadable")], ids=repr
-    )
-    def test_any_answer_but_true_is_not_a_confirmation(self, vision, answer):
-        vision.answers["acme/odd-1"] = answer
-        assert _litellm_supports_vision("acme/odd-1") is False
+    @pytest.mark.parametrize("answer", [False, None, "True", 1], ids=repr)
+    def test_any_answer_but_true_is_not_a_confirmation(self, answer):
+        with patch.dict(litellm.model_cost, {"acme/odd-1": {"supports_vision": answer}}):
+            assert _litellm_supports_vision("acme/odd-1") is False
 
-    @pytest.mark.parametrize("model", ["acme/unmapped-1", "no-provider-at-all"])
+    def test_an_entry_that_is_not_a_mapping_is_not_a_confirmation(self):
+        with patch.dict(litellm.model_cost, {"acme/odd-1": "supports_vision"}):
+            assert _litellm_supports_vision("acme/odd-1") is False
+
+    def test_a_map_that_cannot_be_read_is_not_a_confirmation(self):
+        with patch.object(litellm, "model_cost", _UnreadableMap()):
+            assert _litellm_supports_vision("openai/gpt-4.1-mini") is False
+
+    @pytest.mark.parametrize(
+        "model, accepts",
+        [
+            ("ollama/llava", False),
+            ("ollama/llava:13b", False),
+            ("ollama_chat/qwen2.5vl:7b", False),
+            ("openai/gpt-4.1-mini", True),
+            ("gpt-4o", True),
+            ("openai/responses/gpt-5-mini", True),
+            ("openai/responses/gpt-4o", True),
+            ("azure/responses/gpt-4o", True),
+        ],
+    )
+    def test_it_sends_no_request(self, no_requests, model, accepts):
+        """LiteLLM's own ``supports_vision`` asks an Ollama server (``/api/show``) about an
+        Ollama model; the lookup reads the loaded map only."""
+        assert _litellm_supports_vision(model) is accepts
+        assert no_requests == []
+
+    @pytest.mark.parametrize(
+        "routed, plain",
+        [
+            ("openai/responses/gpt-5-mini", "openai/gpt-5-mini"),
+            ("openai/responses/gpt-4o", "openai/gpt-4o"),
+            ("azure/responses/gpt-4o", "azure/gpt-4o"),
+            ("openai/responses/gpt-3.5-turbo", "openai/gpt-3.5-turbo"),
+        ],
+    )
+    def test_a_responses_route_is_looked_up_by_its_model(self, no_requests, routed, plain):
+        assert _litellm_supports_vision(routed) is _litellm_supports_vision(plain)
+        assert no_requests == []
+
+    def test_a_responses_route_is_dropped_only_after_a_provider(self):
+        with patch.dict(litellm.model_cost, {"acme-1": {"supports_vision": True}}):
+            assert _litellm_supports_vision("acme/responses/acme-1") is False
+
+    @pytest.mark.parametrize(
+        "model, listed",
+        [
+            ("openai/acme-vision-1", "openai"),
+            ("vertex_ai/acme-vision-1", "vertex_ai-language-models"),
+            ("azure_ai/acme-vision-1", "azure"),
+            ("litellm_proxy/acme-vision-1", "openai"),
+        ],
+    )
+    def test_an_entry_for_the_models_provider_is_read(self, model, listed):
+        entry = {"supports_vision": True, "litellm_provider": listed}
+        with patch.dict(litellm.model_cost, {"acme-vision-1": entry}):
+            assert _litellm_supports_vision(model) is True
+
+    def test_an_entry_for_another_provider_is_not(self):
+        entry = {"supports_vision": True, "litellm_provider": "anthropic"}
+        with patch.dict(litellm.model_cost, {"acme-vision-1": entry}):
+            assert _litellm_supports_vision("groq/acme-vision-1") is False
+
+    def test_a_silent_entry_for_the_provider_defers_to_the_bare_name(self):
+        """``azure/gpt-4-turbo``'s entry does not say; OpenAI's ``gpt-4-turbo`` does."""
+        entries = {
+            "azure/acme-vision-1": {"litellm_provider": "azure"},
+            "acme-vision-1": {"supports_vision": True, "litellm_provider": "openai"},
+        }
+        with patch.dict(litellm.model_cost, entries):
+            assert _litellm_supports_vision("azure/acme-vision-1") is True
+
+    def test_keys_match_ignoring_case(self):
+        assert _litellm_supports_vision("openai/GPT-4o") is True
+
+    def test_an_entry_that_does_not_say_leaves_the_next_key_to_decide(self):
+        entries = {
+            "acme-vision-1": {"supports_vision": True, "litellm_provider": "openai"},
+            "openai/acme-vision-1": {"litellm_provider": "openai"},
+        }
+        with patch.dict(litellm.model_cost, entries):
+            assert _litellm_supports_vision("openai/acme-vision-1") is True
+
+    @pytest.mark.parametrize(
+        "model", ["acme/unmapped-1", "no-provider-at-all", "ollama/llava", "openai/gpt-4o"]
+    )
     def test_it_prints_and_logs_nothing(self, capsys, caplog, model):
-        """LiteLLM prints a provider-list banner and logs a debug record for a model it
-        cannot place; the lookup lets neither through, and leaves LiteLLM's settings as
-        they were."""
-        before = litellm.suppress_debug_info
         with caplog.at_level(logging.DEBUG):
             _litellm_supports_vision(model)
         assert capsys.readouterr() == ("", "")
         assert [r for r in caplog.records if r.name.startswith("LiteLLM")] == []
-        assert litellm.suppress_debug_info is before
 
 
 # =============================================================================
@@ -354,6 +461,19 @@ class TestWhoIsSentImages:
 
 
 class TestWhenLiteLLMIsAsked:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("model", ["ollama/llava", "ollama_chat/qwen2.5vl:7b"])
+    async def test_an_ollama_judge_is_refused_without_asking_its_server(
+        self, no_requests, provider, model
+    ):
+        """The real lookup, on the grading path: an Ollama model the map does not hold is
+        refused, and no request reaches an Ollama server (or any other)."""
+        config = LLMConfig(model, api_base="http://gpu-box:11434")
+        with pytest.raises(ValueError, match=re.escape(unconfirmed("default", model))):
+            await Rubric([LEGIBLE]).grade(DOCUMENT, grader=grader_for(config))
+        assert no_requests == []
+        provider.assert_not_called()
+
     @pytest.mark.asyncio
     async def test_text_only_grading_never_asks(self, vision, provider):
         grader = grader_for(LLMConfig(BLIND), LLMConfig(SEEING))

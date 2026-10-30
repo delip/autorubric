@@ -13,7 +13,6 @@ import logging
 import math
 import numbers
 import sys
-import threading
 from dataclasses import asdict, dataclass, field, fields
 from enum import Enum
 from pathlib import Path, PurePath
@@ -747,15 +746,16 @@ class LLMConfig:
         seed: Random seed for reproducible outputs (OpenAI, some other providers).
         extra_headers: Additional HTTP headers for provider-specific features.
         extra_params: Additional provider-specific parameters passed to LiteLLM.
-        images: Whether the model accepts images in its prompts. None (default) asks
-            LiteLLM's model map (``litellm.supports_vision``) the first time a grader is
-            to send this judge an image; ``True`` or ``False`` is your declaration and
-            wins over the map. A judge whose model neither LiteLLM lists nor you declare as
-            accepting images is never sent one: grading an item holding images refuses it
-            before any request (``CriterionGrader``). Set ``images=True`` for a vision
-            model LiteLLM does not map (e.g. a LLaVA or Qwen-VL model served through
-            Ollama, vLLM or OpenRouter). Text-only grading never reads it, so it changes
-            no request. Only ``None``, ``True`` and ``False`` are accepted.
+        images: Whether the model accepts images in its prompts. None (default) looks
+            the model up in LiteLLM's model map (the one it loaded at import; no request
+            is sent) the first time a grader is to send this judge an image; ``True`` or
+            ``False`` is your declaration and wins over the map. A judge whose model
+            neither LiteLLM lists nor you declare as accepting images is never sent one:
+            grading an item holding images refuses it before any request
+            (``CriterionGrader``). Set ``images=True`` for a vision model LiteLLM does not
+            map (e.g. a LLaVA or Qwen-VL model served through Ollama, vLLM or
+            OpenRouter). Text-only grading never reads it, so it changes no request. Only
+            ``None``, ``True`` and ``False`` are accepted.
 
     Examples:
         # Basic usage without thinking (provider-default temperature)
@@ -949,43 +949,85 @@ class LLMConfig:
             yaml.dump(data, f, Dumper=_LLMConfigDumper, default_flow_style=False, sort_keys=False)
 
 
-# Serializes the lookups' swaps of LiteLLM's global ``suppress_debug_info`` (a lookup can
-# run in several threads at once), so each restores the value it found.
-_LITELLM_LOOKUP_LOCK = threading.Lock()
+# LiteLLM's proxy route: it names no provider of its own, so any model-map entry fits it.
+_ANY_PROVIDER = "litellm_proxy"
 
 
-class _DropRecords(logging.Filter):
-    """Drops every record: LiteLLM's own logger, for the length of a lookup."""
+def _map_keys(model: str) -> tuple[str | None, list[str]]:
+    """The provider ``model`` names, if any, and the keys LiteLLM's model map could hold it
+    under, most specific first.
 
-    def filter(self, record: logging.LogRecord) -> bool:
+    A first path segment that LiteLLM lists as a provider (``litellm.provider_list``) is the
+    provider, and a ``responses/`` segment after it (LiteLLM's Responses API route,
+    ``openai/responses/gpt-5-mini``) is dropped, since the map keys the model, not the
+    route. The keys are then the provider-prefixed name (``openai/gpt-4.1-mini``) and the
+    bare one (``gpt-4.1-mini``), as LiteLLM keys its entries both ways. With no provider
+    the model string is the one key.
+    """
+    head, sep, rest = model.partition("/")
+    if not sep or head not in litellm.provider_list:
+        return None, [model]
+    if rest.startswith("responses/"):
+        rest = rest[len("responses/") :]
+    return head, [f"{head}/{rest}", rest]
+
+
+def _same_provider(listed: object, provider: str | None) -> bool:
+    """Whether a model-map entry whose ``litellm_provider`` is ``listed`` describes the model
+    as ``provider`` serves it: an entry or a model naming no provider fits any, a proxy
+    (``litellm_proxy``) fits every entry, and otherwise the names agree or one is a prefix
+    of the other (``vertex_ai`` and ``vertex_ai-language-models``, ``azure_ai`` and
+    ``azure``), much as LiteLLM's own lookup matches them."""
+    if provider is None or listed is None or provider == _ANY_PROVIDER:
+        return True
+    if not isinstance(listed, str):
         return False
+    return listed.startswith(provider) or provider.startswith(listed)
 
 
 def _litellm_supports_vision(model: str) -> bool:
     """Whether LiteLLM's model map lists ``model`` as accepting images.
 
-    True only when ``litellm.supports_vision`` answers ``True``; any other answer (``False``,
-    as LiteLLM answers for a model its map does not hold, ``None``, or an exception) is not
-    a confirmation. LiteLLM prints a provider-list banner and logs a debug record for a
-    model it cannot place; the lookup lets neither through (``suppress_debug_info`` and the
-    ``LiteLLM`` logger are quieted for its length, then restored), so it prints and logs
-    nothing. The lookup sends no request: it reads the model map LiteLLM loaded at import,
-    which LiteLLM fetches from its repository unless ``LITELLM_LOCAL_MODEL_COST_MAP`` is set,
-    so the answer can follow the fetched map rather than the installed package's copy.
+    It reads the model map LiteLLM loaded at import (``litellm.model_cost``) and nothing
+    else: it sends no request and reads no file, so it never blocks, and it prints and logs
+    nothing. (LiteLLM's own ``supports_vision`` is not used: for some providers, Ollama's
+    among them, it asks the provider's server at run time.) The map is the one LiteLLM
+    fetches from its repository at import unless ``LITELLM_LOCAL_MODEL_COST_MAP=True`` is
+    set, so the answer follows the fetched map rather than the installed package's copy.
+
+    The keys tried are ``_map_keys``'s, exactly and then ignoring case, as LiteLLM matches
+    them; a ``responses/`` route is looked up by its model. The first entry found for the
+    model's provider (``_same_provider``) that says whether the model accepts images
+    decides: only ``supports_vision`` ``True`` confirms it. An entry for the provider that
+    does not say leaves the next key to decide, whatever provider that key's entry names
+    (``azure/gpt-4-turbo`` is silent, so ``gpt-4-turbo``, OpenAI's, decides), as in
+    LiteLLM's own lookup. A model the map does not hold (an Ollama model, a
+    model served through vLLM, a deployment name) is not confirmed, which is what
+    ``LLMConfig(images=True)`` is for. Any error reading the map is not a confirmation
+    either.
     """
-    litellm_logger = logging.getLogger("LiteLLM")
-    drop = _DropRecords()
-    with _LITELLM_LOOKUP_LOCK:
-        suppressed = litellm.suppress_debug_info
-        litellm.suppress_debug_info = True
-        litellm_logger.addFilter(drop)
-        try:
-            return litellm.supports_vision(model=model) is True
-        except Exception:
-            return False
-        finally:
-            litellm_logger.removeFilter(drop)
-            litellm.suppress_debug_info = suppressed
+    try:
+        provider, keys = _map_keys(model)
+        model_map = litellm.model_cost
+        folded: dict[str, str] | None = None
+        silent = False  # an entry for the model's provider was found that does not say
+        for key in keys:
+            if key not in model_map:
+                if folded is None:
+                    folded = {k.lower(): k for k in list(model_map)}
+                key = folded.get(key.lower(), key)
+            entry = model_map.get(key)
+            if not isinstance(entry, dict):
+                continue
+            if not silent and not _same_provider(entry.get("litellm_provider"), provider):
+                continue
+            listed = entry.get("supports_vision")
+            if isinstance(listed, bool):
+                return listed
+            silent = True
+        return False
+    except Exception:
+        return False
 
 
 def _open_response_cache(cache_dir: str | Path) -> diskcache.Cache:
