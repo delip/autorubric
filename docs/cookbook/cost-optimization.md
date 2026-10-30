@@ -122,7 +122,7 @@ print(f"Cleared {cleared} cached entries")
 
 ### Step 5: Enable Prompt Caching (Anthropic)
 
-For Anthropic models, prompt caching reduces costs for repeated system prompts:
+Per-criterion grading sends the same system prompt and submission once per criterion. Since 1.7.0 each per-criterion prompt puts them first and the criterion last, so providers can reuse them across an item's calls. `prompt_caching=True` (the default) also sends the shared part as its own message, and lets one call finish before the rest so that the others find a warm cache:
 
 ```python
 grader = CriterionGrader(
@@ -132,7 +132,7 @@ grader = CriterionGrader(
     )
 )
 
-# Evaluate - system prompt cached after first call
+# Evaluate - the first call of each item writes the cache and the others read it
 result = await evaluate(dataset, grader)
 
 # Check cache efficiency in token usage
@@ -144,17 +144,17 @@ if result.total_token_usage:
         # Cached tokens are 90% cheaper on Anthropic!
 ```
 
-!!! info "Prompt Caching by Provider"
-    - **Anthropic**: Requires explicit cache_control (AutoRubric handles this)
-    - **OpenAI/DeepSeek**: Automatic for prompts ≥1024 tokens
-    - **Gemini**: Supported on 2.5+ models
+| Provider | What AutoRubric does | Notes |
+|----------|----------------------|-------|
+| Anthropic (`anthropic/`, `claude`, `openrouter/anthropic/`) | `cache_control` on the system prompt and the shared content | Claude through Bedrock or Vertex AI is sent one unmarked message |
+| OpenAI, GPT-5.6 and later | Explicit cache breakpoints on the same two places | Automatic mode rewrites each whole prompt, at 1.25x the input rate |
+| OpenAI, earlier models | The shared content in its own message | Automatic prefix caching |
+| DeepSeek | The shared content in its own message | Automatic prefix caching |
+| Gemini | Nothing | Its automatic cache was not readable until about a minute after a call, too late for an item's other calls |
+| Other models | One user message, no warming | Some OpenAI-compatible servers refuse consecutive user messages |
 
-| Provider | Cache Type | Min Prompt Size | Discount | Notes |
-|----------|-----------|-----------------|----------|-------|
-| Anthropic | Explicit prefix | 1024 tokens | 90% on cached input | Requires `cache_control` breakpoints; AutoRubric sets these automatically |
-| OpenAI | Automatic prefix | 1024 tokens | 50-90% on cached input, depending on the model | No opt-in needed; applies when the prefix matches a recent request |
-| DeepSeek | Automatic prefix | 1024 tokens | 50-90% on cached input | Behavior mirrors OpenAI; discount varies by model tier |
-| Gemini | Context caching | 32k tokens | 75% on cached input | Best suited for large system prompts or few-shot context |
+!!! note "Few-shot examples are not cached across criteria"
+    Examples are drawn per criterion, so they follow the submission and are paid for in full on every call.
 
 ### Step 6: One Call Per Item Instead of Per Criterion
 

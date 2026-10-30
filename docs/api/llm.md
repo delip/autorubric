@@ -142,7 +142,7 @@ stats = client.cache_stats()
 
 ## Prompt Caching (Anthropic)
 
-Reduce latency and cost on repeated calls. Enabled by default:
+Reduce latency and cost on repeated calls. Enabled by default, it arranges per-criterion requests so that providers can reuse what an item's calls share:
 
 ```python
 config = LLMConfig(

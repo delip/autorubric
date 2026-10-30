@@ -54,7 +54,7 @@ Every field except `model` has a default. [LLM Infrastructure](../api/llm.md) is
 | `api_key` | `None` | Provider key; `None` lets LiteLLM read the provider's environment variable |
 | `api_base` | `None` | Base URL of the endpoint, for proxies and self-hosted servers |
 | `thinking` | `None` | Extended thinking: a level (`"low"`, `"medium"`, `"high"`, `"none"`), a token budget, or a `ThinkingConfig` |
-| `prompt_caching` | `True` | Mark the system prompt for Anthropic's prompt cache (model ids starting with `anthropic/` or `claude`; others are unaffected) |
+| `prompt_caching` | `True` | Arrange per-criterion requests for the provider's prompt cache: what an item's calls share goes in its own message, marked where the provider needs it, and one call finishes before the rest. See [prompt caching](cost-optimization.md#step-5-enable-prompt-caching-anthropic) |
 | `seed` | `None` | Sampling seed sent with every call; for a provider LiteLLM knows takes none, such as Anthropic or Gemini, the first call's grade raises `ValueError` unless `extra_params={"drop_params": True}` |
 | `extra_headers` | `{}` | Additional HTTP headers sent with every call |
 | `extra_params` | `{}` | Additional LiteLLM parameters sent with every call |
@@ -257,7 +257,7 @@ The judge answers with one structured judgment per criterion: `RubricJudgment`, 
 
 ### Tokens and cost
 
-With N criteria, a submission (with its input and reference) of S tokens, a system prompt of P tokens, and about c tokens per criterion block, a per-criterion judge's input tokens per item and judge scale as N·(P + S + c); a `per_item` judge's scale as P_w + S + N·c, where P_w is the wrapped system prompt (the preamble, the guide for each kind of criterion present, and the closing format). For N = 10 and S = 1,000, that is roughly 26,700 input tokens per item and judge called per criterion, against roughly 3,400 (a rubric of one kind) to 5,000 (both kinds) under `per_item`. [Prompt caching](cost-optimization.md#step-5-enable-prompt-caching-anthropic) narrows the gap only for the system-prompt part: under `per_criterion` the submission follows the criterion in every call and is re-sent each time, so caching never covers it.
+With N criteria, a submission (with its input and reference) of S tokens, a system prompt of P tokens, and about c tokens per criterion block, a per-criterion judge's input tokens per item and judge scale as N·(P + S + c); a `per_item` judge's scale as P_w + S + N·c, where P_w is the wrapped system prompt (the preamble, the guide for each kind of criterion present, and the closing format). For N = 10 and S = 1,000, that is roughly 26,700 input tokens per item and judge called per criterion, against roughly 3,400 (a rubric of one kind) to 5,000 (both kinds) under `per_item`. [Prompt caching](cost-optimization.md#step-5-enable-prompt-caching-anthropic) narrows the gap on input: a `per_criterion` prompt puts the submission before the criterion, so a provider can reuse the system prompt and submission across an item's calls. It cannot reduce output, and `per_criterion` writes more of it.
 
 The call's token usage and cost ride on its first criterion's result, so a report's `token_usage` and `completion_cost` add up each judge's one call. A call in which some criteria fail alone is counted in full; a call that fails adds nothing, as a failed per-criterion call adds nothing.
 
