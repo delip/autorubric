@@ -83,7 +83,9 @@ print(decision_model_capabilities("jev-1.14.0"))
 
 Jev reads only PNG and JPEG with sides between 280 and 1568 pixels, and it does not resize images itself. autorubric therefore fits each image before sending it. An image already inside these limits is sent unchanged. Any other is re-encoded as PNG or JPEG, scaled to fit, and padded with white when a side is still too short, as for a very wide chart. [Images](../api/decision-models.md#images) gives the exact rules. To keep a chart exactly as you made it, save it as a PNG within those sides.
 
-Which models accept images comes from autorubric's decision-model registry. A model it lists as text-only, such as `jev-1.13.0`, or a model it does not list, raises `ValueError` naming the judge and the model as soon as content holds an image, and no judge sends a request, not even the LLM judges of a mixed panel. [Model Capabilities](../api/decision-models.md#model-capabilities) shows how to add an entry for another model.
+Which models accept images comes from autorubric's decision-model registry. A model it lists as text-only, such as `jev-1.13.0`, or a model it does not list, raises `ValueError` naming the judge and the model as soon as content holds an image, and no judge sends a request, not even the LLM judges of a mixed panel. [Model Capabilities](../api/decision-models.md#model-capabilities) has the entry format.
+
+For a model the registry does not list, such as a self-hosted endpoint, declare what it accepts on the judge's config, without editing the installed package. Pass `DecisionModelConfig(model=..., capabilities={...})` with the entry the registry would hold, such as `{"provider": "my-org", "images": True, "image_formats": ["png"], "min_side_px": 64, "max_side_px": 1024, "max_image_bytes": 4_000_000, "max_request_bytes": 8_000_000}`. Images are then fitted into those limits. The declared entry replaces the registry's for that judge, so it can also tighten a listed model's limits.
 
 In a [cascade](cascade-grading.md), the escalation judges are LLM judges, so give the grader `llm_calls="per_item"` there too: an escalated item then sends its images to each escalation judge once.
 
@@ -170,7 +172,7 @@ def as_png(path: str) -> Image:
 - **`Content`** is a string, an `Image`, or a list of both read in order; it applies to the submission, the query and the reference submission
 - **Images are read once per grade**, and one that cannot be read raises instead of becoming a verdict
 - **`llm_calls="per_item"`** sends each image to an LLM judge once per item instead of once per criterion
-- **Decision models** get images fitted into the limits their registry entry gives (PNG or JPEG, 280 to 1568 pixels per side for Jev)
+- **Decision models** get images fitted into the limits their registry entry (or declared `capabilities`) gives (PNG or JPEG, 280 to 1568 pixels per side for Jev)
 - **Dataset files** hold images as `{"image": "<path>"}` parts, resolved against the file's directory
 
 ## Going Further

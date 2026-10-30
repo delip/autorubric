@@ -24,8 +24,9 @@ request sends the images as System One assets under those references: ``state_im
 collects them, and ``DecisionModelClient.prepare_assets`` fits each into the envelope the
 model accepts (``_fit_for_system_one``), since System One never resizes an image itself.
 Which models accept images, and that envelope, come from autorubric's decision-model
-registry, ``data/decision_models.json`` (``decision_model_capabilities``), which is read
-only for a request that would carry images.
+registry, ``data/decision_models.json`` (``decision_model_capabilities``), or from the
+judge's own ``DecisionModelConfig.capabilities``, which replaces the registry entry
+(``_judge_capabilities``); either is read only for a request that would carry images.
 """
 
 from __future__ import annotations
@@ -42,7 +43,7 @@ import math
 import os
 import weakref
 from collections import Counter
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import KW_ONLY, dataclass, field
 from pathlib import Path
 from types import MappingProxyType, ModuleType
@@ -310,7 +311,8 @@ class DecisionModelConfig:
             experiment's manifest records the string as given. Any model works for text.
             Sending images needs a model that autorubric's decision-model registry
             (``decision_model_capabilities``) lists as accepting them, such as
-            ``"jev-1.14.0"``; the registry is consulted only for a request with images.
+            ``"jev-1.14.0"``, or ``capabilities`` saying it does; either is consulted only
+            for a request with images.
         api_key: API key, sent as a bearer token. ``None`` (default) reads the
             ``TYPESAFE_API_KEY`` environment variable, which a ``.env`` file may set, as for
             LLM provider keys. Surrounding whitespace is stripped, as the SDK strips it, so
@@ -429,6 +431,21 @@ class DecisionModelConfig:
             because vendor prices change: set it whenever cost matters. ``None`` (default)
             means the cost is unknown, and the decision model then contributes nothing to a
             report's ``completion_cost``.
+        capabilities: What the model accepts, declared on the config: an entry of the same
+            shape as one in autorubric's decision-model registry
+            (``decision_model_capabilities``), e.g. ``{"provider": "acme", "images": True,
+            "image_formats": ["png", "jpeg"], "min_side_px": 280, "max_side_px": 1568,
+            "max_image_bytes": 16777216, "max_request_bytes": 33554432}``, or
+            ``{"provider": "acme", "images": False}``. When set it replaces the registry
+            entry for this judge entirely, for a model the registry lists and one it does
+            not, so a model the installed package does not list can be sent images without
+            editing the package. ``None`` (default) uses the registry. Checked here by the
+            rules a registry entry follows (``_checked_capabilities``), so a malformed entry
+            raises ``ValueError`` naming this field; stored as a plain ``dict`` copy
+            (``image_formats`` as a list), so the config still pickles and compares. Like
+            the registry, it is read only for a request that would carry images: images
+            are fitted into its limits, and those limits are part of such a request's cache
+            key. An experiment's manifest records it when set.
 
     Examples:
         >>> jev = DecisionModelConfig(model="jev-latest", cache_enabled=True)
@@ -436,6 +453,18 @@ class DecisionModelConfig:
         ...     model="my-org/rubric-dm-7b",
         ...     api_base="https://xyz.endpoints.huggingface.cloud",
         ...     api_key="hf_...",
+        ... )
+        >>> with_images = DecisionModelConfig(
+        ...     model="my-org/rubric-dm-7b",
+        ...     capabilities={
+        ...         "provider": "my-org",
+        ...         "images": True,
+        ...         "image_formats": ["png", "jpeg"],
+        ...         "min_side_px": 64,
+        ...         "max_side_px": 1024,
+        ...         "max_image_bytes": 4_000_000,
+        ...         "max_request_bytes": 8_000_000,
+        ...     },
         ... )
     """
 
@@ -454,12 +483,14 @@ class DecisionModelConfig:
     ordinal_framing: OrdinalFraming = "choice"
     decision_threshold: float = 0.5
     input_cost_per_token: float | None = None
+    capabilities: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         """Validate the configuration.
 
         ``api_base`` and ``extra_headers`` are checked when a client is built, with the SDK's
-        HTTP stack, which this config does not need.
+        HTTP stack, which this config does not need. ``capabilities`` is checked here and
+        replaced by a plain ``dict`` copy (``_checked_capabilities``).
 
         Raises:
             ValueError: If a field is out of range or not one of its allowed values.
@@ -522,6 +553,12 @@ class DecisionModelConfig:
             raise ValueError(
                 f"{name}.input_cost_per_token must be None or a finite number >= 0; got {price!r}"
             )
+        if self.capabilities is not None:
+
+            def malformed(problem: str) -> ValueError:
+                return ValueError(f"{name}.capabilities is malformed: {problem}")
+
+            self.capabilities = _checked_capabilities(self.capabilities, malformed)
 
 
 # =============================================================================
@@ -575,16 +612,85 @@ def _object_without_repeated_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any
     return dict(pairs)
 
 
+def _checked_capabilities(entry: object, malformed: Callable[[str], ValueError]) -> dict[str, Any]:
+    """One decision model's capabilities ``entry``, checked, as a plain dict copy.
+
+    The rules a packaged registry entry and ``DecisionModelConfig.capabilities`` share: a
+    mapping with a non-empty ``provider`` string, a ``bool`` ``images`` and optionally a
+    ``notes`` string; an entry with ``images: true`` also has every key of
+    ``_IMAGE_LIMIT_KEYS``, and only such an entry has them: ``image_formats``, a list of
+    ``"png"`` and ``"jpeg"`` (System One's names, the formats an image can be sent in),
+    each at most once; and the integers >= 1 ``min_side_px`` <= ``max_side_px`` and
+    ``max_image_bytes`` <= ``max_request_bytes``. Any other key is refused, so a misspelled
+    limit cannot go unread. ``image_formats`` may also be a tuple, as in an entry
+    ``decision_model_capabilities`` hands out (JSON never gives one); the copy holds it as
+    a list, so the copy is JSON's shape (``_read_only_capabilities`` hands it out).
+
+    Args:
+        entry: The entry to check.
+        malformed: Builds the error for a problem, naming where the entry comes from.
+
+    Raises:
+        ValueError: ``malformed(problem)``, for the first rule ``entry`` breaks.
+    """
+    if not isinstance(entry, Mapping):
+        raise malformed(f"it must be a JSON object; it is a {type(entry).__name__}")
+    entry = cast(Mapping[str, Any], entry)
+    provider = entry.get("provider")
+    if not isinstance(provider, str) or not provider:
+        raise malformed(f'"provider" must be a non-empty string; got {provider!r}')
+    images = entry.get("images")
+    if not isinstance(images, bool):
+        raise malformed(f'"images" must be true or false; got {images!r}')
+    allowed = {"provider", "images", "notes", *(_IMAGE_LIMIT_KEYS if images else ())}
+    unknown = sorted(set(entry) - allowed, key=str)
+    if unknown:
+        raise malformed(f"unknown keys {unknown!r} (an entry can have {sorted(allowed)!r})")
+    if not isinstance(entry.get("notes", ""), str):
+        raise malformed(f'"notes" must be a string; got {entry["notes"]!r}')
+    checked = dict(entry)
+    if images:
+        missing = [key for key in _IMAGE_LIMIT_KEYS if key not in entry]
+        if missing:
+            raise malformed(f"it accepts images, so it needs {missing!r}")
+        formats = entry["image_formats"]
+        if not (
+            isinstance(formats, (list, tuple))
+            and formats
+            and all(f in _SYSTEM_ONE_FORMATS.values() for f in formats)
+            and len(set(formats)) == len(formats)
+        ):
+            raise malformed(
+                '"image_formats" must be a non-empty list of "png" and "jpeg", each at '
+                f"most once; got {formats!r}"
+            )
+        for key in _IMAGE_LIMIT_KEYS[1:]:
+            value = entry[key]
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise malformed(f'"{key}" must be an integer >= 1; got {value!r}')
+        if entry["min_side_px"] > entry["max_side_px"]:
+            raise malformed('"min_side_px" is over "max_side_px"')
+        if entry["max_image_bytes"] > entry["max_request_bytes"]:
+            raise malformed('"max_image_bytes" is over "max_request_bytes"')
+        checked["image_formats"] = list(formats)
+    return checked
+
+
+def _read_only_capabilities(checked: Mapping[str, Any]) -> Mapping[str, Any]:
+    """A checked entry (``_checked_capabilities``) as handed out: a read-only view whose
+    ``image_formats``, when present, is a tuple."""
+    view = dict(checked)
+    if "image_formats" in view:
+        view["image_formats"] = tuple(view["image_formats"])
+    return MappingProxyType(view)
+
+
 def _checked_registry(data: object, source: str) -> Mapping[str, Mapping[str, Any]]:
     """The registry ``data`` read from ``source``, checked entry by entry, as read-only views.
 
-    Each entry is keyed by a model id as sent to the API (no provider prefix) and has a
-    non-empty ``provider`` string, a ``bool`` ``images`` and optionally a ``notes`` string;
-    an entry with ``images: true`` also has every key of ``_IMAGE_LIMIT_KEYS``, and only
-    such an entry has them: ``image_formats``, a list of ``"png"`` and ``"jpeg"`` (System
-    One's names, the formats an image can be sent in), each at most once, kept as a tuple;
-    and the integers >= 1 ``min_side_px`` <= ``max_side_px`` and ``max_image_bytes`` <=
-    ``max_request_bytes``. Any other key is refused, so a misspelled limit cannot go unread.
+    Each entry is keyed by a model id as sent to the API (no provider prefix) and follows
+    the rules of ``_checked_capabilities``; each is handed out by
+    ``_read_only_capabilities`` (``image_formats`` a tuple).
 
     Raises:
         ValueError: Naming ``source`` and the entry, for the first entry that breaks a rule.
@@ -595,64 +701,21 @@ def _checked_registry(data: object, source: str) -> Mapping[str, Mapping[str, An
             f"by model id; it is a {type(data).__name__}"
         )
 
-    def malformed(model: str, problem: str) -> ValueError:
-        return ValueError(
-            f"The decision-model registry {source} has a malformed entry {model!r}: {problem}"
-        )
-
     entries: dict[str, Mapping[str, Any]] = {}
     # JSON object keys are strings; the values are checked here.
     for model, entry in cast(dict[str, Any], data).items():
+
+        def malformed(problem: str, model: str = model) -> ValueError:
+            return ValueError(
+                f"The decision-model registry {source} has a malformed entry {model!r}: {problem}"
+            )
+
         if not model or _api_model_id(model) != model:
             raise malformed(
-                model,
                 f"an entry is keyed by the model id as sent to the API, without a "
-                f'"{_TYPESAFE_PROVIDER}/" prefix',
+                f'"{_TYPESAFE_PROVIDER}/" prefix'
             )
-        if not isinstance(entry, dict):
-            raise malformed(model, f"it must be a JSON object; it is a {type(entry).__name__}")
-        entry = cast(dict[str, Any], entry)
-        provider = entry.get("provider")
-        if not isinstance(provider, str) or not provider:
-            raise malformed(model, f'"provider" must be a non-empty string; got {provider!r}')
-        images = entry.get("images")
-        if not isinstance(images, bool):
-            raise malformed(model, f'"images" must be true or false; got {images!r}')
-        allowed = {"provider", "images", "notes", *(_IMAGE_LIMIT_KEYS if images else ())}
-        unknown = sorted(set(entry) - allowed)
-        if unknown:
-            raise malformed(
-                model, f"unknown keys {unknown!r} (an entry can have {sorted(allowed)!r})"
-            )
-        if not isinstance(entry.get("notes", ""), str):
-            raise malformed(model, f'"notes" must be a string; got {entry["notes"]!r}')
-        checked = dict(entry)
-        if images:
-            missing = [key for key in _IMAGE_LIMIT_KEYS if key not in entry]
-            if missing:
-                raise malformed(model, f"it accepts images, so it needs {missing!r}")
-            formats = entry["image_formats"]
-            if not (
-                isinstance(formats, list)
-                and formats
-                and all(f in _SYSTEM_ONE_FORMATS.values() for f in formats)
-                and len(set(formats)) == len(formats)
-            ):
-                raise malformed(
-                    model,
-                    '"image_formats" must be a non-empty list of "png" and "jpeg", each at '
-                    f"most once; got {formats!r}",
-                )
-            for key in _IMAGE_LIMIT_KEYS[1:]:
-                value = entry[key]
-                if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-                    raise malformed(model, f'"{key}" must be an integer >= 1; got {value!r}')
-            if entry["min_side_px"] > entry["max_side_px"]:
-                raise malformed(model, '"min_side_px" is over "max_side_px"')
-            if entry["max_image_bytes"] > entry["max_request_bytes"]:
-                raise malformed(model, '"max_image_bytes" is over "max_request_bytes"')
-            checked["image_formats"] = tuple(formats)
-        entries[model] = MappingProxyType(checked)
+        entries[model] = _read_only_capabilities(_checked_capabilities(entry, malformed))
     return MappingProxyType(entries)
 
 
@@ -713,6 +776,34 @@ def decision_model_capabilities(model: str) -> Mapping[str, Any] | None:
     if entry is None or (api_id != model and entry["provider"] != _TYPESAFE_PROVIDER):
         return None
     return entry
+
+
+def _judge_capabilities(config: DecisionModelConfig) -> Mapping[str, Any] | None:
+    """What a decision-model judge configured by ``config`` accepts: the one lookup.
+
+    ``config.capabilities`` when set, which replaces the registry entry entirely, else the
+    registry's entry for ``config.model`` (``decision_model_capabilities``). Either is handed
+    out read-only (``_read_only_capabilities``, ``image_formats`` a tuple). A declared entry
+    is checked again here, so a dict changed after the config was built cannot bypass the
+    rules.
+
+    Returns:
+        The entry, or ``None`` when ``capabilities`` is unset and the registry does not list
+        the model.
+
+    Raises:
+        ValueError: If the registry file is malformed, or ``config.capabilities`` has been
+            changed into a malformed entry since the config was built; marked as a
+            configuration error (``_configuration_error``).
+    """
+    if config.capabilities is None:
+        return decision_model_capabilities(config.model)
+    name = type(config).__name__
+
+    def malformed(problem: str) -> ValueError:
+        return _configuration_error(ValueError(f"{name}.capabilities is malformed: {problem}"))
+
+    return _read_only_capabilities(_checked_capabilities(config.capabilities, malformed))
 
 
 _CONFIGURATION_ERROR_NOTE = "autorubric: judge configuration error (fails every item alike)"
@@ -903,8 +994,8 @@ def _fit_for_system_one(image: Image, *, envelope: Mapping[str, Any]) -> tuple[b
 
     Args:
         image: The image.
-        envelope: The images the model accepts: its registry entry
-            (``decision_model_capabilities``), of which ``image_formats``,
+        envelope: The images the model accepts: the judge's capabilities
+            (``_judge_capabilities``), of which ``image_formats``,
             ``min_side_px``, ``max_side_px`` and ``max_image_bytes`` are read.
 
     Raises:
@@ -1126,6 +1217,7 @@ class DecisionModelClient:
         questions: Mapping[str, Question],
         *,
         assets: Mapping[str, AssetImage] | None = None,
+        envelope: Mapping[str, Any] | None = None,
         use_cache: bool | None = None,
     ) -> SystemOneResponse:
         """Send one System One request: ``questions`` about ``state``.
@@ -1142,6 +1234,9 @@ class DecisionModelClient:
                 forms, keyed by the ids the answers come back under.
             assets: The SDK images the state refers to, keyed by their references
                 (``prepare_assets``). ``None`` or empty (default): a request without images.
+            envelope: The envelope ``prepare_assets`` fitted ``assets`` into (the judge's
+                capabilities, ``_judge_capabilities``); required with ``assets``, whose
+                cache key names its image limits (``_cache_key``). Ignored without assets.
             use_cache: Whether to use the response cache for this request. ``None``
                 (default) follows ``config.cache_enabled``.
 
@@ -1152,14 +1247,21 @@ class DecisionModelClient:
             carries the request's headers.
 
         Raises:
+            ValueError: If ``assets`` is not empty and ``envelope`` is ``None``; nothing is
+                sent.
             typesafe_sdk.TypeSafeError: The request failed after the configured attempts,
                 or the endpoint's answer did not validate. ``classify_grading_error`` routes
                 every SDK exception.
         """
+        if assets and envelope is None:
+            raise ValueError(
+                "A request carrying images needs the envelope they were fitted into "
+                "(envelope=), which is part of its cache key"
+            )
         should_cache = self.config.cache_enabled if use_cache is None else use_cache
         cache_key: str | None = None
         if should_cache:
-            cache_key = self._cache_key(state, questions, assets)
+            cache_key = self._cache_key(state, questions, assets, envelope)
             cached = self._cached_response(cache_key)
             if cached is not None:
                 return cached
@@ -1220,6 +1322,7 @@ class DecisionModelClient:
         state: JSONContent,
         questions: Mapping[str, Question],
         assets: Mapping[str, object] | None = None,
+        envelope: Mapping[str, Any] | None = None,
     ) -> str:
         """SHA-256 over the model, the resolved base URL, the state and the questions.
 
@@ -1230,14 +1333,31 @@ class DecisionModelClient:
         ``cache_namespace`` when it has one; nothing else is. Framing is already expressed in
         the questions, and ``decision_threshold`` only post-processes answers, so changing it
         re-reads cached answers instead of asking again. A request carrying images adds
-        ``{"assets": [...]}``, its asset references sorted, after the questions; each
-        reference is the SHA-256 of an image as given, so the key does not depend on how
-        the image was fitted. A request without images has the key it had before image
-        support.
+        ``{"assets": [...], "envelope": {...}}`` after the questions: its asset references
+        sorted, each the SHA-256 of an image as given, and the image limits of the envelope
+        the images were fitted into (``_IMAGE_LIMIT_KEYS``, in that order; not
+        ``provider`` or ``notes``, which shape nothing). Fitting is deterministic given the
+        image and those limits, so changing a model's limits, in the registry or in
+        ``DecisionModelConfig.capabilities``, never reuses answers about differently fitted
+        images. A request without images has the key it had before image support;
+        ``envelope`` is then ignored.
+
+        Raises:
+            ValueError: If ``assets`` is not empty and ``envelope`` is ``None``.
         """
         parts: list[object] = [_api_model_id(self.config.model), self._base_url, state, questions]
         if assets:
-            parts.append({"assets": sorted(assets)})
+            if envelope is None:
+                raise ValueError(
+                    "A request carrying images needs the envelope they were fitted into "
+                    "(envelope=), which is part of its cache key"
+                )
+            parts.append(
+                {
+                    "assets": sorted(assets),
+                    "envelope": {key: envelope[key] for key in _IMAGE_LIMIT_KEYS},
+                }
+            )
         if self._cache_namespace is not None:
             parts.append({"namespace": self._cache_namespace})
         content = _canonical_json(parts)
@@ -1258,8 +1378,9 @@ class DecisionModelClient:
         Args:
             images: The images a state refers to, keyed by their references
                 (``state_images``).
-            envelope: The images the model accepts: its registry entry
-                (``decision_model_capabilities``).
+            envelope: The images the model accepts: the judge's capabilities
+                (``_judge_capabilities``: ``DecisionModelConfig.capabilities``, else its
+                registry entry). Pass the same envelope to ``system_one``.
 
         Returns:
             ``typesafe_sdk.Image`` assets under the same keys, in the same order.

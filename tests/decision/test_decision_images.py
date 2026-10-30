@@ -488,7 +488,7 @@ class TestRequests:
         client = make_client(extra_headers={"X-Team": "evals"})
         state = build_state([FIGURE, CAPTION])
         assets = client.prepare_assets(state_images([FIGURE, CAPTION]), envelope=JEV_ENVELOPE)
-        await client.system_one(state, QUESTIONS, assets=assets)
+        await client.system_one(state, QUESTIONS, assets=assets, envelope=JEV_ENVELOPE)
 
         ((sent_state, sent_questions, kwargs),) = fake_sdk.calls
         assert (sent_state, sent_questions) == (state, QUESTIONS)
@@ -501,7 +501,9 @@ class TestRequests:
         (sdk_client,) = fake_sdk.clients
         assert sdk_client.kwargs["headers"] == {"X-Team": "evals"}
 
-    def test_the_cache_key_of_a_request_with_images_adds_its_sorted_references(self, make_client):
+    def test_the_cache_key_of_a_request_with_images_adds_its_references_and_envelope(
+        self, make_client
+    ):
         client = make_client()
         state = build_state([OTHER, FIGURE])
         assets = {reference(OTHER): object(), reference(FIGURE): object()}
@@ -510,17 +512,30 @@ class TestRequests:
             "https://api.typesafe.ai",
             state,
             QUESTIONS,
-            {"assets": sorted([reference(OTHER), reference(FIGURE)])},
+            {
+                "assets": sorted([reference(OTHER), reference(FIGURE)]),
+                "envelope": {
+                    "image_formats": ["png", "jpeg"],
+                    "min_side_px": 280,
+                    "max_side_px": 1568,
+                    "max_image_bytes": 16777216,
+                    "max_request_bytes": 33554432,
+                },
+            },
         ]
         expected = hashlib.sha256(_canonical_json(parts).encode("utf-8")).hexdigest()
-        assert client._cache_key(state, QUESTIONS, assets) == expected
+        assert client._cache_key(state, QUESTIONS, assets, JEV_ENVELOPE) == expected
 
     def test_documents_with_different_image_bytes_have_different_keys(self, make_client):
         client = make_client()
         keys = set()
         for image in (FIGURE, OTHER):
             document = [image, CAPTION]
-            keys.add(client._cache_key(build_state(document), QUESTIONS, state_images(document)))
+            keys.add(
+                client._cache_key(
+                    build_state(document), QUESTIONS, state_images(document), JEV_ENVELOPE
+                )
+            )
         assert len(keys) == 2
 
     @pytest.mark.asyncio
@@ -528,8 +543,8 @@ class TestRequests:
         client = make_client(cache_enabled=True)
         state = build_state([FIGURE, CAPTION])
         assets = client.prepare_assets(state_images([FIGURE]), envelope=JEV_ENVELOPE)
-        first = await client.system_one(state, QUESTIONS, assets=assets)
-        again = await client.system_one(state, QUESTIONS, assets=assets)
+        first = await client.system_one(state, QUESTIONS, assets=assets, envelope=JEV_ENVELOPE)
+        again = await client.system_one(state, QUESTIONS, assets=assets, envelope=JEV_ENVELOPE)
         assert len(fake_sdk.calls) == 1
         assert again.model_dump() == first.model_dump()
 
@@ -644,7 +659,9 @@ class TestWire:
         assets = await asyncio.to_thread(
             client.prepare_assets, state_images(document), envelope=JEV_ENVELOPE
         )
-        await client.system_one(state, {"c0": Noul(instructions="Legible")}, assets=assets)
+        await client.system_one(
+            state, {"c0": Noul(instructions="Legible")}, assets=assets, envelope=JEV_ENVELOPE
+        )
 
         (request,) = http_endpoint.requests
         assert request.headers["typesafe-danger-zone-images"] == "true"

@@ -12,6 +12,7 @@ against rubrics, with support for:
 from __future__ import annotations
 
 import asyncio
+import copy
 import hashlib
 import json
 import logging
@@ -301,7 +302,8 @@ def _decision_model_judge_entry(
     client resolved at construction (``api_base``, else ``TYPESAFE_BASE_URL``, else the
     SDK default); without such a client, the host of an explicit ``api_base``, else None.
     The rest of the URL (its path; a base URL cannot hold credentials), the API key and
-    ``extra_headers`` are never recorded.
+    ``extra_headers`` are never recorded. ``capabilities`` (``DecisionModelConfig``) is
+    recorded, as a copy, only when set.
     """
     clients = getattr(grader, "_decision_clients", None)
     client = clients.get(judge_id) if isinstance(clients, dict) else None
@@ -309,7 +311,7 @@ def _decision_model_judge_entry(
     if not isinstance(host, str):
         host = _url_host(config.api_base) if config.api_base is not None else None
     weight = getattr(judge, "weight", 1.0)
-    return {
+    entry: dict[str, Any] = {
         "judge_id": judge_id,
         "judge_kind": "decision_model",
         "model": config.model,
@@ -320,6 +322,10 @@ def _decision_model_judge_entry(
         "decision_threshold": config.decision_threshold,
         "api_base_host": host,
     }
+    # Only when set, so manifests of judges without it are unchanged.
+    if config.capabilities is not None:
+        entry["capabilities"] = copy.deepcopy(dict(config.capabilities))
+    return entry
 
 
 def _serialize_eval_config(config: EvalConfig) -> dict[str, Any]:

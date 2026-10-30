@@ -38,7 +38,6 @@ from autorubric.decision import (
 )
 from autorubric.eval import _serialize_grader_config
 from autorubric.graders import CriterionGrader, EscalationConfig, JudgeSpec
-from autorubric.graders import criterion_grader as grader_module
 from autorubric.graders.criterion_grader import _is_judge_configuration_error
 from autorubric.utils import fill_ground_truth
 
@@ -116,15 +115,16 @@ def registry_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[C
 
 @pytest.fixture
 def lookups(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    """Record every registry lookup, through either module's name for the function."""
+    """Record every registry lookup."""
     seen: list[str] = []
 
     def spy(model: str) -> Any:
         seen.append(model)
         return decision_model_capabilities(model)
 
+    # The grader looks capabilities up through ``decision._judge_capabilities``, which
+    # calls the registry lookup by the decision module's name.
     monkeypatch.setattr(decision_module, "decision_model_capabilities", spy)
-    monkeypatch.setattr(grader_module, "decision_model_capabilities", spy)
     return seen
 
 
@@ -301,7 +301,8 @@ class TestImagesAreRefused:
         assert str(excinfo.value) == (
             "Judge 'mine' uses decision model 'my-org/rubric-dm-7b', which is not in "
             "autorubric's decision-model registry (autorubric/data/decision_models.json, "
-            "inside the installed package); add an entry saying whether it accepts images"
+            "inside the installed package); add an entry saying whether it accepts images, "
+            "or pass DecisionModelConfig(capabilities=...)"
         )
         assert _is_judge_configuration_error(excinfo.value)
         assert fake_sdk.calls == []

@@ -102,7 +102,8 @@ CLARITY_CHOICE = {
 
 
 def dm(**overrides: Any) -> DecisionModelConfig:
-    return DecisionModelConfig(**{"model": "jev-latest", "api_key": API_KEY, **overrides})
+    fields: dict[str, Any] = {"model": "jev-latest", "api_key": API_KEY, **overrides}
+    return DecisionModelConfig(**fields)
 
 
 def response() -> SystemOneResponse:

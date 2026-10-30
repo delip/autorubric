@@ -70,7 +70,13 @@ from autorubric import (
     Image,
     Rubric,
 )
-from autorubric.decision import _IMAGES_HEADER, DecisionModelClient, build_state, state_images
+from autorubric.decision import (
+    _IMAGES_HEADER,
+    DecisionModelClient,
+    _judge_capabilities,
+    build_state,
+    state_images,
+)
 from autorubric.graders import CriterionGrader
 from autorubric.llm import _classify_typesafe_error
 from autorubric.types import CANONICAL_NA_OPTION, EnsembleEvaluationReport
@@ -357,7 +363,12 @@ async def test_an_image_outside_the_envelope_is_rejected_by_the_server(live_clie
     }
     question = {"c0": Noul(instructions=AXES.requirement)}
     try:
-        await live_client.system_one(build_state(document), question, assets=assets)
+        await live_client.system_one(
+            build_state(document),
+            question,
+            assets=assets,
+            envelope=_judge_capabilities(live_client.config),
+        )
     except typesafe_sdk.TypeSafeAPIError as error:
         # A rejection of the image, not of the key, the model or the request rate.
         assert not isinstance(

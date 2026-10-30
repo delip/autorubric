@@ -32,7 +32,8 @@ CANNOT_ASSESS = CriterionVerdict.CANNOT_ASSESS
 
 
 def config(**overrides: Any) -> DecisionModelConfig:
-    return DecisionModelConfig(**{"model": "jev-latest", **overrides})
+    fields: dict[str, Any] = {"model": "jev-latest", **overrides}
+    return DecisionModelConfig(**fields)
 
 
 def answers(**by_id: dict[str, Any]) -> dict[str, Any]:

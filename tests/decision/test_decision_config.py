@@ -34,6 +34,7 @@ class TestDefaults:
         assert config.ordinal_framing == "choice"
         assert config.decision_threshold == 0.5
         assert config.input_cost_per_token is None
+        assert config.capabilities is None
 
     def test_field_set_is_exactly_the_documented_one(self):
         assert [f.name for f in dataclasses.fields(DecisionModelConfig)] == [
@@ -51,6 +52,7 @@ class TestDefaults:
             "ordinal_framing",
             "decision_threshold",
             "input_cost_per_token",
+            "capabilities",
         ]
 
     def test_shared_concepts_mirror_llm_config_names_and_defaults(self):

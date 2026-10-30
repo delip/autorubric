@@ -84,7 +84,8 @@ GUIDELINES_STATES = [
 
 
 def config(**overrides: Any) -> DecisionModelConfig:
-    return DecisionModelConfig(**{"model": "jev-latest", **overrides})
+    fields: dict[str, Any] = {"model": "jev-latest", **overrides}
+    return DecisionModelConfig(**fields)
 
 
 def binary(requirement: str = REQ, weight: float = 5.0, name: str | None = None) -> Criterion:

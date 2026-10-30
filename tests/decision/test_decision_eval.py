@@ -104,7 +104,8 @@ def dataset(n_items: int = 3) -> RubricDataset:
 
 
 def dm(**overrides: Any) -> DecisionModelConfig:
-    return DecisionModelConfig(**{"model": "jev-latest", "api_key": API_KEY, **overrides})
+    fields: dict[str, Any] = {"model": "jev-latest", "api_key": API_KEY, **overrides}
+    return DecisionModelConfig(**fields)
 
 
 class _LLM:

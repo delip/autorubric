@@ -12,6 +12,7 @@ import json
 import logging
 import sys
 import types
+from typing import Any
 
 import h11
 import httpx2
@@ -33,7 +34,8 @@ QUESTIONS = {
 
 
 def dm_config(**overrides) -> DecisionModelConfig:
-    return DecisionModelConfig(**{"model": "jev-latest", "api_key": "test-key", **overrides})
+    fields: dict[str, Any] = {"model": "jev-latest", "api_key": "test-key", **overrides}
+    return DecisionModelConfig(**fields)
 
 
 def _http_layer_sends(name: str, value: str) -> bool:
