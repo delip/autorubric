@@ -231,7 +231,9 @@ class ScriptedLLM:
         parsed = (
             self._rubric_judgment(system_prompt, user_prompt)
             if response_format is RubricJudgment
-            else self._judgment(system_prompt, user_prompt)
+            # Hashed in the pre-1.7 layout, the one a rebuilt per-item prompt keeps, so that the
+            # verdicts the hash gives are the same in both modes.
+            else self._judgment(system_prompt, kwargs.get("pre_1_7_user_prompt", user_prompt))
         )
         return GenerateResult(
             content="{}",

@@ -21,7 +21,7 @@ grader = CriterionGrader(
     judges=[
         JudgeSpec(LLMConfig(model="gemini/gemini-3-flash-preview"), "gemini", weight=1.0),
         JudgeSpec(LLMConfig(model="anthropic/claude-sonnet-4-5-20250929"), "claude", weight=1.2),
-        JudgeSpec(LLMConfig(model="openai/gpt-4.1-mini"), "gpt", weight=1.0),
+        JudgeSpec(LLMConfig(model="openai/gpt-5.6-luna"), "gpt", weight=1.0),
     ],
     aggregation="weighted",
 )
@@ -55,7 +55,7 @@ you pass the config by keyword, call it `judge_model_config`:
 
 ```python
 spec = JudgeSpec(
-    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    judge_model_config=LLMConfig(model="openai/gpt-5.6-luna"),
     judge_id="gpt",
     weight=1.0,
 )
@@ -80,7 +80,7 @@ gets its own response-cache entries with `cache_enabled=True`, so a rerun replay
 answers, and each copy of an LLM judge also gets its own option shuffle:
 
 ```python
-judges = [JudgeSpec(LLMConfig(model="openai/gpt-4.1-mini"), f"gpt-{i}") for i in range(3)]
+judges = [JudgeSpec(LLMConfig(model="openai/gpt-5.6-luna"), f"gpt-{i}") for i in range(3)]
 ```
 
 ## Aggregation Strategies

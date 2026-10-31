@@ -211,8 +211,8 @@ from autorubric.graders import JudgeSpec
 
 judges = [
     JudgeSpec(
-        judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
-        judge_id="gpt4-mini",
+        judge_model_config=LLMConfig(model="openai/gpt-5.6-luna"),
+        judge_id="luna",
     ),
     JudgeSpec(
         judge_model_config=LLMConfig(model="gemini/gemini-2.5-flash"),
@@ -394,33 +394,32 @@ Running this pipeline on the flawed rubric above produces dramatic improvement:
 
 ![Rubric Improvement Over Iterations](../images/rubric-improvement-chart.png)
 
-The chart shows how the quality score increases from 0% to 100% while detected issues drop from 21 to 0 over 5 iterations.
+The chart shows how the quality score increases from 0% to 96% while detected issues drop from 28 to 1 over three revisions. The score crossed the 0.95 threshold at iteration 3, where the loop stopped with `thresholds_met`.
 
 | Iteration | Score | Issues | Key Changes |
 |-----------|-------|--------|-------------|
-| 0 (Initial) | 0% | 21 | Generic, vague, double-barreled criteria |
-| 1 | 89% | 2 | Task-specific criteria addressing manufacturing, operation, end-of-life |
-| 2 | 92% | 1 | Split compound criteria, clarified wording |
-| 3 | 95% | 1 | Improved comparative framing |
-| 4 (Final) | 100% | 0 | Balanced weights, fully optimized |
+| 0 (Initial) | 0% | 28 | Generic, vague, double-barreled criteria |
+| 1 | 78% | 5 | 9 task-specific criteria on manufacturing, operation and end-of-life, 3 of them negative |
+| 2 | 87% | 3 | Grew to 12 criteria, fixing the deterministic-assessment and overlap issues |
+| 3 (Final) | 96% | 1 | Split into 14 criteria, one per vehicle and life-cycle stage, with separate comparison checks. `well_defined_options` remains flagged |
 
 ### Qualitative Transformation
 
 The table below shows how specific criteria evolved through the refinement process:
 
-| Aspect | Initial (Iteration 0) | Final (Iteration 4) |
+| Aspect | Initial (Iteration 0) | Final (Iteration 3) |
 |--------|----------------------|---------------------|
-| **Manufacturing** | Not addressed | "Compares the environmental impacts of manufacturing electric vehicle batteries with the manufacturing processes of gasoline vehicles" |
-| **Operation** | Not addressed | "Contrasts the indirect emissions from electricity generation for EVs against the direct tailpipe emissions of gasoline vehicles" |
-| **End-of-Life** | Not addressed | "Compares the environmental implications of EV battery disposal or recycling against the end-of-life processing of gasoline vehicles" |
-| **Writing Quality** | "well-written, accurate, and demonstrates creativity" (double-barreled, vague) | "Organizes the content using specific headers for manufacturing, operation, and end-of-life phases" (specific, observable) |
-| **Overall Quality** | "The response is of high quality" (circular, generic) | "Provides a concluding assessment that weighs the total environmental footprint of EVs against gasoline vehicles" (task-specific) |
+| **Manufacturing** | Not addressed | "The analysis explicitly compares the environmental impacts of EVs and gasoline vehicles within the manufacturing stage, using comparative language (e.g., 'more than', 'less than', 'while')." |
+| **Operation** | Not addressed | "The analysis discusses the environmental impact of the operational phase for electric vehicles, mentioning that the impact depends on the electricity source (e.g., grid mix, renewables)." |
+| **End-of-Life** | Not addressed | "The analysis discusses the environmental impact of the end-of-life phase for electric vehicles, mentioning battery recycling, disposal, or second-life applications." |
+| **Writing Quality** | "well-written, accurate, and demonstrates creativity" (double-barreled, vague) | "The analysis is organized into distinct sections or paragraphs that correspond to the life-cycle stages (manufacturing, operation, and end-of-life)." (specific, observable) |
+| **Overall Quality** | "The response is of high quality" (circular, generic) | "The analysis includes at least two distinct pieces of quantitative data (e.g., a percentage, a measurement like 'grams of CO2 per mile', a year) to support claims." (task-specific) |
 
 The transformation illustrates three key improvements:
 
 1. **Generic to task-specific**: Criteria now directly address the EV analysis requirements
-2. **Vague to observable**: "high quality" becomes measurable structural requirements
-3. **Compound to unidimensional**: Multi-aspect criteria split into focused assessments
+2. **Vague to observable**: "high quality" becomes specific claims a judge can check in the text
+3. **Compound to unidimensional**: Multi-aspect criteria split into focused assessments, taking the rubric from 5 criteria to 14
 
 ## Key Takeaways
 
@@ -437,7 +436,7 @@ The transformation illustrates three key improvements:
 
 | Task | Recommended Model | Why |
 |------|------------------|-----|
-| Evaluation | Fast model (Flash/Mini) | Many parallel criterion assessments |
+| Evaluation | Fast model (Flash/Luna) | Many parallel criterion assessments |
 | Revision | Strong model (Pro/4o) | Complex reasoning about rubric design |
 
 ### Convergence

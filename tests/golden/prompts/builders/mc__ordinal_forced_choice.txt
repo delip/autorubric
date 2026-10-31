@@ -1,3 +1,7 @@
+<submission>
+Water boils at 100 degrees Celsius at sea level.
+</submission>
+
 <question>
 How clear is the explanation?
 </question>
@@ -7,7 +11,3 @@ How clear is the explanation?
 2. Somewhat clear
 3. Very clear
 </options>
-
-<submission>
-Water boils at 100 degrees Celsius at sea level.
-</submission>

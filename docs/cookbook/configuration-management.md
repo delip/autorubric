@@ -22,7 +22,7 @@ Create reusable LLM configurations:
 
 ```yaml
 # configs/llm/production.yaml
-model: openai/gpt-4.1-mini
+model: openai/gpt-5.6-luna
 max_tokens: 1024
 cache_enabled: true
 cache_dir: .cache/autorubric
@@ -49,7 +49,7 @@ The config leaves `temperature` unset, so the provider's default applies (see [T
 
 ```yaml
 # configs/llm/development.yaml
-model: openai/gpt-4.1-mini
+model: openai/gpt-5.6-luna
 cache_enabled: true
 cache_dir: .cache/dev
 
@@ -74,7 +74,7 @@ config = LLMConfig.from_yaml(f"configs/llm/{env}.yaml")
 
 | Environment | Model | Cache | Parallelism | Use Case |
 |---|---|---|---|---|
-| development | `gpt-4.1-mini` | Enabled (local) | 1 (default) | Rapid iteration with cached responses |
+| development | `gpt-5.6-luna` | Enabled (local) | 1 (default) | Rapid iteration with cached responses |
 | staging | `gpt-4.1` | Disabled | 10 | Pre-production validation on full model |
 | production | `gpt-4.1` | Prompt caching | 50 | High-throughput batch evaluation |
 
@@ -222,7 +222,7 @@ name: paper-review-experiment-v2
 description: "Evaluate peer review quality with improved rubric"
 
 llm:
-  model: openai/gpt-4.1-mini
+  model: openai/gpt-5.6-luna
   max_parallel_requests: 20
 
 rubric_file: configs/rubrics/paper_review_v2.json
@@ -326,7 +326,7 @@ def experiment_name(rubric_version: str, dataset_version: str, model: str) -> st
     return f"{rubric_version}-{date}-{short_hash}"
 
 # Usage
-name = experiment_name("paper_review_v2", "reviews_2024", "gpt4-mini")
+name = experiment_name("paper_review_v2", "reviews_2024", "luna")
 # Output: "paper_review_v2-20240115-a3f2b1c9"
 ```
 
@@ -411,12 +411,12 @@ def create_config_structure():
     # LLM configs
     llm_configs = {
         "development": {
-            "model": "openai/gpt-4.1-mini",
+            "model": "openai/gpt-5.6-luna",
             "cache_enabled": True,
             "cache_dir": ".cache/dev",
         },
         "production": {
-            "model": "openai/gpt-4.1-mini",
+            "model": "openai/gpt-5.6-luna",
             "cache_enabled": True,
             "cache_dir": ".cache/prod",
             "max_parallel_requests": 20,
@@ -492,7 +492,7 @@ def create_config_structure():
         "name": "paper-review-eval-v2",
         "description": "Evaluate peer review quality",
         "llm": {
-            "model": "openai/gpt-4.1-mini",
+            "model": "openai/gpt-5.6-luna",
             "max_parallel_requests": 20,
         },
         "rubric_file": "configs/rubrics/paper_review.json",

@@ -145,7 +145,7 @@ grader = CriterionGrader(
     judges=[
         JudgeSpec(jev, "jev"),
         JudgeSpec(LLMConfig(model="gemini/gemini-3-flash-preview"), "gemini"),
-        JudgeSpec(LLMConfig(model="openai/gpt-4.1-mini"), "gpt"),
+        JudgeSpec(LLMConfig(model="openai/gpt-5.6-luna"), "gpt"),
     ],
     aggregation="majority",
 )

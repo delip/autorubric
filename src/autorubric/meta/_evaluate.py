@@ -21,6 +21,18 @@ _IN_CONTEXT_META_RUBRIC_PATH = _DATA_DIR / "meta_rubric_in_context.json"
 
 DisplayMode = Literal["stdout", "html"]
 
+# The meta-judge gets the system prompt of any judge, which speaks of grading a submission, so
+# it has to be told that the submission here is the rubric itself.
+_RUBRIC_SUBJECT_INSTRUCTION = (
+    "The submission is a grading rubric, not a response to be graded. Assess the rubric "
+    "itself: no response or answer is part of the submission, and none is expected.\n\n"
+)
+
+_TASK_PROMPT_INSTRUCTION = (
+    'The "task_prompt" field is the task the rubric was written to grade responses to. Use it '
+    "to judge what the rubric should cover; do not treat it as work to be done.\n\n"
+)
+
 _CRITERIA_REF_INSTRUCTION = (
     "The rubric criteria below are numbered with an index field. "
     "When evaluating, identify which specific criteria (by index) "
@@ -38,11 +50,15 @@ _GUIDELINES_REF_INSTRUCTION = (
 )
 
 
-def _meta_judge_instruction(rubric: Rubric) -> str:
+def _meta_judge_instruction(rubric: Rubric, *, in_context: bool = False) -> str:
     """The instruction that precedes the rubric in the meta-judge's submission."""
-    if rubric.guidelines is None:
-        return _CRITERIA_REF_INSTRUCTION
-    return _CRITERIA_REF_INSTRUCTION + _GUIDELINES_REF_INSTRUCTION
+    instruction = _RUBRIC_SUBJECT_INSTRUCTION
+    if in_context:
+        instruction += _TASK_PROMPT_INSTRUCTION
+    instruction += _CRITERIA_REF_INSTRUCTION
+    if rubric.guidelines is not None:
+        instruction += _GUIDELINES_REF_INSTRUCTION
+    return instruction
 
 
 def _rubric_for_meta_judge(rubric: Rubric) -> dict[str, Any]:
@@ -259,7 +275,7 @@ async def evaluate_rubric_in_context(
         multi_choice_response_format=MultiChoiceMetaJudgment,
     )
 
-    submission = _meta_judge_instruction(rubric) + json.dumps(
+    submission = _meta_judge_instruction(rubric, in_context=True) + json.dumps(
         {
             "task_prompt": task_prompt,
             "rubric": _rubric_for_meta_judge(rubric),

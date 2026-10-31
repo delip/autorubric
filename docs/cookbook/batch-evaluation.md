@@ -69,7 +69,7 @@ dataset = RubricDataset.from_file("customer_feedback.json")
 # Configure grader with rate limiting
 grader = CriterionGrader(
     judge_model_config=LLMConfig(
-        model="openai/gpt-4.1-mini",
+        model="openai/gpt-5.6-luna",
         max_parallel_requests=20,  # Provider-level rate limit
     )
 )
@@ -246,7 +246,7 @@ Balance throughput against rate limits:
 # Limits concurrent API calls to this provider
 grader = CriterionGrader(
     judge_model_config=LLMConfig(
-        model="openai/gpt-4.1-mini",
+        model="openai/gpt-5.6-luna",
         max_parallel_requests=20,  # Max 20 concurrent OpenAI calls
     )
 )
@@ -266,7 +266,7 @@ from autorubric.graders import JudgeSpec
 grader = CriterionGrader(
     judges=[
         JudgeSpec(
-            LLMConfig(model="openai/gpt-4.1-mini", max_parallel_requests=15),
+            LLMConfig(model="openai/gpt-5.6-luna", max_parallel_requests=15),
             judge_id="openai"
         ),
         JudgeSpec(
@@ -395,7 +395,7 @@ async def run_batch_evaluation():
     # Configure grader
     grader = CriterionGrader(
         judge_model_config=LLMConfig(
-            model="openai/gpt-4.1-mini",
+            model="openai/gpt-5.6-luna",
             max_parallel_requests=10,  # Rate limit
         )
     )

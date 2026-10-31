@@ -95,7 +95,7 @@ from autorubric import LLMConfig
 from autorubric.graders import CriterionGrader
 
 baseline_grader = CriterionGrader(
-    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini")
+    judge_model_config=LLMConfig(model="openai/gpt-5.6-luna")
 )
 ```
 
@@ -107,7 +107,7 @@ Now create a grader that uses training examples:
 from autorubric import FewShotConfig
 
 calibrated_grader = CriterionGrader(
-    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    judge_model_config=LLMConfig(model="openai/gpt-5.6-luna"),
     training_data=train_data,
     few_shot_config=FewShotConfig(
         n_examples=3,           # 3 examples per criterion (this grader's default llm_calls="per_criterion")
@@ -177,26 +177,30 @@ async def compare_graders():
 asyncio.run(compare_graders())
 ```
 
-Sample output:
+Output from running the appendix's dataset on 2026-10-30:
 
 ```
 === BASELINE (no few-shot) ===
-Criterion Accuracy: 75.0%
-Cohen's Kappa: 0.412
+Criterion Accuracy: 100.0%
+Cohen's Kappa: 1.000
 
 === CALIBRATED (3-shot) ===
-Criterion Accuracy: 90.0%
-Cohen's Kappa: 0.782
+Criterion Accuracy: 100.0%
+Cohen's Kappa: 1.000
 ```
 
-![Few-shot calibration comparison showing accuracy and kappa improvements](../images/fewshot-calibration-comparison.png)
+![Few-shot calibration comparison: baseline and calibrated both reach 100% accuracy and kappa 1.000](../images/fewshot-calibration-comparison.png)
 
 | Metric | Baseline | Calibrated (3-shot) | Delta |
 |---|---|---|---|
-| Criterion Accuracy | 75.0% | 90.0% | +15.0% |
-| Cohen's Kappa | 0.412 | 0.782 | +0.370 |
-| False Compliant Rate | 30.0% | 10.0% | -20.0% |
-| Cost per Item | $0.0032 | $0.0051 | +$0.0019 |
+| Criterion Accuracy | 100.0% | 100.0% | +0.0% |
+| Cohen's Kappa | 1.000 | 1.000 | +0.000 |
+| False Compliant Rate | 0.0% | 0.0% | +0.0% |
+| Cost per Item | $0.00051 | $0.00087 | +$0.00037 |
+
+False Compliant Rate is the share of the non-compliant test cells that the judge marked compliant. A cell is non-compliant when a positive criterion is UNMET or `missing_jurisdiction` is MET, which covers 8 of the 20 cells here.
+
+The judge labelled all 20 test cells (5 clauses × 4 criteria) correctly without any examples, and again in two more runs of both graders. So on this test set the examples had nothing to fix, and calibration only added cost. To see a gain, run this comparison on clauses the judge gets wrong, and hold out more than five of them.
 
 ### Step 6: Tune Example Count
 
@@ -205,7 +209,7 @@ Experiment with different numbers of examples:
 ```python
 for n in [1, 2, 3, 5]:
     grader = CriterionGrader(
-        judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
+        judge_model_config=LLMConfig(model="openai/gpt-5.6-luna"),
         training_data=train_data,
         few_shot_config=FewShotConfig(n_examples=n, balance_verdicts=True)
     )
@@ -228,7 +232,7 @@ for n in [1, 2, 3, 5]:
 
 ## Key Takeaways
 
-- **Few-shot calibration** significantly improves accuracy on nuanced criteria
+- **Few-shot calibration** can help only where the judge makes mistakes: on this page's five test clauses it had none to fix
 - **`balance_verdicts=True`** ensures the judge sees examples of both MET and UNMET
 - **Split your data** into training (few-shot) and test (evaluation) sets
 - **Measure improvement** with `compute_metrics()` against ground truth
@@ -464,12 +468,12 @@ async def main():
 
     # Baseline grader (no few-shot)
     baseline_grader = CriterionGrader(
-        judge_model_config=LLMConfig(model="openai/gpt-4.1-mini")
+        judge_model_config=LLMConfig(model="openai/gpt-5.6-luna")
     )
 
     # Calibrated grader (3-shot)
     calibrated_grader = CriterionGrader(
-        judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
+        judge_model_config=LLMConfig(model="openai/gpt-5.6-luna"),
         training_data=train_data,
         few_shot_config=FewShotConfig(
             n_examples=3,

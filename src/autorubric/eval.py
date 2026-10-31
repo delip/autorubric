@@ -958,7 +958,7 @@ class EvalRunner:
         >>> dataset = RubricDataset.from_file("data.json")
         >>> grader = CriterionGrader(
         ...     judge_model_config=LLMConfig(
-        ...         model="openai/gpt-4.1-mini",
+        ...         model="openai/gpt-5.6-luna",
         ...         max_parallel_requests=10,
         ...     )
         ... )

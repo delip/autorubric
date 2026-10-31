@@ -15,7 +15,7 @@ from autorubric import LLMConfig, LLMClient, generate
 
 # Configuration
 config = LLMConfig(
-    model="openai/gpt-4.1-mini",
+    model="openai/gpt-5.6-luna",
     max_tokens=1024,
     cache_enabled=True,
     max_parallel_requests=10,
@@ -25,7 +25,7 @@ config = LLMConfig(
 result = await generate(
     system_prompt="You are a helpful assistant.",
     user_prompt="Explain quantum computing.",
-    model="openai/gpt-4.1-mini",
+    model="openai/gpt-5.6-luna",
 )
 print(result)
 
@@ -41,7 +41,7 @@ result = await client.generate(
 
 | Provider | Model Format | Environment Variable |
 |----------|-------------|---------------------|
-| OpenAI | `openai/gpt-4.1`, `openai/gpt-4.1-mini` | `OPENAI_API_KEY` |
+| OpenAI | `openai/gpt-4.1`, `openai/gpt-5.6-luna` | `OPENAI_API_KEY` |
 | Anthropic | `anthropic/claude-sonnet-4-5-20250929` | `ANTHROPIC_API_KEY` |
 | Google | `gemini/gemini-2.5-flash` | `GEMINI_API_KEY` |
 | Azure | `azure/openai/gpt-4.1` | `AZURE_API_KEY`, `AZURE_API_BASE` |
@@ -56,8 +56,10 @@ An explicit value, including `0.0`, is sent unchanged. A `temperature=` keyword 
 
 ```python
 LLMConfig(model="openai/gpt-5.2")                        # temperature omitted: provider default
-LLMConfig(model="openai/gpt-4.1-mini", temperature=0.0)  # temperature=0.0 sent
+LLMConfig(model="gemini/gemini-3.8-flash", temperature=0.0)  # temperature=0.0 sent
 ```
+
+Some models refuse it: OpenAI's Luna models accept neither a custom `temperature` nor `top_p`, so leave both unset for them.
 
 A low temperature reduces run-to-run variance, but most providers do not guarantee identical outputs even at `0.0`.
 
@@ -69,8 +71,8 @@ A low temperature reduces run-to-run variance, but most providers do not guarant
 `max_tokens` and `top_p` also default to `None`, which leaves them out of the request so the provider's own limit and default apply. A value you set is sent unchanged, including `top_p=0.0`. `LLMConfig` refuses a value no provider can mean with a `ValueError`: a `max_tokens` that is not an integer of at least 1, or a `top_p` that is not a number between 0 and 1 (a `bool` is not taken for a number).
 
 ```python
-LLMConfig(model="openai/gpt-4.1-mini", max_tokens=1024, top_p=0.0)  # both sent
-LLMConfig(model="openai/gpt-4.1-mini", max_tokens=0)                 # ValueError
+LLMConfig(model="gemini/gemini-3.8-flash", max_tokens=1024, top_p=0.0)  # both sent
+LLMConfig(model="gemini/gemini-3.8-flash", max_tokens=0)                 # ValueError
 ```
 
 !!! note "Changed behaviour"
@@ -128,7 +130,7 @@ Supported providers: Anthropic, OpenAI (o-series), Gemini (2.5+), DeepSeek.
 
 ```python
 config = LLMConfig(
-    model="openai/gpt-4.1-mini",
+    model="openai/gpt-5.6-luna",
     cache_enabled=True,
     cache_dir=".autorubric_cache",
     cache_ttl=3600,  # 1 hour
@@ -142,7 +144,7 @@ stats = client.cache_stats()
 
 ## Prompt Caching (Anthropic)
 
-Reduce latency and cost on repeated calls. Enabled by default:
+Reduce latency and cost on repeated calls. Enabled by default, it arranges per-criterion requests so that providers can reuse what an item's calls share:
 
 ```python
 config = LLMConfig(

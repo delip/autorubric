@@ -65,8 +65,8 @@ class TokenUsage:
         prompt_tokens: Number of tokens in the prompt/input.
         completion_tokens: Number of tokens in the completion/output.
         total_tokens: Total tokens (prompt + completion).
-        cache_creation_input_tokens: Tokens used to create cache entries (Anthropic).
-        cache_read_input_tokens: Tokens read from cache (Anthropic).
+        cache_creation_input_tokens: Tokens written to the provider's prompt cache.
+        cache_read_input_tokens: Tokens read from the provider's prompt cache.
 
     Example:
         >>> usage = TokenUsage(prompt_tokens=100, completion_tokens=50, total_tokens=150)

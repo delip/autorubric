@@ -5,61 +5,61 @@
         "judge_id": "alpha",
         "response_format": "CriterionJudgment",
         "system_prompt_sha256": "c871088134842a74fc3258e208f613bfb17ac3c6416af256aa0c28aa22890bea",
-        "user_prompt": "<criterion_type>\nnegative\n</criterion_type>\n\n<criterion>\nRecommends drinking untreated river water\n</criterion>\n\n<input>At what temperature does water boil?</input>\n\n<submission>\nWater boils at 100 degrees Celsius at sea level.\n</submission>"
+        "user_prompt": "<input>At what temperature does water boil?</input>\n\n<submission>\nWater boils at 100 degrees Celsius at sea level.\n</submission>\n\n<criterion_type>\nnegative\n</criterion_type>\n\n<criterion>\nRecommends drinking untreated river water\n</criterion>"
       },
       {
         "judge_id": "alpha",
         "response_format": "CriterionJudgment",
         "system_prompt_sha256": "c871088134842a74fc3258e208f613bfb17ac3c6416af256aa0c28aa22890bea",
-        "user_prompt": "<criterion_type>\npositive\n</criterion_type>\n\n<criterion>\nStates the boiling point of water at sea level\n</criterion>\n\n<input>At what temperature does water boil?</input>\n\n<submission>\nWater boils at 100 degrees Celsius at sea level.\n</submission>"
+        "user_prompt": "<input>At what temperature does water boil?</input>\n\n<submission>\nWater boils at 100 degrees Celsius at sea level.\n</submission>\n\n<criterion_type>\npositive\n</criterion_type>\n\n<criterion>\nStates the boiling point of water at sea level\n</criterion>"
       },
       {
         "judge_id": "alpha",
         "response_format": "MultiChoiceJudgment",
         "system_prompt_sha256": "d71d520e98f15f1c9f61e3a3074f8d29a24e01bf0e477eb1352565b673d92adc",
-        "user_prompt": "<question>\nHow clear is the explanation?\n</question>\n\n<options>\n1. Cannot assess / not applicable\n2. Very unclear\n3. Very clear\n4. Somewhat clear\n</options>\n\n<input>At what temperature does water boil?</input>\n\n<submission>\nWater boils at 100 degrees Celsius at sea level.\n</submission>"
+        "user_prompt": "<input>At what temperature does water boil?</input>\n\n<submission>\nWater boils at 100 degrees Celsius at sea level.\n</submission>\n\n<question>\nHow clear is the explanation?\n</question>\n\n<options>\n1. Cannot assess / not applicable\n2. Very unclear\n3. Very clear\n4. Somewhat clear\n</options>"
       },
       {
         "judge_id": "alpha",
         "response_format": "MultiChoiceJudgment",
         "system_prompt_sha256": "d71d520e98f15f1c9f61e3a3074f8d29a24e01bf0e477eb1352565b673d92adc",
-        "user_prompt": "<question>\nHow specific are the safety instructions?\n</question>\n\n<options>\n1. Vague\n2. Insufficient data (cannot assess / not applicable)\n3. Partly specific\n4. Fully specific\n</options>\n\n<input>At what temperature does water boil?</input>\n\n<submission>\nWater boils at 100 degrees Celsius at sea level.\n</submission>"
+        "user_prompt": "<input>At what temperature does water boil?</input>\n\n<submission>\nWater boils at 100 degrees Celsius at sea level.\n</submission>\n\n<question>\nHow specific are the safety instructions?\n</question>\n\n<options>\n1. Vague\n2. Insufficient data (cannot assess / not applicable)\n3. Partly specific\n4. Fully specific\n</options>"
       },
       {
         "judge_id": "alpha",
         "response_format": "MultiChoiceJudgment",
         "system_prompt_sha256": "d71d520e98f15f1c9f61e3a3074f8d29a24e01bf0e477eb1352565b673d92adc",
-        "user_prompt": "<question>\nWhich register best describes the answer?\n</question>\n\n<options>\n1. Formal\n2. Conversational\n3. N/A\n4. Slang\n</options>\n\n<input>At what temperature does water boil?</input>\n\n<submission>\nWater boils at 100 degrees Celsius at sea level.\n</submission>"
+        "user_prompt": "<input>At what temperature does water boil?</input>\n\n<submission>\nWater boils at 100 degrees Celsius at sea level.\n</submission>\n\n<question>\nWhich register best describes the answer?\n</question>\n\n<options>\n1. Formal\n2. Conversational\n3. N/A\n4. Slang\n</options>"
       },
       {
         "judge_id": "beta",
         "response_format": "CriterionJudgment",
         "system_prompt_sha256": "c871088134842a74fc3258e208f613bfb17ac3c6416af256aa0c28aa22890bea",
-        "user_prompt": "<criterion_type>\nnegative\n</criterion_type>\n\n<criterion>\nRecommends drinking untreated river water\n</criterion>\n\n<input>At what temperature does water boil?</input>\n\n<submission>\nWater boils at 100 degrees Celsius at sea level.\n</submission>"
+        "user_prompt": "<input>At what temperature does water boil?</input>\n\n<submission>\nWater boils at 100 degrees Celsius at sea level.\n</submission>\n\n<criterion_type>\nnegative\n</criterion_type>\n\n<criterion>\nRecommends drinking untreated river water\n</criterion>"
       },
       {
         "judge_id": "beta",
         "response_format": "CriterionJudgment",
         "system_prompt_sha256": "c871088134842a74fc3258e208f613bfb17ac3c6416af256aa0c28aa22890bea",
-        "user_prompt": "<criterion_type>\npositive\n</criterion_type>\n\n<criterion>\nStates the boiling point of water at sea level\n</criterion>\n\n<input>At what temperature does water boil?</input>\n\n<submission>\nWater boils at 100 degrees Celsius at sea level.\n</submission>"
+        "user_prompt": "<input>At what temperature does water boil?</input>\n\n<submission>\nWater boils at 100 degrees Celsius at sea level.\n</submission>\n\n<criterion_type>\npositive\n</criterion_type>\n\n<criterion>\nStates the boiling point of water at sea level\n</criterion>"
       },
       {
         "judge_id": "beta",
         "response_format": "MultiChoiceJudgment",
         "system_prompt_sha256": "d71d520e98f15f1c9f61e3a3074f8d29a24e01bf0e477eb1352565b673d92adc",
-        "user_prompt": "<question>\nHow clear is the explanation?\n</question>\n\n<options>\n1. Very clear\n2. Somewhat clear\n3. Very unclear\n4. Cannot assess / not applicable\n</options>\n\n<input>At what temperature does water boil?</input>\n\n<submission>\nWater boils at 100 degrees Celsius at sea level.\n</submission>"
+        "user_prompt": "<input>At what temperature does water boil?</input>\n\n<submission>\nWater boils at 100 degrees Celsius at sea level.\n</submission>\n\n<question>\nHow clear is the explanation?\n</question>\n\n<options>\n1. Very clear\n2. Somewhat clear\n3. Very unclear\n4. Cannot assess / not applicable\n</options>"
       },
       {
         "judge_id": "beta",
         "response_format": "MultiChoiceJudgment",
         "system_prompt_sha256": "d71d520e98f15f1c9f61e3a3074f8d29a24e01bf0e477eb1352565b673d92adc",
-        "user_prompt": "<question>\nHow specific are the safety instructions?\n</question>\n\n<options>\n1. Fully specific\n2. Partly specific\n3. Insufficient data (cannot assess / not applicable)\n4. Vague\n</options>\n\n<input>At what temperature does water boil?</input>\n\n<submission>\nWater boils at 100 degrees Celsius at sea level.\n</submission>"
+        "user_prompt": "<input>At what temperature does water boil?</input>\n\n<submission>\nWater boils at 100 degrees Celsius at sea level.\n</submission>\n\n<question>\nHow specific are the safety instructions?\n</question>\n\n<options>\n1. Fully specific\n2. Partly specific\n3. Insufficient data (cannot assess / not applicable)\n4. Vague\n</options>"
       },
       {
         "judge_id": "beta",
         "response_format": "MultiChoiceJudgment",
         "system_prompt_sha256": "d71d520e98f15f1c9f61e3a3074f8d29a24e01bf0e477eb1352565b673d92adc",
-        "user_prompt": "<question>\nWhich register best describes the answer?\n</question>\n\n<options>\n1. Slang\n2. Formal\n3. Conversational\n4. N/A\n</options>\n\n<input>At what temperature does water boil?</input>\n\n<submission>\nWater boils at 100 degrees Celsius at sea level.\n</submission>"
+        "user_prompt": "<input>At what temperature does water boil?</input>\n\n<submission>\nWater boils at 100 degrees Celsius at sea level.\n</submission>\n\n<question>\nWhich register best describes the answer?\n</question>\n\n<options>\n1. Slang\n2. Formal\n3. Conversational\n4. N/A\n</options>"
       }
     ],
     "few_shot_plain_query": [
@@ -67,19 +67,19 @@
         "judge_id": "golden",
         "response_format": "CriterionJudgment",
         "system_prompt_sha256": "bb3c5ab0efb3f23cff9c5cdf8cc8551c07a15a24a6b3a32bb1ec1d96372a23ad",
-        "user_prompt": "<criterion_type>\nnegative\n</criterion_type>\n\n<criterion>\nRecommends drinking untreated river water\n</criterion>\n\n<examples>\n<example_1>\n<example_submission>Training answer 2: water boils at 97 degrees.</example_submission>\n<verdict>MET</verdict>\n</example_1>\n<example_2>\n<example_submission>Training answer 3: water boils at 98 degrees.</example_submission>\n<verdict>UNMET</verdict>\n</example_2>\n</examples>\n\n<input>At what temperature does water boil?</input>\n\n<submission>\nWater boils at 100 degrees Celsius at sea level.\n</submission>"
+        "user_prompt": "<input>At what temperature does water boil?</input>\n\n<submission>\nWater boils at 100 degrees Celsius at sea level.\n</submission>\n\n<examples>\n<example_1>\n<example_submission>Training answer 2: water boils at 97 degrees.</example_submission>\n<verdict>MET</verdict>\n</example_1>\n<example_2>\n<example_submission>Training answer 1: water boils at 96 degrees.</example_submission>\n<verdict>UNMET</verdict>\n</example_2>\n</examples>\n\n<criterion_type>\npositive\n</criterion_type>\n\n<criterion>\nStates the boiling point of water at sea level\n</criterion>"
       },
       {
         "judge_id": "golden",
         "response_format": "CriterionJudgment",
         "system_prompt_sha256": "bb3c5ab0efb3f23cff9c5cdf8cc8551c07a15a24a6b3a32bb1ec1d96372a23ad",
-        "user_prompt": "<criterion_type>\npositive\n</criterion_type>\n\n<criterion>\nStates the boiling point of water at sea level\n</criterion>\n\n<examples>\n<example_1>\n<example_submission>Training answer 2: water boils at 97 degrees.</example_submission>\n<verdict>MET</verdict>\n</example_1>\n<example_2>\n<example_submission>Training answer 1: water boils at 96 degrees.</example_submission>\n<verdict>UNMET</verdict>\n</example_2>\n</examples>\n\n<input>At what temperature does water boil?</input>\n\n<submission>\nWater boils at 100 degrees Celsius at sea level.\n</submission>"
+        "user_prompt": "<input>At what temperature does water boil?</input>\n\n<submission>\nWater boils at 100 degrees Celsius at sea level.\n</submission>\n\n<examples>\n<example_1>\n<example_submission>Training answer 2: water boils at 97 degrees.</example_submission>\n<verdict>MET</verdict>\n</example_1>\n<example_2>\n<example_submission>Training answer 3: water boils at 98 degrees.</example_submission>\n<verdict>UNMET</verdict>\n</example_2>\n</examples>\n\n<criterion_type>\nnegative\n</criterion_type>\n\n<criterion>\nRecommends drinking untreated river water\n</criterion>"
       },
       {
         "judge_id": "golden",
         "response_format": "MultiChoiceJudgment",
         "system_prompt_sha256": "2c5b8d9f2673d65fc5faa9d0226ae307a8f6f06a87402e650635bdcc95fc674c",
-        "user_prompt": "<question>\nHow clear is the explanation?\n</question>\n\n<options>\n1. Very clear\n2. Cannot assess / not applicable\n3. Somewhat clear\n4. Very unclear\n</options>\n\n<examples>\n<example_1>\n<example_submission>Training answer 1: water boils at 96 degrees.</example_submission>\n<selected_option>4</selected_option>\n<selected_label>Very unclear</selected_label>\n</example_1>\n<example_2>\n<example_submission>Training answer 2: water boils at 97 degrees.</example_submission>\n<selected_option>3</selected_option>\n<selected_label>Somewhat clear</selected_label>\n</example_2>\n</examples>\n\n<input>At what temperature does water boil?</input>\n\n<submission>\nWater boils at 100 degrees Celsius at sea level.\n</submission>"
+        "user_prompt": "<input>At what temperature does water boil?</input>\n\n<submission>\nWater boils at 100 degrees Celsius at sea level.\n</submission>\n\n<examples>\n<example_1>\n<example_submission>Training answer 1: water boils at 96 degrees.</example_submission>\n<selected_option>4</selected_option>\n<selected_label>Very unclear</selected_label>\n</example_1>\n<example_2>\n<example_submission>Training answer 2: water boils at 97 degrees.</example_submission>\n<selected_option>3</selected_option>\n<selected_label>Somewhat clear</selected_label>\n</example_2>\n</examples>\n\n<question>\nHow clear is the explanation?\n</question>\n\n<options>\n1. Very clear\n2. Cannot assess / not applicable\n3. Somewhat clear\n4. Very unclear\n</options>"
       }
     ],
     "forced_choice_unshuffled_plain": [
@@ -87,31 +87,31 @@
         "judge_id": "golden",
         "response_format": "CriterionJudgment",
         "system_prompt_sha256": "c871088134842a74fc3258e208f613bfb17ac3c6416af256aa0c28aa22890bea",
-        "user_prompt": "<criterion_type>\nnegative\n</criterion_type>\n\n<criterion>\nRecommends drinking untreated river water\n</criterion>\n\n<submission>\nWater boils at 100 degrees Celsius at sea level.\n</submission>"
+        "user_prompt": "<submission>\nWater boils at 100 degrees Celsius at sea level.\n</submission>\n\n<criterion_type>\nnegative\n</criterion_type>\n\n<criterion>\nRecommends drinking untreated river water\n</criterion>"
       },
       {
         "judge_id": "golden",
         "response_format": "CriterionJudgment",
         "system_prompt_sha256": "c871088134842a74fc3258e208f613bfb17ac3c6416af256aa0c28aa22890bea",
-        "user_prompt": "<criterion_type>\npositive\n</criterion_type>\n\n<criterion>\nStates the boiling point of water at sea level\n</criterion>\n\n<submission>\nWater boils at 100 degrees Celsius at sea level.\n</submission>"
+        "user_prompt": "<submission>\nWater boils at 100 degrees Celsius at sea level.\n</submission>\n\n<criterion_type>\npositive\n</criterion_type>\n\n<criterion>\nStates the boiling point of water at sea level\n</criterion>"
       },
       {
         "judge_id": "golden",
         "response_format": "MultiChoiceJudgment",
         "system_prompt_sha256": "d71d520e98f15f1c9f61e3a3074f8d29a24e01bf0e477eb1352565b673d92adc",
-        "user_prompt": "<question>\nHow clear is the explanation?\n</question>\n\n<options>\n1. Very unclear\n2. Somewhat clear\n3. Very clear\n</options>\n\n<submission>\nWater boils at 100 degrees Celsius at sea level.\n</submission>"
+        "user_prompt": "<submission>\nWater boils at 100 degrees Celsius at sea level.\n</submission>\n\n<question>\nHow clear is the explanation?\n</question>\n\n<options>\n1. Very unclear\n2. Somewhat clear\n3. Very clear\n</options>"
       },
       {
         "judge_id": "golden",
         "response_format": "MultiChoiceJudgment",
         "system_prompt_sha256": "d71d520e98f15f1c9f61e3a3074f8d29a24e01bf0e477eb1352565b673d92adc",
-        "user_prompt": "<question>\nHow specific are the safety instructions?\n</question>\n\n<options>\n1. Vague\n2. Partly specific\n3. Fully specific\n4. Insufficient data (cannot assess / not applicable)\n</options>\n\n<submission>\nWater boils at 100 degrees Celsius at sea level.\n</submission>"
+        "user_prompt": "<submission>\nWater boils at 100 degrees Celsius at sea level.\n</submission>\n\n<question>\nHow specific are the safety instructions?\n</question>\n\n<options>\n1. Vague\n2. Partly specific\n3. Fully specific\n4. Insufficient data (cannot assess / not applicable)\n</options>"
       },
       {
         "judge_id": "golden",
         "response_format": "MultiChoiceJudgment",
         "system_prompt_sha256": "d71d520e98f15f1c9f61e3a3074f8d29a24e01bf0e477eb1352565b673d92adc",
-        "user_prompt": "<question>\nWhich register best describes the answer?\n</question>\n\n<options>\n1. Formal\n2. Conversational\n3. Slang\n4. N/A\n</options>\n\n<submission>\nWater boils at 100 degrees Celsius at sea level.\n</submission>"
+        "user_prompt": "<submission>\nWater boils at 100 degrees Celsius at sea level.\n</submission>\n\n<question>\nWhich register best describes the answer?\n</question>\n\n<options>\n1. Formal\n2. Conversational\n3. Slang\n4. N/A\n</options>"
       }
     ],
     "single_judge_structured_query_reference": [
@@ -119,31 +119,31 @@
         "judge_id": "golden",
         "response_format": "CriterionJudgment",
         "system_prompt_sha256": "c871088134842a74fc3258e208f613bfb17ac3c6416af256aa0c28aa22890bea",
-        "user_prompt": "<criterion_type>\nnegative\n</criterion_type>\n\n<criterion>\nRecommends drinking untreated river water\n</criterion>\n\n<input>At what temperature does water boil?</input>\n\n<reference_submission>\nAt sea level, water boils at 100 °C (212 °F).\n</reference_submission>\n\n<submission>\n<thinking>Recall the value.</thinking>\n<output>Water boils at 100 degrees Celsius at sea level.</output>\n</submission>"
+        "user_prompt": "<input>At what temperature does water boil?</input>\n\n<reference_submission>\nAt sea level, water boils at 100 °C (212 °F).\n</reference_submission>\n\n<submission>\n<thinking>Recall the value.</thinking>\n<output>Water boils at 100 degrees Celsius at sea level.</output>\n</submission>\n\n<criterion_type>\nnegative\n</criterion_type>\n\n<criterion>\nRecommends drinking untreated river water\n</criterion>"
       },
       {
         "judge_id": "golden",
         "response_format": "CriterionJudgment",
         "system_prompt_sha256": "c871088134842a74fc3258e208f613bfb17ac3c6416af256aa0c28aa22890bea",
-        "user_prompt": "<criterion_type>\npositive\n</criterion_type>\n\n<criterion>\nStates the boiling point of water at sea level\n</criterion>\n\n<input>At what temperature does water boil?</input>\n\n<reference_submission>\nAt sea level, water boils at 100 °C (212 °F).\n</reference_submission>\n\n<submission>\n<thinking>Recall the value.</thinking>\n<output>Water boils at 100 degrees Celsius at sea level.</output>\n</submission>"
+        "user_prompt": "<input>At what temperature does water boil?</input>\n\n<reference_submission>\nAt sea level, water boils at 100 °C (212 °F).\n</reference_submission>\n\n<submission>\n<thinking>Recall the value.</thinking>\n<output>Water boils at 100 degrees Celsius at sea level.</output>\n</submission>\n\n<criterion_type>\npositive\n</criterion_type>\n\n<criterion>\nStates the boiling point of water at sea level\n</criterion>"
       },
       {
         "judge_id": "golden",
         "response_format": "MultiChoiceJudgment",
         "system_prompt_sha256": "d71d520e98f15f1c9f61e3a3074f8d29a24e01bf0e477eb1352565b673d92adc",
-        "user_prompt": "<question>\nHow clear is the explanation?\n</question>\n\n<options>\n1. Very unclear\n2. Very clear\n3. Cannot assess / not applicable\n4. Somewhat clear\n</options>\n\n<input>At what temperature does water boil?</input>\n\n<reference_submission>\nAt sea level, water boils at 100 °C (212 °F).\n</reference_submission>\n\n<submission>\n<thinking>Recall the value.</thinking>\n<output>Water boils at 100 degrees Celsius at sea level.</output>\n</submission>"
+        "user_prompt": "<input>At what temperature does water boil?</input>\n\n<reference_submission>\nAt sea level, water boils at 100 °C (212 °F).\n</reference_submission>\n\n<submission>\n<thinking>Recall the value.</thinking>\n<output>Water boils at 100 degrees Celsius at sea level.</output>\n</submission>\n\n<question>\nHow clear is the explanation?\n</question>\n\n<options>\n1. Very unclear\n2. Very clear\n3. Cannot assess / not applicable\n4. Somewhat clear\n</options>"
       },
       {
         "judge_id": "golden",
         "response_format": "MultiChoiceJudgment",
         "system_prompt_sha256": "d71d520e98f15f1c9f61e3a3074f8d29a24e01bf0e477eb1352565b673d92adc",
-        "user_prompt": "<question>\nHow specific are the safety instructions?\n</question>\n\n<options>\n1. Fully specific\n2. Vague\n3. Partly specific\n4. Insufficient data (cannot assess / not applicable)\n</options>\n\n<input>At what temperature does water boil?</input>\n\n<reference_submission>\nAt sea level, water boils at 100 °C (212 °F).\n</reference_submission>\n\n<submission>\n<thinking>Recall the value.</thinking>\n<output>Water boils at 100 degrees Celsius at sea level.</output>\n</submission>"
+        "user_prompt": "<input>At what temperature does water boil?</input>\n\n<reference_submission>\nAt sea level, water boils at 100 °C (212 °F).\n</reference_submission>\n\n<submission>\n<thinking>Recall the value.</thinking>\n<output>Water boils at 100 degrees Celsius at sea level.</output>\n</submission>\n\n<question>\nHow specific are the safety instructions?\n</question>\n\n<options>\n1. Fully specific\n2. Vague\n3. Partly specific\n4. Insufficient data (cannot assess / not applicable)\n</options>"
       },
       {
         "judge_id": "golden",
         "response_format": "MultiChoiceJudgment",
         "system_prompt_sha256": "d71d520e98f15f1c9f61e3a3074f8d29a24e01bf0e477eb1352565b673d92adc",
-        "user_prompt": "<question>\nWhich register best describes the answer?\n</question>\n\n<options>\n1. Formal\n2. Slang\n3. Conversational\n4. N/A\n</options>\n\n<input>At what temperature does water boil?</input>\n\n<reference_submission>\nAt sea level, water boils at 100 °C (212 °F).\n</reference_submission>\n\n<submission>\n<thinking>Recall the value.</thinking>\n<output>Water boils at 100 degrees Celsius at sea level.</output>\n</submission>"
+        "user_prompt": "<input>At what temperature does water boil?</input>\n\n<reference_submission>\nAt sea level, water boils at 100 °C (212 °F).\n</reference_submission>\n\n<submission>\n<thinking>Recall the value.</thinking>\n<output>Water boils at 100 degrees Celsius at sea level.</output>\n</submission>\n\n<question>\nWhich register best describes the answer?\n</question>\n\n<options>\n1. Formal\n2. Slang\n3. Conversational\n4. N/A\n</options>"
       }
     ]
   },

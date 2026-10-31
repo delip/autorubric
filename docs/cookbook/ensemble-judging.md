@@ -251,8 +251,8 @@ grader = CriterionGrader(
             weight=2.0  # Trust GPT-4 more
         ),
         JudgeSpec(
-            LLMConfig(model="openai/gpt-4.1-mini"),
-            judge_id="gpt4-mini",
+            LLMConfig(model="openai/gpt-5.6-luna"),
+            judge_id="luna",
             weight=1.0
         ),
         JudgeSpec(
@@ -270,7 +270,7 @@ With these weights:
 - GPT-4 MET + others UNMET → Total weight: 2 MET vs 2 UNMET → Tie (resolves to UNMET for positive-weight criteria)
 - GPT-4 MET + one other MET → Total weight: 3 MET vs 1 UNMET → MET wins
 
-| GPT-4 Vote | GPT-4-Mini Vote | Gemini Flash Vote | Weight (MET vs UNMET) | Result |
+| GPT-4 Vote | Luna Vote | Gemini Flash Vote | Weight (MET vs UNMET) | Result |
 |------------|-----------------|--------------------|-----------------------|--------|
 | MET        | MET             | MET                | 4 vs 0                | MET    |
 | MET        | MET             | UNMET              | 3 vs 1                | MET    |
@@ -375,8 +375,8 @@ dataset = RubricDataset(
 grader = CriterionGrader(
     judges=[
         JudgeSpec(
-            judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
-            judge_id="gpt4-mini",
+            judge_model_config=LLMConfig(model="openai/gpt-5.6-luna"),
+            judge_id="luna",
         ),
         JudgeSpec(
             judge_model_config=LLMConfig(model="anthropic/claude-sonnet-4-5-20250929"),
@@ -586,8 +586,8 @@ async def main():
     grader = CriterionGrader(
         judges=[
             JudgeSpec(
-                judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
-                judge_id="gpt4-mini",
+                judge_model_config=LLMConfig(model="openai/gpt-5.6-luna"),
+                judge_id="luna",
                 weight=1.0
             ),
             JudgeSpec(

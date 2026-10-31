@@ -38,7 +38,7 @@ from autorubric.graders import CriterionGrader
 
 grader = CriterionGrader(
     judge_model_config=LLMConfig(
-        model="openai/gpt-4.1-mini",
+        model="openai/gpt-5.6-luna",
         cache_enabled=True,           # Enable disk caching
         cache_dir=".autorubric_cache", # Cache location
         cache_ttl=86400,              # 24 hours (None = no expiration)
@@ -122,17 +122,17 @@ print(f"Cleared {cleared} cached entries")
 
 ### Step 5: Enable Prompt Caching (Anthropic)
 
-For Anthropic models, prompt caching reduces costs for repeated system prompts:
+Per-criterion grading sends the same system prompt and submission once per criterion. Since 1.7.0 each per-criterion prompt puts them first and the criterion last, so providers can reuse them across an item's calls. `prompt_caching=True` (the default) also sends the shared part as its own message, and lets one call finish before the rest so that the others find a warm cache:
 
 ```python
 grader = CriterionGrader(
     judge_model_config=LLMConfig(
         model="anthropic/claude-sonnet-4-5-20250929",
-        prompt_caching=True,  # Enable Anthropic prompt caching (default)
+        prompt_caching=True,  # The default
     )
 )
 
-# Evaluate - system prompt cached after first call
+# Evaluate - the first call of each item writes the cache and the others read it
 result = await evaluate(dataset, grader)
 
 # Check cache efficiency in token usage
@@ -144,17 +144,19 @@ if result.total_token_usage:
         # Cached tokens are 90% cheaper on Anthropic!
 ```
 
-!!! info "Prompt Caching by Provider"
-    - **Anthropic**: Requires explicit cache_control (AutoRubric handles this)
-    - **OpenAI/DeepSeek**: Automatic for prompts ≥1024 tokens
-    - **Gemini**: Supported on 2.5+ models
+| Provider | What AutoRubric does | Notes |
+|----------|----------------------|-------|
+| Anthropic (`anthropic/`, `claude`, `openrouter/anthropic/`) | `cache_control` on the system prompt and the shared content | Claude through Bedrock or Vertex AI is sent one unmarked message |
+| OpenAI, GPT-5.6 and later | Explicit cache breakpoints on the same two places | Automatic mode rewrites each whole prompt, at 1.25x the input rate |
+| OpenAI, earlier models | The shared content in its own message | Automatic prefix caching |
+| DeepSeek | The shared content in its own message | Automatic prefix caching |
+| Gemini 2.5 and 3 | A five-minute context cache of the system prompt and shared content, from 4,096 tokens | Reads cost a tenth of input and storage is billed by the hour. Shorter prompts are sent as one message, and so is a call whose cache could not be created. |
+| Gemini 4 | One user message, no warming | It refuses context caches, and its automatic cache was too slow to help an item's other calls in our tests on 3.8 Flash |
+| Other models LiteLLM says cache | The shared content in its own message | |
+| Any other model, or any custom `api_base` | One user message, no warming | Some OpenAI-compatible servers refuse consecutive user messages |
 
-| Provider | Cache Type | Min Prompt Size | Discount | Notes |
-|----------|-----------|-----------------|----------|-------|
-| Anthropic | Explicit prefix | 1024 tokens | 90% on cached input | Requires `cache_control` breakpoints; AutoRubric sets these automatically |
-| OpenAI | Automatic prefix | 1024 tokens | 50-90% on cached input, depending on the model | No opt-in needed; applies when the prefix matches a recent request |
-| DeepSeek | Automatic prefix | 1024 tokens | 50-90% on cached input | Behavior mirrors OpenAI; discount varies by model tier |
-| Gemini | Context caching | 32k tokens | 75% on cached input | Best suited for large system prompts or few-shot context |
+!!! note "Few-shot examples are not cached across criteria"
+    Examples are drawn per criterion, so they follow the submission and are paid for in full on every call.
 
 ### Step 6: One Call Per Item Instead of Per Criterion
 
@@ -162,14 +164,14 @@ A per-criterion LLM judge re-sends the system prompt and the submission with eve
 
 ```python
 grader = CriterionGrader(
-    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    judge_model_config=LLMConfig(model="openai/gpt-5.6-luna"),
     llm_calls="per_item",
 )
 ```
 
 For a 10-criterion rubric and a 1,000-token submission, that is roughly 3,400-5,000 input tokens per item and judge instead of roughly 26,700. Fewer, larger requests also raise throughput under a requests-per-minute or tokens-per-minute limit, though a single call writes every criterion's explanation one after another, so per-item wall-clock time can go up rather than down. A failed call now costs a whole item's judgment instead of one criterion's, so give `max_tokens` enough room for every criterion's answer. See [`llm_calls="per_item"`](llm-judges.md#grading-a-whole-rubric-in-one-call) for the full cost model, the failure-scoping trade-off, and the caveat on comparing it against per-criterion grading before switching a production judge over.
 
-[Grading a Whole Rubric in One Call](single-call-grading.md) walks through that comparison and reports a live one: on a 100-answer RiceChem sample, one call per item cost 2.8x less as LiteLLM recorded it (4.2x at list price) and ran 3.3x faster, but graded stricter.
+[Grading a Whole Rubric in One Call](single-call-grading.md) walks through that comparison and reports a live one: on a 100-answer RiceChem sample, one call per item cost 1.8x less as LiteLLM recorded it (3.8x at list price) and ran 2.0x faster, but graded stricter.
 
 ### Step 7: Compare Model Cost vs Accuracy
 
@@ -178,7 +180,7 @@ Evaluate the same dataset with different models:
 ```python
 models = [
     ("openai/gpt-4.1", "GPT-4.1"),
-    ("openai/gpt-4.1-mini", "GPT-4.1-mini"),
+    ("openai/gpt-5.6-luna", "GPT-5.6 Luna"),
     ("anthropic/claude-haiku-4-5-20251001", "Claude Haiku 4.5"),
     ("gemini/gemini-2.5-flash", "Gemini 2.5 Flash"),
 ]
@@ -213,7 +215,7 @@ Model                  Accuracy       Cost       Time
 ----------------------------------------------------
 Gemini 2.5 Flash          87.5%    $0.0012       4.2s
 Claude Haiku 4.5          89.2%    $0.0018       5.1s
-GPT-4.1-mini              91.3%    $0.0034       6.8s
+GPT-5.6 Luna              91.3%    $0.0034       6.8s
 GPT-4.1                   94.1%    $0.0156      12.3s
 ```
 
@@ -231,7 +233,7 @@ Combine strategies for optimal cost:
 grader = CriterionGrader(
     judge_model_config=LLMConfig(
         # Cost-effective model
-        model="openai/gpt-4.1-mini",
+        model="openai/gpt-5.6-luna",
 
         # Response caching for reruns
         cache_enabled=True,
@@ -309,10 +311,10 @@ total exceeds what they spent.
 ## Key Takeaways
 
 - **Response caching** (`cache_enabled=True`) avoids redundant API calls
-- **Prompt caching** reduces costs for repeated system prompts
+- **Prompt caching** reduces the cost of what an item's calls share
 - **Model comparison** reveals cost vs accuracy trade-offs
 - **`llm_calls="per_item"`** sends the submission once per item instead of once per criterion, at the cost of a wider blast radius when a call fails
-- **Smaller models** (GPT-4-mini, Haiku, Flash) often suffice for simpler tasks
+- **Smaller models** (GPT-5.6 Luna, Haiku, Flash) often suffice for simpler tasks
 - **Checkpointing** (`resume=True`) prevents re-evaluating on restart
 - **Monitor costs** across experiments to identify optimization opportunities
 
@@ -506,7 +508,7 @@ async def compare_models(dataset: RubricDataset):
 
     models = [
         ("openai/gpt-4.1", "GPT-4.1"),
-        ("openai/gpt-4.1-mini", "GPT-4.1-mini"),
+        ("openai/gpt-5.6-luna", "GPT-5.6 Luna"),
         ("anthropic/claude-haiku-4-5-20251001", "Claude Haiku 4.5"),
     ]
 
@@ -552,7 +554,7 @@ async def benchmark_caching(dataset: RubricDataset):
 
     grader = CriterionGrader(
         judge_model_config=LLMConfig(
-            model="openai/gpt-4.1-mini",
+            model="openai/gpt-5.6-luna",
             cache_enabled=True,
             cache_dir=".benchmark_cache",
         )
@@ -612,11 +614,11 @@ async def main():
 Key strategies demonstrated:
 1. Response caching - Avoids redundant API calls
 2. Model selection - Cheaper models for simpler tasks
-3. Prompt caching - Reduces repeated system prompt costs
+3. Prompt caching - Reduces the cost of what an item's calls share
 
 For production, combine:
 - cache_enabled=True (response caching)
-- prompt_caching=True (Anthropic system prompt caching)
+- prompt_caching=True (the provider's prompt cache)
 - Appropriate model selection for accuracy needs
 - Checkpointing to avoid re-evaluation
 """)
