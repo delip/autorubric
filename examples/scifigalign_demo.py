@@ -20,8 +20,13 @@ Usage:
     uv run python examples/scifigalign_demo.py --limit 3 --run    # grades 3 figures
 
     [--split train|val|test|all] [--judge llm|jev] [--model M]
-    [--llm-calls per_item|per_criterion] [--ordinal-framing choice|score]
+    [--llm-calls per_criterion|per_item] [--ordinal-framing choice|score]
     [--input-cost USD_PER_TOKEN] [--image-tokens N] [--limit N] [--few-shot N] [--run]
+
+The LLM judge grades each of the four scores in its own call by default (``--llm-calls
+per_criterion``, AutoRubric's default), so each figure is sent four times. ``--llm-calls
+per_item`` grades all four in one call per figure, which is cheaper; AutoRubric's docs
+advise comparing the two on labelled data before switching.
 
 The LLM judge needs the provider's key (e.g. ``OPENAI_API_KEY`` for the default model) and
 a model that LiteLLM's model map lists as accepting images, as it lists the default; with
@@ -154,9 +159,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--llm-calls",
-        choices=("per_item", "per_criterion"),
-        help="LLM judge only: one call per figure for all four scores (default), or one "
-        "call per score, which sends the figure four times",
+        choices=("per_criterion", "per_item"),
+        help="LLM judge only: one call per score (default), which sends the figure four "
+        "times, or one call per figure for all four scores",
     )
     parser.add_argument(
         "--ordinal-framing",
@@ -205,7 +210,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             if value is not None:
                 parser.error(f"{flag} applies to --judge jev only")
         args.model = args.model or DEFAULT_LLM_MODEL
-        args.llm_calls = args.llm_calls or "per_item"
+        args.llm_calls = args.llm_calls or "per_criterion"
     if args.few_shot is not None and args.split in ("train", "all"):
         parser.error(
             "--few-shot draws its examples from train.json; grade val or test with it, so "

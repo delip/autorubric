@@ -170,10 +170,10 @@ A judge whose macro MAE on the test split is not below about 0.74 does no better
 
 ```bash
 uv run python examples/scifigalign_demo.py                       # LLM judge, dry run
-uv run python examples/scifigalign_demo.py --llm-calls per_criterion
+uv run python examples/scifigalign_demo.py --llm-calls per_item
 uv run python examples/scifigalign_demo.py --few-shot 3          # examples from train.json
 uv run python examples/scifigalign_demo.py --judge jev --input-cost 0.042e-6
 uv run python examples/scifigalign_demo.py --judge jev --limit 3 --run
 ```
 
-The LLM judge grades all four dimensions in one call per figure by default (`--llm-calls per_item`), so each figure is sent once. With `--llm-calls per_criterion` it is sent four times. Jev makes one request per figure. `--input-cost` gives Jev's price per input token (`DecisionModelConfig.input_cost_per_token`), since autorubric has no price table for decision models. `typesafe/jev-1.13.0` takes no images, and autorubric's decision-model registry refuses it with a configuration error before any request is sent. With `--run` the demo prints that error. Both judges are built with `auto_na_option=False`, so neither can abstain, as the annotators could not. Responses are cached on disk (`cache_enabled=True`), so a repeated run is free.
+By default the LLM judge grades each dimension in its own call (`--llm-calls per_criterion`, AutoRubric's default), so each figure is sent four times. With `--llm-calls per_item` it grades all four dimensions in one call per figure and sends each figure once. That is cheaper, but the verdicts can differ, and AutoRubric's docs advise comparing the two on labelled data before switching ([Grading a whole rubric in one call](../../../docs/cookbook/llm-judges.md#grading-a-whole-rubric-in-one-call)). Jev makes one request per figure. `--input-cost` gives Jev's price per input token (`DecisionModelConfig.input_cost_per_token`), since autorubric has no price table for decision models. `typesafe/jev-1.13.0` takes no images, and autorubric's decision-model registry refuses it with a configuration error before any request is sent. With `--run` the demo prints that error. Both judges are built with `auto_na_option=False`, so neither can abstain, as the annotators could not. Responses are cached on disk (`cache_enabled=True`), so a repeated run is free.
