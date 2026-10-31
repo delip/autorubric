@@ -528,7 +528,8 @@ def _extract_usage_from_response(response: Any) -> TokenUsage:
 
     Additional fields may be present for specific providers:
     - cache_creation_input_tokens: Tokens used to create cache (Anthropic)
-    - cache_read_input_tokens: Tokens read from cache (Anthropic)
+    - cache_read_input_tokens: Tokens read from cache (Anthropic, Gemini)
+    - prompt_tokens_details: ``cached_tokens`` and ``cache_write_tokens`` (OpenAI, DeepSeek)
 
     Args:
         response: The LiteLLM response object
@@ -549,9 +550,16 @@ def _extract_usage_from_response(response: Any) -> TokenUsage:
     completion_tokens = getattr(usage, "completion_tokens", 0) or 0
     total_tokens = getattr(usage, "total_tokens", 0) or 0
 
-    # Extract Anthropic prompt caching fields if present
-    cache_creation = getattr(usage, "cache_creation_input_tokens", 0) or 0
-    cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+    # Providers report prompt caching in one of two places
+    details = getattr(usage, "prompt_tokens_details", None)
+    cache_creation = (
+        getattr(usage, "cache_creation_input_tokens", 0)
+        or getattr(details, "cache_write_tokens", 0)
+        or 0
+    )
+    cache_read = (
+        getattr(usage, "cache_read_input_tokens", 0) or getattr(details, "cached_tokens", 0) or 0
+    )
 
     return TokenUsage(
         prompt_tokens=prompt_tokens,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -14,9 +15,11 @@ from autorubric.llm import (
     LLMClient,
     LLMConfig,
     _caches_prompts,
+    _extract_usage_from_response,
     _is_anthropic_model,
     _prompt_cache_min_tokens,
 )
+from autorubric.types import TokenUsage
 
 SHARED = "<submission>\nS\n</submission>"
 PROMPT = f"{SHARED}\n\n<criterion>\nC\n</criterion>"
@@ -189,6 +192,33 @@ class TestModelLookups:
 
     def test_recorded_minimum_wins(self) -> None:
         assert _prompt_cache_min_tokens("claude-opus-5-5") == 512
+
+
+class TestUsage:
+    def _usage(self, **fields: Any) -> TokenUsage:
+        return _extract_usage_from_response(SimpleNamespace(usage=SimpleNamespace(**fields)))
+
+    def test_openai_reports_its_cache_tokens_in_the_details(self) -> None:
+        details = SimpleNamespace(cached_tokens=900, cache_write_tokens=50)
+        usage = self._usage(prompt_tokens=1000, prompt_tokens_details=details)
+        assert usage.cache_read_input_tokens == 900
+        assert usage.cache_creation_input_tokens == 50
+
+    def test_anthropic_reports_them_at_the_top_level(self) -> None:
+        details = SimpleNamespace(cached_tokens=900, cache_write_tokens=None)
+        usage = self._usage(
+            prompt_tokens=1000,
+            cache_read_input_tokens=900,
+            cache_creation_input_tokens=70,
+            prompt_tokens_details=details,
+        )
+        assert usage.cache_read_input_tokens == 900
+        assert usage.cache_creation_input_tokens == 70
+
+    def test_a_response_without_details_reports_none(self) -> None:
+        usage = self._usage(prompt_tokens=1000)
+        assert usage.cache_read_input_tokens == 0
+        assert usage.cache_creation_input_tokens == 0
 
 
 def _key_written_by_1_6(model: str, system: str, user: str) -> str:
