@@ -1,12 +1,12 @@
 """A decision model's, or a cascade's escalation judge's, configuration error raises (#40).
 
-A 401, 403 or 404 from TypeSafe (a revoked key, a key without access, a base URL that
-names no System One endpoint) fails every request the judge makes, like an LLM judge's
-configuration error: the grade raises a ``ValueError`` naming the judge, chained from the
-SDK's exception, and never abstains, nor escalates in a cascade. Every other request
-failure is routed as before. A cascade's escalation judges are LLM judges, and their
-configuration errors raise as any LLM judge's do. A parameter LiteLLM refuses raises on the
-judge's first call.
+A 401, 402, 403 or 404 from TypeSafe (a revoked key, an organization with no credits left, a
+key without access, a base URL that names no System One endpoint) fails every request the
+judge makes, like an LLM judge's configuration error: the grade raises a ``ValueError``
+naming the judge, chained from the SDK's exception, and never abstains, nor escalates in a
+cascade. Every other request failure is routed as before. A cascade's escalation judges
+are LLM judges, and their configuration errors raise as any LLM judge's do. A parameter
+LiteLLM refuses raises on the judge's first call.
 
 The decision model runs on the recording fake SDK client of ``conftest.py``; LLM judges are
 local stubs, or a real ``LLMClient`` whose call LiteLLM refuses before any request. Nothing
@@ -21,6 +21,7 @@ import httpx2
 import litellm
 import pytest
 import typesafe_sdk
+import typesafe_sdk._core.errors as sdk_errors
 
 from autorubric import (
     Criterion,
@@ -29,7 +30,9 @@ from autorubric import (
     EscalationConfig,
     LLMConfig,
     Rubric,
+    RubricDataset,
     classify_grading_error,
+    fill_ground_truth,
 )
 from autorubric.graders import CriterionGrader, JudgeSpec
 from autorubric.llm import GenerateResult, _is_configuration_error
@@ -43,6 +46,8 @@ RUBRIC = Rubric(
     ]
 )
 SUBMISSION = "Plants use light to make sugar."
+# TypeSafe's answer when the organization is out of credits, as observed live.
+NO_CREDITS = "Your organization has no available TypeSafe API credits"
 
 
 def dm() -> DecisionModelConfig:
@@ -63,6 +68,10 @@ CONFIGURATION_ERRORS = {
     "TypeSafeNotFoundError": lambda: typesafe_sdk.TypeSafeNotFoundError(
         404, {"detail": "not found"}, _headers()
     ),
+    # The SDK has no class of its own for a 402: it raises its base TypeSafeAPIError.
+    "TypeSafeAPIError": lambda: typesafe_sdk.TypeSafeAPIError(
+        402, {"detail": NO_CREDITS}, _headers()
+    ),
 }
 ROUTED_ERRORS = {
     "TypeSafeAPIConnectionError": lambda: typesafe_sdk.TypeSafeAPIConnectionError("refused"),
@@ -73,6 +82,11 @@ ROUTED_ERRORS = {
     "TypeSafeUnprocessableEntityError": lambda: typesafe_sdk.TypeSafeUnprocessableEntityError(
         422, {"detail": "too long"}, _headers()
     ),
+    "TypeSafeInternalServerError": lambda: typesafe_sdk.TypeSafeInternalServerError(
+        500, {"detail": "down"}, _headers()
+    ),
+    # Another status the SDK has no class for is routed like any API error.
+    "TypeSafeAPIError": lambda: typesafe_sdk.TypeSafeAPIError(409, {"detail": "x"}, _headers()),
 }
 
 
@@ -163,6 +177,113 @@ class TestTheDecisionModel:
         with pytest.raises(ValueError, match="Judge 'default' is misconfigured"):
             await RUBRIC.grade(SUBMISSION, grader=grader)
         assert llm.calls == 0
+
+
+class TestAPaymentRequiredAnswer:
+    """TypeSafe answers 402 when the organization has no credits left. The SDK raises its
+    base ``TypeSafeAPIError`` for it (no class of its own) and does not retry it; the grade
+    raises a ``ValueError`` naming the judge and saying credits ran out."""
+
+    def test_the_sdk_has_no_class_for_it(self):
+        assert 402 not in sdk_errors.STATUS_ERROR_TYPES
+        error = sdk_errors.api_error(402, {"detail": NO_CREDITS}, _headers())
+        assert type(error) is typesafe_sdk.TypeSafeAPIError
+        assert _is_configuration_error(error)
+
+    @pytest.mark.asyncio
+    async def test_the_real_sdk_sends_one_request_and_the_grade_raises(
+        self, http_endpoint, make_grader
+    ):
+        """The real SDK client, its retry policy included, answered 402 by the in-memory
+        endpoint: one request, no retry, and the grade raises."""
+        for _ in range(4):
+            http_endpoint.reply(402, {"detail": NO_CREDITS})
+        grader = make_grader(
+            judge_model_config=DecisionModelConfig(
+                model="jev-latest", api_key=API_KEY, max_retries=3, cache_enabled=False
+            )
+        )
+
+        with pytest.raises(ValueError) as excinfo:
+            await RUBRIC.grade(SUBMISSION, grader=grader)
+
+        message = str(excinfo.value)
+        assert "Judge 'default' is misconfigured (TypeSafeAPIError)" in message
+        assert "402 Payment Required" in message and "credits" in message
+        assert NO_CREDITS in message
+        assert isinstance(excinfo.value.__cause__, typesafe_sdk.TypeSafeAPIError)
+        assert len(http_endpoint.requests) == 1
+
+    @pytest.mark.asyncio
+    async def test_a_cascade_never_escalates_it(self, fake_sdk, make_grader):
+        fake_sdk.error = CONFIGURATION_ERRORS["TypeSafeAPIError"]()
+        grader = make_grader(
+            judge_model_config=dm(),
+            escalation=EscalationConfig(
+                judges=[JudgeSpec(LLMConfig(model="openai/gpt-4.1-mini"), "llm")], threshold=0.5
+            ),
+        )
+        llm = StubLLM()
+        grader._clients["llm"] = llm
+
+        with pytest.raises(ValueError, match="Judge 'default' is misconfigured"):
+            await RUBRIC.grade(SUBMISSION, grader=grader)
+        assert llm.calls == 0
+        assert len(fake_sdk.calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_a_panel_member(self, fake_sdk, make_grader):
+        fake_sdk.error = CONFIGURATION_ERRORS["TypeSafeAPIError"]()
+        grader = make_grader(
+            judges=[
+                JudgeSpec(dm(), "jev"),
+                JudgeSpec(LLMConfig(model="openai/gpt-4.1-mini"), "llm"),
+            ]
+        )
+        grader._clients["llm"] = StubLLM()
+
+        with pytest.raises(ValueError, match="Judge 'jev' is misconfigured"):
+            await RUBRIC.grade(SUBMISSION, grader=grader)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("llm_calls", ["per_criterion", "per_item"])
+    async def test_an_escalation_judge_out_of_credits(self, fake_sdk, make_grader, llm_calls):
+        # The request fails transiently, so every criterion escalates.
+        fake_sdk.error = ROUTED_ERRORS["TypeSafeAPIConnectionError"]()
+        error = litellm.APIError(
+            status_code=402, message="Insufficient credits", llm_provider="openrouter", model="m"
+        )
+        grader = make_grader(
+            judge_model_config=dm(),
+            escalation=EscalationConfig(
+                judges=[JudgeSpec(LLMConfig(model="openai/gpt-4.1-mini"), "llm")], threshold=0.5
+            ),
+            llm_calls=llm_calls,
+        )
+        llm = StubLLM(error)
+        grader._clients["llm"] = llm
+
+        with pytest.raises(ValueError) as excinfo:
+            await RUBRIC.grade(SUBMISSION, grader=grader)
+
+        assert "Judge 'llm' is misconfigured (APIError)" in str(excinfo.value)
+        assert "402 Payment Required" in str(excinfo.value)
+        assert excinfo.value.__cause__ is error
+
+    @pytest.mark.asyncio
+    async def test_fill_ground_truth_raises(self, fake_sdk, make_grader):
+        error = CONFIGURATION_ERRORS["TypeSafeAPIError"]()
+        fake_sdk.error = error
+        grader = make_grader(judge_model_config=dm())
+        data = RubricDataset(prompt="Q", rubric=RUBRIC)
+        for i in range(3):
+            data.add_item(submission=f"answer {i}", description=f"item {i}")
+
+        with pytest.raises(ValueError) as excinfo:
+            await fill_ground_truth(data, grader, show_progress=False)
+
+        assert "Judge 'default' is misconfigured (TypeSafeAPIError)" in str(excinfo.value)
+        assert excinfo.value.__cause__ is error
 
 
 class TestTheEscalationJudges:

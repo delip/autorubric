@@ -119,10 +119,10 @@ def classify_grading_error(exc: BaseException) -> ErrorCategory:
 
     Configuration errors are classified like any other API error (``"infrastructure"``),
     but ``CriterionGrader`` never routes one: an exception that says the judge is
-    misconfigured (LiteLLM's ``UnsupportedParamsError``, a 401, 403 or 404 from the
-    provider (but OpenRouter's 403, a moderation flag on the input) or from TypeSafe, or
-    the OpenAI SDK's refusal to build its client, e.g. with no OpenAI or Azure API key,
-    which LiteLLM reports as an ``InternalServerError`` or, for Azure, an ``APIError``)
+    misconfigured (LiteLLM's ``UnsupportedParamsError``, a 401, 402 (no credits left), 403
+    or 404 from the provider (but OpenRouter's 403, a moderation flag on the input) or from
+    TypeSafe, or the OpenAI SDK's refusal to build its client, e.g. with no OpenAI or Azure
+    API key, which LiteLLM reports as an ``InternalServerError`` or, for Azure, an ``APIError``)
     fails every call the judge makes, so the grade raises a ``ValueError`` naming the
     judge, chained from it, instead of abstaining (#40). Item-specific 400s
     (``ContextWindowExceededError``, ``ContentPolicyViolationError``) and a plain
@@ -168,6 +168,9 @@ def _is_configuration_error(exc: BaseException | None) -> bool:
     - The TypeSafe SDK's ``TypeSafeAuthenticationError``, ``TypeSafePermissionDeniedError``
       and ``TypeSafeNotFoundError`` (e.g. a base URL that names no System One endpoint),
       for decision-model judges.
+    - An HTTP 402 Payment Required answer, from an LLM provider or from TypeSafe
+      (``_is_payment_required``): the account has no credits left, or a billing problem,
+      and every call fails until it is paid. OpenRouter's 402 is one too.
     - The OpenAI SDK's refusal to build its client, before any request (e.g. no API key:
       "Missing credentials"), for OpenAI, OpenAI-compatible providers and Azure, which
       LiteLLM wraps in an ``InternalServerError`` (an ``APIError`` for Azure) with the SDK's
@@ -200,7 +203,7 @@ def _is_configuration_error(exc: BaseException | None) -> bool:
         ),
     ):
         return True
-    if _is_forbidden_answer(exc):
+    if _is_forbidden_answer(exc) or _is_payment_required(exc):
         return True
     sdk = sys.modules.get("typesafe_sdk")
     return sdk is not None and isinstance(
@@ -241,6 +244,43 @@ def _is_forbidden_answer(exc: BaseException) -> bool:
             except (AttributeError, RuntimeError):  # a response built without its request
                 host = ""
             return not (host == _MODERATING_HOST or host.endswith("." + _MODERATING_HOST))
+        current = current.__cause__ or current.__context__
+    return False
+
+
+# The HTTP status of an answer that says the account must pay before any call succeeds.
+_PAYMENT_REQUIRED = 402
+
+
+def _is_payment_required(exc: BaseException) -> bool:
+    """Whether ``exc`` is an API error that is an HTTP 402 Payment Required answer.
+
+    A 402 says the account has no credits left (OpenRouter, TypeSafe: "Your organization
+    has no available TypeSafe API credits") or a billing problem, and fails every call
+    alike until it is paid. LiteLLM has no exception of its own for it: an
+    OpenAI-compatible provider's and OpenRouter's come back as a plain ``APIError`` whose
+    ``status_code`` is 402, Anthropic's and Gemini's as an ``APIConnectionError`` carrying
+    500, and some providers' (NLP Cloud's) as a ``RateLimitError``. Each keeps the
+    provider's HTTP response (``response``) or the status (``status_code``) on some
+    exception of its ``__cause__``/``__context__`` chain, which is where the 402 is looked
+    for. The TypeSafe SDK has no class for a 402 either: it raises its base
+    ``TypeSafeAPIError`` with ``status`` 402. Only an API error is read: another exception,
+    even one raised while a 402 was being handled, is not a 402 answer.
+    """
+    sdk = sys.modules.get("typesafe_sdk")
+    if sdk is not None and isinstance(exc, sdk.TypeSafeAPIError):
+        return getattr(exc, "status", None) == _PAYMENT_REQUIRED
+    if not isinstance(exc, openai.APIError):
+        return False
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if getattr(current, "status_code", None) == _PAYMENT_REQUIRED:
+            return True
+        response = getattr(current, "response", None)
+        if response is not None and getattr(response, "status_code", None) == _PAYMENT_REQUIRED:
+            return True
         current = current.__cause__ or current.__context__
     return False
 

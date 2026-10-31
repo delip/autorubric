@@ -35,6 +35,10 @@ Accuracy held in these runs: on RiceChem it moved by at most 1.5 points in eithe
 
 The meta-judge now receives an instruction that the submission is a rubric, not a response to grade. Without it, judges could fault a rubric for containing no response. Meta-rubric scores can change, and replies cached for those requests are not reused.
 
+### Running out of credits raises
+
+A 402 Payment Required from an LLM provider or from TypeSafe, which says the account has no credits left or has a billing problem, is now a judge configuration error, like a rejected key. The grade raises a `ValueError` that names the judge and says the provider answered 402, the call is not retried, and `fill_ground_truth` raises it too. Before, each such call abstained as an `infrastructure` failure, so a run that ran out of credits went on to the end, and every item it graded after that point had no score. See [Failures](cookbook/llm-judges.md#standalone-use).
+
 ### Your response caches keep working
 
 Cache directories written by earlier releases still load, and their replies are still used, so upgrading does not pay again for calls you have already made. A run reading such a cache can return verdicts generated under the old order. Clear the cache to get replies generated under the new one.

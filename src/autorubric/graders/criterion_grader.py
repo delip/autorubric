@@ -54,6 +54,7 @@ from autorubric.llm import (
     LLMConfig,
     _caches_prompts,
     _is_configuration_error,
+    _is_payment_required,
     _litellm_supports_vision,
     _prefix_reaches_cache_minimum,
     classify_grading_error,
@@ -913,12 +914,12 @@ def _failed_judgment_result(
     for each criterion posed in it), an answer that cannot be used, and a criterion a
     decision model cannot be asked about. The failure is classified by
     ``classify_grading_error`` and logged with the judge's id. A configuration error
-    (``_is_configuration_error``: LiteLLM's ``UnsupportedParamsError``, a 401, 403 (but
-    OpenRouter's moderation 403) or 404
-    from the provider or TypeSafe, the OpenAI SDK's refusal to build its client) is not a
-    failed judgment: it fails every call the judge makes, so it is raised, never routed
-    (#40). Infrastructure (API/network) and parse/validation failures are not the
-    submission's fault, so they abstain: ``CANNOT_ASSESS`` (binary) or ``na=True``
+    (``_is_configuration_error``: LiteLLM's ``UnsupportedParamsError``, a 401, 402 (no
+    credits left, ``_is_payment_required``, said so in the message), 403 (but OpenRouter's
+    moderation 403) or 404 from the provider or TypeSafe, the OpenAI SDK's refusal to build
+    its client) is not a failed judgment: it fails every call the judge makes, so it is
+    raised, never routed (#40). Infrastructure (API/network) and parse/validation failures
+    are not the submission's fault, so they abstain: ``CANNOT_ASSESS`` (binary) or ``na=True``
     (multi-choice), which the default ``CannotAssessStrategy.SKIP`` excludes from scoring,
     instead of a score-affecting worst-case verdict. Only truly unknown errors keep the
     conservative worst case. The report surfaces the failure structurally (``error``,
@@ -941,9 +942,15 @@ def _failed_judgment_result(
             ``fail_fast`` stops the run on the first item).
     """
     if _is_configuration_error(error):
+        cause = (
+            "the provider answered 402 Payment Required (the account has no credits left, "
+            "or a billing problem): "
+            if _is_payment_required(error)
+            else ""
+        )
         raise ValueError(
             f"Judge {judge_id!r} is misconfigured ({type(error).__name__}), so every call "
-            f"it makes fails: {error}"
+            f"it makes fails: {cause}{error}"
         ) from error
     category = classify_grading_error(error)
     # The outcome fields each criterion kind's report has always been built with, so the
