@@ -1146,9 +1146,11 @@ def _marked(content: Content, key: str, marker: dict[str, Any]) -> list[dict[str
 
     Text is one part. A document's marker goes on its last text part, since Gemini context
     caching reads a marker only on text and every provider caches the prompt up to and
-    including the marked part. The shared prefixes ``CriterionGrader`` sends end with the
-    text ``"\n</submission>"``, so that part is the document's last and the whole prefix,
-    images included, is cached. A document with no text part is sent unmarked.
+    including the marked part. Every shared prefix ``CriterionGrader`` sends ends with text:
+    ``"\n</submission>"`` for a call without examples, and the criterion's, the question's
+    or the examples' closing tag for a call with them. So that part is the document's last
+    and the whole prefix, images included, is cached. A document with no text part is sent
+    unmarked.
     """
     parts = _content_parts(content)
     for part in reversed(parts):
@@ -1312,6 +1314,7 @@ class LLMClient:
         return_result: bool = False,
         shared_prefix: Content | None = None,
         pre_1_7_user_prompt: str | None = None,
+        pre_1_7_system_prompt: str | None = None,
         **kwargs: Any,
     ) -> str | T | GenerateResult:
         """Generate LLM response with optional structured output.
@@ -1347,6 +1350,8 @@ class LLMClient:
                 response-cache miss, the key of that text is read too, so replies cached by
                 earlier releases are reused; nothing is written under it. Kept for backward
                 compatibility and planned for removal in 2.0.0.
+            pre_1_7_system_prompt: The text ``system_prompt`` had before 1.7.0 for that lookup,
+                when it differs.
             **kwargs: Override any LLMConfig parameters for this call. In particular,
                 ``temperature`` accepts a float to send for this call, or None to omit it
                 so the provider's default applies (regardless of ``config.temperature``).
@@ -1396,7 +1401,7 @@ class LLMClient:
                 cached = cache.get(
                     self._cache_key(
                         self.config.model,
-                        system_prompt,
+                        pre_1_7_system_prompt or system_prompt,
                         pre_1_7_user_prompt,
                         response_format,
                         kwargs,

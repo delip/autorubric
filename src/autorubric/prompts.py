@@ -286,19 +286,33 @@ def _shared_user_content(
 ) -> Content:
     """The start of a per-criterion user prompt: the part an item's calls have in common.
 
-    Guidelines, input, reference submission and submission, in that order. Few-shot examples
-    and the criterion follow it, since they differ from one criterion to the next and would
-    end the prefix a provider's prompt cache can reuse across the item's calls.
+    Guidelines, input, reference submission and submission, in that order. The criterion
+    follows it, since it differs from one criterion to the next and would end the prefix a
+    provider's prompt cache can reuse across the item's calls. A prompt with few-shot
+    examples starts with its examples and criterion instead (``_few_shot_prefix``,
+    ``_multi_choice_few_shot_prefix``), which its calls on other items share.
 
     A ``str`` for text; a document, its images where their text would be, when a part holds
     an image. Either way it ends with the text ``"\n</submission>"``, so a cache marker
     placed on its last part is placed on text (``LLMClient.generate``).
     """
     return _concat(
-        _guidelines_block(guidelines),
-        _input_block(query),
-        _reference_block(reference_submission),
-        _submission_block(to_grade),
+        _guidelines_block(guidelines), _item_content(to_grade, query, reference_submission)
+    )
+
+
+def _item_content(
+    to_grade: Content,
+    query: Content | None = None,
+    reference_submission: Content | None = None,
+) -> Content:
+    """What belongs to one item alone: its input, reference submission and submission.
+
+    A ``str`` for text, else a document; either way it ends with the text
+    ``"\n</submission>"`` (``_submission_block``).
+    """
+    return _concat(
+        _input_block(query), _reference_block(reference_submission), _submission_block(to_grade)
     )
 
 
@@ -330,6 +344,34 @@ def _pre_1_7_user_prompt(
     posed = f"{criterion_block}\n\n{examples_text}" if examples_text else criterion_block
     guidelines_text = _guidelines_block(guidelines)
     return f"{guidelines_text}{posed}\n\n{shared.removeprefix(guidelines_text)}"
+
+
+def _pre_1_7_few_shot_user_prompt(
+    criterion_block: str,
+    examples_text: Content,
+    to_grade: Content,
+    query: Content | None = None,
+    reference_submission: Content | None = None,
+    *,
+    guidelines: str | None = None,
+) -> str | None:
+    """The text a few-shot per-criterion prompt had before 1.7.0, as ``_pre_1_7_user_prompt``.
+
+    ``examples_text`` is rendered as those releases rendered it (``numbered=True``). ``None``
+    when a part, an example's submission included, holds an image, as for
+    ``_pre_1_7_user_prompt``.
+    """
+    item = _item_content(to_grade, query, reference_submission)
+    if not isinstance(examples_text, str) or not isinstance(item, str):
+        return None
+    return f"{_guidelines_block(guidelines)}{criterion_block}\n\n{examples_text}\n\n{item}"
+
+
+def _pre_1_7_system_prompt(system_prompt: str) -> str:
+    """The system prompt a few-shot request had before 1.7.0, as ``_pre_1_7_user_prompt``."""
+    return system_prompt.replace(
+        MULTI_CHOICE_FEW_SHOT_ADDITION, _PRE_1_7_MULTI_CHOICE_FEW_SHOT_ADDITION
+    )
 
 
 def build_user_prompt(
@@ -393,9 +435,28 @@ def build_few_shot_user_prompt(
         TypeError: If ``guidelines`` is neither a ``str`` nor ``None``, or a submission,
             query or reference submission is not ``Content``.
     """
-    shared = _shared_user_content(to_grade, query, reference_submission, guidelines=guidelines)
+    prefix = _few_shot_prefix(criterion, examples, include_reason, guidelines=guidelines)
+    return _concat(prefix, "\n\n", _item_content(to_grade, query, reference_submission))
+
+
+def _few_shot_prefix(
+    criterion: Criterion,
+    examples: list[FewShotExample],
+    include_reason: bool = False,
+    *,
+    guidelines: str | None = None,
+) -> Content:
+    """The start of a few-shot prompt for a binary criterion, the same for every item.
+
+    Guidelines, examples and the criterion. A criterion's examples are drawn for it alone, so
+    what its calls share is this prefix across items, not the submission across criteria.
+    A document when an example's submission holds an image; it ends with the criterion's
+    text either way, so a cache marker on its last part is placed on text and the examples'
+    images are in the cached prefix (``LLMClient.generate``).
+    """
     examples_text = _format_few_shot_examples(examples, include_reason)
-    return _concat(shared, "\n\n", examples_text, "\n\n", _binary_criterion_block(criterion))
+    posed = _binary_criterion_block(criterion)
+    return _concat(_guidelines_block(guidelines), examples_text, "\n\n", posed)
 
 
 def _format_few_shot_examples(
@@ -431,14 +492,18 @@ def _example_judgment_lines(
     options: Sequence[CriterionOption] | None,
     reason: str | None,
     include_reason: bool,
+    *,
+    numbered: bool = False,
 ) -> list[str]:
     """The tags of one criterion's judgment in a few-shot example, one per line.
 
     Every few-shot example shows a judgment in these tags, whether it is drawn per criterion
     (``_format_few_shot_examples``, ``_format_multi_choice_examples``) or is a whole
     training item in a call for the whole rubric (``_format_rubric_examples``): a binary
-    criterion's ``<verdict>``, or a multi-choice criterion's 1-based ``<selected_option>``
-    and its ``<selected_label>``; then the ``<reason>``, when shown and not empty.
+    criterion's ``<verdict>``, or a multi-choice criterion's ``<selected_label>``; then the
+    ``<reason>``, when shown and not empty. A multi-choice example names its option by label
+    alone because option numbers change with each item's shuffle, and the examples have to
+    read the same for every item to be cached.
 
     Args:
         label: A binary criterion's verdict, or the 0-based index of a multi-choice
@@ -447,6 +512,8 @@ def _example_judgment_lines(
             ``None`` for a binary criterion.
         reason: The written reason for the label, or ``None``.
         include_reason: Whether to show the reason.
+        numbered: Also show the 1-based ``<selected_option>``, as releases before 1.7.0 did;
+            used only to compute the response-cache key those releases used.
 
     Raises:
         ValueError: If ``label`` is an option index and there are no ``options``.
@@ -454,11 +521,10 @@ def _example_judgment_lines(
     if isinstance(label, int):
         if options is None:
             raise ValueError(f"option index {label} given for a criterion without options")
-        # Convert 0-based index to 1-based for display
-        lines = [
-            f"<selected_option>{label + 1}</selected_option>",
-            f"<selected_label>{options[label].label}</selected_label>",
-        ]
+        lines = [f"<selected_label>{options[label].label}</selected_label>"]
+        if numbered:
+            # Convert 0-based index to 1-based for display
+            lines.insert(0, f"<selected_option>{label + 1}</selected_option>")
     else:
         lines = [f"<verdict>{label.value}</verdict>"]
     if include_reason and reason:
@@ -645,13 +711,23 @@ def _multi_choice_criterion_block(criterion: Criterion) -> str:
     """
     if criterion.options is None:
         raise ValueError("Cannot build multi-choice prompt for binary criterion")
-    # Format options as numbered list (1-indexed for human readability)
-    options_text = _render_options(criterion.options)
+    return f"{_question_block(criterion)}\n\n{_options_block(criterion)}"
+
+
+def _question_block(criterion: Criterion) -> str:
+    """A multi-choice criterion's ``<question>``, the same for every item."""
     return f"""<question>
 {criterion.requirement}
-</question>
+</question>"""
 
-<options>
+
+def _options_block(criterion: Criterion) -> str:
+    """A multi-choice criterion's numbered ``<options>``, in the order it lists them."""
+    if criterion.options is None:
+        raise ValueError("Cannot build multi-choice prompt for binary criterion")
+    # Format options as numbered list (1-indexed for human readability)
+    options_text = _render_options(criterion.options)
+    return f"""<options>
 {options_text}
 </options>"""
 
@@ -717,15 +793,44 @@ def build_multi_choice_few_shot_user_prompt(
         TypeError: If ``guidelines`` is neither a ``str`` nor ``None``, or a submission,
             query or reference submission is not ``Content``.
     """
-    shared = _shared_user_content(to_grade, query, reference_submission, guidelines=guidelines)
+    prefix = _multi_choice_few_shot_prefix(
+        criterion, examples, include_reason, guidelines=guidelines
+    )
+    options = _options_block(criterion)
+    item = _item_content(to_grade, query, reference_submission)
+    return _concat(prefix, "\n\n", options, "\n\n", item)
+
+
+def _multi_choice_few_shot_prefix(
+    criterion: Criterion,
+    examples: Sequence[tuple[Content, int, str | None]],
+    include_reason: bool = False,
+    *,
+    guidelines: str | None = None,
+) -> Content:
+    """The start of a few-shot prompt for a multi-choice criterion, the same for every item.
+
+    Guidelines, examples and the question. The options follow it, since each item shuffles
+    them. ``examples`` index ``criterion``'s options as given, and render as labels alone.
+    A document when an example's submission holds an image, ending with the question's
+    text, as for ``_few_shot_prefix``.
+
+    Raises:
+        ValueError: If criterion has no options (is binary).
+    """
+    if criterion.options is None:
+        raise ValueError("Cannot build multi-choice prompt for binary criterion")
     examples_text = _format_multi_choice_examples(criterion, examples, include_reason)
-    return _concat(shared, "\n\n", examples_text, "\n\n", _multi_choice_criterion_block(criterion))
+    posed = _question_block(criterion)
+    return _concat(_guidelines_block(guidelines), examples_text, "\n\n", posed)
 
 
 def _format_multi_choice_examples(
     criterion: Criterion,
     examples: Sequence[tuple[Content, int, str | None]],
     include_reason: bool,
+    *,
+    numbered: bool = False,
 ) -> Content:
     """Format multi-choice few-shot examples as XML.
 
@@ -733,6 +838,7 @@ def _format_multi_choice_examples(
         criterion: The criterion (for option labels).
         examples: List of (submission, selected_index, reason) tuples. Index is 0-based.
         include_reason: If True, include reason in format.
+        numbered: As in ``_example_judgment_lines``.
 
     Returns:
         XML-formatted examples section, or empty string if no examples: a ``str`` unless
@@ -746,7 +852,9 @@ def _format_multi_choice_examples(
         lines.append(f"<example_{i}>")
         lines.append(_example_submission_block(submission))
         lines.extend(
-            _example_judgment_lines(selected_idx, criterion.options, reason, include_reason)
+            _example_judgment_lines(
+                selected_idx, criterion.options, reason, include_reason, numbered=numbered
+            )
         )
         lines.append(f"</example_{i}>")
     lines.append("</examples>")
@@ -764,11 +872,17 @@ your judgment, but evaluate the actual <submission> on its own merits.
 
 Each example includes:
 - <example_submission>: A submission that was previously evaluated
-- <selected_option>: The option number that was selected
 - <selected_label>: The text of the selected option
 - <reason>: (Optional) Explanation for the selection
 
 Apply consistent standards across the examples and the submission you are evaluating."""
+
+# What MULTI_CHOICE_FEW_SHOT_ADDITION said before 1.7.0, when examples numbered their options;
+# used only to compute the response-cache key those releases used.
+_PRE_1_7_MULTI_CHOICE_FEW_SHOT_ADDITION = MULTI_CHOICE_FEW_SHOT_ADDITION.replace(
+    "- <selected_label>",
+    "- <selected_option>: The option number that was selected\n- <selected_label>",
+)
 
 
 # ============================================================================
@@ -945,11 +1059,13 @@ def build_rubric_user_prompt(
 ) -> Content:
     """Build the user prompt of an LLM judge's one call for a whole rubric.
 
-    The rubric's guidelines first, when it has any, then every criterion in ``<criteria>``,
-    each in a ``<rubric_criterion>`` tagged with its id and holding the block a per-criterion
-    prompt poses it with (``_binary_criterion_block``, ``_multi_choice_criterion_block``),
-    then the examples, the input, the reference submission and the submission. The whole
-    prompt is one call's, so unlike a per-criterion prompt it has no shared start to keep.
+    The rubric's guidelines first, when it has any, then the examples, then every criterion
+    in ``<criteria>``, each in a ``<rubric_criterion>`` tagged with its id and holding the
+    block a per-criterion prompt poses it with (``_binary_criterion_block``,
+    ``_multi_choice_criterion_block``), then the input, the reference submission and the
+    submission. Guidelines and examples are what every item's call shares
+    (``_rubric_examples_prefix``); the criteria follow them because each item shuffles their
+    options.
 
     Args:
         criteria: Each criterion with its id, in the order to list them. A multi-choice
@@ -958,7 +1074,7 @@ def build_rubric_user_prompt(
         query: Optional input/query that prompted the submission.
         reference_submission: Optional exemplar response for grading context.
         examples_text: The rendered few-shot examples (``_format_rubric_examples``), if
-            any, placed after the criteria.
+            any, placed before the criteria.
         guidelines: Optional rubric guidelines, as in ``build_user_prompt``.
 
     Returns:
@@ -972,6 +1088,15 @@ def build_rubric_user_prompt(
     """
     if not criteria:
         raise ValueError("Cannot build a rubric prompt without criteria")
+    prefix = _rubric_examples_prefix(examples_text, guidelines=guidelines)
+    start = _concat(prefix, "\n\n") if _normalize_content(examples_text) else prefix
+    criteria_text = _rubric_criteria_block(criteria)
+    item = _item_content(to_grade, query, reference_submission)
+    return _concat(start, criteria_text, "\n\n", item)
+
+
+def _rubric_criteria_block(criteria: Sequence[tuple[str, Criterion]]) -> str:
+    """The ``<criteria>`` of a whole-rubric prompt."""
     blocks = []
     for criterion_id, criterion in criteria:
         block = (
@@ -981,20 +1106,40 @@ def build_rubric_user_prompt(
         )
         blocks.append(f'<rubric_criterion id="{criterion_id}">\n{block}\n</rubric_criterion>')
     criteria_text = "\n\n".join(blocks)
-    guidelines_text = _guidelines_block(guidelines)
-    query_text = _input_block(query)
-    reference_text = _reference_block(reference_submission)
-    examples_block = _concat(examples_text, "\n\n") if _normalize_content(examples_text) else ""
+    return f"""<criteria>
+{criteria_text}
+</criteria>"""
 
-    return _concat(
-        guidelines_text,
-        "<criteria>\n",
-        criteria_text,
-        "\n</criteria>\n\n",
-        examples_block,
-        query_text,
-        reference_text,
-        _submission_block(to_grade),
+
+def _rubric_examples_prefix(examples_text: Content, *, guidelines: str | None = None) -> Content:
+    """The start of a whole-rubric prompt: guidelines and examples, the same for every item.
+
+    A document when an example's submission holds an image; with examples it ends with the
+    text ``"</examples>"``, so a cache marker on its last part is placed on text.
+    """
+    return _concat(_guidelines_block(guidelines), examples_text)
+
+
+def _pre_1_7_rubric_user_prompt(
+    criteria: Sequence[tuple[str, Criterion]],
+    examples_text: Content,
+    to_grade: Content,
+    query: Content | None = None,
+    reference_submission: Content | None = None,
+    *,
+    guidelines: str | None = None,
+) -> str | None:
+    """The text a whole-rubric prompt with examples had before 1.7.0.
+
+    As ``_pre_1_7_few_shot_user_prompt``: those releases put the examples after the criteria.
+    ``None`` when a part, an example's submission included, holds an image.
+    """
+    item = _item_content(to_grade, query, reference_submission)
+    if not isinstance(examples_text, str) or not isinstance(item, str):
+        return None
+    return (
+        f"{_guidelines_block(guidelines)}{_rubric_criteria_block(criteria)}\n\n"
+        f"{examples_text}\n\n{item}"
     )
 
 
@@ -1003,6 +1148,8 @@ def _format_rubric_examples(
         tuple[Content, Sequence[tuple[str, Criterion, CriterionVerdict | int, str | None]]]
     ],
     include_reason: bool,
+    *,
+    numbered: bool = False,
 ) -> Content:
     """Format the few-shot examples of an LLM judge's one call for a whole rubric as XML.
 
@@ -1010,8 +1157,7 @@ def _format_rubric_examples(
     criterion under the criterion's id, holding the tags a per-criterion example shows
     (``_example_judgment_lines``, shared with ``_format_few_shot_examples`` and
     ``_format_multi_choice_examples``): a binary criterion's ``<verdict>``, or a
-    multi-choice criterion's 1-based ``<selected_option>`` and its ``<selected_label>``,
-    numbered in the order the call shows the options; then the ``<reason>``, if shown.
+    multi-choice criterion's ``<selected_label>``; then the ``<reason>``, if shown.
 
     Args:
         examples: Each example's submission and its judgments, in the order to show them;
@@ -1022,6 +1168,7 @@ def _format_rubric_examples(
             shown for a multi-choice one; and the training item's written reason for the
             label, or ``None``.
         include_reason: If True, a judgment with a reason shows it.
+        numbered: As in ``_example_judgment_lines``.
 
     Returns:
         The ``<examples>`` block, or an empty string if there are no examples: a ``str``
@@ -1039,7 +1186,11 @@ def _format_rubric_examples(
         lines.append(_example_submission_block(submission))
         for criterion_id, criterion, label, reason in judgments:
             lines.append(f'<judgment id="{criterion_id}">')
-            lines.extend(_example_judgment_lines(label, criterion.options, reason, include_reason))
+            lines.extend(
+                _example_judgment_lines(
+                    label, criterion.options, reason, include_reason, numbered=numbered
+                )
+            )
             lines.append("</judgment>")
         lines.append(f"</example_{i}>")
     lines.append("</examples>")

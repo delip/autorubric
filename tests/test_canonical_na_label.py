@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -410,6 +411,11 @@ def _training() -> RubricDataset:
     return training
 
 
+def _content_text(content: Any) -> list[str]:
+    """A message's content as text, whether a string or a list of parts."""
+    return [content] if isinstance(content, str) else [part["text"] for part in content]
+
+
 class TestPerCriterionFewShot:
     @pytest.mark.parametrize("balance", [True, False])
     def test_the_label_names_the_appended_option(self, balance):
@@ -449,7 +455,9 @@ class TestPerCriterionFewShot:
         prompts: list[str] = []
 
         async def acompletion(**params):
-            prompts.append(params["messages"][-1]["content"])
+            # The examples sit in the start of the prompt, which may be a message of its own.
+            parts = [part for m in params["messages"][1:] for part in _content_text(m["content"])]
+            prompts.append("\n\n".join(parts))
             return _choice_response(2)
 
         with patch("litellm.acompletion", side_effect=acompletion):
@@ -457,14 +465,11 @@ class TestPerCriterionFewShot:
 
         (prompt,) = prompts
         shown = re.search(
-            r"<example_submission>\[see attached PDF\]</example_submission>\n(.*?)\n(.*?)\n",
+            r"<example_submission>\[see attached PDF\]</example_submission>\n(.*?)\n",
             prompt,
         )
         assert shown is not None
-        assert shown.groups() == (
-            "<selected_option>3</selected_option>",
-            f"<selected_label>{NA_LABEL}</selected_label>",
-        )
+        assert shown.groups() == (f"<selected_label>{NA_LABEL}</selected_label>",)
 
 
 # =============================================================================

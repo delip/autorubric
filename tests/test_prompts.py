@@ -4,12 +4,21 @@ import pytest
 
 from autorubric.prompts import (
     GUIDELINES_BLOCK,
+    MULTI_CHOICE_FEW_SHOT_ADDITION,
     MULTI_CHOICE_SYSTEM_PROMPT,
     _binary_criterion_block,
+    _few_shot_prefix,
+    _format_multi_choice_examples,
+    _multi_choice_few_shot_prefix,
+    _pre_1_7_few_shot_user_prompt,
+    _pre_1_7_system_prompt,
     _pre_1_7_user_prompt,
+    _rubric_examples_prefix,
     _shared_user_content,
     build_few_shot_user_prompt,
+    build_multi_choice_few_shot_user_prompt,
     build_multi_choice_user_prompt,
+    build_rubric_user_prompt,
     build_user_prompt,
 )
 from autorubric.types import Criterion, CriterionOption, CriterionVerdict, FewShotExample
@@ -218,32 +227,78 @@ def test_binary_system_prompt_is_built_from_the_verdict_definitions():
 
 
 class TestPerCriterionLayout:
-    """Shared content first, then examples, then the criterion."""
+    """Shared content first and the criterion last; with examples, examples first."""
 
     CRITERION = Criterion(name="c", requirement="States the boiling point", weight=1.0)
     OTHER = Criterion(name="d", requirement="Names the unit", weight=1.0)
+    MULTI = Criterion(
+        name="m",
+        requirement="How clear?",
+        weight=1.0,
+        options=[
+            CriterionOption(label="Vague", value=0.0),
+            CriterionOption(label="Clear", value=1.0),
+        ],
+    )
+    FLIPPED = Criterion(
+        name="m",
+        requirement="How clear?",
+        weight=1.0,
+        options=[
+            CriterionOption(label="Clear", value=1.0),
+            CriterionOption(label="Vague", value=0.0),
+        ],
+    )
     SHARED_ARGS = {"query": "Q?", "reference_submission": "REF", "guidelines": "Be strict."}
     EXAMPLE = FewShotExample(submission="ex", verdict=CriterionVerdict.MET, reason=None)
 
-    def test_criterion_ends_every_per_criterion_prompt(self) -> None:
+    def test_criterion_ends_a_prompt_without_examples(self) -> None:
         block = _binary_criterion_block(self.CRITERION)
         prompt = build_user_prompt(self.CRITERION, "S", **self.SHARED_ARGS)
-        few_shot = build_few_shot_user_prompt(
-            self.CRITERION, "S", [self.EXAMPLE], **self.SHARED_ARGS
-        )
-        assert isinstance(prompt, str) and isinstance(few_shot, str)
+        assert isinstance(prompt, str)
         assert prompt.endswith(block)
-        assert few_shot.endswith(block)
 
-    def test_examples_sit_just_before_the_criterion(self) -> None:
+    def test_a_binary_prompt_with_examples_ends_with_the_item(self) -> None:
         prompt = build_few_shot_user_prompt(self.CRITERION, "S", [self.EXAMPLE], **self.SHARED_ARGS)
         assert isinstance(prompt, str)
         assert (
-            prompt.index("</submission>")
+            prompt.index("<guidelines>")
             < prompt.index("<examples>")
-            < prompt.index("</examples>")
-            < prompt.index("<criterion_type>")
+            < prompt.index("<criterion>")
+            < prompt.index("<input>")
+            < prompt.index("<submission>")
         )
+        assert prompt.endswith("<submission>\nS\n</submission>")
+
+    def test_a_multi_choice_prompt_keeps_its_options_after_the_prefix(self) -> None:
+        prompt = build_multi_choice_few_shot_user_prompt(
+            self.MULTI, "S", [("ex", 1, None)], **self.SHARED_ARGS
+        )
+        prefix = _multi_choice_few_shot_prefix(
+            self.MULTI, [("ex", 1, None)], guidelines="Be strict."
+        )
+        assert isinstance(prompt, str) and isinstance(prefix, str)
+        assert prompt.startswith(prefix + "\n\n<options>")
+        assert "<options>" not in prefix
+        assert prefix.endswith("</question>")
+
+    def test_the_prefix_is_the_same_for_every_option_order(self) -> None:
+        one = _multi_choice_few_shot_prefix(self.MULTI, [("ex", 1, None)])
+        other = _multi_choice_few_shot_prefix(self.FLIPPED, [("ex", 0, None)])
+        assert one == other
+        assert isinstance(one, str)
+        assert "<selected_option>" not in one
+        assert "<selected_label>Clear</selected_label>" in one
+
+    def test_the_binary_prefix_does_not_depend_on_the_item(self) -> None:
+        prefix = _few_shot_prefix(self.CRITERION, [self.EXAMPLE], guidelines="Be strict.")
+        assert isinstance(prefix, str)
+        for submission in ("S", "T"):
+            prompt = build_few_shot_user_prompt(
+                self.CRITERION, submission, [self.EXAMPLE], guidelines="Be strict."
+            )
+            assert isinstance(prompt, str)
+            assert prompt.startswith(prefix + "\n\n")
 
     def test_shared_block_is_equal_across_criteria_of_an_item(self) -> None:
         shared = _shared_user_content("S", "Q?", "REF", guidelines="Be strict.")
@@ -253,31 +308,45 @@ class TestPerCriterionLayout:
             assert isinstance(prompt, str)
             assert prompt.startswith(shared + "\n\n")
 
+    def test_whole_rubric_prefix_is_guidelines_and_examples(self) -> None:
+        prompt = build_rubric_user_prompt(
+            [("c0", self.MULTI)], "S", examples_text="<examples>\nE\n</examples>", guidelines="G"
+        )
+        prefix = _rubric_examples_prefix("<examples>\nE\n</examples>", guidelines="G")
+        assert isinstance(prompt, str) and isinstance(prefix, str)
+        assert prompt.startswith(prefix + "\n\n<criteria>")
+
     @pytest.mark.parametrize("with_guidelines", [False, True])
-    @pytest.mark.parametrize("with_examples", [False, True])
-    def test_pre_1_7_text_is_the_old_layout(
-        self, with_guidelines: bool, with_examples: bool
-    ) -> None:
+    def test_pre_1_7_text_without_examples(self, with_guidelines: bool) -> None:
         guidelines = "Be strict." if with_guidelines else None
         block = _binary_criterion_block(self.CRITERION)
         shared = _shared_user_content("S", "Q?", "REF", guidelines=guidelines)
-        examples = "<examples>\n<example_1>\n<example_submission>ex</example_submission>\n"
-        examples += "<verdict>MET</verdict>\n</example_1>\n</examples>"
-        if with_examples:
-            prompt = build_few_shot_user_prompt(
-                self.CRITERION,
-                "S",
-                [self.EXAMPLE],
-                "Q?",
-                reference_submission="REF",
-                guidelines=guidelines,
-            )
-        else:
-            prompt = build_user_prompt(self.CRITERION, "S", "Q?", "REF", guidelines=guidelines)
+        prompt = build_user_prompt(self.CRITERION, "S", "Q?", "REF", guidelines=guidelines)
         head = GUIDELINES_BLOCK.format(guidelines="Be strict.") if with_guidelines else ""
-        posed = f"{block}\n\n{examples}" if with_examples else block
         assert _pre_1_7_user_prompt(prompt, shared, block, guidelines) == (
-            f"{head}{posed}\n\n<input>Q?</input>\n\n"
+            f"{head}{block}\n\n<input>Q?</input>\n\n"
             "<reference_submission>\nREF\n</reference_submission>\n\n"
             "<submission>\nS\n</submission>"
         )
+
+    @pytest.mark.parametrize("with_guidelines", [False, True])
+    def test_pre_1_7_text_with_examples(self, with_guidelines: bool) -> None:
+        guidelines = "Be strict." if with_guidelines else None
+        head = GUIDELINES_BLOCK.format(guidelines="Be strict.") if with_guidelines else ""
+        assert _pre_1_7_few_shot_user_prompt(
+            "POSED", "EXAMPLES", "S", "Q?", "REF", guidelines=guidelines
+        ) == (
+            f"{head}POSED\n\nEXAMPLES\n\n<input>Q?</input>\n\n"
+            "<reference_submission>\nREF\n</reference_submission>\n\n"
+            "<submission>\nS\n</submission>"
+        )
+
+    def test_pre_1_7_examples_number_their_options(self) -> None:
+        text = _format_multi_choice_examples(self.MULTI, [("ex", 1, None)], False, numbered=True)
+        assert isinstance(text, str)
+        assert "<selected_option>2</selected_option>\n<selected_label>Clear" in text
+
+    def test_pre_1_7_system_prompt_mentions_the_option_number(self) -> None:
+        old = _pre_1_7_system_prompt(MULTI_CHOICE_SYSTEM_PROMPT + MULTI_CHOICE_FEW_SHOT_ADDITION)
+        assert "- <selected_option>: The option number that was selected\n" in old
+        assert "- <selected_option>" not in MULTI_CHOICE_FEW_SHOT_ADDITION

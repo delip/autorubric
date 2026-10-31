@@ -1,11 +1,14 @@
 """How ``LLMClient`` arranges a per-criterion request holding images for prompt caches.
 
-A per-criterion prompt starts with what an item's calls share (``_shared_user_content``),
-and an image in the submission, input or reference submission sits inside that start. Sent
-split, the shared message carries those images as content parts with the cache marker on its
-last text part (the ``"\\n</submission>"`` that ends it), and the rest (examples and
-criterion, example images included) follows as a message of its own. The response-cache key
-hashes the whole prompt, image bytes included, as it does without a split.
+A per-criterion prompt without examples starts with what an item's calls share
+(``_shared_user_content``), and an image in the submission, input or reference submission
+sits inside that start. Sent split, the shared message carries those images as content parts
+with the cache marker on its last text part (the ``"\\n</submission>"`` that ends it), and
+the criterion follows as a message of its own. A few-shot prompt starts with what a
+criterion's calls share across items (``_few_shot_prefix``): the examples, their images
+included, and the criterion, the marker on the criterion's closing text; the item, with the
+submission's images, follows. The response-cache key hashes the whole prompt, image bytes
+included, as it does without a split.
 """
 
 from __future__ import annotations
@@ -23,6 +26,8 @@ from autorubric.content import _concat, _content_removeprefix
 from autorubric.llm import LLMClient, LLMConfig, _prefix_reaches_cache_minimum
 from autorubric.prompts import (
     _binary_criterion_block,
+    _few_shot_prefix,
+    _pre_1_7_few_shot_user_prompt,
     _pre_1_7_user_prompt,
     _shared_user_content,
     build_few_shot_user_prompt,
@@ -51,18 +56,15 @@ def _response() -> MagicMock:
     return response
 
 
+EXAMPLE = FewShotExample([GRAY, "Flat."], CriterionVerdict.UNMET, None)
+
+
 def _prompt(*, examples: bool = False) -> tuple[Any, Any]:
-    shared = _shared_user_content(SUBMISSION, QUERY)
+    """A per-criterion prompt and the shared prefix ``CriterionGrader`` passes with it."""
     if examples:
-        prompt = build_few_shot_user_prompt(
-            CRITERION,
-            SUBMISSION,
-            [FewShotExample([GRAY, "Flat."], CriterionVerdict.UNMET, None)],
-            QUERY,
-        )
-    else:
-        prompt = build_user_prompt(CRITERION, SUBMISSION, QUERY)
-    return prompt, shared
+        prompt = build_few_shot_user_prompt(CRITERION, SUBMISSION, [EXAMPLE], QUERY)
+        return prompt, _few_shot_prefix(CRITERION, [EXAMPLE])
+    return build_user_prompt(CRITERION, SUBMISSION, QUERY), _shared_user_content(SUBMISSION, QUERY)
 
 
 async def _messages(model: str, prompt: Any, shared: Any, **config: Any) -> list[dict]:
@@ -97,17 +99,38 @@ class TestTheSharedStartHoldsTheImages:
         assert [p for p in shared if isinstance(p, Image)] == [BLUE, RED]
 
     def test_the_prompt_starts_with_it(self) -> None:
-        prompt, shared = _prompt(examples=True)
+        prompt, shared = _prompt()
         rest = _content_removeprefix(prompt, shared)
-        assert rest is not None
+        assert isinstance(rest, str)
+        assert rest == f"\n\n{_binary_criterion_block(CRITERION)}"
+        assert _concat(shared, rest) == prompt
+
+    def test_a_few_shot_prompt_starts_with_its_examples_and_criterion(self) -> None:
+        prompt, prefix = _prompt(examples=True)
+        assert isinstance(prefix, tuple)
+        assert [p for p in prefix if isinstance(p, Image)] == [GRAY]
+        last = prefix[-1]
+        assert isinstance(last, str) and last.endswith(_binary_criterion_block(CRITERION))
+        rest = _content_removeprefix(prompt, prefix)
         assert isinstance(rest, tuple)
         head = rest[0]
-        assert isinstance(head, str) and head.startswith("\n\n<examples>")
-        assert _concat(shared, rest) == prompt
+        assert isinstance(head, str) and head == "\n\n<input>"
+        assert [p for p in rest if isinstance(p, Image)] == [BLUE, RED]
+        assert _concat(prefix, rest) == prompt
 
     def test_no_pre_1_7_key_for_a_document(self) -> None:
         prompt, shared = _prompt()
         assert _pre_1_7_user_prompt(prompt, shared, _binary_criterion_block(CRITERION)) is None
+
+    @pytest.mark.parametrize(
+        "examples, submission",
+        [("<examples>E</examples>", SUBMISSION), ((GRAY, "<examples>E</examples>"), "S")],
+        ids=["submission_image", "example_image"],
+    )
+    def test_no_pre_1_7_few_shot_key_for_a_document(self, examples: Any, submission: Any) -> None:
+        block = _binary_criterion_block(CRITERION)
+        assert _pre_1_7_few_shot_user_prompt(block, examples, submission) is None
+        assert isinstance(_pre_1_7_few_shot_user_prompt(block, "<examples>E</examples>", "S"), str)
 
 
 class TestSplitMessages:
@@ -151,15 +174,43 @@ class TestSplitMessages:
         )
 
     @pytest.mark.asyncio
-    async def test_example_images_follow_in_the_tail(self) -> None:
-        prompt, shared = _prompt(examples=True)
-        _, shared_message, tail = await _messages("deepseek/deepseek-chat", prompt, shared)
-        assert shared_message["content"] == _expected_shared_parts(None, None)
+    async def test_example_images_are_shared_and_the_submission_follows_in_the_tail(
+        self,
+    ) -> None:
+        prompt, prefix = _prompt(examples=True)
+        _, shared_message, tail = await _messages("deepseek/deepseek-chat", prompt, prefix)
+        shared_parts = shared_message["content"]
+        assert isinstance(shared_parts, list)
+        assert [p for p in shared_parts if p["type"] == "image_url"] == [_url(GRAY)]
+        assert shared_parts[0] == {
+            "type": "text",
+            "text": "<examples>\n<example_1>\n<example_submission>",
+        }
+        assert shared_parts[-1]["text"].endswith(_binary_criterion_block(CRITERION))
+        assert all("cache_control" not in p for p in shared_parts)
         parts = tail["content"]
         assert isinstance(parts, list)
-        assert [p for p in parts if p["type"] == "image_url"] == [_url(GRAY)]
-        assert parts[0]["type"] == "text" and parts[0]["text"].startswith("<examples>")
+        assert [p for p in parts if p["type"] == "image_url"] == [_url(BLUE), _url(RED)]
+        assert parts[0] == {"type": "text", "text": "<input>"}
+        assert parts[-1] == {
+            "type": "text",
+            "text": "Accuracy rises with model size.\n</submission>",
+        }
+
+    @pytest.mark.asyncio
+    async def test_anthropic_caches_the_example_images_with_the_criterion(self) -> None:
+        prompt, prefix = _prompt(examples=True)
+        _, shared_message, tail = await _messages("anthropic/claude-sonnet-4-5", prompt, prefix)
+        mark = {"type": "ephemeral"}
+        parts = shared_message["content"]
+        marked = [p for p in parts if "cache_control" in p]
+        assert marked == [parts[-1]]
+        assert parts[-1]["type"] == "text" and parts[-1]["cache_control"] == mark
         assert parts[-1]["text"].endswith(_binary_criterion_block(CRITERION))
+        assert _url(GRAY) in parts
+        # The item is not cached: no marker in the tail, which holds the submission's images.
+        assert all("cache_control" not in p for p in tail["content"])
+        assert _url(RED) in tail["content"]
 
     @pytest.mark.asyncio
     async def test_a_text_prefix_does_not_start_a_document(self) -> None:

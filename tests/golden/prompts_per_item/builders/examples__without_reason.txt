@@ -5,7 +5,6 @@
 <verdict>MET</verdict>
 </judgment>
 <judgment id="c1">
-<selected_option>1</selected_option>
 <selected_label>Very clear</selected_label>
 </judgment>
 </example_1>
@@ -15,7 +14,6 @@
 <verdict>UNMET</verdict>
 </judgment>
 <judgment id="c1">
-<selected_option>3</selected_option>
 <selected_label>Somewhat clear</selected_label>
 </judgment>
 </example_2>

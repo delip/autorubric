@@ -1,7 +1,3 @@
-<submission>
-Water boils at 100 degrees Celsius at sea level.
-</submission>
-
 <examples>
 <example_1>
 <example_submission>Water boils at 100 C.</example_submission>
@@ -24,3 +20,7 @@ positive
 <criterion>
 States the boiling point of water at sea level
 </criterion>
+
+<submission>
+Water boils at 100 degrees Celsius at sea level.
+</submission>

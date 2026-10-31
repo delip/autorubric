@@ -202,11 +202,12 @@ def test_text_alone_builds_a_string(builder: str) -> None:
     assert isinstance(build(TEXT_FIELDS), str)
 
 
-# The builders of a per-criterion prompt, which puts what an item's calls share first (the
-# guidelines, input, reference submission and submission) and the examples and criterion
-# after it. ``build_rubric_user_prompt`` keeps the examples ahead of the input and ends with
-# the submission.
-PER_CRITERION = {"user", "few_shot", "multi_choice", "multi_choice_few_shot"}
+# The builders of a per-criterion prompt without examples, which puts what an item's calls
+# share first (the guidelines, input, reference submission and submission) and the criterion
+# after it. A few-shot per-criterion prompt puts what a criterion's calls share across items
+# first (the guidelines, examples and criterion) and, like ``build_rubric_user_prompt``,
+# keeps the examples ahead of the input and ends with the submission.
+SHARED_ITEM_FIRST = {"user", "multi_choice"}
 
 
 @pytest.mark.parametrize("builder", sorted(BUILDERS))
@@ -220,7 +221,7 @@ def test_a_submission_that_is_one_image_is_the_whole_submission_block(builder: s
     assert isinstance(head, str)
     assert head.endswith("<submission>\n")
     assert image is RED
-    if builder in PER_CRITERION:
+    if builder in SHARED_ITEM_FIRST:
         # The submission block closes the shared start; what follows it is the text
         # prompt's own ending.
         text_prompt = build({**TEXT_FIELDS, "submission": SENTINEL})
@@ -235,14 +236,14 @@ def test_a_submission_that_is_one_image_is_the_whole_submission_block(builder: s
 @pytest.mark.parametrize("builder", sorted(BUILDERS))
 def test_images_in_every_field_keep_the_prompt_order(builder: str) -> None:
     """Images in several fields appear in the order the prompt reads: in a per-criterion
-    prompt the input, then the reference submission, then the submission, then the
-    examples; in a whole-rubric prompt the examples first, then the other three."""
+    prompt without examples the input, then the reference submission, then the submission;
+    in a few-shot or whole-rubric prompt the examples first, then the other three."""
     build, fields = BUILDERS[builder]
     given = {"example": GRAY, "query": GREEN, "reference": BLUE, "submission": RED}
     prompt = build({**TEXT_FIELDS, **{field: given[field] for field in fields}})
     order = (
-        ("query", "reference", "submission", "example")
-        if builder in PER_CRITERION
+        ("query", "reference", "submission")
+        if builder in SHARED_ITEM_FIRST
         else ("example", "query", "reference", "submission")
     )
     expected = [given[field] for field in order if field in fields]

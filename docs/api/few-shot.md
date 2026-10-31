@@ -190,8 +190,8 @@ grader = CriterionGrader(
   item shows, ties broken by the seeded order; no item's submission is ever shown twice; once
   no remaining item adds a new pair, the rest of the slots are filled in the seeded order.
 - **`balance_verdicts=False`** takes the first items of that seeded order.
-- **Multi-choice labels** are numbered in the call's shuffled option order, matching how that
-  criterion's options are shown.
+- **Multi-choice labels** name the option by its label, so examples read the same for every
+  item whatever order it shuffles the options into.
 - **`include_reason`** still shows each example's `DataItem.ground_truth_reasons` entry for
   the criterion, where the item has one.
 - **The draw is deterministic** for a given seed and judge: each judge (including a cascade's

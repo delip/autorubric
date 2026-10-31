@@ -595,17 +595,57 @@ class TestFewShotImages:
         examples = {data_url(encoded_png("green")), data_url(encoded_png("blue"))}
         graded = [data_url(encoded_png("red"))]
         for urls in provider.image_urls():
-            if llm_calls == "per_criterion":
-                # The graded figure, in the part an item's calls share, then both examples'
-                # figures, each once.
-                assert urls[:1] == graded
-                assert sorted(urls[1:]) == sorted(examples)
-            else:
-                # Both examples' figures, then the graded figure, each once.
-                assert sorted(urls[:2]) == sorted(examples)
-                assert urls[2:] == graded
+            # Both examples' figures, in the prefix a criterion's calls share across items,
+            # then the graded figure, each once; in both modes.
+            assert sorted(urls[:2]) == sorted(examples)
+            assert urls[2:] == graded
         # Grading read the graded figure alone: the examples hold their bytes.
         assert {p: reads[p] for p in [*paths, path]} == {**dict.fromkeys(paths, 1), path: 1}
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "rubric, labels, llm_calls, prefix_end",
+        [
+            ([LEGIBLE], [[MET], [UNMET]], "per_criterion", "</criterion>"),
+            ([CLARITY], [["Clear"], ["Unclear"]], "per_criterion", "</question>"),
+            ([LEGIBLE, CLARITY], [[MET, "Clear"], [UNMET, "Unclear"]], "per_item", "</examples>"),
+        ],
+        ids=["binary", "multi_choice", "per_item"],
+    )
+    async def test_a_split_request_caches_the_example_figures(
+        self, tmp_path, provider, rubric, labels, llm_calls, prefix_end
+    ):
+        """A few-shot call to a model that caches prompts sends what a criterion's calls
+        share across items, the examples' figures included, as a user message of its own,
+        with a Claude model's cache marker on its last text part; the graded figure follows
+        in the uncached tail."""
+        data, _ = training(tmp_path, rubric, labels, ["green", "blue"])
+        claude = LLMConfig(model="anthropic/claude-sonnet-4-5")
+        grader = CriterionGrader(
+            judge_model_config=claude,
+            training_data=data,
+            few_shot_config=FewShotConfig(n_examples=2),
+            llm_calls=llm_calls,
+            seed=SEED,
+        )
+        document, path = figure(tmp_path)
+        report = await Rubric(rubric).grade(document, grader=grader)
+
+        assert report.error is None
+        assert len(provider.calls) == 1
+        examples = {data_url(encoded_png("green")), data_url(encoded_png("blue"))}
+        shared, tail = user_messages(provider.calls[0])
+        assert isinstance(shared, list) and isinstance(tail, list)
+        shared_urls = [p["image_url"]["url"] for p in shared if p["type"] == "image_url"]
+        assert sorted(shared_urls) == sorted(examples)
+        assert shared[-1]["type"] == "text"
+        assert shared[-1]["text"].endswith(prefix_end)
+        assert shared[-1]["cache_control"] == {"type": "ephemeral"}
+        assert all("cache_control" not in p for p in shared[:-1])
+        assert [p["image_url"]["url"] for p in tail if p["type"] == "image_url"] == [
+            data_url(path.read_bytes())
+        ]
+        assert all("cache_control" not in p for p in tail)
 
     @pytest.mark.asyncio
     async def test_the_same_figure_from_two_files_is_one_example(self, tmp_path, provider):

@@ -210,13 +210,6 @@ def set_label(item: DataItem, criterion_idx: int, label: object) -> None:
     labels[criterion_idx] = label
 
 
-def selected_option(judgment: str) -> int:
-    """The option number of a multi-choice judgment's content."""
-    match = re.search(r"<selected_option>(\d+)</selected_option>", judgment)
-    assert match is not None
-    return int(match[1])
-
-
 def names(items: Sequence[DataItem]) -> list[str]:
     return [item.description for item in items]
 
@@ -248,9 +241,9 @@ def per_item_grader(
 
 def split_examples(user_prompt: str) -> tuple[str, str]:
     """The prompt's ``<criteria>`` part and its ``<examples>`` block."""
-    criteria, rest = user_prompt.split("</criteria>\n\n", 1)
+    rest, criteria = user_prompt.split("\n\n<criteria>", 1)
     assert rest.startswith("<examples>\n")
-    return criteria, rest.split("\n</examples>\n\n", 1)[0] + "\n</examples>"
+    return criteria, rest[rest.index("<examples>") :]
 
 
 def shown_examples(user_prompt: str) -> list[tuple[str, dict[str, str]]]:
@@ -265,15 +258,12 @@ def shown_examples(user_prompt: str) -> list[tuple[str, dict[str, str]]]:
 
 
 def expected_judgment(label: Any, reason: str | None, presented: list[str] | None) -> str:
-    """A judgment's content, written out: the verdict, or the option's number in the order
-    the call presents the options (``presented``) and its label; then the reason if shown."""
+    """A judgment's content, written out: the verdict, or the option's label; then the reason
+    if shown. ``presented`` is the call's option order, ``None`` for a binary criterion."""
     if presented is None:
         lines = [f"<verdict>{label.value}</verdict>"]
     else:
-        lines = [
-            f"<selected_option>{presented.index(label) + 1}</selected_option>",
-            f"<selected_label>{label}</selected_label>",
-        ]
+        lines = [f"<selected_label>{label}</selected_label>"]
     if reason:
         lines.append(f"<reason>{reason}</reason>")
     return "\n".join(lines)
@@ -474,11 +464,11 @@ class TestEligibility:
         (call,) = fake.calls
         examples = dict(shown_examples(call.user_prompt))
         assert examples["index in range text"]["c1"] == (
-            "<selected_option>3</selected_option>\n<selected_label>Very clear</selected_label>"
+            "<selected_label>Very clear</selected_label>"
         )
         # The NA option the grader adds is shown last, after tone's four options.
         assert examples["NA option index text"]["c3"] == (
-            f"<selected_option>5</selected_option>\n<selected_label>{NA_LABEL}</selected_label>"
+            f"<selected_label>{NA_LABEL}</selected_label>"
         )
 
     @pytest.mark.asyncio
@@ -494,13 +484,9 @@ class TestEligibility:
         assert examples["verdict values text"]["c2"] == "<verdict>MET</verdict>"
         assert examples["NA label text"] == {
             "c0": "<verdict>MET</verdict>",
-            "c1": (
-                f"<selected_option>4</selected_option>\n<selected_label>{NA_LABEL}</selected_label>"
-            ),
+            "c1": (f"<selected_label>{NA_LABEL}</selected_label>"),
             "c2": "<verdict>UNMET</verdict>",
-            "c3": (
-                f"<selected_option>5</selected_option>\n<selected_label>{NA_LABEL}</selected_label>"
-            ),
+            "c3": (f"<selected_label>{NA_LABEL}</selected_label>"),
         }
 
     @pytest.mark.asyncio
@@ -522,9 +508,7 @@ class TestEligibility:
         examples = dict(shown_examples(call.user_prompt))
         assert sorted(examples) == ["Leaves catch light.", "Roots drink water."]
         for judgments in examples.values():
-            assert judgments["c1"] == (
-                f"<selected_option>4</selected_option>\n<selected_label>{NA_LABEL}</selected_label>"
-            )
+            assert judgments["c1"] == (f"<selected_label>{NA_LABEL}</selected_label>")
 
     @pytest.mark.asyncio
     async def test_no_eligible_item_means_no_examples(self):
@@ -827,9 +811,7 @@ class TestCoverageIdentifiesOptionsByIndex:
         await Rubric([LIGHT, CLARITY]).grade(SUBMISSION, grader=grader, query=QUERY)
         (call,) = fake.calls
         examples = dict(shown_examples(call.user_prompt))
-        very_clear = (
-            "<selected_option>3</selected_option>\n<selected_label>Very clear</selected_label>"
-        )
+        very_clear = "<selected_label>Very clear</selected_label>"
         for submission in ("V1", "V2", "V3", "V4", "C"):
             assert examples[submission]["c1"] == very_clear
         assert examples["C"]["c0"] == "<verdict>CANNOT_ASSESS</verdict>"
@@ -855,40 +837,40 @@ class TestRendering:
             "Plants use sunlight to make sugar.": (
                 '<judgment id="c0">\n<verdict>MET</verdict>\n<reason>Names sunlight.</reason>\n'
                 "</judgment>\n"
-                '<judgment id="c1">\n<selected_option>3</selected_option>\n'
+                '<judgment id="c1">\n'
                 "<selected_label>Very clear</selected_label>\n</judgment>\n"
                 '<judgment id="c2">\n<verdict>UNMET</verdict>\n</judgment>\n'
-                '<judgment id="c3">\n<selected_option>1</selected_option>\n'
+                '<judgment id="c3">\n'
                 "<selected_label>Formal</selected_label>\n<reason>Plain register.</reason>\n"
                 "</judgment>"
             ),
             "Plants eat dirt, lol.": (
                 '<judgment id="c0">\n<verdict>UNMET</verdict>\n</judgment>\n'
-                '<judgment id="c1">\n<selected_option>1</selected_option>\n'
+                '<judgment id="c1">\n'
                 "<selected_label>Unclear</selected_label>\n</judgment>\n"
                 '<judgment id="c2">\n<verdict>UNMET</verdict>\n</judgment>\n'
-                '<judgment id="c3">\n<selected_option>3</selected_option>\n'
+                '<judgment id="c3">\n'
                 "<selected_label>Playful</selected_label>\n</judgment>"
             ),
             "Chlorophyll drives photolysis!": (
                 '<judgment id="c0">\n<verdict>MET</verdict>\n</judgment>\n'
-                '<judgment id="c1">\n<selected_option>2</selected_option>\n'
+                '<judgment id="c1">\n'
                 "<selected_label>Mostly clear</selected_label>\n<reason>Some terms.</reason>\n"
                 "</judgment>\n"
                 '<judgment id="c2">\n<verdict>MET</verdict>\n'
                 "<reason>Photolysis is unexplained.</reason>\n</judgment>\n"
-                '<judgment id="c3">\n<selected_option>4</selected_option>\n'
+                '<judgment id="c3">\n'
                 "<selected_label>Neutral</selected_label>\n</judgment>"
             ),
             "Light and water, basically.": (
                 '<judgment id="c0">\n<verdict>MET</verdict>\n<reason>Light.</reason>\n'
                 "</judgment>\n"
-                '<judgment id="c1">\n<selected_option>2</selected_option>\n'
+                '<judgment id="c1">\n'
                 "<selected_label>Mostly clear</selected_label>\n<reason>Clear enough.</reason>\n"
                 "</judgment>\n"
                 '<judgment id="c2">\n<verdict>UNMET</verdict>\n<reason>No jargon.</reason>\n'
                 "</judgment>\n"
-                '<judgment id="c3">\n<selected_option>2</selected_option>\n'
+                '<judgment id="c3">\n'
                 "<selected_label>Casual</selected_label>\n<reason>Informal.</reason>\n"
                 "</judgment>"
             ),
@@ -906,12 +888,11 @@ class TestRendering:
                 "</examples>",
             ]
         )
-        assert f"</criteria>\n\n{block}\n\n<input>{QUERY}</input>\n\n<submission>\n" in (
-            call.user_prompt
-        )
+        assert call.user_prompt.startswith(f"{block}\n\n<criteria>\n")
+        assert f"</criteria>\n\n<input>{QUERY}</input>\n\n<submission>\n" in call.user_prompt
 
     @pytest.mark.asyncio
-    async def test_one_block_between_the_criteria_and_the_input(self):
+    async def test_one_block_before_the_criteria(self):
         fake = RubricLLM()
         grader = per_item_grader(fake)
         await Rubric(TRAIN_RUBRIC, guidelines=GUIDELINES).grade(
@@ -922,10 +903,10 @@ class TestRendering:
         assert call.response_format is RubricJudgment
         assert prompt.count("<examples>") == prompt.count("</examples>") == 1
         assert prompt.startswith("<guidelines>\n")
-        assert prompt.index("</criteria>") < prompt.index("<examples>")
-        assert "</criteria>\n\n<examples>\n<example_1>\n" in prompt
+        assert prompt.index("</examples>") < prompt.index("<criteria>")
+        assert "</examples>\n\n<criteria>\n" in prompt
         assert (
-            f"</example_4>\n</examples>\n\n<input>{QUERY}</input>\n\n"
+            f"</criteria>\n\n<input>{QUERY}</input>\n\n"
             f"<reference_submission>\n{REFERENCE}\n</reference_submission>\n\n"
             f"<submission>\n{SUBMISSION}\n</submission>"
         ) in prompt
@@ -938,7 +919,7 @@ class TestRendering:
     )
     @pytest.mark.parametrize("include_reason", [False, True], ids=["no_reason", "reason"])
     @pytest.mark.asyncio
-    async def test_each_criterion_is_judged_in_the_calls_numbering(
+    async def test_each_criterion_is_judged_by_label(
         self, shuffle_options, auto_na_option, include_reason
     ):
         fake = RubricLLM()
@@ -957,20 +938,15 @@ class TestRendering:
                 assert "<reason>" not in call.user_prompt
 
     @pytest.mark.asyncio
-    async def test_the_numbering_follows_the_shuffle_not_the_training_rubric(self):
-        """Guards the test above: with shuffling on, some example's option number differs
-        from its option's position in the training rubric."""
+    async def test_examples_read_the_same_whatever_the_items_shuffle(self):
+        """Examples name options by label, so the prefix is the same across items."""
         fake = RubricLLM()
         grader = per_item_grader(fake)
-        await Rubric(TRAIN_RUBRIC).grade(SUBMISSION, grader=grader, query=QUERY)
-        (call,) = fake.calls
-        renumbered = False
-        for submission, judgments in shown_examples(call.user_prompt):
-            labels, _ = TRAINING[submission]
-            for idx in (1, 3):
-                original = [o.label for o in TRAIN_RUBRIC[idx].options or []].index(labels[idx])
-                renumbered |= selected_option(judgments[f"c{idx}"]) != original + 1
-        assert renumbered
+        for submission in (SUBMISSION, OTHER_SUBMISSION):
+            await Rubric(TRAIN_RUBRIC).grade(submission, grader=grader, query=QUERY)
+        first, second = (c.user_prompt.split("\n\n<criteria>", 1)[0] for c in fake.calls)
+        assert first == second
+        assert "<selected_option>" not in first
 
     @pytest.mark.asyncio
     async def test_the_examples_are_the_same_for_every_item(self):
@@ -1215,7 +1191,7 @@ class TestSystemPrompt:
 
 class TestPanel:
     @pytest.mark.asyncio
-    async def test_each_judge_shows_its_own_examples_in_its_own_numbering(self):
+    async def test_each_judge_shows_its_own_examples(self):
         fakes = {"alpha": RubricLLM(), "beta": RubricLLM()}
         grader = make_grader(
             fakes,
