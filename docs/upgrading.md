@@ -4,7 +4,7 @@
 
 ### Per-criterion prompts put the criterion last
 
-A per-criterion prompt now runs in this order: guidelines, input, reference submission, submission, few-shot examples, criterion. Before 1.7.0 the criterion came first, which kept providers from reusing the submission across an item's calls. The text of each part is unchanged, and only the default `llm_calls="per_criterion"` is affected (meta-rubric evaluation included, as it grades per criterion). `llm_calls="per_item"` prompts and decision-model requests do not change.
+A per-criterion prompt now runs in this order: guidelines, input, reference submission, submission, criterion. With few-shot examples, which differ per criterion, it runs guidelines, examples, criterion, input, reference submission, submission, and a multi-choice prompt puts its options after the question. Few-shot examples also name a multi-choice option by label rather than by number, in `per_item` prompts too, where the examples now precede the criteria. Before 1.7.0 the criterion came first, which kept providers from reusing the submission across an item's calls. The text of each part is unchanged, and without examples only the default `llm_calls="per_criterion"` is affected (meta-rubric evaluation included, as it grades per criterion). Decision-model requests do not change.
 
 We re-ran nine datasets (5,003 criterion judgments) with each judge and compared the result with one call per item. Cost fell for the two judges whose caches these prompts could reach. Gemini's prompts here were below its 4,096-token minimum for caching, so its cost did not change, though longer submissions and images will benefit.
 

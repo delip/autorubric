@@ -1135,6 +1135,7 @@ class LLMClient:
         return_result: bool = False,
         shared_prefix: str | None = None,
         pre_1_7_user_prompt: str | None = None,
+        pre_1_7_system_prompt: str | None = None,
         **kwargs: Any,
     ) -> str | T | GenerateResult:
         """Generate LLM response with optional structured output.
@@ -1164,6 +1165,8 @@ class LLMClient:
                 response-cache miss, the key of that text is read too, so replies cached by
                 earlier releases are reused; nothing is written under it. Kept for backward
                 compatibility and planned for removal in 2.0.0.
+            pre_1_7_system_prompt: The text ``system_prompt`` had before 1.7.0 for that lookup,
+                when it differs.
             **kwargs: Override any LLMConfig parameters for this call. In particular,
                 ``temperature`` accepts a float to send for this call, or None to omit it
                 so the provider's default applies (regardless of ``config.temperature``).
@@ -1211,7 +1214,7 @@ class LLMClient:
                 cached = cache.get(
                     self._cache_key(
                         self.config.model,
-                        system_prompt,
+                        pre_1_7_system_prompt or system_prompt,
                         pre_1_7_user_prompt,
                         response_format,
                         kwargs,

@@ -10,9 +10,17 @@ from unittest.mock import patch
 import litellm
 import pytest
 
+from autorubric.dataset import RubricDataset
 from autorubric.graders import CriterionGrader
 from autorubric.llm import GenerateResult, LLMConfig, _caches_prompts, _prompt_cache_min_tokens
-from autorubric.types import Criterion, CriterionJudgment, CriterionOption, CriterionVerdict
+from autorubric.rubric import Rubric
+from autorubric.types import (
+    Criterion,
+    CriterionJudgment,
+    CriterionOption,
+    CriterionVerdict,
+    FewShotConfig,
+)
 
 LONG = "word " * 5000
 
@@ -204,3 +212,69 @@ class TestWarming:
         for k in seen:
             assert k["user_prompt"].startswith(k["shared_prefix"] + "\n\n")
             assert k["pre_1_7_user_prompt"].endswith("<submission>\nS\n</submission>")
+
+
+class TestFewShotPrefixes:
+    """Few-shot prefixes are shared across items, so the first item's call warms them."""
+
+    def _grader(self, recorder: _Recorder, rubric: list[Criterion]) -> CriterionGrader:
+        labels = [
+            [CriterionVerdict.MET if c.options is None else "a" for c in rubric],
+            [CriterionVerdict.UNMET if c.options is None else "b" for c in rubric],
+        ]
+        data = RubricDataset(prompt="P", rubric=Rubric(rubric))
+        for i, ground_truth in enumerate(labels):
+            data.add_item(f"Training {i}. " + LONG, f"Training {i}", ground_truth=ground_truth)
+        grader = CriterionGrader(
+            judge_model_config=LLMConfig(model="gpt-5.6-luna"),
+            training_data=data,
+            few_shot_config=FewShotConfig(n_examples=2),
+        )
+        grader._clients[grader._judges[0].judge_id] = recorder  # type: ignore[assignment]
+        return grader
+
+    @pytest.mark.asyncio
+    async def test_the_first_item_warms_a_criterions_prefix_for_concurrent_items(self) -> None:
+        recorder = _Recorder()
+        rubric = [_binary("a")]
+        grader = self._grader(recorder, rubric)
+        await asyncio.gather(*(_judge(grader, rubric, f"Item {i}") for i in range(3)))
+        assert _started_before_first_end(recorder) == ["a"]
+        assert len([e for e in recorder.events if e[0] == "start"]) == 3
+
+    @pytest.mark.asyncio
+    async def test_criteria_of_one_item_do_not_wait_for_each_other(self) -> None:
+        recorder = _Recorder()
+        rubric = [_binary("a"), _binary("b")]
+        grader = self._grader(recorder, rubric)
+        await _judge(grader, rubric, "Item")
+        assert sorted(_started_before_first_end(recorder)) == ["a", "b"]
+
+    @pytest.mark.asyncio
+    async def test_a_failed_warming_call_lets_the_next_call_warm(self) -> None:
+        recorder = _Recorder(fail_first=TimeoutError("slow"))
+        rubric = [_binary("a")]
+        grader = self._grader(recorder, rubric)
+        await _judge(grader, rubric, "Item 0")
+        assert grader._warmed_prefixes == {}
+        await _judge(grader, rubric, "Item 1")
+        assert len(grader._warmed_prefixes) == 1
+
+    @pytest.mark.asyncio
+    async def test_the_prefix_reaches_generate_with_the_old_prompts(self) -> None:
+        recorder = _Recorder()
+        seen: list[dict] = []
+        original = recorder.generate
+
+        async def spy(**kwargs: Any) -> GenerateResult:
+            seen.append(kwargs)
+            return await original(**kwargs)
+
+        recorder.generate = spy  # type: ignore[method-assign]
+        grader = self._grader(recorder, [_multi("m")])
+        await _judge(grader, [grader._effective_criterion(_multi("m"))], "S")
+        (request,) = seen
+        assert request["shared_prefix"].endswith("</question>")
+        assert "<selected_option>" in request["pre_1_7_user_prompt"]
+        assert "- <selected_option>" in request["pre_1_7_system_prompt"]
+        assert "- <selected_option>" not in request["system_prompt"]

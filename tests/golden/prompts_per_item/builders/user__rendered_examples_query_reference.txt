@@ -1,3 +1,16 @@
+<examples>
+<example_1>
+<example_submission>Water boils around 100 degrees; not sure about altitude effects.</example_submission>
+<judgment id="c0">
+<verdict>MET</verdict>
+<reason>States the boiling point.</reason>
+</judgment>
+<judgment id="c1">
+<selected_label>Very clear</selected_label>
+</judgment>
+</example_1>
+</examples>
+
 <criteria>
 <rubric_criterion id="c0">
 <criterion_type>
@@ -22,20 +35,6 @@ How clear is the explanation?
 </options>
 </rubric_criterion>
 </criteria>
-
-<examples>
-<example_1>
-<example_submission>Water boils around 100 degrees; not sure about altitude effects.</example_submission>
-<judgment id="c0">
-<verdict>MET</verdict>
-<reason>States the boiling point.</reason>
-</judgment>
-<judgment id="c1">
-<selected_option>3</selected_option>
-<selected_label>Very clear</selected_label>
-</judgment>
-</example_1>
-</examples>
 
 <input>At what temperature does water boil?</input>
 

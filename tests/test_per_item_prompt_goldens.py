@@ -872,10 +872,15 @@ def test_spec_example_user_prompt() -> None:
     assert actual == expected
 
 
-def test_spec_examples_sit_between_the_criteria_and_the_input() -> None:
-    """Rendered examples follow ``</criteria>`` and a blank line, and a blank line separates
-    them from the input, then the reference submission and the submission follow."""
+def test_spec_examples_sit_before_the_criteria() -> None:
+    """Rendered examples open the prompt, so every item's call starts the same way, and a
+    blank line separates them from the criteria, then the input, the reference submission
+    and the submission follow."""
     expected = (
+        "<examples>\n"
+        "...\n"
+        "</examples>\n"
+        "\n"
         "<criteria>\n"
         '<rubric_criterion id="c0">\n'
         "<criterion_type>\n"
@@ -887,10 +892,6 @@ def test_spec_examples_sit_between_the_criteria_and_the_input() -> None:
         "</criterion>\n"
         "</rubric_criterion>\n"
         "</criteria>\n"
-        "\n"
-        "<examples>\n"
-        "...\n"
-        "</examples>\n"
         "\n"
         "<input>At what temperature does water boil?</input>\n"
         "\n"
@@ -969,7 +970,6 @@ def test_spec_format_rubric_examples_worked_example() -> None:
         "<reason>Names Paris.</reason>\n"
         "</judgment>\n"
         '<judgment id="c1">\n'
-        "<selected_option>2</selected_option>\n"
         "<selected_label>Very clear</selected_label>\n"
         "</judgment>\n"
         "</example_1>\n"

@@ -1,10 +1,3 @@
-<input>At what temperature does water boil?</input>
-
-<submission>
-<thinking>Recall the standard value at one atmosphere.</thinking>
-<output>Water boils at 100 °C at sea level.</output>
-</submission>
-
 <examples>
 <example_1>
 <example_submission>Water boils at 100 C.</example_submission>
@@ -27,3 +20,10 @@ positive
 <criterion>
 States the boiling point of water at sea level
 </criterion>
+
+<input>At what temperature does water boil?</input>
+
+<submission>
+<thinking>Recall the standard value at one atmosphere.</thinking>
+<output>Water boils at 100 °C at sea level.</output>
+</submission>

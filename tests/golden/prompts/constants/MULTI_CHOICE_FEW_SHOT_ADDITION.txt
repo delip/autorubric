@@ -7,7 +7,6 @@ your judgment, but evaluate the actual <submission> on its own merits.
 
 Each example includes:
 - <example_submission>: A submission that was previously evaluated
-- <selected_option>: The option number that was selected
 - <selected_label>: The text of the selected option
 - <reason>: (Optional) Explanation for the selection
 
