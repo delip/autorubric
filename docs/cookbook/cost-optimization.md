@@ -150,7 +150,8 @@ if result.total_token_usage:
 | OpenAI, GPT-5.6 and later | Explicit cache breakpoints on the same two places | Automatic mode rewrites each whole prompt, at 1.25x the input rate |
 | OpenAI, earlier models | The shared content in its own message | Automatic prefix caching |
 | DeepSeek | The shared content in its own message | Automatic prefix caching |
-| Gemini | Nothing | Its automatic cache was not readable until about a minute after a call, too late for an item's other calls |
+| Gemini 2.5 and 3 | A five-minute context cache of the system prompt and shared content, from 4,096 tokens | Reads cost a tenth of input and storage is billed by the hour. Shorter prompts are sent as one message. |
+| Gemini 4 | One user message, no warming | It refuses context caches, and its automatic cache was too slow to help an item's other calls in our tests on 3.8 Flash |
 | Other models | One user message, no warming | Some OpenAI-compatible servers refuse consecutive user messages |
 
 !!! note "Few-shot examples are not cached across criteria"

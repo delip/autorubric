@@ -26,11 +26,6 @@ work and make input the dominant cost, so the submission has to be in the shared
   prompts take the new layout like any other per-criterion call.
 - A different few-shot selection. A single example set shared across criteria would cache
   better but changes grading behaviour; it is a possible later change.
-- Gemini explicit context caching. Live probes of Gemini 3.8 Flash found its automatic cache
-  was not readable until about a minute after a call, and only for a repeated prefix, even
-  well above its 4,096-token minimum. That is too late for an item's other calls, so Gemini
-  gets one user message and no warm-first. Explicit caching is a possible later change for
-  image submissions. The docs state the limit.
 - Changing the `autorubric-image` branch.
 
 ## Anti-goals
@@ -98,6 +93,8 @@ differing in that message never read it. For split requests only, these models g
 `prompt_cache_breakpoint: {"mode": "explicit"}` on the system message and the shared block and
 `prompt_cache_options: {"mode": "explicit"}` in `extra_body`, on Chat Completions. Later calls
 then read the whole shared prefix. Requests that are not split stay in automatic mode.
+
+Gemini 2.5 and 3 get a five-minute context cache through `cache_control` on the same two places, from 4,096 tokens of prefix. Their automatic cache was not readable until about a minute after a call. Explicit caching was first ruled out here, then adopted once image-sized prompts were weighed: reads cost a tenth of input and a live 12,400-token prompt cost about 30% as much once cached. Gemini 4 refuses context caches and keeps one message.
 
 ### Response cache key
 

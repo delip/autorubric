@@ -6,7 +6,15 @@
 
 A per-criterion prompt now runs in this order: guidelines, input, reference submission, submission, few-shot examples, criterion. Before 1.7.0 the criterion came first, which kept providers from reusing the submission across an item's calls. The text of each part is unchanged, and only the default `llm_calls="per_criterion"` is affected (meta-rubric evaluation included, as it grades per criterion). `llm_calls="per_item"` prompts and decision-model requests do not change.
 
-MEASURED_NUMBERS
+We re-ran nine datasets (5,003 criterion judgments) with each judge and compared the result with one call per item. Cost fell for the two judges whose caches these prompts could reach. Gemini's prompts here were below its 4,096-token minimum for caching, so its cost did not change, though longer submissions and images will benefit.
+
+| Judge | Cost before | Cost after | Before, relative to `per_item` | After, relative to `per_item` | Cached prompt tokens before | Cached prompt tokens after |
+|---|---|---|---|---|---|---|
+| gpt-5.6-luna | $1.84 | $1.40 | 1.82x | 1.39x | 80% | 91% |
+| deepseek-v4.1-flash | $4.18 | $3.23 | 1.23x | 0.95x | 68% | 82% |
+| gemini-3.8-flash | $20.59 | $20.68 | 1.79x | 1.79x | none | about 1% |
+
+Expect some verdicts to change. On a 10% repeat, two runs of the new layout agreed on 86.4% of Luna's verdicts, 86.1% of DeepSeek's and 96.4% of Gemini's, while the old and new layouts agreed on 81.1%, 77.9% and 93.6%. So the order itself moves verdicts, beyond run-to-run noise. Accuracy against the labels changed by −0.4 points for Luna (95% interval −1.3 to +0.5), +0.5 for DeepSeek (−0.5 to +1.5) and −1.4 for Gemini (−2.1 to −0.8). If you compare scores across this upgrade, re-grade a sample with both versions first.
 
 ### Your response caches keep working
 

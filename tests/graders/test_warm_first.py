@@ -14,7 +14,7 @@ from autorubric.graders import CriterionGrader
 from autorubric.llm import GenerateResult, LLMConfig, _caches_prompts, _prompt_cache_min_tokens
 from autorubric.types import Criterion, CriterionJudgment, CriterionOption, CriterionVerdict
 
-LONG = "word " * 2000
+LONG = "word " * 5000
 
 
 @pytest.fixture(autouse=True)
@@ -113,24 +113,30 @@ class TestWarming:
         grader, recorder = _grader(model, **config)
         rubric = [_binary(f"c{i}") for i in range(rubric_size)]
         # The system prompt alone passes 1,024 tokens, so raise the bar for the short case.
-        with patch(
-            "autorubric.graders.criterion_grader._prompt_cache_min_tokens", return_value=5000
-        ):
+        with patch("autorubric.llm._prompt_cache_min_tokens", return_value=5000):
             await _judge(grader, rubric, submission)
         assert len(_started_before_first_end(recorder)) == rubric_size
 
+    @pytest.mark.parametrize(
+        ("model", "submission", "warmed"),
+        [
+            ("gemini/gemini-3.8-flash", LONG, True),
+            ("gemini/gemini-3.8-flash", "short", False),
+            ("gemini/gemini-4-argon", LONG, False),
+        ],
+    )
     @pytest.mark.asyncio
-    async def test_gemini_is_not_warmed(self) -> None:
-        grader, recorder = _grader("gemini/gemini-3.8-flash")
-        await _judge(grader, [_binary("a"), _binary("b")])
-        assert len(_started_before_first_end(recorder)) == 2
+    async def test_gemini_warms_only_a_context_cache(
+        self, model: str, submission: str, warmed: bool
+    ) -> None:
+        grader, recorder = _grader(model)
+        await _judge(grader, [_binary("a"), _binary("b")], submission)
+        assert len(_started_before_first_end(recorder)) == (1 if warmed else 2)
 
     @pytest.mark.asyncio
     async def test_a_tokenizer_failure_means_no_warming(self) -> None:
         grader, recorder = _grader()
-        with patch(
-            "autorubric.graders.criterion_grader.litellm.token_counter", side_effect=ValueError("x")
-        ):
+        with patch("autorubric.llm.litellm.token_counter", side_effect=ValueError("x")):
             await _judge(grader, [_binary("a"), _binary("b")])
         assert len(_started_before_first_end(recorder)) == 2
 

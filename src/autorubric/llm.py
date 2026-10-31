@@ -58,6 +58,14 @@ T = TypeVar("T", bound=BaseModel)
 # with an explicit breakpoint.
 _EXPLICIT_BREAKPOINT_MODELS = re.compile(r"(openai/)?gpt-(5\.[6-9]|[6-9])")
 
+# Gemini models that take explicit context caches: their automatic cache was not readable
+# until about a minute after a call, too late for an item's other calls. LiteLLM turns a
+# ``cache_control`` marker into a context cache. Gemini 4 refuses one with a 400.
+_GEMINI_CONTEXT_CACHE_MODELS = re.compile(r"gemini/gemini-(2\.5|3)")
+_GEMINI_PROMPT_CACHE_MIN_TOKENS = 4096
+# Long enough for an item's calls: storage is billed by the hour, reads at a tenth of input.
+_GEMINI_CACHE_TTL = "300s"
+
 
 # ============================================================================
 # Grading error classification
@@ -722,8 +730,9 @@ class LLMConfig:
             ``CriterionGrader`` lets one call finish before the rest when that prefix is long
             enough to cache. Model ids that start with ``anthropic/``, ``claude`` or
             ``openrouter/anthropic/`` also get ``cache_control: {"type": "ephemeral"}`` on
-            the system message and that shared message, and OpenAI models from GPT-5.6 on
-            get explicit cache breakpoints there. Prompt caching is generally
+            the system message and that shared message, OpenAI models from GPT-5.6 on get
+            explicit cache breakpoints there, and Gemini 2.5 and 3 models a five-minute
+            context cache when the prefix reaches 4,096 tokens. Prompt caching is generally
             available, so no beta header is added, and an ``anthropic-beta`` value in
             ``extra_headers`` is sent unchanged. Claude models served through Bedrock or
             Vertex AI are sent one user message with no marker. With False every request
@@ -931,10 +940,11 @@ def _caches_prompts(model: str) -> bool:
     up, keeps one user message: splitting gains it nothing, and some OpenAI-compatible
     servers refuse consecutive user messages. DeepSeek always caches automatically, and the
     map misses some of its ids. Bedrock and Vertex Claude ids keep their requests as they are.
-    Gemini's automatic cache was not readable until about a minute after a call, too late for
-    an item's other calls, so it is arranged for no differently from a model without one.
+    Gemini models without context caches are arranged for like a model with no cache.
     """
-    if "gemini" in model or ("claude" in model and not _is_anthropic_model(model)):
+    if "gemini" in model:
+        return _GEMINI_CONTEXT_CACHE_MODELS.match(model) is not None
+    if "claude" in model and not _is_anthropic_model(model):
         return False
     if "deepseek" in model:
         return True
@@ -948,19 +958,42 @@ def _caches_prompts(model: str) -> bool:
 def _prompt_cache_min_tokens(model: str) -> int:
     """The shortest prefix ``model``'s prompt cache stores, in tokens.
 
-    LiteLLM's model map records it for Anthropic-family entries only. Others get LiteLLM's
-    general fallback.
+    LiteLLM's model map records it for Anthropic-family entries only. Others get Gemini 3's
+    minimum or LiteLLM's general fallback.
     """
     try:
         recorded = litellm.get_model_info(model=model).get("prompt_cache_min_tokens")
     except Exception:  # as in _caches_prompts
         recorded = None
-    return int(recorded) if recorded else DEFAULT_MINIMUM_PROMPT_CACHE_TOKEN_COUNT
+    if recorded:
+        return int(recorded)
+    if "gemini" in model:
+        return _GEMINI_PROMPT_CACHE_MIN_TOKENS
+    return DEFAULT_MINIMUM_PROMPT_CACHE_TOKEN_COUNT
+
+
+def _prefix_reaches_cache_minimum(model: str, system_prompt: str, shared_prefix: str) -> bool:
+    """Whether this prefix is long enough for ``model``'s prompt cache.
+
+    The count is LiteLLM's estimate: a wrong one costs a little latency or a cache miss, so a
+    model it cannot count for is treated as too short.
+    """
+    try:
+        tokens = litellm.token_counter(model=model, text=system_prompt + shared_prefix)
+    except Exception:  # LiteLLM's tokenizer lookups raise assorted errors
+        return False
+    return tokens >= _prompt_cache_min_tokens(model)
 
 
 def _cache_marked(text: str) -> list[dict[str, Any]]:
     """``text`` as message content carrying Anthropic's ``cache_control`` marker."""
     return [{"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}]
+
+
+def _context_cache_marked(text: str) -> list[dict[str, Any]]:
+    """``text`` as message content that LiteLLM puts in a Gemini context cache."""
+    marker = {"type": "ephemeral", "ttl": _GEMINI_CACHE_TTL}
+    return [{"type": "text", "text": text, "cache_control": marker}]
 
 
 def _breakpoint_marked(text: str) -> list[dict[str, Any]]:
@@ -1190,19 +1223,24 @@ class LLMClient:
         # Build request parameters
         model = kwargs.get("model", self.config.model)
 
+        gemini = _GEMINI_CONTEXT_CACHE_MODELS.match(model) is not None
         split = (
             shared_prefix is not None
             and self.config.prompt_caching
             and user_prompt.startswith(shared_prefix)
             and _caches_prompts(model)
+            # A context cache is created per prefix, so one that is too short is not asked for.
+            and (not gemini or _prefix_reaches_cache_minimum(model, system_prompt, shared_prefix))
         )
-        # Anthropic caches at cache_control markers on message content. The other providers
-        # cache automatically, at message endings, which is why the shared prefix is a
-        # message of its own: a prefix ending inside a message is not reused.
+        # Anthropic and Gemini cache at cache_control markers on message content. The other
+        # providers cache automatically, at message endings, which is why the shared prefix is
+        # a message of its own: a prefix ending inside a message is not reused.
         explicit = split and _EXPLICIT_BREAKPOINT_MODELS.match(model) is not None
         mark = (
             _breakpoint_marked
             if explicit
+            else _context_cache_marked
+            if split and gemini
             else _cache_marked
             if self.config.prompt_caching and _is_anthropic_model(model)
             else None

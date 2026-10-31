@@ -27,6 +27,7 @@ pytestmark = pytest.mark.skipif(
 MODELS = [
     "gpt-5.6-luna",
     "anthropic/claude-haiku-5-5",
+    "gemini/gemini-3.8-flash",
     "openrouter/deepseek/deepseek-v4.1-flash",
 ]
 RUBRIC = [

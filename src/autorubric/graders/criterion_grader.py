@@ -18,7 +18,6 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast, get_args, overload
 
-import litellm
 from pydantic import BaseModel
 
 from autorubric.decision import (
@@ -38,7 +37,7 @@ from autorubric.llm import (
     LLMConfig,
     _caches_prompts,
     _is_configuration_error,
-    _prompt_cache_min_tokens,
+    _prefix_reaches_cache_minimum,
     classify_grading_error,
 )
 from autorubric.prompts import (
@@ -2638,21 +2637,15 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
 
     @staticmethod
     def _warms_cache(judge: JudgeSpec, system_prompt: str, shared: str) -> bool:
-        """Whether ``judge``'s model can cache a prefix of ``system_prompt`` and ``shared``.
-
-        The token count is LiteLLM's estimate: a wrong one costs a little latency or a
-        cache miss, so a model it cannot count for is simply not warmed.
-        """
+        """Whether ``judge``'s model can cache a prefix of ``system_prompt`` and ``shared``."""
         config = judge.llm_config
         if not isinstance(config, LLMConfig):
             return False
-        if not config.prompt_caching or not _caches_prompts(config.model):
-            return False
-        try:
-            tokens = litellm.token_counter(model=config.model, text=system_prompt + shared)
-        except Exception:  # LiteLLM's tokenizer lookups raise assorted errors
-            return False
-        return tokens >= _prompt_cache_min_tokens(config.model)
+        return (
+            config.prompt_caching
+            and _caches_prompts(config.model)
+            and _prefix_reaches_cache_minimum(config.model, system_prompt, shared)
+        )
 
     async def _judge_all_criteria_with_decision_model(
         self,

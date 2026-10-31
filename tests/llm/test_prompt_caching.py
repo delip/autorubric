@@ -155,6 +155,23 @@ class TestMessages:
         ]
 
     @pytest.mark.asyncio
+    async def test_gemini_context_cache_on_a_long_prefix(self) -> None:
+        with patch("autorubric.llm._prefix_reaches_cache_minimum", return_value=True):
+            kwargs = await _request("gemini/gemini-3.8-flash", shared_prefix=SHARED)
+        mark = {"type": "ephemeral", "ttl": "300s"}
+        system, shared, tail = kwargs["messages"]
+        assert system["content"] == [{"type": "text", "text": "SYS", "cache_control": mark}]
+        assert shared["content"] == [{"type": "text", "text": SHARED, "cache_control": mark}]
+        assert tail == {"role": "user", "content": TAIL}
+
+    @pytest.mark.asyncio
+    async def test_gemini_keeps_one_message_on_a_short_prefix(self) -> None:
+        assert await _messages("gemini/gemini-3.8-flash", shared_prefix=SHARED) == [
+            {"role": "system", "content": "SYS"},
+            {"role": "user", "content": PROMPT},
+        ]
+
+    @pytest.mark.asyncio
     async def test_a_prefix_that_is_not_one_stays_joined(self) -> None:
         messages = await _messages("gpt-5.6-luna", shared_prefix="something else")
         assert messages[1:] == [{"role": "user", "content": PROMPT}]
@@ -181,13 +198,16 @@ class TestModelLookups:
     def test_the_real_lookup_confirms_these_models(self, model: str) -> None:
         assert _caches_prompts(model) is True
 
-    def test_gemini_is_arranged_for_like_a_model_without_a_cache(self) -> None:
-        assert _caches_prompts("gemini/gemini-3.8-flash") is False
+    def test_gemini_context_cache_models(self) -> None:
+        assert _caches_prompts("gemini/gemini-3.8-flash") is True
+        assert _caches_prompts("gemini/gemini-2.5-flash") is True
+        assert _caches_prompts("gemini/gemini-4-argon") is False
 
     def test_unknown_model_does_not_cache(self) -> None:
         assert _caches_prompts("no-such-provider/no-such-model") is False
 
     def test_min_tokens_fallback(self) -> None:
+        assert _prompt_cache_min_tokens("gemini/gemini-3.8-flash") == 4096
         assert _prompt_cache_min_tokens("gpt-5.6-luna") == 1024
 
     def test_recorded_minimum_wins(self) -> None:
