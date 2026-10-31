@@ -1,3 +1,9 @@
+<examples>
+<example_1>
+<example_submission>Water boils at 90 degrees.</example_submission>
+</example_1>
+</examples>
+
 <criteria>
 <rubric_criterion id="c0">
 <criterion_type>
@@ -22,12 +28,6 @@ How clear is the explanation?
 </options>
 </rubric_criterion>
 </criteria>
-
-<examples>
-<example_1>
-<example_submission>Water boils at 90 degrees.</example_submission>
-</example_1>
-</examples>
 
 <input>At what temperature does water boil?</input>
 

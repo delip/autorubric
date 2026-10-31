@@ -155,8 +155,8 @@ if result.total_token_usage:
 | Other models LiteLLM says cache | The shared content in its own message | |
 | Any other model, or any custom `api_base` | One user message, no warming | Some OpenAI-compatible servers refuse consecutive user messages |
 
-!!! note "Few-shot examples are not cached across criteria"
-    Examples are drawn per criterion, so they follow the submission and are paid for in full on every call.
+!!! note "Few-shot examples are cached across items"
+    With few-shot examples, what a criterion's calls share is the examples, so those come first and the submission last. The first item's call for a criterion writes the cache and the other items read it. The submission is then paid for in full on every call. Multi-choice examples name their option by label, so that they read the same whatever order an item shuffles the options into.
 
 ### Step 6: One Call Per Item Instead of Per Criterion
 

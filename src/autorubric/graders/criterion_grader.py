@@ -46,9 +46,17 @@ from autorubric.prompts import (
     MULTI_CHOICE_FEW_SHOT_ADDITION,
     MULTI_CHOICE_SYSTEM_PROMPT,
     _binary_criterion_block,
+    _few_shot_prefix,
+    _format_few_shot_examples,
+    _format_multi_choice_examples,
     _format_rubric_examples,
     _multi_choice_criterion_block,
+    _multi_choice_few_shot_prefix,
+    _pre_1_7_few_shot_user_prompt,
+    _pre_1_7_rubric_user_prompt,
+    _pre_1_7_system_prompt,
     _pre_1_7_user_prompt,
+    _rubric_examples_prefix,
     _shared_user_content,
     build_few_shot_user_prompt,
     build_multi_choice_few_shot_user_prompt,
@@ -2254,18 +2262,36 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 criterion, to_grade, query, reference_submission, guidelines=guidelines
             )
 
-        shared = _shared_user_content(to_grade, query, reference_submission, guidelines=guidelines)
-        pre_1_7_prompt = _pre_1_7_user_prompt(
-            user_prompt, shared, _binary_criterion_block(criterion), guidelines
-        )
+        if examples:
+            include_reason = self._few_shot_config.include_reason
+            prefix = _few_shot_prefix(criterion, examples, include_reason, guidelines=guidelines)
+            pre_1_7_prompt = _pre_1_7_few_shot_user_prompt(
+                _binary_criterion_block(criterion),
+                _format_few_shot_examples(examples, include_reason),
+                to_grade,
+                query,
+                reference_submission,
+                guidelines=guidelines,
+            )
+        else:
+            shared = _shared_user_content(
+                to_grade, query, reference_submission, guidelines=guidelines
+            )
+            prefix = shared if reused else None
+            pre_1_7_prompt = _pre_1_7_user_prompt(
+                user_prompt, shared, _binary_criterion_block(criterion), guidelines
+            )
 
         try:
-            result: GenerateResult = await client.generate(
+            result: GenerateResult = await self._generate(
+                judge,
+                client,
+                bool(examples),
                 system_prompt=self._system_prompt,
                 user_prompt=user_prompt,
                 response_format=self._binary_response_format,
                 return_result=True,
-                shared_prefix=shared if reused else None,
+                shared_prefix=prefix,
                 pre_1_7_user_prompt=pre_1_7_prompt,
             )
 
@@ -2334,33 +2360,55 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 (submission, original_to_shuffled[orig_idx], reason)
                 for submission, orig_idx, reason in examples
             ]
+            include_reason = self._few_shot_config.include_reason
             user_prompt = build_multi_choice_few_shot_user_prompt(
                 criterion=prompt_criterion,
                 to_grade=to_grade,
                 examples=transformed_examples,
                 query=query,
-                include_reason=self._few_shot_config.include_reason,
+                include_reason=include_reason,
                 reference_submission=reference_submission,
+                guidelines=guidelines,
+            )
+            prefix = _multi_choice_few_shot_prefix(
+                prompt_criterion, transformed_examples, include_reason, guidelines=guidelines
+            )
+            pre_1_7_prompt = _pre_1_7_few_shot_user_prompt(
+                _multi_choice_criterion_block(prompt_criterion),
+                _format_multi_choice_examples(
+                    prompt_criterion, transformed_examples, include_reason, numbered=True
+                ),
+                to_grade,
+                query,
+                reference_submission,
                 guidelines=guidelines,
             )
         else:
             user_prompt = build_multi_choice_user_prompt(
                 prompt_criterion, to_grade, query, reference_submission, guidelines=guidelines
             )
-
-        shared = _shared_user_content(to_grade, query, reference_submission, guidelines=guidelines)
-        pre_1_7_prompt = _pre_1_7_user_prompt(
-            user_prompt, shared, _multi_choice_criterion_block(prompt_criterion), guidelines
-        )
+            shared = _shared_user_content(
+                to_grade, query, reference_submission, guidelines=guidelines
+            )
+            prefix = shared if reused else None
+            pre_1_7_prompt = _pre_1_7_user_prompt(
+                user_prompt, shared, _multi_choice_criterion_block(prompt_criterion), guidelines
+            )
 
         try:
-            result: GenerateResult = await client.generate(
+            result: GenerateResult = await self._generate(
+                judge,
+                client,
+                bool(examples),
                 system_prompt=self._multi_choice_system_prompt,
                 user_prompt=user_prompt,
                 response_format=self._multi_choice_response_format,
                 return_result=True,
-                shared_prefix=shared if reused else None,
+                shared_prefix=prefix,
                 pre_1_7_user_prompt=pre_1_7_prompt,
+                pre_1_7_system_prompt=(
+                    _pre_1_7_system_prompt(self._multi_choice_system_prompt) if examples else None
+                ),
             )
 
             judgment: MultiChoiceJudgment = result.parsed
@@ -2613,6 +2661,14 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
             One result per entry of ``criteria``, in that order.
         """
 
+        # A criterion with examples shares a prefix with its own calls on other items
+        # (``_generate``), not with this item's other criteria.
+        plain = [
+            (position, criterion)
+            for position, (criterion_idx, criterion) in enumerate(criteria)
+            if not self._shows_examples(judge, criterion_idx, criterion)
+        ]
+
         def call(position: int) -> Awaitable[CriterionResult]:
             criterion_idx, criterion = criteria[position]
             return self._judge_single_criterion(
@@ -2623,7 +2679,7 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 query,
                 reference_submission,
                 guidelines=guidelines,
-                reused=sum(c.is_multi_choice == criterion.is_multi_choice for _, c in criteria) > 1,
+                reused=sum(c.is_multi_choice == criterion.is_multi_choice for _, c in plain) > 1,
             )
 
         shared = _shared_user_content(to_grade, query, reference_submission, guidelines=guidelines)
@@ -2632,7 +2688,7 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
             (self._system_prompt, False),
             (self._multi_choice_system_prompt, True),
         ):
-            kind = [p for p, (_, c) in enumerate(criteria) if c.is_multi_choice == is_multi_choice]
+            kind = [p for p, c in plain if c.is_multi_choice == is_multi_choice]
             if len(kind) > 1 and self._warms_cache(judge, system_prompt, shared):
                 warming.append(kind[0])
 
@@ -2643,6 +2699,51 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         rest = [position for position in range(len(criteria)) if position not in results]
         results.update(zip(rest, await _gather_or_cancel(*map(call, rest)), strict=True))
         return [results[position] for position in range(len(criteria))]
+
+    def _shows_examples(self, judge: JudgeSpec, criterion_idx: int, criterion: Criterion) -> bool:
+        """Whether ``judge``'s call about this criterion shows few-shot examples."""
+        examples = (
+            self._multi_choice_examples if criterion.is_multi_choice else self._criterion_examples
+        )
+        return bool(
+            examples.get((criterion_idx, judge.judge_id))
+            and self._poses_training_question(criterion_idx, criterion)
+        )
+
+    async def _generate(
+        self, judge: JudgeSpec, client: LLMClient, across_items: bool, **request: Any
+    ) -> Any:
+        """``client.generate``, the first call of a prefix shared across items going first.
+
+        Few-shot prefixes are shared across items, which ``EvalRunner`` grades concurrently,
+        so the first call with a prefix ``across_items`` writes the provider's cache and the
+        calls that arrive while it runs wait for it. A prefix is warmed once per grader: a
+        cache that expires between calls is written again by whichever call comes next.
+        """
+        prefix = request.get("shared_prefix")
+        if (
+            not across_items
+            or prefix is None
+            or not self._warms_cache(judge, request["system_prompt"], prefix)
+        ):
+            return await client.generate(**request)
+        warmed = self.__dict__.setdefault("_warmed_prefixes", {})
+        key = (judge.judge_id, request["system_prompt"], prefix)
+        loop = asyncio.get_running_loop()
+        warming = warmed.get(key)
+        if warming is None:
+            warming = warmed[key] = loop.create_future()
+            try:
+                return await client.generate(**request)
+            except BaseException:
+                # The next call warms it instead.
+                del warmed[key]
+                raise
+            finally:
+                warming.set_result(None)
+        if not warming.done() and warming.get_loop() is loop:
+            await asyncio.shield(warming)
+        return await client.generate(**request)
 
     @staticmethod
     def _warms_cache(judge: JudgeSpec, system_prompt: str, shared: str) -> bool:
@@ -2785,9 +2886,9 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         judgments map back to one result per criterion, in rubric order.
 
         With training data, the user prompt shows the judge's few-shot examples
-        (``_select_item_examples``) after the criteria, rendered with the prompts: each a
-        whole training item with its judgment of each criterion under the criterion's id,
-        a multi-choice criterion's option numbered in this call's order (``_rubric_examples``,
+        (``_select_item_examples``) before the criteria, rendered with the prompts: each a
+        whole training item with its judgment of each criterion under the criterion's id, a
+        multi-choice criterion's option named by its label (``_rubric_examples``,
         ``_format_rubric_examples``). The system prompt's preamble then says how to read
         them. When no example has a judgment to show, the call has no examples block and the
         preamble leaves out its examples sentence; the guides keep their few-shot additions,
@@ -2837,10 +2938,9 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 )
             presented.append((question_id(criterion_idx), shown))
             shuffles.append(shuffled_indices)
-        examples_text = _format_rubric_examples(
-            self._rubric_examples(judge.judge_id, rubric, presented, shuffles),
-            self._few_shot_config.include_reason,
-        )
+        rubric_examples = self._rubric_examples(judge.judge_id, rubric, presented, shuffles)
+        include_reason = self._few_shot_config.include_reason
+        examples_text = _format_rubric_examples(rubric_examples, include_reason)
         system_prompt = self._rubric_system_prompt(rubric, with_examples=bool(examples_text))
         user_prompt = build_rubric_user_prompt(
             presented,
@@ -2850,16 +2950,35 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
             examples_text=examples_text,
             guidelines=guidelines,
         )
+        # Only a prompt with examples has a start every item's call shares.
+        cache_request: dict[str, Any] = {}
+        if examples_text:
+            cache_request = {
+                "shared_prefix": _rubric_examples_prefix(examples_text, guidelines=guidelines),
+                "pre_1_7_user_prompt": _pre_1_7_rubric_user_prompt(
+                    presented,
+                    _format_rubric_examples(rubric_examples, include_reason, numbered=True),
+                    to_grade,
+                    query,
+                    reference_submission,
+                    guidelines=guidelines,
+                ),
+                "pre_1_7_system_prompt": _pre_1_7_system_prompt(system_prompt),
+            }
 
         try:
             # return_result=True makes generate return a GenerateResult.
             result = cast(
                 GenerateResult,
-                await client.generate(
+                await self._generate(
+                    judge,
+                    client,
+                    True,
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
                     response_format=RubricJudgment,
                     return_result=True,
+                    **cache_request,
                 ),
             )
             reply: RubricJudgment = result.parsed
