@@ -22,10 +22,10 @@ We measured few-shot grading (five examples each) on 40 RiceChem answers and 30 
 
 | Judge | Cached before | Cached after | Cost before | Cost after |
 |---|---|---|---|---|
-| gpt-5.6-luna | 54% | 90% | $0.354 | $0.207 |
+| gpt-5.6-luna | 53% | 89% | $0.354 | $0.207 |
 | claude-haiku-5-5 | 56% | 88% | $0.244 | $0.155 |
-| gemini-3.8-flash | 2% | 45% | $3.571 | $2.860 |
-| deepseek-v4.1-flash | 42% | 82% | $0.616 | $0.724 |
+| gemini-3.8-flash | 2% | 46% | $3.571 | $2.860 |
+| deepseek-v4.1-flash | 42% | 81% | $0.616 | $0.724 |
 
 DeepSeek's cost rose because it wrote more output in that run, not because caching got worse. Gemini caches only where the prefix reaches 4,096 tokens: 88% on ELLIPSE, 4% on RiceChem's shorter answers. `per_item` costs fell too, from $0.152 to $0.095 on Luna, $0.091 to $0.064 on Haiku, $1.782 to $1.530 on Gemini and $0.256 to $0.232 on DeepSeek.
 
