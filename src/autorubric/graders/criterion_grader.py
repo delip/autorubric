@@ -159,6 +159,23 @@ def _ground_truth_reason(item: DataItem, criterion_idx: int) -> str | None:
     return reasons[criterion_idx] if reasons is not None else None
 
 
+def _count(n: int, noun: str) -> str:
+    """``n`` and ``noun``, plural unless ``n`` is 1."""
+    return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
+
+
+def _binary_label(label: CriterionVerdict | str) -> CriterionVerdict | None:
+    """A binary criterion's training label as its verdict, or ``None`` if it names none.
+
+    A label is a ``CriterionVerdict`` or its value (``"MET"``), as ``resolve_ground_truth``
+    reads it. A label that names no verdict (``"yes"``) cannot label a few-shot example.
+    """
+    try:
+        return CriterionVerdict(label)
+    except ValueError:
+        return None
+
+
 def _posed_question(criterion: Criterion) -> tuple[object, ...]:
     """The question an LLM judge is asked about a criterion, which its labels answer.
 
@@ -1812,6 +1829,7 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 for j in (*self._judges, *self._escalation_judges)
                 if not isinstance(j.llm_config, DecisionModelConfig)
             ]
+            self._warn_unusable_binary_labels(rubric_criteria)
 
             if self._llm_calls == "per_item":
                 for judge in llm_judges:
@@ -1874,6 +1892,59 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
             loaded[submission] = _load_content(submission)
         return loaded[submission]
 
+    def _warn_unusable_binary_labels(self, rubric_criteria: Sequence[Criterion]) -> None:
+        """Warn once if a binary training label names no verdict, so an item is left out.
+
+        A binary criterion's label is a ``CriterionVerdict`` or its value (``"MET"``,
+        ``_binary_label``); any other label (``"met"``, ``"yes"``) cannot label a few-shot
+        example. Called per criterion, a judge leaves the item out of that criterion's
+        examples only; called per item, it leaves the whole item out, since each example
+        shows an item's labels for every criterion. The warning says which, naming each
+        criterion with its unusable labels and how many items have one there. Called once,
+        when the grader is built, so a grader warns once however many judges draw examples.
+
+        Args:
+            rubric_criteria: The training rubric's criteria.
+        """
+        assert self._training_data is not None
+        unusable: dict[int, tuple[set[str], list[int]]] = {}
+        items_left_out = 0
+        for item in self._training_data:
+            item_has_unusable = False
+            for criterion_idx, criterion in enumerate(rubric_criteria):
+                if not criterion.is_binary:
+                    continue
+                label = self._training_label(item, criterion_idx)
+                if label is not None and _binary_label(label) is None:
+                    labels, count = unusable.setdefault(criterion_idx, (set(), [0]))
+                    labels.add(repr(label))
+                    count[0] += 1
+                    item_has_unusable = True
+            items_left_out += item_has_unusable
+        if not unusable:
+            return
+        named = "; ".join(
+            f"{_describe(rubric_criteria[idx], idx)}: {', '.join(sorted(labels))} "
+            f"({_count(count[0], 'item')})"
+            for idx, (labels, count) in sorted(unusable.items())
+        )
+        if self._llm_calls == "per_item":
+            left_out = (
+                f"leave out {_count(items_left_out, 'training item')} whose binary label "
+                "names no verdict"
+            )
+        else:
+            left_out = (
+                "of a binary criterion leave out each training item whose label for it "
+                "names no verdict"
+            )
+        warnings.warn(
+            f"Few-shot examples {left_out} (expected MET, UNMET or CANNOT_ASSESS, as a "
+            f"CriterionVerdict or its value): {named}",
+            UserWarning,
+            stacklevel=_caller_stacklevel(),
+        )
+
     def _select_examples_for_criterion(
         self, criterion_idx: int, judge_id: str
     ) -> list[FewShotExample]:
@@ -1892,18 +1963,20 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         assert seed is not None
         rng = _derive_shuffle_rng(seed, FEW_SHOT_DOMAIN, criterion_idx, judge_id)
 
-        # Group items by verdict for this criterion
-        verdict_groups: dict[CriterionVerdict, list] = {
+        # Group items by verdict for this criterion. A label given as its value ("MET")
+        # is its verdict; an item whose label names no verdict cannot be an example.
+        verdict_groups: dict[CriterionVerdict, list[tuple[DataItem, CriterionVerdict]]] = {
             CriterionVerdict.MET: [],
             CriterionVerdict.UNMET: [],
             CriterionVerdict.CANNOT_ASSESS: [],
         }
 
         for item in self._training_data:
-            verdict = self._training_label(item, criterion_idx)
+            label = self._training_label(item, criterion_idx)
+            verdict = _binary_label(label) if label is not None else None
             if verdict is None:
                 continue
-            verdict_groups[verdict].append(item)
+            verdict_groups[verdict].append((item, verdict))
 
         available_verdicts = [v for v, items in verdict_groups.items() if items]
         if not available_verdicts:
@@ -1914,15 +1987,15 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         if config.balance_verdicts and len(available_verdicts) > 1:
             return self._balanced_selection(verdict_groups, n_examples, criterion_idx, rng)
         else:
-            all_items = [item for items in verdict_groups.values() for item in items]
+            all_items = [labelled for items in verdict_groups.values() for labelled in items]
             rng.shuffle(all_items)
             return [
                 FewShotExample(
                     submission=self._example_submission(item),
-                    verdict=item.ground_truth[criterion_idx],  # type: ignore
+                    verdict=verdict,
                     reason=_ground_truth_reason(item, criterion_idx),
                 )
-                for item in all_items[:n_examples]
+                for item, verdict in all_items[:n_examples]
             ]
 
     def _balanced_pick(
@@ -1977,22 +2050,25 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
 
     def _balanced_selection(
         self,
-        verdict_groups: dict[CriterionVerdict, list],
+        verdict_groups: dict[CriterionVerdict, list[tuple[DataItem, CriterionVerdict]]],
         n_examples: int,
         criterion_idx: int,
         rng: random.Random,
     ) -> list[FewShotExample]:
-        """Select examples with balanced verdict distribution."""
+        """Select examples with balanced verdict distribution.
+
+        Each group holds its items paired with their verdict for the criterion.
+        """
         return self._balanced_pick(
             groups=verdict_groups,
             n_examples=n_examples,
             rng=rng,
-            transform=lambda item: FewShotExample(
-                submission=self._example_submission(item),
-                verdict=item.ground_truth[criterion_idx],  # type: ignore
-                reason=_ground_truth_reason(item, criterion_idx),
+            transform=lambda labelled: FewShotExample(
+                submission=self._example_submission(labelled[0]),
+                verdict=labelled[1],
+                reason=_ground_truth_reason(labelled[0], criterion_idx),
             ),
-            identity=lambda item: _content_identity(self._example_submission(item)),
+            identity=lambda labelled: _content_identity(self._example_submission(labelled[0])),
         )
 
     def _poses_training_question(self, criterion_idx: int, criterion: Criterion) -> bool:
@@ -2303,10 +2379,10 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 labels.append(None)
                 continue
             if criterion.options is None:
-                try:
-                    labels.append(CriterionVerdict(label))
-                except ValueError:
+                verdict = _binary_label(label)
+                if verdict is None:
                     return None
+                labels.append(verdict)
                 continue
             shown = self._effective_criterion(criterion)
             option_idx: int | None = None
