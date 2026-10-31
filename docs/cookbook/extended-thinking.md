@@ -505,7 +505,7 @@ async def main():
     # Grader without extended thinking
     grader_basic = CriterionGrader(
         judge_model_config=LLMConfig(
-            model="openai/gpt-4.1-mini",
+            model="openai/gpt-5.6-luna",
         )
     )
 
@@ -545,7 +545,7 @@ async def main():
         def fmt(x):
             return f"{x:.2f}" if x is not None else "n/a"
 
-        print(f"\n{'GPT-4-mini (no thinking)':<30} | {'Claude Sonnet (high thinking)':<30}")
+        print(f"\n{'GPT-5.6 Luna (default)':<30} | {'Claude Sonnet (high thinking)':<30}")
         print("-" * 62)
         print(f"Score: {fmt(basic_result.score)}{'':<22} | Score: {fmt(thinking_result.score)}")
         print(f"Cost: ${basic_result.completion_cost or 0:.4f}{'':<20} | Cost: ${thinking_result.completion_cost or 0:.4f}")

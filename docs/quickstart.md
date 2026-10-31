@@ -37,7 +37,7 @@ When it is imported, AutoRubric loads the nearest `.env` file at or above your w
 
 | Provider | Model Format | Environment Variable |
 |----------|-------------|---------------------|
-| OpenAI | `openai/gpt-4.1`, `openai/gpt-4.1-mini` | `OPENAI_API_KEY` |
+| OpenAI | `openai/gpt-4.1`, `openai/gpt-5.6-luna` | `OPENAI_API_KEY` |
 | Anthropic | `anthropic/claude-sonnet-4-5-20250929` | `ANTHROPIC_API_KEY` |
 | Google | `gemini/gemini-2.5-flash`, `gemini/gemini-2.5-pro` | `GEMINI_API_KEY` |
 | Azure OpenAI | `azure/openai/gpt-4.1` | `AZURE_API_KEY`, `AZURE_API_BASE` |
@@ -55,7 +55,7 @@ from autorubric.graders import CriterionGrader
 
 async def main():
     # 1. Configure the LLM judge
-    grader = CriterionGrader(judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"))
+    grader = CriterionGrader(judge_model_config=LLMConfig(model="openai/gpt-5.6-luna"))
 
     # 2. Define your evaluation rubric
     rubric = Rubric.from_dict([
@@ -130,12 +130,12 @@ from autorubric import LLMConfig
 from autorubric.graders import CriterionGrader, JudgeSpec
 
 # Single LLM
-grader = CriterionGrader(judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"))
+grader = CriterionGrader(judge_model_config=LLMConfig(model="openai/gpt-5.6-luna"))
 
 # Ensemble with multiple judges
 grader = CriterionGrader(
     judges=[
-        JudgeSpec(LLMConfig(model="openai/gpt-4.1-mini"), "gpt"),
+        JudgeSpec(LLMConfig(model="openai/gpt-5.6-luna"), "gpt"),
         JudgeSpec(LLMConfig(model="anthropic/claude-sonnet-4-5-20250929"), "claude"),
     ],
     aggregation="majority",
@@ -176,7 +176,7 @@ from autorubric import LLMConfig
 
 config = LLMConfig(
     # Required
-    model="openai/gpt-4.1-mini",
+    model="openai/gpt-5.6-luna",
 
     # Sampling
     temperature=None,          # None (default) = provider default; e.g. 0.0 to pin it
@@ -233,7 +233,7 @@ async def batch_eval():
     # Configure grader with rate limiting
     grader = CriterionGrader(
         judge_model_config=LLMConfig(
-            model="openai/gpt-4.1-mini",
+            model="openai/gpt-5.6-luna",
             max_parallel_requests=10,
         )
     )

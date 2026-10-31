@@ -38,7 +38,7 @@ from autorubric.graders import CriterionGrader
 
 grader = CriterionGrader(
     judge_model_config=LLMConfig(
-        model="openai/gpt-4.1-mini",
+        model="openai/gpt-5.6-luna",
         cache_enabled=True,           # Enable disk caching
         cache_dir=".autorubric_cache", # Cache location
         cache_ttl=86400,              # 24 hours (None = no expiration)
@@ -164,7 +164,7 @@ A per-criterion LLM judge re-sends the system prompt and the submission with eve
 
 ```python
 grader = CriterionGrader(
-    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    judge_model_config=LLMConfig(model="openai/gpt-5.6-luna"),
     llm_calls="per_item",
 )
 ```
@@ -180,7 +180,7 @@ Evaluate the same dataset with different models:
 ```python
 models = [
     ("openai/gpt-4.1", "GPT-4.1"),
-    ("openai/gpt-4.1-mini", "GPT-4.1-mini"),
+    ("openai/gpt-5.6-luna", "GPT-5.6 Luna"),
     ("anthropic/claude-haiku-4-5-20251001", "Claude Haiku 4.5"),
     ("gemini/gemini-2.5-flash", "Gemini 2.5 Flash"),
 ]
@@ -215,7 +215,7 @@ Model                  Accuracy       Cost       Time
 ----------------------------------------------------
 Gemini 2.5 Flash          87.5%    $0.0012       4.2s
 Claude Haiku 4.5          89.2%    $0.0018       5.1s
-GPT-4.1-mini              91.3%    $0.0034       6.8s
+GPT-5.6 Luna              91.3%    $0.0034       6.8s
 GPT-4.1                   94.1%    $0.0156      12.3s
 ```
 
@@ -233,7 +233,7 @@ Combine strategies for optimal cost:
 grader = CriterionGrader(
     judge_model_config=LLMConfig(
         # Cost-effective model
-        model="openai/gpt-4.1-mini",
+        model="openai/gpt-5.6-luna",
 
         # Response caching for reruns
         cache_enabled=True,
@@ -314,7 +314,7 @@ total exceeds what they spent.
 - **Prompt caching** reduces the cost of what an item's calls share
 - **Model comparison** reveals cost vs accuracy trade-offs
 - **`llm_calls="per_item"`** sends the submission once per item instead of once per criterion, at the cost of a wider blast radius when a call fails
-- **Smaller models** (GPT-4-mini, Haiku, Flash) often suffice for simpler tasks
+- **Smaller models** (GPT-5.6 Luna, Haiku, Flash) often suffice for simpler tasks
 - **Checkpointing** (`resume=True`) prevents re-evaluating on restart
 - **Monitor costs** across experiments to identify optimization opportunities
 
@@ -508,7 +508,7 @@ async def compare_models(dataset: RubricDataset):
 
     models = [
         ("openai/gpt-4.1", "GPT-4.1"),
-        ("openai/gpt-4.1-mini", "GPT-4.1-mini"),
+        ("openai/gpt-5.6-luna", "GPT-5.6 Luna"),
         ("anthropic/claude-haiku-4-5-20251001", "Claude Haiku 4.5"),
     ]
 
@@ -554,7 +554,7 @@ async def benchmark_caching(dataset: RubricDataset):
 
     grader = CriterionGrader(
         judge_model_config=LLMConfig(
-            model="openai/gpt-4.1-mini",
+            model="openai/gpt-5.6-luna",
             cache_enabled=True,
             cache_dir=".benchmark_cache",
         )

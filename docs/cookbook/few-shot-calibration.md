@@ -95,7 +95,7 @@ from autorubric import LLMConfig
 from autorubric.graders import CriterionGrader
 
 baseline_grader = CriterionGrader(
-    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini")
+    judge_model_config=LLMConfig(model="openai/gpt-5.6-luna")
 )
 ```
 
@@ -107,7 +107,7 @@ Now create a grader that uses training examples:
 from autorubric import FewShotConfig
 
 calibrated_grader = CriterionGrader(
-    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    judge_model_config=LLMConfig(model="openai/gpt-5.6-luna"),
     training_data=train_data,
     few_shot_config=FewShotConfig(
         n_examples=3,           # 3 examples per criterion (this grader's default llm_calls="per_criterion")
@@ -196,7 +196,7 @@ Cohen's Kappa: 1.000
 | Criterion Accuracy | 100.0% | 100.0% | +0.0% |
 | Cohen's Kappa | 1.000 | 1.000 | +0.000 |
 | False Compliant Rate | 0.0% | 0.0% | +0.0% |
-| Cost per Item | $0.00214 | $0.00248 | +$0.00034 |
+| Cost per Item | $0.00051 | $0.00087 | +$0.00037 |
 
 False Compliant Rate is the share of the non-compliant test cells that the judge marked compliant. A cell is non-compliant when a positive criterion is UNMET or `missing_jurisdiction` is MET, which covers 8 of the 20 cells here.
 
@@ -209,7 +209,7 @@ Experiment with different numbers of examples:
 ```python
 for n in [1, 2, 3, 5]:
     grader = CriterionGrader(
-        judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
+        judge_model_config=LLMConfig(model="openai/gpt-5.6-luna"),
         training_data=train_data,
         few_shot_config=FewShotConfig(n_examples=n, balance_verdicts=True)
     )
@@ -468,12 +468,12 @@ async def main():
 
     # Baseline grader (no few-shot)
     baseline_grader = CriterionGrader(
-        judge_model_config=LLMConfig(model="openai/gpt-4.1-mini")
+        judge_model_config=LLMConfig(model="openai/gpt-5.6-luna")
     )
 
     # Calibrated grader (3-shot)
     calibrated_grader = CriterionGrader(
-        judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
+        judge_model_config=LLMConfig(model="openai/gpt-5.6-luna"),
         training_data=train_data,
         few_shot_config=FewShotConfig(
             n_examples=3,

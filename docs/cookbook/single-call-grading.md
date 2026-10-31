@@ -25,7 +25,7 @@ from autorubric import LLMConfig
 from autorubric.graders import CriterionGrader
 
 grader = CriterionGrader(
-    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    judge_model_config=LLMConfig(model="openai/gpt-5.6-luna"),
     llm_calls="per_item",  # the default is "per_criterion"
 )
 report = await rubric.grade(to_grade=answer, grader=grader, query=question)  # one call
@@ -55,7 +55,7 @@ from autorubric import LLMConfig, RubricDataset, evaluate
 from autorubric.graders import CriterionGrader
 
 dataset = RubricDataset.from_file("labelled_answers.json")  # items with ground truth
-judge = LLMConfig(model="openai/gpt-4.1-mini", max_parallel_requests=16)
+judge = LLMConfig(model="openai/gpt-5.6-luna", max_parallel_requests=16)
 MODES, REPLICATES = ("per_criterion", "per_item"), (1, 2)
 
 runs = {}
@@ -365,7 +365,7 @@ def fmt(x, spec=".3f"):
 
 async def main():
     dataset = RubricDataset.from_file("labelled_answers.json")  # items with ground truth
-    judge = LLMConfig(model="openai/gpt-4.1-mini", max_parallel_requests=16)
+    judge = LLMConfig(model="openai/gpt-5.6-luna", max_parallel_requests=16)
 
     # Two runs of each mode, first runs first; each call is a new experiment.
     runs = {}

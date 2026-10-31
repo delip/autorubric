@@ -211,8 +211,8 @@ from autorubric.graders import JudgeSpec
 
 judges = [
     JudgeSpec(
-        judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
-        judge_id="gpt4-mini",
+        judge_model_config=LLMConfig(model="openai/gpt-5.6-luna"),
+        judge_id="luna",
     ),
     JudgeSpec(
         judge_model_config=LLMConfig(model="gemini/gemini-2.5-flash"),
@@ -441,7 +441,7 @@ The transformation illustrates three key improvements:
 
 | Task | Recommended Model | Why |
 |------|------------------|-----|
-| Evaluation | Fast model (Flash/Mini) | Many parallel criterion assessments |
+| Evaluation | Fast model (Flash/Luna) | Many parallel criterion assessments |
 | Revision | Strong model (Pro/4o) | Complex reasoning about rubric design |
 
 ### Convergence

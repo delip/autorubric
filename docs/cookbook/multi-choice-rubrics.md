@@ -174,7 +174,7 @@ from autorubric import LLMConfig
 from autorubric.graders import CriterionGrader
 
 grader = CriterionGrader(
-    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    judge_model_config=LLMConfig(model="openai/gpt-5.6-luna"),
     shuffle_options=True,  # Randomize option order (default)
 )
 ```
@@ -240,20 +240,20 @@ Sample output:
 ```
 Overall Score: 0.91
 
-[Good] detail_level
-  Value: 0.75
-  Reason: default: The review offers detailed descriptions of the salmon, risotto, service, ambiance, and value, which shows good informativeness, but it does not cover all aspects comprehensively (e.g., limited dessert discussion), so it fits best as 'Good' rather than 'Excellent'.
-
-[Positive] review_tone
+[Excellent] detail_level
   Value: 1.00
-  Reason: default: The review uses generally positive language describing the food, service, ambiance, and value, with only a minor criticism of the dessert menu. This indicates an overall positive tone.
+  Reason: default: The review is highly detailed and informative, covering specific dish qualities, service expertise, ambiance, dessert limitations, and price/value. Descriptions such as the salmon’s “crispy skin and buttery interior” and the server’s pairing suggestions give readers useful, concrete information.
+
+[Mixed] review_tone
+  Value: 0.50
+  Reason: default: The review is predominantly positive, praising the food, service, ambiance, and value, but it also notes a limited dessert menu and an unmemorable tiramisu; these contrasting comments make the overall tone mixed.
 
 [Outstanding] food_quality
   Value: 1.00
-  Reason: default: The reviewer describes the salmon as perfectly cooked with a crispy skin and buttery interior and the risotto as creamy without being heavy. The overall tone about the food is very positive, indicating an outstanding food quality rating.
+  Reason: default: The reviewer rates the food as exceptional, praising the perfectly cooked salmon and creamy risotto; although the dessert was unremarkable, the overall food quality is clearly outstanding.
 
 [UNMET] spam_content
-  Reason: default: The review provides an honest description of the dining experience without any spam or promotional content.
+  Reason: default: The review provides a personal account of the meal, service, ambiance, and value, but it contains no spam or overt promotional content.
 ```
 
 ### Step 7: Ensemble Aggregation for Multi-Choice
@@ -558,7 +558,7 @@ async def main():
 
     # Configure grader
     grader = CriterionGrader(
-        judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
+        judge_model_config=LLMConfig(model="openai/gpt-5.6-luna"),
         shuffle_options=True,
     )
 

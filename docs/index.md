@@ -55,7 +55,7 @@ from autorubric.graders import CriterionGrader
 
 async def main():
     # Configure LLM judge
-    grader = CriterionGrader(judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"))
+    grader = CriterionGrader(judge_model_config=LLMConfig(model="openai/gpt-5.6-luna"))
 
     # Define evaluation rubric
     rubric = Rubric.from_dict([

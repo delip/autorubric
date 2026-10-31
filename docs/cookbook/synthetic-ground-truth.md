@@ -222,7 +222,7 @@ from autorubric import evaluate
 # Production model (cheaper, faster)
 production_grader = CriterionGrader(
     judge_model_config=LLMConfig(
-        model="openai/gpt-4.1-mini",  # or "gemini/gemini-2.5-flash"
+        model="openai/gpt-5.6-luna",  # or "gemini/gemini-2.5-flash"
     )
 )
 
@@ -270,7 +270,7 @@ print(f"{'Model':<20} {'Accuracy':>10} {'Kappa':>10} {'Cost':>10}")
 print("-" * 50)
 print(f"{'GPT-4 (GT source)':<20} {cell(strong_metrics.criterion_accuracy, 9, '1%')} "
       f"{cell(strong_metrics.mean_kappa, 10, '3f')} ${strong_result.total_completion_cost or 0:>8.4f}")
-print(f"{'GPT-4-mini (prod)':<20} {cell(production_metrics.criterion_accuracy, 9, '1%')} "
+print(f"{'GPT-5.6 Luna (prod)':<20} {cell(production_metrics.criterion_accuracy, 9, '1%')} "
       f"{cell(production_metrics.mean_kappa, 10, '3f')} ${result.total_completion_cost or 0:>8.4f}")
 ```
 
@@ -281,13 +281,13 @@ Model Comparison:
 Model                 Accuracy      Kappa       Cost
 --------------------------------------------------
 GPT-4 (GT source)        100.0%      1.000   $0.0823
-GPT-4-mini (prod)         89.0%      0.762   $0.0124
+GPT-5.6 Luna (prod)         89.0%      0.762   $0.0124
 ```
 
 | Model | Accuracy | Kappa | Cost |
 |-------|----------|-------|------|
 | GPT-4 (GT source) | 100.0% | 1.000 | $0.0823 |
-| GPT-4-mini (prod) | 89.0% | 0.762 | $0.0124 |
+| GPT-5.6 Luna (prod) | 89.0% | 0.762 | $0.0124 |
 
 !!! tip "Synthetic Label Limitations"
     Synthetic ground truth is only as good as the generating model.
@@ -557,7 +557,7 @@ async def main():
     # Production model for comparison
     production_grader = CriterionGrader(
         judge_model_config=LLMConfig(
-            model="openai/gpt-4.1-mini",
+            model="openai/gpt-5.6-luna",
         )
     )
 

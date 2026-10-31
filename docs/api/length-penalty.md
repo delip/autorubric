@@ -17,7 +17,7 @@ from autorubric import Rubric, LLMConfig, LengthPenalty
 from autorubric.graders import CriterionGrader
 
 grader = CriterionGrader(
-    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    judge_model_config=LLMConfig(model="openai/gpt-5.6-luna"),
     length_penalty=LengthPenalty(
         free_budget=6000,        # No penalty below this count
         max_cap=8000,            # Maximum penalty at/above this count
@@ -53,7 +53,7 @@ from transformers import AutoTokenizer
 tokenizer = AutoTokenizer.from_pretrained("gpt2")
 
 grader = CriterionGrader(
-    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    judge_model_config=LLMConfig(model="openai/gpt-5.6-luna"),
     length_penalty=LengthPenalty(
         free_budget=8000,
         max_cap=10000,
@@ -97,7 +97,7 @@ For reinforcement learning, use unnormalized scores with absolute penalties:
 
 ```python
 grader = CriterionGrader(
-    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    judge_model_config=LLMConfig(model="openai/gpt-5.6-luna"),
     normalize=False,  # Raw weighted sums
     length_penalty=LengthPenalty(
         free_budget=8000,

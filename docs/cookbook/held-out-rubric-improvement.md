@@ -225,6 +225,7 @@ async def chain():
         eval_llm=eval_llm,
         revision_llm=revision_llm,
         strategy="meta_rubric",
+        mode="standalone",  # structural quality only, so no task_prompt is needed
         max_iterations=3,
     )
     return final_result
@@ -346,6 +347,7 @@ async def main():
         eval_llm=eval_llm,
         revision_llm=revision_llm,
         strategy="meta_rubric",
+        mode="standalone",  # structural quality only, so no task_prompt is needed
         max_iterations=3,
         show_progress=True,
         artifacts_dir="held_out_improvement_meta",

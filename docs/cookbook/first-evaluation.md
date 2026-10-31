@@ -78,7 +78,7 @@ from autorubric.graders import CriterionGrader
 
 grader = CriterionGrader(
     judge_model_config=LLMConfig(
-        model="openai/gpt-4.1-mini",  # or "anthropic/claude-sonnet-4-5-20250929"
+        model="openai/gpt-5.6-luna",  # or "anthropic/claude-sonnet-4-5-20250929"
     )
 )
 ```
@@ -168,20 +168,20 @@ Sample output:
 
 ```
 Score: 1.00
-Tokens used: 8944
-Cost: $0.0026
+Tokens used: 9034
+Cost: $0.0006
 
 [MET] addresses_issue (weight: 10.0)
-  Reason: default: The response directly addresses the customer's issue of WiFi connectivity after an update by providing relevant troubleshooting steps like resetting the network adapter and running the Network Troubleshooter.
+  Reason: default: The response directly addresses the reported post-update WiFi connectivity problem by providing steps to reset the network adapter and run the Network Adapter troubleshooter.
 
 [MET] provides_solution (weight: 8.0)
-  Reason: default: The response provides clear next steps including resetting the network adapter and running the Network Troubleshooter, which are actionable solutions for the WiFi connectivity issue.
+  Reason: default: The response provides clear, actionable next steps: disabling and re-enabling the WiFi adapter in Device Manager, followed by running the Network Adapter troubleshooter if needed.
 
 [MET] professional_tone (weight: 5.0)
-  Reason: default: The response uses polite language such as 'I understand how frustrating connectivity issues can be,' and ends with 'Best regards, Support Team,' maintaining a professional and courteous tone throughout.
+  Reason: default: The response uses a courteous, professional tone, acknowledging the user's frustration ('I understand how frustrating connectivity issues can be') and offering clear assistance with a polite closing ('Best regards, Support Team').
 
 [UNMET] factual_errors (weight: -15.0)
-  Reason: default: The submission provides accurate technical instructions for resetting the network adapter and running the Network Troubleshooter, without any incorrect information.
+  Reason: default: The response provides technically valid troubleshooting steps: disabling and re-enabling the WiFi adapter in Device Manager and running the Network Adapter troubleshooter through Settings. It does not contain factually incorrect technical information.
 ```
 
 ### Understanding the Score
@@ -369,7 +369,7 @@ async def main():
     # Configure the grader
     grader = CriterionGrader(
         judge_model_config=LLMConfig(
-            model="openai/gpt-4.1-mini",
+            model="openai/gpt-5.6-luna",
         )
     )
 

@@ -97,7 +97,7 @@ import asyncio
 from autorubric import LLMConfig
 from autorubric.meta import evaluate_rubric_standalone
 
-llm_config = LLMConfig(model="openai/gpt-4.1-mini")
+llm_config = LLMConfig(model="openai/gpt-5.6-luna")
 
 async def main():
     result = await evaluate_rubric_standalone(
@@ -115,9 +115,9 @@ The output shows per-section results with verdicts and explanations:
 !!! note "Scores and verdicts are illustrative"
     The verdicts, explanations, and scores shown throughout this page (e.g. `SCORE: 0.00`,
     and the flawed/improved comparison below) are abridged outputs from live runs with an LLM
-    judge (`openai/gpt-4.1-mini`). They are not deterministic fixtures and will vary between
-    runs and as the meta-rubric evolves. With this judge, one run's score says little: Step 6
-    shows how far repeats of the same comparison spread.
+    judge (`openai/gpt-5.6-luna`). They are not deterministic fixtures and will vary between
+    runs and as the meta-rubric evolves. Step 6 shows how far repeats of the same comparison
+    spread.
 
 ```
 ═══════════════════════════════════════════════════════════════
@@ -128,29 +128,32 @@ Evaluating rubric with 5 criteria
 Section: Clarity & Precision
 ─────────────────────────────────────────────────────────────────
 [UNMET] specific_actionable (weight: 10)
-  The provided rubric criteria description uses generic phrases such as
-  'Review is thorough, insightful, and constructive' and 'Good assessment
-  of methodology' without specific guidance or detailed specificity.
+  The criteria are broad and generic—for example, "Review is thorough,
+  insightful, and constructive" and "Good assessment of methodology"—without
+  defining specific indicators or assessment guidance.
 
 [UNMET] unidimensional (weight: 10)
-  The criterion named 'thoroughness' conflates being thorough, insightful,
-  and constructive, which are multiple attributes combined into one criterion.
+  Several rubric items combine multiple constructs: criterion 1 combines
+  thoroughness, insightfulness, and constructiveness; criterion 3 combines
+  professionalism and appropriateness; and criterion 4 combines identifying
+  strengths and identifying weaknesses.
 
 Section: Anti-Patterns
 ─────────────────────────────────────────────────────────────────
 [MET] double_barreled (weight: -8)
-  Criterion 1 requires a review that is 'thorough, insightful, and
-  constructive,' which assesses multiple distinct qualities in a single
-  requirement.
+  The rubric contains multiple bundled requirements: criterion 1 combines
+  "thorough, insightful, and constructive," criterion 3 combines "professional
+  and appropriate," and criterion 4 combines identifying both "strengths and
+  weaknesses."
 
 [MET] vague_wording (weight: -8)
-  The criterion 'Review is thorough, insightful, and constructive' includes
-  vague terms like 'thorough' and 'insightful' that may be interpreted
-  differently by different raters.
+  Several criteria use vague, undefined standards likely to produce differing
+  ratings, including "thorough, insightful, and constructive," "Good assessment
+  of methodology," and "professional and appropriate."
 
 [MET] hedging_language (weight: -6)
-  Criterion 5 includes the phrase 'May contain factual errors,' which uses
-  the hedging word 'May,' making the assessment non-definitive.
+  Criterion 5 contains the hedging word "May" in "May contain factual errors,"
+  which makes the assessment less definitive.
 
 ═══════════════════════════════════════════════════════════════
 SCORE: 0.00
@@ -242,25 +245,29 @@ In-context evaluation adds three more sections:
 ```
 Section: Construct Alignment (In-Context)
 ─────────────────────────────────────────────────────────────────
-[MET] task_aligned (weight: 12)
+[UNMET] task_aligned (weight: 12)
+  The rubric partially maps to the task prompt through methodology (index 2),
+  professionalism (index 3), and strengths/weaknesses (index 4), but it omits
+  explicit criteria for clarity and organization, statistical or technical
+  errors, and actionable improvement suggestions.
 
-[MET] covers_key_aspects (weight: 10)
+[UNMET] covers_key_aspects (weight: 10)
+  The rubric covers methodology (2), professionalism (3), strengths and
+  weaknesses (4), and general thoroughness (1), but it does not explicitly
+  assess clarity and organization, actionable suggestions, avoidance of mere
+  summary, or statistical/technical errors as distinct requirements.
 
 Section: Discriminative Power (In-Context)
 ─────────────────────────────────────────────────────────────────
-[UNMET] distinguishes_quality (weight: 10)
-  The submission only presents the rubric criteria without demonstrating
-  how these criteria would meaningfully distinguish between good and poor
-  submissions; no evidence is provided that the criteria are discriminative
-  or evaluative in practice.
+[MET] distinguishes_quality (weight: 10)
 
 Section: Anti-Patterns (In-Context)
 ─────────────────────────────────────────────────────────────────
 [MET] missing_critical (weight: -10)
-  The submission does not provide any assessment, failing to explicitly
-  evaluate methodology, statistical or technical errors, clarity, or provide
-  suggestions as required by the task, thus failing to assess critical
-  aspects explicitly required.
+  The submission contains only the task prompt and rubric, not an actual peer
+  review. Therefore, it does not assess methodology, statistical or technical
+  errors, clarity and organization, actionable improvements, or professional
+  review quality.
 ```
 
 ### Step 5: Comparing Standalone vs In-Context
@@ -280,7 +287,7 @@ Some issues only surface with task context:
 | Irrelevant criteria for task | Cannot detect | **Detects** |
 | Poor discriminative power | Cannot detect | **Detects** |
 
-This table says what each mode checks for, not how reliably a given judge finds it. In six repeats on the flawed rubric with `openai/gpt-4.1-mini`, `missing_critical` fired twice and `covers_key_aspects` passed every time, so a clean in-context result from one run is weak evidence.
+This table says what each mode checks for, not how well a verdict can be trusted. In six repeats with `openai/gpt-5.6-luna`, `covers_key_aspects` failed on both rubrics each time, and on the improved rubric it named a real gap, the missing check on clarity and organization. `missing_critical` also fired on both rubrics each time, but its explanation can treat the rubric as a peer review that was never written, as in the output above. Read the explanation before acting on that verdict.
 
 !!! tip "Use Both"
     Run standalone first to fix intrinsic issues, then in-context to ensure task alignment.
@@ -372,12 +379,12 @@ One run gave:
 ```
 SCORE COMPARISON
 ----------------------------------------
-  Flawed:   0.25
-  Improved: 0.54
-  Delta:    +0.30
+  Flawed:   0.00
+  Improved: 0.18
+  Delta:    +0.18
 ```
 
-Do not read much into one run. Over eight repeats of this comparison, the flawed rubric scored from 0.14 to 0.49 (mean 0.26) and the improved rubric from 0.15 to 0.59 (mean 0.37). The improved rubric scored higher in six of the eight, so average several runs before you trust a gain.
+Over seven repeats of this comparison, the flawed rubric scored at most 0.01 and the improved rubric from 0.18 to 0.39 (mean 0.27), higher than the flawed rubric every time. The improved rubric still scores low because several anti-patterns fired on it in all of the six repeats we inspected, among them `double_barreled`, `vague_wording`, `excessive_overlap` and `boundary_ambiguity`. Standalone, the flawed rubric scored 0.00 in all six and the improved rubric from 0.00 to 0.31. Use the score to compare drafts on the same judge, and work from the verdicts to see what to fix next.
 
 ### Step 7: Generating HTML Reports
 
@@ -465,7 +472,7 @@ async def validate_rubric(rubric_path: str, task_path: str, threshold: float = 0
     with open(task_path, encoding="utf-8") as f:
         task_prompt = f.read()
 
-    llm_config = LLMConfig(model="openai/gpt-4.1-mini")
+    llm_config = LLMConfig(model="openai/gpt-5.6-luna")
 
     result = await evaluate_rubric_in_context(
         rubric, task_prompt, llm_config,
@@ -509,12 +516,11 @@ In your CI configuration:
 ```
 
 !!! note "Choosing a quality threshold"
-    A threshold of 0.7 is permissive and appropriate during early rubric iteration, when
-    you want fast feedback without blocking on marginal issues. For production rubrics,
-    raise the bar to 0.85 or higher. The right value depends on your tolerance for false
-    positives (rejecting an acceptable rubric) versus false negatives (passing a flawed one).
-    Calibrate it on your own judge: in the eight repeats in Step 6, the improved rubric never
-    reached 0.7 with `openai/gpt-4.1-mini`.
+    Set the threshold from the scores of rubrics you have reviewed and accept, on the judge
+    you will gate with. With `openai/gpt-5.6-luna`, the improved rubric in Step 6 scored 0.18
+    to 0.39 in context, so the example's 0.7 would reject it as well as the flawed one. The
+    right value depends on your tolerance for false positives (rejecting an acceptable rubric)
+    versus false negatives (passing a flawed one).
 
 ## Key Takeaways
 
@@ -639,7 +645,7 @@ def create_improved_rubric() -> Rubric:
 
 
 async def main():
-    llm_config = LLMConfig(model="openai/gpt-4.1-mini")
+    llm_config = LLMConfig(model="openai/gpt-5.6-luna")
 
     flawed_rubric = create_flawed_rubric()
     improved_rubric = create_improved_rubric()

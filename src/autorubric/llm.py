@@ -747,7 +747,7 @@ class LLMConfig:
         config = LLMConfig(model="openai/gpt-5.2")
 
         # Explicit temperature
-        config = LLMConfig(model="openai/gpt-4.1-mini", temperature=0.0)  # explicit; sent as-is
+        config = LLMConfig(model="gemini/gemini-3.8-flash", temperature=0.0)  # sent as-is
 
         # Enable thinking with a level
         config = LLMConfig(model="anthropic/claude-sonnet-4-5-20250929", thinking="high")
