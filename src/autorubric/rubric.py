@@ -9,6 +9,7 @@ from typing import Any
 import yaml
 from pydantic import ValidationError
 
+from autorubric.content import Content
 from autorubric.graders import Grader
 from autorubric.graders.base import (
     ReportT,
@@ -142,10 +143,10 @@ class Rubric:
         self,
         to_grade: ToGradeInput,
         grader: Grader[ReportT],
-        query: str | None = None,
-        reference_submission: str | None = None,
+        query: Content | None = None,
+        reference_submission: Content | None = None,
     ) -> ReportT:
-        """Grade text against this rubric using a grader.
+        """Grade a submission against this rubric using a grader.
 
         The rubric's guidelines, when it has them, go to the grader as
         ``grader.grade(..., guidelines=self.guidelines)``; a rubric without guidelines calls
@@ -155,17 +156,20 @@ class Rubric:
         ``judge`` does not accept them (see ``Grader.grade``).
 
         Args:
-            to_grade: The text to evaluate. Can be either:
-                - A string (optionally with <thinking>/<output> markers)
-                - A dict with 'thinking' and 'output' keys
+            to_grade: The submission to evaluate. Can be either:
+                - ``Content``: a string (optionally with <thinking>/<output> markers), an
+                  ``Image``, or a sequence of strings and images read in order
+                - A dict with 'thinking' and 'output' keys, both text
             grader: The grader to use. REQUIRED - must be provided.
                 Configure length_penalty and normalize on the grader if needed.
-            query: Optional input/query that prompted the response.
-            reference_submission: Optional exemplar response for grading context.
-                When present, provides calibration for the grader.
+            query: Optional input/query that prompted the response (``Content``).
+            reference_submission: Optional exemplar response for grading context
+                (``Content``). When present, provides calibration for the grader.
 
         Raises:
             TypeError: If grader is not provided.
+            OSError, ValueError: From ``Grader.grade``, if an image file cannot be read or
+                is not a supported image; it is read before any judge is called.
 
         Warns:
             UserWarning: "<GraderClass> ignores rubric guidelines", once per grader

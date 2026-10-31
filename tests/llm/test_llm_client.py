@@ -1338,3 +1338,347 @@ class TestAnthropicPromptCaching:
         sent = await self._sent_params(LLMConfig(model="anthropic/claude-sonnet-4-5-20250929"))
 
         assert "anthropic-beta" not in sent.get("extra_headers", {})
+
+
+def _png(color: str = "red") -> bytes:
+    """A tiny one-color PNG, encoded by Pillow."""
+    import io
+
+    import PIL.Image as pil_image
+
+    buffer = io.BytesIO()
+    pil_image.new("RGB", (3, 2), color).save(buffer, "PNG")
+    return buffer.getvalue()
+
+
+def _png_url(data: bytes) -> str:
+    import base64
+
+    return "data:image/png;base64," + base64.b64encode(data).decode("ascii")
+
+
+async def _sent_messages(config: LLMConfig, user_prompt: Any, system: str = "System") -> list:
+    """The ``messages`` that ``litellm.acompletion`` receives for one ``generate`` call."""
+    sent: dict = {}
+
+    async def fake_acompletion(**params):
+        sent.update(params)
+        return _litellm_reply("ok")
+
+    with patch("autorubric.llm.litellm.acompletion", side_effect=fake_acompletion):
+        await LLMClient(config).generate(system, user_prompt)
+    return sent["messages"]
+
+
+OPENAI = LLMConfig(model="openai/gpt-5.2")
+ANTHROPIC = LLMConfig(model="anthropic/claude-sonnet-4-5-20250929")
+CACHED_SYSTEM_MESSAGE = {
+    "role": "system",
+    "content": [{"type": "text", "text": "System", "cache_control": {"type": "ephemeral"}}],
+}
+
+
+class TestImageMessages:
+    """A user prompt holding images is sent as OpenAI-style content parts, in its order."""
+
+    @pytest.mark.asyncio
+    async def test_text_and_an_image_become_three_parts(self):
+        from autorubric import Image
+
+        png = _png()
+        messages = await _sent_messages(OPENAI, ["before ", Image(png), " after"])
+
+        assert messages == [
+            {"role": "system", "content": "System"},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "before "},
+                    {"type": "image_url", "image_url": {"url": _png_url(png)}},
+                    {"type": "text", "text": " after"},
+                ],
+            },
+        ]
+
+    @pytest.mark.asyncio
+    async def test_adjacent_images_become_consecutive_image_parts(self):
+        from autorubric import Image
+
+        red, blue = _png("red"), _png("blue")
+        messages = await _sent_messages(OPENAI, ["Compare:", Image(red), Image(blue)])
+
+        assert messages[1]["content"] == [
+            {"type": "text", "text": "Compare:"},
+            {"type": "image_url", "image_url": {"url": _png_url(red)}},
+            {"type": "image_url", "image_url": {"url": _png_url(blue)}},
+        ]
+
+    @pytest.mark.parametrize("as_list", [False, True], ids=["bare", "in_a_list"])
+    @pytest.mark.asyncio
+    async def test_an_image_alone_is_a_single_part(self, as_list):
+        from autorubric import Image
+
+        png = _png()
+        prompt = [Image(png)] if as_list else Image(png)
+        messages = await _sent_messages(OPENAI, prompt)
+
+        assert messages[1] == {
+            "role": "user",
+            "content": [{"type": "image_url", "image_url": {"url": _png_url(png)}}],
+        }
+
+    @pytest.mark.asyncio
+    async def test_a_file_backed_image_sends_its_bytes(self, tmp_path):
+        from autorubric import Image
+
+        png = _png()
+        path = tmp_path / "fig.png"
+        path.write_bytes(png)
+
+        for image in (Image(path)._loaded(), Image(path)):
+            messages = await _sent_messages(OPENAI, ["Figure:", image])
+            assert messages[1]["content"][1] == {
+                "type": "image_url",
+                "image_url": {"url": _png_url(png)},
+            }
+
+    @pytest.mark.asyncio
+    async def test_anthropic_prompt_caching_sends_the_same_user_parts(self):
+        from autorubric import Image
+
+        png = _png()
+        document = ["before ", Image(png), " after"]
+        standard = await _sent_messages(OPENAI, document)
+        cached = await _sent_messages(ANTHROPIC, document)
+
+        assert cached == [CACHED_SYSTEM_MESSAGE, standard[1]]
+
+    @pytest.mark.asyncio
+    async def test_the_module_level_generate_sends_parts_too(self):
+        from autorubric import Image
+        from autorubric.llm import generate
+
+        png = _png()
+        sent: dict = {}
+
+        async def fake_acompletion(**params):
+            sent.update(params)
+            return _litellm_reply("ok")
+
+        with patch("autorubric.llm.litellm.acompletion", side_effect=fake_acompletion):
+            await generate("System", [Image(png), "caption"], model="openai/gpt-5.2")
+
+        assert sent["messages"][1]["content"] == [
+            {"type": "image_url", "image_url": {"url": _png_url(png)}},
+            {"type": "text", "text": "caption"},
+        ]
+
+
+class TestTextRequestsAreUnchanged:
+    """A text prompt is sent and keyed exactly as before images existed."""
+
+    PROMPT = "Grade this submission."
+    # Captured from the cache-key formula before images existed (default config, no
+    # namespace): sha256 of
+    # "openai/gpt-5.2:You are a grader.:Grade this submission.:<schema>:temp=None:top_p=None"
+    # ":max_tokens=None:thinking=none:seed=None".
+    KEY_STR = "39aa8c206fd3760beecc2f168ac2237636304cda8ecd88b8b14dc0c63e88f9e2"
+    KEY_CRITERION_JUDGMENT = "2967c97821143e89ae10a55d0b06267b19927f39a88eb3bd6e13fd3842276f78"
+
+    @pytest.mark.asyncio
+    async def test_the_messages_are_plain_strings(self):
+        prompt = "".join(["Grade this ", "submission."])  # not an interned literal
+        messages = await _sent_messages(OPENAI, prompt)
+
+        assert messages == [
+            {"role": "system", "content": "System"},
+            {"role": "user", "content": "Grade this submission."},
+        ]
+        assert messages[1]["content"] is prompt
+
+    @pytest.mark.asyncio
+    async def test_anthropic_prompt_caching_sends_the_user_prompt_as_a_string(self):
+        messages = await _sent_messages(ANTHROPIC, self.PROMPT)
+
+        assert messages == [CACHED_SYSTEM_MESSAGE, {"role": "user", "content": self.PROMPT}]
+
+    @pytest.mark.parametrize(
+        "prompt",
+        [[PROMPT], ["Grade this ", "submission."], ["", PROMPT, ""]],
+        ids=["one_string", "two_strings", "with_empty_strings"],
+    )
+    @pytest.mark.parametrize("config", [OPENAI, ANTHROPIC], ids=["standard", "prompt_caching"])
+    @pytest.mark.asyncio
+    async def test_a_list_of_strings_is_sent_as_their_text(self, prompt, config):
+        assert await _sent_messages(config, prompt) == await _sent_messages(config, self.PROMPT)
+
+    def test_the_cache_key_is_the_one_captured_before_images(self):
+        from autorubric.types import CriterionJudgment
+
+        client = LLMClient(OPENAI)
+        content = (
+            f"openai/gpt-5.2:You are a grader.:{self.PROMPT}:str:temp=None:top_p=None"
+            ":max_tokens=None:thinking=none:seed=None"
+        )
+
+        key = client._cache_key("openai/gpt-5.2", "You are a grader.", self.PROMPT, None)
+        assert key == self.KEY_STR == hashlib.sha256(content.encode()).hexdigest()
+        assert (
+            client._cache_key("openai/gpt-5.2", "You are a grader.", self.PROMPT, CriterionJudgment)
+            == self.KEY_CRITERION_JUDGMENT
+        )
+
+    @pytest.mark.parametrize(
+        "prompt",
+        [[PROMPT], ["Grade this ", "submission."]],
+        ids=["one_string", "two_strings"],
+    )
+    def test_a_list_of_strings_is_keyed_as_their_text(self, prompt):
+        client = LLMClient(OPENAI)
+
+        assert client._cache_key("openai/gpt-5.2", "You are a grader.", prompt) == self.KEY_STR
+
+
+class TestDocumentCacheKeys:
+    """A document is keyed by its content digest: what it holds, not where it is read from."""
+
+    @staticmethod
+    def _key(user_prompt: Any, client: LLMClient | None = None) -> str:
+        return (client or LLMClient(OPENAI))._cache_key("openai/gpt-5.2", "System", user_prompt)
+
+    def test_the_key_names_the_content_digest(self):
+        from autorubric import Image
+        from autorubric.content import _content_digest
+
+        document = ["before ", Image(_png()), " after"]
+        content = (
+            f"openai/gpt-5.2:System:<content sha256={_content_digest(document)}>:str"
+            ":temp=None:top_p=None:max_tokens=None:thinking=none:seed=None"
+        )
+
+        assert self._key(document) == hashlib.sha256(content.encode()).hexdigest()
+
+    def test_equal_content_from_different_sources_shares_a_key(self, tmp_path):
+        from autorubric import Image
+
+        png = _png()
+        path = tmp_path / "fig.png"
+        path.write_bytes(png)
+
+        keys = {
+            self._key(["See:", image, "done"])
+            for image in (Image(png), Image(bytearray(png)), Image(path), Image(path)._loaded())
+        }
+
+        assert len(keys) == 1
+
+    def test_different_image_bytes_give_different_keys(self):
+        from autorubric import Image
+
+        assert self._key(["See:", Image(_png("red"))]) != self._key(["See:", Image(_png("blue"))])
+
+    def test_a_different_part_order_gives_a_different_key(self):
+        from autorubric import Image
+
+        png = _png()
+
+        assert self._key(["caption", Image(png)]) != self._key([Image(png), "caption"])
+
+    def test_a_document_is_not_keyed_as_its_text(self):
+        from autorubric import Image
+        from autorubric.content import _content_preview
+
+        document = ["before ", Image(_png()), " after"]
+
+        assert self._key(document) != self._key("before  after")
+        assert self._key(document) != self._key(_content_preview(document))
+
+    def test_the_namespace_is_still_appended(self):
+        from autorubric import Image
+        from autorubric.content import _content_digest
+
+        document = [Image(_png()), "caption"]
+        content = (
+            f"openai/gpt-5.2:System:<content sha256={_content_digest(document)}>:str"
+            ":temp=None:top_p=None:max_tokens=None:thinking=none:seed=None:namespace=gpt-0"
+        )
+
+        namespaced = self._key(document, LLMClient(OPENAI, cache_namespace="gpt-0"))
+        assert namespaced == hashlib.sha256(content.encode()).hexdigest()
+        assert namespaced != self._key(document)
+
+    @pytest.mark.asyncio
+    async def test_an_equal_document_from_another_source_hits_the_cache(self, tmp_path):
+        from autorubric import Image
+
+        png = _png()
+        path = tmp_path / "fig.png"
+        path.write_bytes(png)
+        config = LLMConfig(model="openai/gpt-5.2", cache_enabled=True, cache_dir=str(tmp_path))
+
+        with LLMClient(config) as client:
+            with patch(
+                "autorubric.llm.litellm.acompletion",
+                new_callable=AsyncMock,
+                return_value=_litellm_reply("first"),
+            ) as first_call:
+                assert await client.generate("System", ["See:", Image(png)]) == "first"
+            first_call.assert_called_once()
+
+            with patch("autorubric.llm.litellm.acompletion", new_callable=AsyncMock) as second:
+                assert await client.generate("System", ["See:", Image(path)._loaded()]) == "first"
+            second.assert_not_called()
+
+
+class TestDebugPromptWithImages:
+    """The debug printout shows a document's text with a marker in place of each image."""
+
+    @staticmethod
+    def _printed(monkeypatch, user_prompt: Any) -> str:
+        import io
+
+        from rich.console import Console
+
+        from autorubric import llm
+
+        output = io.StringIO()
+        monkeypatch.setattr(llm, "_debug_console", Console(file=output, width=200))
+        llm._print_debug_prompt("System", user_prompt, "openai/gpt-5.2")
+        return output.getvalue()
+
+    def test_a_file_backed_image_is_shown_by_file_name(self, monkeypatch, tmp_path):
+        from autorubric import Image
+
+        path = tmp_path / "fig1.png"
+        path.write_bytes(_png())
+
+        printed = self._printed(monkeypatch, ["Figure:", Image(path), "end"])
+
+        assert "Figure:[image: fig1.png]end" in printed
+
+    def test_an_image_held_as_bytes_is_shown_by_size(self, monkeypatch):
+        from autorubric import Image
+
+        png = _png()
+
+        printed = self._printed(monkeypatch, [Image(png), "caption"])
+
+        assert f"[image: {len(png)} bytes]caption" in printed
+
+    @pytest.mark.asyncio
+    async def test_generate_prints_a_document_in_debug_mode(self, monkeypatch):
+        import io
+
+        from rich.console import Console
+
+        import autorubric
+        from autorubric import Image, llm
+
+        output = io.StringIO()
+        monkeypatch.setattr(llm, "_debug_console", Console(file=output, width=200))
+        monkeypatch.setattr(autorubric, "debug", True)
+        png = _png()
+
+        await _sent_messages(OPENAI, ["See:", Image(png)])
+
+        assert f"See:[image: {len(png)} bytes]" in output.getvalue()

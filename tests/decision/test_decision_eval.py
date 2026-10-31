@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from unittest.mock import patch
 
 import httpx
@@ -104,7 +104,8 @@ def dataset(n_items: int = 3) -> RubricDataset:
 
 
 def dm(**overrides: Any) -> DecisionModelConfig:
-    return DecisionModelConfig(**{"model": "jev-latest", "api_key": API_KEY, **overrides})
+    fields: dict[str, Any] = {"model": "jev-latest", "api_key": API_KEY, **overrides}
+    return DecisionModelConfig(**fields)
 
 
 class _LLM:
@@ -154,7 +155,7 @@ async def test_evaluate_sends_one_request_per_item(fake_sdk, graders, tmp_path):
     assert len(fake_sdk.calls) == 5
     assert all(list(questions) == ["c0", "c1", "c2"] for _, questions, _ in fake_sdk.calls)
     submissions = sorted(state["submission"] for state, _, _ in fake_sdk.calls)
-    assert submissions == sorted(item.submission for item in dataset(5))
+    assert submissions == sorted(cast(str, item.submission) for item in dataset(5))
 
 
 @pytest.mark.asyncio

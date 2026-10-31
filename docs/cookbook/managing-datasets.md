@@ -176,6 +176,14 @@ The JSON format is human-readable:
     above. Every judge sees the guidelines. See
     [Rubric Guidelines](../api/core-grading.md#rubric-guidelines).
 
+!!! tip "Submissions with images"
+    A submission, prompt or reference submission can hold images. In the file an image is an
+    object whose only key is `"image"`, and a document is an array of strings and image objects,
+    e.g. `"submission": [{"image": "scans/ecg_017.png"}, "ECG taken at triage."]`. A relative
+    path is resolved against the dataset file's directory, so keep the figures beside the file.
+    See [Grading Submissions with Images](image-inputs.md#step-4-keep-images-in-a-dataset-file)
+    and [Images in Dataset Files](../api/dataset.md#images-in-dataset-files).
+
 ### Step 4: Split for Training and Testing
 
 Use `split_train_test()` to create separate sets for few-shot calibration and evaluation:

@@ -34,6 +34,7 @@ class TestDefaults:
         assert config.ordinal_framing == "choice"
         assert config.decision_threshold == 0.5
         assert config.input_cost_per_token is None
+        assert config.capabilities is None
 
     def test_field_set_is_exactly_the_documented_one(self):
         assert [f.name for f in dataclasses.fields(DecisionModelConfig)] == [
@@ -51,6 +52,7 @@ class TestDefaults:
             "ordinal_framing",
             "decision_threshold",
             "input_cost_per_token",
+            "capabilities",
         ]
 
     def test_shared_concepts_mirror_llm_config_names_and_defaults(self):
@@ -229,14 +231,17 @@ def test_core_install_never_imports_the_sdk():
     assert result.stdout.strip().endswith("ok")
 
 
-def test_the_typesafe_extra_requires_an_sdk_that_keeps_credentials_out_of_errors():
-    """``typesafe-sdk`` 0.7.1 is the first release that validates the API key when a client is
-    built and redacts credentials from transport errors. Under 0.7.0 a key with a line
-    break reached the HTTP layer, whose error (``Illegal header value b'Bearer ...'``) was
-    recorded in every failed report's ``error`` and ``reason``, and so in checkpoints."""
+def test_the_typesafe_extra_requires_an_sdk_with_image_assets():
+    """``typesafe-sdk`` 0.7.5 is the first release with image assets, the SDK's way of
+    sending images to a decision model. The earlier floor still holds: 0.7.1 is the first
+    release that validates the API key when a client is built and redacts credentials from
+    transport errors. Under 0.7.0 a key with a line break reached the HTTP layer, whose error
+    (``Illegal header value b'Bearer ...'``) was recorded in every failed report's ``error``
+    and ``reason``, and so in checkpoints."""
     requirement = _typesafe_extra()["typesafe-sdk"]
     assert not requirement.specifier.contains("0.7.0")
-    assert requirement.specifier.contains("0.7.1")
+    assert not requirement.specifier.contains("0.7.4")
+    assert requirement.specifier.contains("0.7.5")
 
 
 def test_the_typesafe_extra_declares_the_http_stack_the_client_imports():

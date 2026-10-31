@@ -103,9 +103,13 @@ LLM_USAGE = TokenUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15)
 
 
 def dm(**overrides: Any) -> DecisionModelConfig:
-    return DecisionModelConfig(
-        **{"model": "jev-latest", "api_key": API_KEY, "input_cost_per_token": DM_PRICE, **overrides}
-    )
+    fields: dict[str, Any] = {
+        "model": "jev-latest",
+        "api_key": API_KEY,
+        "input_cost_per_token": DM_PRICE,
+        **overrides,
+    }
+    return DecisionModelConfig(**fields)
 
 
 # =============================================================================

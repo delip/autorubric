@@ -115,6 +115,15 @@ Abstract base class for grader implementations.
 as `EnsembleEvaluationReport`. A custom grader declares its own, for example
 `class MyGrader(Grader[EvaluationReport])`; one that names no type still works.
 
+!!! note "Changed: `judge` takes `Content`"
+    The abstract `judge` annotates `to_grade`, `query` and `reference_submission` as `Content` (a
+    string, an `Image`, or a sequence of both) instead of `str`, because a submission may hold
+    images. A subclass whose `judge` still annotates them as `str` runs unchanged, but a type
+    checker reports its override as incompatible with the base class; annotate them as `Content`.
+    `grade` now raises `TypeError` for a query or reference submission that is not `Content`
+    (for example a number), where earlier releases passed it through. See
+    [Submissions with Images](core-grading.md#submissions-with-images).
+
 ::: autorubric.graders.Grader
     options:
       show_source: true

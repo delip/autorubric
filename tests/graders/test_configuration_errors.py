@@ -2,8 +2,8 @@
 
 For every LLM judge (a single judge, a panel member, a cascade's escalation judge; the
 cascade is covered in ``tests/decision/test_configuration_errors.py``), a configuration
-error at call time (``UnsupportedParamsError``, a 401, 403 or 404, the OpenAI SDK's refusal
-to build its client) is raised by the grade as a ``ValueError`` naming the judge, chained
+error at call time (``UnsupportedParamsError``, a 401, 402, 403 or 404, the OpenAI SDK's
+refusal to build its client) is raised by the grade as a ``ValueError`` naming the judge, chained
 from the provider's exception, instead of being routed as an ``infrastructure`` abstention.
 Item-specific 400s keep abstaining. A parameter LiteLLM refuses fails the judge's first
 call: LiteLLM raises ``UnsupportedParamsError`` on the client, before any request.
@@ -27,6 +27,7 @@ import httpx
 import litellm
 import openai
 import pytest
+import pytest_asyncio
 
 from autorubric import (
     Criterion,
@@ -94,6 +95,11 @@ CONFIGURATION_ERRORS = {
     ),
     "NotFoundError": lambda: litellm.NotFoundError(
         message="The model does not exist", model="m", llm_provider="openai"
+    ),
+    # A 402 (no credits left) as LiteLLM reports one from an OpenAI-compatible provider or
+    # OpenRouter: a plain APIError carrying the status.
+    "PaymentRequired": lambda: litellm.APIError(
+        status_code=402, message="Insufficient credits", llm_provider="openrouter", model="m"
     ),
 }
 
@@ -183,6 +189,11 @@ def _assert_names_the_judge(excinfo: pytest.ExceptionInfo[ValueError], judge_id:
     assert f"Judge {judge_id!r} is misconfigured ({type(exc).__name__})" in str(excinfo.value)
     assert str(exc) in str(excinfo.value)
     assert excinfo.value.__cause__ is exc
+
+
+def _assert_says_payment_is_required(excinfo: pytest.ExceptionInfo[ValueError]) -> None:
+    assert "402 Payment Required" in str(excinfo.value)
+    assert "credits" in str(excinfo.value)
 
 
 # =============================================================================
@@ -339,6 +350,19 @@ class TestRunsStopOnTheFirstItem:
         _assert_names_the_judge(excinfo, "default", error)
 
     @pytest.mark.asyncio
+    async def test_fill_ground_truth_raises_for_a_payment_required_answer(self):
+        error = CONFIGURATION_ERRORS["PaymentRequired"]()
+        grader = _grader(judge_model_config=WORKING)
+        stub = StubJudge(error)
+        _install(grader, default=stub)
+
+        with pytest.raises(ValueError) as excinfo:
+            await fill_ground_truth(self._dataset(), grader, show_progress=False)
+
+        _assert_names_the_judge(excinfo, "default", error)
+        _assert_says_payment_is_required(excinfo)
+
+    @pytest.mark.asyncio
     async def test_fill_ground_truth_still_leaves_out_an_item_that_failed(self):
         grader = _grader(judge_model_config=WORKING)
         _install(grader, default=StubJudge(ABSTAINING_ERRORS["Timeout"]()))
@@ -353,17 +377,23 @@ class TestRunsStopOnTheFirstItem:
 # =============================================================================
 
 
-@pytest.fixture
-def no_request(monkeypatch):
+@pytest_asyncio.fixture
+async def no_request(monkeypatch, refuse_network):
     """A dummy key and a refused network, so that a mistake cannot send a paid request.
-    LiteLLM refuses a parameter on the client, before it needs either."""
+    LiteLLM refuses a parameter on the client, before it needs either. Async, so the
+    network is refused only once the test's event loop exists (``refuse_network``)."""
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-key-never-valid-40")
+    refuse_network("a refused parameter reached the network")
 
-    def no_network(*args: Any, **kwargs: Any) -> Any:
-        raise AssertionError("a refused parameter reached the network")
 
-    monkeypatch.setattr(socket.socket, "connect", no_network)
-    monkeypatch.setattr(socket, "getaddrinfo", no_network)
+@pytest.mark.asyncio
+async def test_the_network_guard_refuses_connections_and_lookups(no_request):
+    """The guard these tests rely on is in force while the test runs, after the event loop
+    exists: a connection or a DNS lookup raises instead of leaving the machine."""
+    with pytest.raises(AssertionError, match="reached the network"):
+        socket.create_connection(("192.0.2.1", 443), timeout=1)
+    with pytest.raises(AssertionError, match="reached the network"):
+        socket.getaddrinfo("api.openai.com", 443)
 
 
 class TestARefusedParameter:
@@ -409,6 +439,161 @@ class TestARefusedParameter:
 
         assert "Judge 'luna' is misconfigured (UnsupportedParamsError)" in str(excinfo.value)
         assert isinstance(excinfo.value.__cause__, litellm.UnsupportedParamsError)
+
+
+# =============================================================================
+# A 402: the judge's account has no credits left
+# =============================================================================
+
+# Real-shaped 402 answers. OpenRouter and TypeSafe answer 402 when the account is out of
+# credits, Anthropic (as its billing_error) when the credit balance is too low. OPENAI_402 is
+# an OpenAI-compatible body at status 402, as OpenRouter and Groq send; OpenAI itself reports
+# an exhausted quota as a 429 (insufficient_quota), which stays a retried rate limit.
+OPENAI_402 = {
+    "error": {
+        "message": "You have run out of credits",
+        "type": "insufficient_quota",
+        "code": "insufficient_quota",
+    }
+}
+OPENROUTER_402 = {
+    "error": {
+        "code": 402,
+        "message": "Insufficient credits. Add more using https://openrouter.ai/settings/credits",
+    }
+}
+ANTHROPIC_402 = {
+    "type": "error",
+    "error": {"type": "billing_error", "message": "Your credit balance is too low"},
+}
+GEMINI_402 = {
+    "error": {"code": 402, "message": "Billing required", "status": "FAILED_PRECONDITION"}
+}
+
+
+class TestAPaymentRequiredAnswer:
+    """A 402 Payment Required says the account has no credits left (or a billing problem),
+    and fails every call the judge makes until someone pays. LiteLLM 1.95.0 has no exception
+    of its own for it: an OpenAI-compatible provider's and OpenRouter's come back as a plain
+    ``APIError`` with the status, Anthropic's and Gemini's as an ``APIConnectionError``
+    (which ``LLMClient`` would retry) carrying 500. Each keeps the provider's HTTP response
+    in its chain, which is what says it was a 402. Unlike a 403, OpenRouter's 402 is one:
+    OpenRouter answers it when the account is out of credits."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("model", "body", "litellm_type"),
+        [
+            ("openai/gpt-4.1-mini", OPENAI_402, litellm.APIError),
+            ("groq/llama-3.1-8b-instant", OPENAI_402, litellm.APIError),
+            ("deepseek/deepseek-chat", OPENAI_402, litellm.APIError),
+            ("openrouter/openai/gpt-4.1-mini", OPENROUTER_402, litellm.APIError),
+            ("anthropic/claude-sonnet-4-5", ANTHROPIC_402, litellm.APIConnectionError),
+            ("gemini/gemini-2.5-flash", GEMINI_402, litellm.APIConnectionError),
+        ],
+    )
+    async def test_is_a_configuration_error(self, provider, model, body, litellm_type):
+        provider.status, provider.body = 402, body
+
+        error = await _litellm_error(provider, model)
+
+        assert type(error) is litellm_type
+        assert _is_configuration_error(error)
+        assert classify_grading_error(error) == "infrastructure"  # the public taxonomy
+
+    def test_a_rate_limit_error_raised_for_a_402(self):
+        """LiteLLM maps some providers' 402 (NLP Cloud's) to ``RateLimitError``, the kind
+        ``LLMClient`` retries, which reports 429 itself; the provider's answer in its chain
+        says it was a 402."""
+        answer = _response(402)
+        try:
+            raise httpx.HTTPStatusError("402", request=answer.request, response=answer)
+        except httpx.HTTPStatusError:
+            try:
+                raise litellm.RateLimitError(
+                    message="NLPCloudException - payment required",
+                    llm_provider="nlp_cloud",
+                    model="m",
+                    response=answer,
+                )
+            except litellm.RateLimitError as error:
+                assert error.status_code == 429
+                assert _is_configuration_error(error)
+
+    def test_another_error_raised_while_handling_one_is_not(self):
+        """Only an API error is read for its status: a parse failure raised while a 402 was
+        being handled is not a 402 answer."""
+        try:
+            raise CONFIGURATION_ERRORS["PaymentRequired"]()
+        except litellm.APIError:
+            try:
+                raise ValueError("LLM reply has no content")
+            except ValueError as error:
+                assert not _is_configuration_error(error)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("model", "body"),
+        [
+            ("anthropic/claude-sonnet-4-5", ANTHROPIC_402),
+            ("openrouter/openai/gpt-4.1-mini", OPENROUTER_402),
+        ],
+    )
+    async def test_is_not_retried(self, provider, model, body):
+        """Anthropic's 402 arrives as an ``APIConnectionError``, the kind ``LLMClient``
+        retries; retrying an empty account only delays the failure."""
+        provider.status, provider.body = 402, body
+        client = LLMClient(
+            LLMConfig(
+                model=model,
+                api_key="test-key",
+                api_base=_base(provider, model),
+                max_retries=3,
+                retry_min_wait=0.0,
+                retry_max_wait=0.0,
+                cache_enabled=False,
+            )
+        )
+
+        with pytest.raises(openai.APIError):
+            await client.generate(system_prompt="s", user_prompt="u")
+
+        assert provider.requests == 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("model", "body", "type_name"),
+        [
+            ("openrouter/openai/gpt-4.1-mini", OPENROUTER_402, "APIError"),
+            ("anthropic/claude-sonnet-4-5", ANTHROPIC_402, "APIConnectionError"),
+        ],
+    )
+    async def test_the_grade_raises_with_no_further_requests(
+        self, provider, model, body, type_name
+    ):
+        """One call answers 402 and the grade raises: no retry, and no criterion's call
+        sent after it (the item's one call under ``per_item``)."""
+        provider.status, provider.body = 402, body
+        grader = _grader(
+            judge_model_config=LLMConfig(
+                model=model,
+                api_key="test-key",
+                api_base=_base(provider, model),
+                max_retries=3,
+                retry_min_wait=0.0,
+                retry_max_wait=0.0,
+                cache_enabled=False,
+            ),
+            llm_calls="per_item",
+        )
+
+        with pytest.raises(ValueError) as excinfo:
+            await RUBRIC.grade(SUBMISSION, grader=grader)
+
+        assert f"Judge 'default' is misconfigured ({type_name})" in str(excinfo.value)
+        _assert_says_payment_is_required(excinfo)
+        assert isinstance(excinfo.value.__cause__, openai.APIError)
+        assert provider.requests == 1
 
 
 # =============================================================================
@@ -656,18 +841,13 @@ class TestAMissingOpenAIKey:
     and LiteLLM wraps that as an ``InternalServerError`` (not ``AuthenticationError``),
     with the SDK's bare ``openai.OpenAIError`` in its ``__context__`` chain."""
 
-    @pytest.fixture
-    def no_openai_key(self, monkeypatch):
+    @pytest_asyncio.fixture
+    async def no_openai_key(self, monkeypatch, refuse_network):
         for name in ("OPENAI_API_KEY", "OPENAI_ADMIN_KEY", "OPENAI_BASE_URL", "OPENAI_API_BASE"):
             monkeypatch.delenv(name, raising=False)
         monkeypatch.setattr(litellm, "api_key", None)
         monkeypatch.setattr(litellm, "openai_key", None)
-
-        def no_network(*args: Any, **kwargs: Any) -> Any:
-            raise AssertionError("a missing key reached the network")
-
-        monkeypatch.setattr(socket.socket, "connect", no_network)
-        monkeypatch.setattr(socket, "getaddrinfo", no_network)
+        refuse_network("a missing key reached the network")
 
     @pytest.mark.asyncio
     async def test_the_real_litellm_error_is_a_configuration_error(self, no_openai_key):
@@ -708,8 +888,8 @@ class TestAMissingAzureKey:
     refuses to build its client, before any request, and LiteLLM wraps that as an
     ``APIError``, with the SDK's bare ``openai.OpenAIError`` in its chain."""
 
-    @pytest.fixture
-    def no_azure_key(self, monkeypatch):
+    @pytest_asyncio.fixture
+    async def no_azure_key(self, monkeypatch, refuse_network):
         for name in (
             "AZURE_API_KEY",
             "AZURE_OPENAI_API_KEY",
@@ -727,12 +907,7 @@ class TestAMissingAzureKey:
         monkeypatch.setenv("AZURE_API_VERSION", "2024-02-01")
         monkeypatch.setattr(litellm, "api_key", None)
         monkeypatch.setattr(litellm, "azure_key", None)
-
-        def no_network(*args: Any, **kwargs: Any) -> Any:
-            raise AssertionError("a missing key reached the network")
-
-        monkeypatch.setattr(socket.socket, "connect", no_network)
-        monkeypatch.setattr(socket, "getaddrinfo", no_network)
+        refuse_network("a missing key reached the network")
 
     @pytest.mark.asyncio
     async def test_the_real_litellm_error_is_a_configuration_error(self, no_azure_key):

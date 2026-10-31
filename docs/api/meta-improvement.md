@@ -180,6 +180,9 @@ When `save_artifacts=True` and `artifacts_dir` is set, the improvement loop writ
 | `improvement_report.html` | Consolidated report (always generated) |
 | `summary.json` | Full run metadata, config snapshot, and per-iteration summary |
 
+!!! note "Validation items holding images"
+    A validation submission that holds images is graded with its images, but the artifacts and the revision LLM's prompt show it as text, with a marker such as `[image: chart.png]` where each image was, so `iter-{NN}.json` stays plain JSON. The revision LLM never sees the pixels: it revises the rubric from the judges' reasons and these markers alone.
+
 ## Custom Convergence
 
 Replace the built-in convergence logic with a custom function:

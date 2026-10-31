@@ -142,6 +142,34 @@ stats = client.cache_stats()
 # {'size': 1024, 'count': 10, 'directory': '.autorubric_cache'}
 ```
 
+## Images in Prompts
+
+`LLMClient.generate` takes the user prompt as `Content`: a string, an `Image`, or a list of strings and images. A text prompt is sent as the message's content string, exactly as before. A prompt holding an image is sent as a list of OpenAI-style content parts in the prompt's order, a `{"type": "text", "text": ...}` part for each run of text and a `{"type": "image_url", "image_url": {"url": "data:<media type>;base64,..."}}` part for each image. LiteLLM translates these parts for providers with another image format (Anthropic, Gemini). The image is sent as its own bytes, neither resized nor re-encoded, so the provider's own limits on format, size and image count apply.
+
+```python
+from autorubric import Image, LLMClient, LLMConfig
+
+client = LLMClient(LLMConfig(model="openai/gpt-5.6-luna"))
+reply = await client.generate(
+    system_prompt="You describe figures.",
+    user_prompt=[Image("figures/fig1.png"), "What does this figure show?"],
+)
+```
+
+The response cache keys a prompt holding an image by the SHA-256 of its content, its text and each image's bytes in order, so an identical prompt hits the cache and a changed image misses it. Text prompts keep their existing cache keys. With `prompt_caching=True`, the system prompt is marked for caching as usual, and the image parts follow it in the user message. When a grader passes `shared_prefix` (grading on a model that caches prompts; see [prompt caching](../cookbook/cost-optimization.md#step-5-enable-prompt-caching-anthropic)), a prompt holding images is split as text is: the shared part is a user message of its own, any cache marker sits on its last text part, and the rest follows in a second user message. Without few-shot examples the shared part is the item's (the images of the submission, input and reference submission) and the criterion follows it. With examples the shared part is the examples (their images included) and the criterion, which a criterion's calls share across items, and the item, with its images, follows. `autorubric.debug = True` prints a marker in place of each image, `[image: <file name>]` for a file and `[image: <N> bytes]` for bytes.
+
+A provider that refuses an image (a format it does not read, or a model without vision input) usually answers with a bad-request error. A grader routes it like any other failed call, so the criterion abstains (`CANNOT_ASSESS`, or NA for a multi-choice criterion) and the error is kept on its report. See the [Image Inputs](../cookbook/image-inputs.md) recipe for the formats providers accept.
+
+A grader does not leave the model question to the provider. `CriterionGrader` sends an image to an LLM judge only when the judge is known to accept images, and `LLMConfig.images` says how that is known:
+
+| `images` | Judge accepts images when |
+|----------|---------------------------|
+| `None` (default) | LiteLLM's model map lists the model as accepting images (its entry in `litellm.model_cost` has `supports_vision: true`). The map is read once per grader per model, the first time the grader is to send that model an image. The lookup reads only the model map LiteLLM loaded at import, so it sends no request, never waits on a provider, and prints and logs nothing. LiteLLM fetches that map from its repository at import unless `LITELLM_LOCAL_MODEL_COST_MAP=True` is set (then the copy installed with LiteLLM is used). The model is looked up under its provider-prefixed name and its bare name, and a `responses/` route is looked up by its model (`openai/responses/gpt-5-mini` as `openai/gpt-5-mini`). A model the map does not hold, such as an Ollama model, is not confirmed. |
+| `True` | Always: your declaration, for a vision model the map does not list (for example `ollama/llava`). |
+| `False` | Never: your declaration, even for a model the map lists. |
+
+Any other value raises `ValueError` when the config is built (`1` and `"yes"` are not declarations). A judge that is not known to accept images raises `ValueError` from the grade, naming the judge and the model, before any judge of the grader sends a request. `fill_ground_truth` raises it too, rather than leaving each item with an image out. `LLMClient.generate` itself does not check, so a direct call sends what it is given. Text-only grading never reads `images` or the map, and the field is never sent, so text requests and cache keys are unchanged. An experiment manifest records `images` for a judge only when it is set.
+
 ## Prompt Caching (Anthropic)
 
 Reduce latency and cost on repeated calls. Enabled by default, it arranges per-criterion requests so that providers can reuse what an item's calls share:
@@ -241,7 +269,7 @@ Type alias for thinking parameter (level or budget).
 
 ## classify_grading_error
 
-Classify an exception raised while grading a single criterion into an [`ErrorCategory`](#errorcategory). The grading pipeline uses the result to route a failed judge call: `infrastructure` and `parse` errors are treated as abstentions (mapped to `CANNOT_ASSESS` / `na=True` and excluded from scoring under the default `SKIP` strategy), while `unknown` errors fall back to a conservative worst-case verdict. These verdicts only stand in for failed calls: an item whose every criterion's judgment failed has no score, and its report's `error` begins `Every criterion's judgment failed:`. Configuration errors (LiteLLM's `UnsupportedParamsError`, 401, 403 and 404 errors from the provider or from TypeSafe, and the OpenAI SDK's refusal to build its client, e.g. with no OpenAI or Azure API key, which LiteLLM reports as an `InternalServerError`, or an `APIError` for Azure) still classify as `infrastructure`, but the grader never routes them: they fail every call the judge makes, so the grade raises a `ValueError` naming the judge, chained from the original exception. Item-specific 400s such as `ContextWindowExceededError` still abstain.
+Classify an exception raised while grading a single criterion into an [`ErrorCategory`](#errorcategory). The grading pipeline uses the result to route a failed judge call: `infrastructure` and `parse` errors are treated as abstentions (mapped to `CANNOT_ASSESS` / `na=True` and excluded from scoring under the default `SKIP` strategy), while `unknown` errors fall back to a conservative worst-case verdict. These verdicts only stand in for failed calls: an item whose every criterion's judgment failed has no score, and its report's `error` begins `Every criterion's judgment failed:`. Configuration errors (LiteLLM's `UnsupportedParamsError`, 401, 402, 403 and 404 errors from the provider or from TypeSafe (a 402 Payment Required says the account has no credits left), and the OpenAI SDK's refusal to build its client, e.g. with no OpenAI or Azure API key, which LiteLLM reports as an `InternalServerError`, or an `APIError` for Azure) still classify as `infrastructure`, but the grader never routes them: they fail every call the judge makes, so the grade raises a `ValueError` naming the judge, chained from the original exception. Item-specific 400s such as `ContextWindowExceededError` still abstain.
 
 ::: autorubric.classify_grading_error
     options:

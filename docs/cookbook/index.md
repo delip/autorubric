@@ -8,7 +8,7 @@ AutoRubric grades with two kinds of AI judges. **LLM judges** take one criterion
 
 ### Tier 1: Foundation
 
-Start here if you're new to AutoRubric. [LLM Judges](llm-judges.md) and [Decision-Model Judges](decision-models.md) introduce the two kinds of judges, [Cheap First-Pass Grading](cascade-grading.md) combines them, and [Grading a Whole Rubric in One Call](single-call-grading.md) cuts an LLM judge to one call per item.
+Start here if you're new to AutoRubric. [LLM Judges](llm-judges.md) and [Decision-Model Judges](decision-models.md) introduce the two kinds of judges, and [Cheap First-Pass Grading](cascade-grading.md) combines them.
 
 | Recipe | Domain | What You'll Learn |
 |--------|--------|-------------------|
@@ -18,7 +18,8 @@ Start here if you're new to AutoRubric. [LLM Judges](llm-judges.md) and [Decisio
 | [Managing Datasets](managing-datasets.md) | Medical Triage | Loading, saving, and splitting datasets |
 | [Working with Explanations](explanations.md) | Essay Feedback | Accessing and formatting per-criterion reasons |
 | [Cheap First-Pass Grading with Jev and an LLM Fallback](cascade-grading.md) | Short-Answer Grading | Calibrating and deploying a decision-model cascade |
-| [Grading a Whole Rubric in One Call](single-call-grading.md) | Long-Answer Grading | Switching an LLM judge to one call per item, and validating the switch on labelled data |
+| [Holistic Rubric grading](single-call-grading.md) | Long-Answer Grading | Switching an LLM judge to one call per item, and validating the switch on labelled data |
+| [Grading Submissions with Images](image-inputs.md) | Chart Reports | Images in submissions, LLM and decision-model judges, image parts in dataset files |
 
 ### Tier 2: Reliability
 

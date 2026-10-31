@@ -78,6 +78,7 @@ convert CO2 into glucose. The overall equation is:
     for idx, item in enumerate(dataset.items):
         print(f"\n{'=' * 60}")
         print(f"Evaluating: {item.description}")
+        assert isinstance(item.submission, str)  # this demo's submissions are text
         print(f"Submission: {item.submission[:100]}...")
 
         # Get the effective reference (global in this case)

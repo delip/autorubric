@@ -17,6 +17,8 @@ from pydantic import (
     model_validator,
 )
 
+from autorubric.content import Content
+
 CountFn = Callable[[str], int]
 
 
@@ -114,10 +116,11 @@ class ThinkingOutputDict(TypedDict, total=False):
     output: str
 
 
-ToGradeInput = str | ThinkingOutputDict
+ToGradeInput = Content | ThinkingOutputDict
 """Union type for to_grade parameter.
 
-Accepts either a plain string or a dict with thinking/output keys.
+Accepts submission ``Content`` (a string, an ``Image``, or a sequence of strings and images)
+or a dict with thinking/output keys, whose sections are text.
 """
 
 PenaltyType = Literal["ALL", "OUTPUT_ONLY", "THINKING_ONLY"]
@@ -1339,7 +1342,8 @@ class FewShotExample:
     """A single few-shot example for criterion evaluation.
 
     Attributes:
-        submission: The content that was evaluated. Can be plain text or JSON-serialized.
+        submission: The content that was evaluated: text (plain or JSON-serialized), an
+            ``Image``, or a document of text and images (``Content``).
         verdict: The ground truth verdict for this criterion.
         reason: Optional explanation for why the verdict was assigned. ``CriterionGrader``
             takes it from the training item's ``DataItem.ground_truth_reasons`` for this
@@ -1354,7 +1358,7 @@ class FewShotExample:
         ... )
     """
 
-    submission: str
+    submission: Content
     verdict: CriterionVerdict
     reason: str | None = None
 

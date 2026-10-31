@@ -1,11 +1,14 @@
 """Tests for EvalRunner and evaluation infrastructure."""
 
+import hashlib
+import io
 import json
 import tempfile
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
+import PIL.Image as pil_image
 import pytest
 
 from autorubric import (
@@ -16,13 +19,14 @@ from autorubric import (
     EvalRunner,
     EvalTimingStats,
     ExperimentManifest,
+    Image,
     ItemResult,
     Rubric,
     TokenUsage,
     evaluate,
 )
 from autorubric.dataset import DataItem, RubricDataset
-from autorubric.eval import _compute_dataset_hash, _serialize_grader_config
+from autorubric.eval import _compute_dataset_hash, _dataset_has_images, _serialize_grader_config
 from autorubric.llm import LLMConfig, ThinkingConfig, ThinkingLevel
 from autorubric.types import (
     AggregatedMultiChoiceVerdict,
@@ -971,6 +975,155 @@ class TestExperimentManifest:
         assert manifest.completed_indices == {0, 1, 2, 3, 4}
 
 
+class TestDatasetHash:
+    """The dataset hash a checkpoint's manifest records, which a resumed run must match."""
+
+    @pytest.mark.parametrize(
+        "prompt",
+        [
+            "Explain a concept",
+            None,
+            {"system": "Be brief.", "user": "Explain a concept"},
+            [{"role": "user", "content": "Explain a concept"}],
+        ],
+        ids=["prompt", "no_prompt", "object_prompt", "messages_prompt"],
+    )
+    def test_a_text_datasets_hash_is_unchanged(self, sample_dataset, prompt):
+        """Written out from ``json`` and ``hashlib`` as the hash was computed before prompts
+        could hold images, so checkpoints written then still resume. A prompt that is not
+        content (a JSON object or a list of messages a dataset file kept) is embedded as it
+        is, as it was then."""
+        sample_dataset.prompt = prompt
+        content = json.dumps(
+            {
+                "name": "test-dataset",
+                "prompt": prompt,
+                "num_items": 3,
+                "num_criteria": 2,
+            },
+            sort_keys=True,
+        )
+        expected = hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
+        assert _compute_dataset_hash(sample_dataset) == expected
+
+    def test_a_document_prompt_is_hashed_by_the_bytes_of_its_images(self, sample_dataset, tmp_path):
+        def png(color: str) -> bytes:
+            buffer = io.BytesIO()
+            pil_image.new("RGB", (2, 2), color).save(buffer, "PNG")
+            return buffer.getvalue()
+
+        def hash_with_prompt(prompt: Any) -> str:
+            sample_dataset.prompt = prompt
+            return _compute_dataset_hash(sample_dataset)
+
+        red_file = tmp_path / "red.png"
+        red_file.write_bytes(png("red"))
+        red = hash_with_prompt([Image(png("red")), "Describe the figure."])
+        assert hash_with_prompt([Image(red_file), "Describe the figure."]) == red
+        assert hash_with_prompt([Image(png("blue")), "Describe the figure."]) != red
+        assert hash_with_prompt("Describe the figure.") != red
+        assert hash_with_prompt(["Describe ", "the figure."]) == hash_with_prompt(
+            "Describe the figure."
+        )
+
+
+class TestManifestImages:
+    """The manifest records ``"images": true`` only for a dataset that holds images."""
+
+    TEXT_MANIFEST_KEYS = [
+        "experiment_name",
+        "created_at",
+        "dataset_name",
+        "dataset_hash",
+        "total_items",
+        "status",
+        "completed_indices",
+        "error",
+        "started_at",
+        "completed_at",
+        "total_duration_seconds",
+        "dataset_path",
+        "grader_config",
+        "eval_config",
+    ]
+
+    @staticmethod
+    async def _run_manifest(dataset: RubricDataset, tmp_path: Path) -> dict[str, Any]:
+        config = EvalConfig(
+            show_progress=False, experiments_dir=tmp_path, experiment_name="images-test"
+        )
+        runner = EvalRunner(dataset=dataset, grader=create_mock_grader(), config=config)
+        await runner.run()
+        with open(tmp_path / "images-test" / "manifest.json") as f:
+            return json.load(f)
+
+    @pytest.mark.asyncio
+    async def test_a_text_only_manifest_has_no_images_key(self, sample_dataset, tmp_path):
+        manifest = await self._run_manifest(sample_dataset, tmp_path)
+        assert list(manifest) == self.TEXT_MANIFEST_KEYS
+        assert ExperimentManifest.from_dict(manifest).images is False
+
+    @pytest.mark.asyncio
+    async def test_a_dataset_holding_an_image_records_it(self, sample_dataset, tmp_path):
+        figure = tmp_path / "figure.png"
+        pil_image.new("RGB", (2, 2), "red").save(figure, "PNG")
+        sample_dataset.items[1].submission = ["See the figure:", Image(figure)]
+        manifest = await self._run_manifest(sample_dataset, tmp_path)
+        assert list(manifest) == [*self.TEXT_MANIFEST_KEYS, "images"]
+        assert manifest["images"] is True
+        assert ExperimentManifest.from_dict(manifest).images is True
+
+    @pytest.mark.parametrize(
+        "where", ["prompt", "reference_submission", "item_prompt", "item_reference"]
+    )
+    def test_every_content_field_counts(self, sample_dataset, tmp_path, where):
+        image = Image(tmp_path / "never-written.png")  # recognized by type: nothing is read
+        if where == "prompt":
+            sample_dataset.prompt = image
+        elif where == "reference_submission":
+            sample_dataset.reference_submission = [image]
+        elif where == "item_prompt":
+            sample_dataset.items[0].prompt = image
+        else:
+            sample_dataset.items[2].reference_submission = ["Like this:", image]
+        assert _dataset_has_images(sample_dataset) is True
+
+    def test_text_and_thinking_output_submissions_hold_no_images(self, sample_dataset):
+        assert _dataset_has_images(sample_dataset) is False
+        sample_dataset.items[0].submission = cast(
+            Any, {"thinking": "Let me see.", "output": "An answer."}
+        )
+        sample_dataset.items[1].submission = ["Text ", "only."]
+        assert _dataset_has_images(sample_dataset) is False
+
+    @pytest.mark.parametrize(
+        "value",
+        [42, [{"role": "user", "content": "hi"}], [1, 2], {"image": 3}],
+        ids=["number", "messages", "numbers", "object"],
+    )
+    def test_values_that_are_not_content_hold_no_images(self, sample_dataset, value):
+        """Values a dataset file keeps as they are never stop the scan (nor a run)."""
+        sample_dataset.items[0].submission = cast(Any, value)
+        sample_dataset.items[1].prompt = cast(Any, value)
+        sample_dataset.reference_submission = cast(Any, value)
+        assert _dataset_has_images(sample_dataset) is False
+
+    def test_to_dict_writes_the_key_only_when_true(self):
+        from datetime import datetime
+
+        fields: dict[str, Any] = {
+            "experiment_name": "e",
+            "created_at": datetime(2024, 1, 15),
+            "dataset_name": None,
+            "dataset_hash": "abc",
+            "total_items": 1,
+            "status": "running",
+            "completed_indices": set(),
+        }
+        assert "images" not in ExperimentManifest(**fields).to_dict()
+        assert ExperimentManifest(**fields, images=True).to_dict()["images"] is True
+
+
 # -----------------------------------------------------------------------------
 # EvalRunner Tests
 # -----------------------------------------------------------------------------
@@ -1683,3 +1836,43 @@ class TestFreshStartInExistingExperiment:
         first, resumed = runs
         assert first.failed_items == resumed.failed_items == loaded.failed_items == 1
         assert resumed.errors == first.errors
+
+
+class TestItemsThatAreNotContent:
+    """An item whose submission is not content fails alone, when it is graded: the run's
+    manifest scan and dataset hash accept any value, as before images existed."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "value, error",
+        [
+            (42, "object has no attribute 'get'"),
+            ([{"role": "user", "content": "hi"}], "A content part must be a str or an Image"),
+        ],
+        ids=["number", "messages"],
+    )
+    async def test_the_other_items_are_graded(self, sample_dataset, tmp_path, value, error):
+        from unittest.mock import patch
+
+        from litellm import ModelResponse
+
+        from autorubric.graders import CriterionGrader
+
+        sample_dataset.items[1].submission = cast(Any, value)
+        content = json.dumps({"criterion_status": "MET", "explanation": "Fine."})
+        reply = ModelResponse(
+            model="gpt-4.1-mini",
+            choices=[
+                {"message": {"role": "assistant", "content": content}, "finish_reason": "stop"}
+            ],
+        )
+        grader = CriterionGrader(judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"))
+        with patch("litellm.acompletion", AsyncMock(return_value=reply)):
+            result = await evaluate(
+                sample_dataset, grader, show_progress=False, experiments_dir=tmp_path
+            )
+        assert result.successful_items == 2
+        assert result.failed_items == 1
+        (failed,) = [r for r in result.item_results if r.error is not None]
+        assert failed.item_idx == 1
+        assert failed.error is not None and error in failed.error

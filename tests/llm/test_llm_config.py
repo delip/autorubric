@@ -583,6 +583,7 @@ class TestLLMConfigToYaml:
             seed=42,
             extra_headers={"X-Custom": "header"},
             extra_params={"custom_param": "value"},
+            images=True,
         )
 
         # Guard: a field added to LLMConfig later must be set here too, or this

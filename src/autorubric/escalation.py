@@ -44,10 +44,17 @@ import warnings
 from collections import Counter
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import BaseModel, ConfigDict
 
+from autorubric.content import (
+    Content,
+    _content_identity,
+    _content_key,
+    _is_content,
+    _normalize_content,
+)
 from autorubric.dataset import DataItem, RubricDataset
 from autorubric.decision import _is_real_number
 from autorubric.eval import EvalResult, EvalTimingStats, ItemResult
@@ -624,7 +631,7 @@ def _paired_items(
             )
         submissions = (dm_item.item.submission, llm_item.item.submission)
         # A result loaded with EvalResult.from_experiment records no submission ("").
-        if all(submissions) and submissions[0] != submissions[1]:
+        if all(_recorded(s) for s in submissions) and not _same_content(*submissions):
             raise ValueError(
                 f"item {idx} is not the same item in dm_result and llm_result: its "
                 "submissions differ"
@@ -768,9 +775,40 @@ def _checked_dm_judge_id(item_result: ItemResult) -> str:
 def _recorded_item(dm_item: ItemResult, llm_item: ItemResult) -> DataItem:
     """The pair's item, taken from a result that recorded its submission if either did (a
     result loaded with ``EvalResult.from_experiment`` records none)."""
-    if dm_item.item.submission or not llm_item.item.submission:
+    if _recorded(dm_item.item.submission) or not _recorded(llm_item.item.submission):
         return dm_item.item
     return llm_item.item
+
+
+def _recorded(submission: object) -> bool:
+    """Whether a result recorded ``submission``: content that is not empty once normalized.
+
+    A value that is not content (a ``{thinking, output}`` dict submission) is recorded when
+    it is truthy, as every submission was read before images existed.
+    """
+    if not _is_content(submission):
+        return bool(submission)
+    return bool(_normalize_content(cast(Content, submission)))
+
+
+def _same_content(a: object, b: object) -> bool:
+    """Whether ``a`` and ``b`` are the same content, as ``_content_identity`` identifies it.
+
+    Both are normalized first (``_normalize_content``), and equal canonical forms are the
+    same content, so text, and documents whose images have the same sources, are compared
+    without reading a file. Otherwise text is the same only as equal text, never a document,
+    and is never hashed; two documents are the same when their identities (digests) are.
+    A value that is not content (a ``{thinking, output}`` dict submission) is the same only
+    as an equal value, as submissions were compared before images existed.
+    """
+    if not (_is_content(a) and _is_content(b)):
+        return a == b
+    left, right = _normalize_content(cast(Content, a)), _normalize_content(cast(Content, b))
+    if left == right:
+        return True
+    if isinstance(left, str) or isinstance(right, str):
+        return False
+    return _content_identity(left) == _content_identity(right)
 
 
 def _replayed_item(
@@ -919,6 +957,14 @@ def _calibration_fingerprint(items: Iterable[tuple[DataItem, Iterable[Criterion]
     """SHA-256 over the contents of items, in order: each item's submission, prompt and
     reference submission, and the requirements of the criteria it is graded against.
 
+    The submission, prompt and reference enter as ``_content_key`` gives them: text, and a
+    value that is not content (a ``{thinking, output}`` dict submission), as it is, so a
+    text dataset's fingerprint is the one computed before images existed, and a document by
+    its ``_content_digest``. A document holding an image whose file cannot be read (moved
+    since the runs, or missing for an item whose grading raised) enters by its parts'
+    sources instead (``_fingerprint_key``), so one such item does not stop a calibration;
+    its fingerprint then differs from the one computed while the file could be read.
+
     It identifies a set of calibration items where ``autorubric.eval._compute_dataset_hash``
     cannot: that hash covers only a dataset's name, prompt and sizes, which the two halves
     of ``RubricDataset.split_train_test`` share. The prompt and reference are the item's
@@ -930,14 +976,40 @@ def _calibration_fingerprint(items: Iterable[tuple[DataItem, Iterable[Criterion]
     """
     content = [
         [
-            item.submission,
-            item.prompt,
-            item.reference_submission,
+            _fingerprint_key(item.submission),
+            _fingerprint_key(item.prompt),
+            _fingerprint_key(item.reference_submission),
             [criterion.requirement for criterion in criteria],
         ]
         for item, criteria in items
     ]
     return hashlib.sha256(json.dumps(content).encode("utf-8")).hexdigest()
+
+
+def _fingerprint_key(value: object) -> object:
+    """``value`` as ``_calibration_fingerprint`` embeds it: ``_content_key(value)``, or, for
+    a document holding an image whose bytes cannot be read, the document's sources.
+
+    The fallback is ``{"content_sources": [...]}``, one ``["text", <text>]``, ``["path",
+    <absolute path>]`` or ``["sha256", <digest>]`` (an image held as bytes) entry per part,
+    in order; it reads no file and equals no ``_content_key``.
+    """
+    try:
+        return _content_key(cast(Content, value))
+    except (OSError, ValueError):
+        # Only a document with an image file that cannot be read (or is not a supported
+        # image) gets here: text and values that are not content read no file.
+        normalized = _normalize_content(cast(Content, value))
+        assert not isinstance(normalized, str)
+        sources: list[list[str]] = []
+        for part in normalized:
+            if isinstance(part, str):
+                sources.append(["text", part])
+            elif part.path is not None:
+                sources.append(["path", str(part.path)])
+            else:
+                sources.append(["sha256", part.digest])
+        return {"content_sources": sources}
 
 
 def _replayed_fingerprint(pairs: Iterable[tuple[ItemResult, ItemResult]]) -> str:

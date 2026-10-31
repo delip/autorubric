@@ -12,6 +12,7 @@ against rubrics, with support for:
 from __future__ import annotations
 
 import asyncio
+import copy
 import hashlib
 import json
 import logging
@@ -35,7 +36,8 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 
-from autorubric.dataset import DataItem, RubricDataset
+from autorubric.content import _content_key
+from autorubric.dataset import DataItem, RubricDataset, _dataset_has_images
 from autorubric.decision import DecisionModelConfig, _url_host
 from autorubric.graders.criterion_grader import (
     CriterionGrader,
@@ -71,7 +73,11 @@ def _generate_experiment_name() -> str:
 
 
 def _compute_dataset_hash(dataset: RubricDataset) -> str:
-    """Compute a hash of the dataset for integrity verification."""
+    """Compute a hash of the dataset for integrity verification.
+
+    The prompt enters as ``_content_key`` gives it: text, and a value that is not content,
+    as it is (the hash computed before images existed), and a document by its digest.
+    """
     try:
         num_criteria = dataset.num_criteria
     except ValueError:
@@ -84,7 +90,7 @@ def _compute_dataset_hash(dataset: RubricDataset) -> str:
     content = json.dumps(
         {
             "name": dataset.name,
-            "prompt": dataset.prompt,
+            "prompt": _content_key(dataset.prompt),
             "num_items": len(dataset),
             "num_criteria": num_criteria,
         },
@@ -100,9 +106,10 @@ def _serialize_grader_config(grader: Grader) -> dict[str, Any]:
     For each judge this records ``judge_id``, ``judge_kind`` (``"llm"`` or
     ``"decision_model"``), ``model``, ``weight`` and ``max_parallel_requests``. An LLM judge
     adds ``temperature`` (None when the provider default is used), then, each only when set,
-    ``max_tokens``, ``top_p``, ``thinking`` (``{"level": ..., "budget_tokens": ...}``) and
-    ``seed`` (see ``_llm_judge_entry``). A decision-model judge adds ``binary_framing``,
-    ``ordinal_framing``, ``decision_threshold`` and ``api_base_host``, the host of the
+    ``max_tokens``, ``top_p``, ``thinking`` (``{"level": ..., "budget_tokens": ...}``),
+    ``seed`` and ``images`` (see ``_llm_judge_entry``). A decision-model judge adds
+    ``binary_framing``, ``ordinal_framing``, ``decision_threshold`` and ``api_base_host``,
+    the host of the
     endpoint it was built against; the rest of its base URL, its API key and its
     ``extra_headers`` are not recorded. A cascade adds
     ``escalation``: its escalation judges (``judges``, LLM entries as above), ``threshold``
@@ -231,6 +238,9 @@ def _llm_judge_entry(judge: Any, judge_id: str, model: str, config: Any) -> dict
     added after those keys, each only when set (not None), in ``LLMConfig``'s field order:
     ``max_tokens``, ``top_p``, ``thinking`` and ``seed`` (#44). The entry of a judge that
     sets none of them is therefore byte-identical to one written before they were recorded.
+    Last, ``images`` is recorded when the config declares it (``True`` or ``False``): it
+    decides whether the judge may be sent images, so it is part of how a run was graded,
+    though it enters no request. Unset (None, LiteLLM's model map asked), it is left out.
     ``thinking`` is the normalized ``get_thinking_config()`` as ``{"level": ...,
     "budget_tokens": ...}``, the level as its plain string, or None for a budget given with
     no level (``budget_tokens``, when not None, is what is sent, the level otherwise). A
@@ -261,6 +271,9 @@ def _llm_judge_entry(judge: Any, judge_id: str, model: str, config: Any) -> dict
     seed = getattr(config, "seed", None)
     if isinstance(seed, int) and not isinstance(seed, bool):
         entry["seed"] = seed
+    images = getattr(config, "images", None)
+    if isinstance(images, bool):
+        entry["images"] = images
     return entry
 
 
@@ -296,7 +309,8 @@ def _decision_model_judge_entry(
     client resolved at construction (``api_base``, else ``TYPESAFE_BASE_URL``, else the
     SDK default); without such a client, the host of an explicit ``api_base``, else None.
     The rest of the URL (its path; a base URL cannot hold credentials), the API key and
-    ``extra_headers`` are never recorded.
+    ``extra_headers`` are never recorded. ``capabilities`` (``DecisionModelConfig``) is
+    recorded, as a copy, only when set.
     """
     clients = getattr(grader, "_decision_clients", None)
     client = clients.get(judge_id) if isinstance(clients, dict) else None
@@ -304,7 +318,7 @@ def _decision_model_judge_entry(
     if not isinstance(host, str):
         host = _url_host(config.api_base) if config.api_base is not None else None
     weight = getattr(judge, "weight", 1.0)
-    return {
+    entry: dict[str, Any] = {
         "judge_id": judge_id,
         "judge_kind": "decision_model",
         "model": config.model,
@@ -315,6 +329,10 @@ def _decision_model_judge_entry(
         "decision_threshold": config.decision_threshold,
         "api_base_host": host,
     }
+    # Only when set, so manifests of judges without it are unchanged.
+    if config.capabilities is not None:
+        entry["capabilities"] = copy.deepcopy(dict(config.capabilities))
+    return entry
 
 
 def _serialize_eval_config(config: EvalConfig) -> dict[str, Any]:
@@ -403,7 +421,9 @@ class EvalConfig:
             - "detailed": Shows per-judge progress for ensemble mode
         max_concurrent_items: Maximum items to grade concurrently.
             None = grade all items in parallel (default).
-            Set this to limit memory usage for very large datasets.
+            Set this to limit memory usage for very large datasets, and for any dataset
+            with images: each item being graded holds its images (and an LLM judge's
+            base64 copies) until its grade finishes, rate-limit waits included.
         experiment_name: Name for this experiment run.
             If None, auto-generates using coolname.
         experiments_dir: Root directory for experiment outputs.
@@ -815,10 +835,16 @@ class ExperimentManifest:
     dataset_path: str | None = None  # Path if loaded from file
     grader_config: dict[str, Any] | None = None  # Serialized grader configuration
     eval_config: dict[str, Any] | None = None  # Serialized EvalConfig
+    # Whether the dataset holds images (``_dataset_has_images``); written only when True
+    images: bool = False
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialize to dictionary for JSON storage."""
-        return {
+        """Serialize to dictionary for JSON storage.
+
+        The ``"images"`` key is written only when the dataset holds images, so a text-only
+        manifest is byte-identical to one written before images were supported.
+        """
+        data: dict[str, Any] = {
             "experiment_name": self.experiment_name,
             "created_at": self.created_at.isoformat(),
             "dataset_name": self.dataset_name,
@@ -834,6 +860,9 @@ class ExperimentManifest:
             "grader_config": self.grader_config,
             "eval_config": self.eval_config,
         }
+        if self.images:
+            data["images"] = True
+        return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ExperimentManifest:
@@ -857,6 +886,7 @@ class ExperimentManifest:
             dataset_path=data.get("dataset_path"),
             grader_config=data.get("grader_config"),
             eval_config=data.get("eval_config"),
+            images=data.get("images", False),
         )
 
 
@@ -1189,6 +1219,7 @@ class EvalRunner:
             started_at=started_at,
             grader_config=_serialize_grader_config(self.grader),
             eval_config=_serialize_eval_config(self.config),
+            images=_dataset_has_images(self.dataset),
         )
         self._exp_dir.mkdir(parents=True, exist_ok=True)
         items_path = self._exp_dir / "items.jsonl"

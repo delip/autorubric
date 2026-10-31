@@ -44,6 +44,7 @@ def _criterion_with_unmarked_na() -> Criterion:
 def test_na_option_is_marked_in_rendered_options():
     """An NA option is visibly marked so the judge can recognize the abstain choice."""
     prompt = build_multi_choice_user_prompt(_criterion_with_unmarked_na(), "submission")
+    assert isinstance(prompt, str)  # text in, text out
     # The NA option line carries the marker.
     assert f"3. Insufficient data {_NA_MARKER}" in prompt
     # Scored options are NOT marked.
@@ -65,6 +66,7 @@ def test_na_marker_not_doubled_when_label_already_signals_na():
         ],
     )
     prompt = build_multi_choice_user_prompt(criterion, "submission")
+    assert isinstance(prompt, str)
     assert "3. N/A" in prompt
     # No appended "(cannot assess / not applicable)" suffix on the N/A line.
     assert f"N/A {_NA_MARKER}" not in prompt
@@ -83,6 +85,7 @@ def test_scored_only_criterion_has_no_na_marker():
         ],
     )
     prompt = build_multi_choice_user_prompt(criterion, "submission")
+    assert isinstance(prompt, str)
     assert _NA_MARKER not in prompt
 
 
@@ -251,10 +254,13 @@ class TestPerCriterionLayout:
 
     def test_criterion_ends_a_prompt_without_examples(self) -> None:
         block = _binary_criterion_block(self.CRITERION)
-        assert build_user_prompt(self.CRITERION, "S", **self.SHARED_ARGS).endswith(block)
+        prompt = build_user_prompt(self.CRITERION, "S", **self.SHARED_ARGS)
+        assert isinstance(prompt, str)
+        assert prompt.endswith(block)
 
     def test_a_binary_prompt_with_examples_ends_with_the_item(self) -> None:
         prompt = build_few_shot_user_prompt(self.CRITERION, "S", [self.EXAMPLE], **self.SHARED_ARGS)
+        assert isinstance(prompt, str)
         assert (
             prompt.index("<guidelines>")
             < prompt.index("<examples>")
@@ -271,6 +277,7 @@ class TestPerCriterionLayout:
         prefix = _multi_choice_few_shot_prefix(
             self.MULTI, [("ex", 1, None)], guidelines="Be strict."
         )
+        assert isinstance(prompt, str) and isinstance(prefix, str)
         assert prompt.startswith(prefix + "\n\n<options>")
         assert "<options>" not in prefix
         assert prefix.endswith("</question>")
@@ -279,27 +286,34 @@ class TestPerCriterionLayout:
         one = _multi_choice_few_shot_prefix(self.MULTI, [("ex", 1, None)])
         other = _multi_choice_few_shot_prefix(self.FLIPPED, [("ex", 0, None)])
         assert one == other
+        assert isinstance(one, str)
         assert "<selected_option>" not in one
         assert "<selected_label>Clear</selected_label>" in one
 
     def test_the_binary_prefix_does_not_depend_on_the_item(self) -> None:
         prefix = _few_shot_prefix(self.CRITERION, [self.EXAMPLE], guidelines="Be strict.")
+        assert isinstance(prefix, str)
         for submission in ("S", "T"):
             prompt = build_few_shot_user_prompt(
                 self.CRITERION, submission, [self.EXAMPLE], guidelines="Be strict."
             )
+            assert isinstance(prompt, str)
             assert prompt.startswith(prefix + "\n\n")
 
     def test_shared_block_is_equal_across_criteria_of_an_item(self) -> None:
         shared = _shared_user_content("S", "Q?", "REF", guidelines="Be strict.")
+        assert isinstance(shared, str)
         for criterion in (self.CRITERION, self.OTHER):
-            assert build_user_prompt(criterion, "S", **self.SHARED_ARGS).startswith(shared + "\n\n")
+            prompt = build_user_prompt(criterion, "S", **self.SHARED_ARGS)
+            assert isinstance(prompt, str)
+            assert prompt.startswith(shared + "\n\n")
 
     def test_whole_rubric_prefix_is_guidelines_and_examples(self) -> None:
         prompt = build_rubric_user_prompt(
             [("c0", self.MULTI)], "S", examples_text="<examples>\nE\n</examples>", guidelines="G"
         )
         prefix = _rubric_examples_prefix("<examples>\nE\n</examples>", guidelines="G")
+        assert isinstance(prompt, str) and isinstance(prefix, str)
         assert prompt.startswith(prefix + "\n\n<criteria>")
 
     @pytest.mark.parametrize("with_guidelines", [False, True])
@@ -329,6 +343,7 @@ class TestPerCriterionLayout:
 
     def test_pre_1_7_examples_number_their_options(self) -> None:
         text = _format_multi_choice_examples(self.MULTI, [("ex", 1, None)], False, numbered=True)
+        assert isinstance(text, str)
         assert "<selected_option>2</selected_option>\n<selected_label>Clear" in text
 
     def test_pre_1_7_system_prompt_mentions_the_option_number(self) -> None:

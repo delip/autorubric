@@ -56,6 +56,7 @@ Every field after `model` is keyword-only. Field names match `LLMConfig` whereve
 | `ordinal_framing` | `"choice"` | How ordinal multi-choice criteria are posed |
 | `decision_threshold` | `0.5` | P(MET) cut for the Noul framings |
 | `input_cost_per_token` | `None` | Price in USD per input token |
+| `capabilities` | `None` | What the model accepts, as a registry-shaped entry (`provider`, `images`, and with images the limits `image_formats`, `min_side_px`, `max_side_px`, `max_image_bytes`, `max_request_bytes`). When set it replaces the registry entry for this judge. Read only for content holding images; see [Declaring a model's capabilities](../api/decision-models.md#declaring-a-models-capabilities) |
 
 `max_retries` and `max_parallel_requests` must be integers of at least 1. Numpy integers are accepted and stored as plain `int`; a `bool` or a float raises `ValueError`.
 
@@ -74,6 +75,8 @@ my_dm = DecisionModelConfig(
 ```
 
 The base URL must be an absolute http(s) URL with no query, fragment or credentials; anything else raises `ValueError` when the grader is built. Requests honour the environment's TLS and proxy settings (`SSL_CERT_FILE`, `HTTPS_PROXY` and the like). An experiment's manifest records only the host of the base URL, never the key.
+
+A self-hosted model is not in autorubric's decision-model registry, so grading content that holds images with it raises `ValueError` until you declare what it accepts with `capabilities=`. [Declaring a model's capabilities](../api/decision-models.md#declaring-a-models-capabilities) shows how.
 
 ### Framings
 
@@ -131,7 +134,7 @@ print(vote.verdict, vote.probabilities, vote.confidence, vote.reason)
 
 `probabilities` is keyed by verdict for binary criteria (`"MET"`, `"UNMET"`, and `"CANNOT_ASSESS"` for the `"choice"` framing), and by the original option index as a string (`"0"`, `"1"`, ...) for multi-choice criteria.
 
-**Failures.** A failed request abstains every criterion of that item for that judge, and each records the `error`: `infrastructure` for rate-limit, timeout, connection and server errors, `parse` for a request the endpoint rejected. Authentication, permission and not-found errors (401, 403, 404: a revoked key, or a base URL that names no System One endpoint) fail every request alike, so the grade raises a `ValueError` naming the judge instead, as for a misconfigured [LLM judge](llm-judges.md#standalone-use); in a cascade this raises rather than escalating every criterion. An answer that is missing or of the wrong type abstains only its own criterion, as a `parse` error. Under the default `CannotAssessStrategy.SKIP` abstentions are left out of the score. A failed request leaves the decision model with nothing judged on that item, so its `judge_scores` entry there is `None`. When no other judge answered either, the item has no score under any strategy: its report's `error` begins `Every criterion's judgment failed:`, and an `EvalRunner` run counts it as failed. A request that the endpoint answered, and billed, without a usable answer for any criterion fails the item the same way, and its cost still counts in the run's totals.
+**Failures.** A failed request abstains every criterion of that item for that judge, and each records the `error`: `infrastructure` for rate-limit, timeout, connection and server errors, `parse` for a request the endpoint rejected. Authentication, payment, permission and not-found errors (401, 402, 403, 404: a revoked key, an organization with no TypeSafe API credits left, or a base URL that names no System One endpoint) fail every request alike, so the grade raises a `ValueError` naming the judge instead, as for a misconfigured [LLM judge](llm-judges.md#standalone-use); in a cascade this raises rather than escalating every criterion. An answer that is missing or of the wrong type abstains only its own criterion, as a `parse` error. Under the default `CannotAssessStrategy.SKIP` abstentions are left out of the score. A failed request leaves the decision model with nothing judged on that item, so its `judge_scores` entry there is `None`. When no other judge answered either, the item has no score under any strategy: its report's `error` begins `Every criterion's judgment failed:`, and an `EvalRunner` run counts it as failed. A request that the endpoint answered, and billed, without a usable answer for any criterion fails the item the same way, and its cost still counts in the run's totals.
 
 ## Mixed ensembles
 

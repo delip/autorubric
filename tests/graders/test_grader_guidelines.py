@@ -29,6 +29,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from autorubric import (
+    Content,
     Criterion,
     CriterionOption,
     CriterionReport,
@@ -97,10 +98,10 @@ class LegacyJevStyleGrader(Grader):
 
     async def judge(
         self,
-        to_grade: str,
+        to_grade: Content,
         rubric: list[Criterion],
-        query: str | None = None,
-        reference_submission: str | None = None,
+        query: Content | None = None,
+        reference_submission: Content | None = None,
     ) -> dict[str, Any]:
         self.judge_calls.append((to_grade, rubric, query, reference_submission))
         return {"rubric": rubric}

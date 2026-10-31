@@ -49,6 +49,7 @@ from rich.progress import (
 from rich.table import Table
 from rich.text import Text
 
+from autorubric.content import Content, _content_preview
 from autorubric.dataset import RubricDataset, _criterion_scale_data
 from autorubric.decision import DecisionModelConfig
 from autorubric.graders import CriterionGrader, Grader
@@ -948,7 +949,7 @@ async def validate_ground_truth(
         if _capture is not None:
             _capture.append(
                 {
-                    "submission": item.submission[:200],
+                    "submission": _content_preview(item.submission)[:200],
                     "description": item.description,
                     "rubric_score": item_score,
                     "expected_score": expected_score,
@@ -1184,7 +1185,7 @@ def build_revision_history(iterations: list[IterationResult], window: int) -> st
 
 async def validate_agreement(
     rubric: Rubric,
-    samples: list[str],
+    samples: Sequence[Content],
     judges: list[JudgeSpec],
     task_prompt: str | None = None,
     *,
@@ -1240,7 +1241,7 @@ async def validate_agreement(
 
                 _capture.append(
                     {
-                        "submission": sample,
+                        "submission": _content_preview(sample),
                         "score": result.score,
                         "mean_agreement": result.mean_agreement,
                         "completion_cost": result.completion_cost,
@@ -1691,7 +1692,7 @@ async def validate_held_out(
 
             exemplar = CriterionExemplar(
                 item_index=item_idx,
-                submission_snippet=item.submission[:200],
+                submission_snippet=_content_preview(item.submission)[:200],
                 llm_verdict=llm_v,
                 ground_truth_verdict=gt_v,
                 llm_reason=llm_reason,
@@ -1702,7 +1703,7 @@ async def validate_held_out(
         if _capture is not None:
             _capture.append(
                 {
-                    "submission": item.submission[:200],
+                    "submission": _content_preview(item.submission)[:200],
                     "description": item.description,
                     "rubric_score": result.score,
                 }
@@ -1746,7 +1747,9 @@ async def validate_held_out(
                 all_exemplars[c_idx].append(
                     CriterionExemplar(
                         item_index=item_idx,
-                        submission_snippet=validation_data.items[item_idx].submission[:200],
+                        submission_snippet=_content_preview(
+                            validation_data.items[item_idx].submission
+                        )[:200],
                         llm_verdict=effective_options[filtered_pred[0]].label,
                         ground_truth_verdict=effective_options[filtered_true[0]].label,
                         llm_reason=llm_reason,
@@ -1856,6 +1859,10 @@ def format_held_out_for_prompt(
     max_exemplars_per_criterion: int = 3,
 ) -> str:
     """Format HeldOutValidationResult into text for the revision prompt.
+
+    Each exemplar shows its ``submission_snippet``: a submission's text preview, with a
+    marker such as ``[image: chart.png]`` in place of each image. The revision LLM sees these
+    markers, never the images themselves.
 
     Args:
         result: The held-out validation result.

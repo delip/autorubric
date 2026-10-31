@@ -100,7 +100,7 @@ These apply to **binary** criteria only and are independent of multi-choice aggr
 Every strategy counts only MET and UNMET votes. CANNOT_ASSESS votes, including those of judge
 calls that failed with an API or parse error, are set aside first, and a criterion whose votes
 all abstain is CANNOT_ASSESS. A panel member's configuration error (LiteLLM's
-`UnsupportedParamsError`, a 401, 403 or 404, a missing OpenAI, Azure or Anthropic key; OpenRouter's
+`UnsupportedParamsError`, a 401, 402, 403 or 404, a missing OpenAI, Azure or Anthropic key; OpenRouter's
 moderation 403 excepted) is not set aside: the whole
 grade raises a `ValueError` naming the judge (see
 [classify_grading_error](llm.md#classify_grading_error)). A `majority` or `weighted` tie goes to the verdict that scores

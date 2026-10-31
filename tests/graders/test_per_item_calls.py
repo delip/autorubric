@@ -20,14 +20,18 @@ Decision-model requests go to the recording fake SDK client of the decision-mode
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import inspect
+import io
 import json
+import random
 import re
 import warnings
 from pathlib import Path
 from typing import Any, cast, get_args
 from unittest.mock import patch
 
+import PIL.Image as pil_image
 import pytest
 import typesafe_sdk
 
@@ -54,14 +58,16 @@ from autorubric import (
     DecisionModelConfig,
     EscalationConfig,
     FewShotConfig,
+    Image,
     LLMConfig,
     Rubric,
     RubricDataset,
     TokenUsage,
     evaluate,
 )
+from autorubric.content import Content
 from autorubric.eval import _serialize_grader_config
-from autorubric.graders import CriterionGrader, JudgeSpec
+from autorubric.graders import CriterionGrader, JudgeSpec, criterion_grader
 from autorubric.llm import GenerateResult
 from autorubric.prompts import GRADER_SYSTEM_PROMPT_DEFAULT, MULTI_CHOICE_SYSTEM_PROMPT
 from autorubric.types import (
@@ -843,6 +849,70 @@ class TestTheShuffleKey:
         report = await Rubric(rubric).grade(UNENCODABLE, grader=grader)
         assert report.error is None and report.score is not None
         assert all(UNENCODABLE in call.user_prompt for call in fake.calls)
+
+    def test_the_key_of_text_is_the_first_16_hex_digits_of_its_sha256(self):
+        """The shuffle key of a text submission is the one used before submissions could
+        hold images: written out here from ``hashlib`` (and the RNG derivation from
+        ``random``), independently of the library, so a change to either fails."""
+        item_key = hashlib.sha256(SUBMISSION.encode("utf-8")).hexdigest()[:16]
+        key = f"{SEED}:{item_key}:1:default"
+        rng = random.Random(int(hashlib.sha256(key.encode()).hexdigest()[:16], 16) % (2**31))
+        expected = list(range(len(SHUFFLED.options or [])))
+        rng.shuffle(expected)
+        assert expected != sorted(expected)
+        assert shuffle_key_and_order(SUBMISSION) == (item_key, expected)
+
+    def test_a_list_of_text_is_keyed_as_its_text(self):
+        assert shuffle_key_and_order([SUBMISSION]) == shuffle_key_and_order(SUBMISSION)
+        halves = [SUBMISSION[:10], SUBMISSION[10:]]
+        assert shuffle_key_and_order(halves) == shuffle_key_and_order(SUBMISSION)
+
+    def test_documents_are_keyed_by_the_bytes_of_their_images(self, tmp_path):
+        red, blue = encoded_png("red"), encoded_png("blue")
+        red_file = tmp_path / "red.png"
+        red_file.write_bytes(red)
+        key, _order = shuffle_key_and_order([Image(red), "x"])
+        # The same bytes read from a file are the same content.
+        assert shuffle_key_and_order([Image(red_file), "x"])[0] == key
+        assert shuffle_key_and_order([Image(blue), "x"])[0] != key
+        assert shuffle_key_and_order(["x", Image(red)])[0] != key
+        assert shuffle_key_and_order("x")[0] != key
+
+
+# A criterion with enough options that two keys rarely give one permutation by chance.
+SHUFFLED = Criterion(
+    weight=1.0,
+    requirement="Which planet is named?",
+    scale_type="nominal",
+    options=[
+        CriterionOption(label=planet, value=1.0)
+        for planet in ("Mercury", "Venus", "Earth", "Mars", "Jupiter", "Saturn", "Uranus")
+    ],
+)
+
+
+def encoded_png(color: str) -> bytes:
+    """A tiny PNG of one ``color``, encoded by Pillow."""
+    buffer = io.BytesIO()
+    pil_image.new("RGB", (2, 2), color).save(buffer, "PNG")
+    return buffer.getvalue()
+
+
+def shuffle_key_and_order(submission: Content) -> tuple[str, list[int]]:
+    """The shuffle key ``_presented_criterion`` derives for ``submission`` (criterion 1,
+    judge ``"default"``, seed ``SEED``), and the option permutation it gives."""
+    grader = one_judge(RubricLLM())
+    keys: list[str] = []
+    derive = criterion_grader._derive_shuffle_rng
+
+    def recording(seed: int, item_key: str, criterion_idx: int, judge_id: str) -> random.Random:
+        keys.append(item_key)
+        return derive(seed, item_key, criterion_idx, judge_id)
+
+    with patch.object(criterion_grader, "_derive_shuffle_rng", recording):
+        _criterion, order = grader._presented_criterion(SHUFFLED, 1, "default", submission)
+    (key,) = keys
+    return key, order
 
 
 # =============================================================================

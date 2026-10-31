@@ -974,6 +974,7 @@ class Runner:
         """Attribution context for a pass."""
         submissions: dict[str, int] = {}
         for index, item in enumerate(dataset.items):
+            assert isinstance(item.submission, str)  # the parity datasets are text
             if item.submission in submissions:
                 raise SystemExit(f"{spec.dataset_id}: duplicate submission at item {index}")
             submissions[item.submission] = index

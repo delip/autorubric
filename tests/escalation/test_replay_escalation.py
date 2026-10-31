@@ -17,11 +17,14 @@ option order included. Nothing reaches the network.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
+import io
 import json
 import warnings
 from collections import Counter
 from typing import Any
 
+import PIL.Image as pil_image
 import pytest
 
 import autorubric
@@ -35,6 +38,7 @@ from autorubric import (
     EvalTimingStats,
     EvaluationReport,
     FewShotConfig,
+    Image,
     ItemResult,
     LLMConfig,
     RubricDataset,
@@ -43,7 +47,9 @@ from autorubric import (
     evaluate,
     replay_escalation,
 )
-from autorubric.escalation import _calibration_fingerprint
+from autorubric.content import Content
+from autorubric.dataset import DataItem
+from autorubric.escalation import _calibration_fingerprint, _same_content
 from autorubric.eval import ExperimentManifest, _compute_dataset_hash
 from autorubric.graders import JudgeSpec
 from escalation.cascade_runs import (
@@ -614,6 +620,22 @@ def replace_item(result: EvalResult, idx: int, **changes: Any) -> EvalResult:
     return dataclasses.replace(result, item_results=items)
 
 
+def encoded_png(color: str) -> bytes:
+    """A tiny PNG of one ``color``, encoded by Pillow."""
+    buffer = io.BytesIO()
+    pil_image.new("RGB", (2, 2), color).save(buffer, "PNG")
+    return buffer.getvalue()
+
+
+RED, BLUE = encoded_png("red"), encoded_png("blue")
+
+
+def replace_submission(result: EvalResult, idx: int, submission: Content) -> EvalResult:
+    """``result`` with item ``idx`` recording ``submission``."""
+    (item,) = [r.item for r in result.item_results if r.item_idx == idx]
+    return replace_item(result, idx, item=dataclasses.replace(item, submission=submission))
+
+
 def replace_criterion_report(result: EvalResult, idx: int, c: int, **changes: Any) -> EvalResult:
     report = result.item_results[idx].report
     reports = list(report.report)
@@ -644,6 +666,30 @@ class TestRequirements:
         other = dataclasses.replace(runs.dm.item_results[1].item, submission="Another answer.")
         with pytest.raises(ValueError, match=r"item 1 is not the same item"):
             replay_escalation(replace_item(runs.dm, 1, item=other), runs.llm, THRESHOLD)
+
+    @pytest.mark.asyncio
+    async def test_the_same_text_in_parts_is_the_same_submission(self, cascade_runs):
+        runs = await cascade_runs()
+        text = runs.dm.item_results[1].item.submission
+        parts = replace_submission(runs.dm, 1, [text[:5], text[5:]])
+        replay = replay_escalation(parts, runs.llm, THRESHOLD)
+        assert [r.item_idx for r in replay.item_results] == list(range(len(ITEMS)))
+
+    @pytest.mark.asyncio
+    async def test_documents_are_the_same_submission_when_their_images_bytes_are(
+        self, cascade_runs, tmp_path
+    ):
+        runs = await cascade_runs()
+        red_file = tmp_path / "red.png"
+        red_file.write_bytes(RED)
+        dm_run = replace_submission(runs.dm, 1, [Image(RED), "x"])
+        # The same bytes, read from a file.
+        replay_escalation(
+            dm_run, replace_submission(runs.llm, 1, [Image(red_file), "x"]), THRESHOLD
+        )
+        for other in ([Image(BLUE), "x"], ["x", Image(RED)], "x"):
+            with pytest.raises(ValueError, match=r"item 1 is not the same item"):
+                replay_escalation(dm_run, replace_submission(runs.llm, 1, other), THRESHOLD)
 
     @pytest.mark.asyncio
     async def test_the_rubrics_must_be_the_same(self, cascade_runs, make_grader, tmp_path):
@@ -825,6 +871,27 @@ class TestRequirements:
             replay_escalation(runs.dm, runs.llm, point)
 
 
+def test_texts_are_compared_as_they_are_never_hashed():
+    """Texts are the same submission only when equal (after joining a list of strings), and
+    are not hashed to find out: a lone surrogate (which cannot be encoded) compares as any
+    text does."""
+    unencodable = "Plants use light \ud83d to make sugar."
+    assert _same_content(unencodable, unencodable)
+    assert _same_content(unencodable, [unencodable[:5], unencodable[5:]])
+    assert not _same_content(unencodable, unencodable + "!")
+    assert _same_content("Light.", ["Li", "ght."])
+    assert not _same_content("Light.", "Light!")
+
+
+def test_text_and_documents_of_one_source_are_compared_without_reading_a_file(tmp_path):
+    missing = Image(tmp_path / "missing.png")
+    assert not _same_content("x", [missing, "x"])
+    assert not _same_content([missing, "x"], ["x"])
+    assert _same_content([missing, "x"], (missing, "x"))
+    with pytest.raises(FileNotFoundError):
+        _same_content([missing, "x"], [Image(RED), "x"])
+
+
 # =============================================================================
 # The calibration fingerprint and the same-data warning
 # =============================================================================
@@ -883,6 +950,38 @@ class TestCalibrationFingerprint:
         reworded.add_item("An answer.", "d", prompt="Q?", reference_submission="Ref.")
         reworded.items[0].rubric = autorubric.Rubric(criteria)
         assert fingerprint(reworded) != digest
+
+    def test_a_text_datasets_fingerprint_is_the_sha256_of_its_strings(self):
+        """Written out from ``json`` and ``hashlib``, as the fingerprint was computed before
+        submissions could hold images, so a text dataset's fingerprint is unchanged."""
+        data = RubricDataset(rubric=RUBRIC)
+        data.add_item("An answer.", "d", prompt="Q?", reference_submission="Ref.")
+        data.items.append(DataItem(submission='Ünïcode, "quoted" ✓', description="e"))
+        requirements = [c.requirement for c in RUBRIC.rubric]
+        raw = [
+            ["An answer.", "Q?", "Ref.", requirements],
+            ['Ünïcode, "quoted" ✓', None, None, requirements],
+        ]
+        assert fingerprint(data) == hashlib.sha256(json.dumps(raw).encode("utf-8")).hexdigest()
+
+    def test_documents_are_fingerprinted_by_the_bytes_of_their_images(self, tmp_path):
+        red_file = tmp_path / "red.png"
+        red_file.write_bytes(RED)
+
+        def fingerprint_of(submission: Content, **fields: Any) -> str:
+            item = DataItem(submission=submission, description="d", **fields)
+            return _calibration_fingerprint([(item, RUBRIC.rubric)])
+
+        digest = fingerprint_of([Image(RED), "x"])
+        assert fingerprint_of([Image(red_file), "x"]) == digest
+        assert fingerprint_of([Image(BLUE), "x"]) != digest
+        assert fingerprint_of(["x", Image(RED)]) != digest
+        assert fingerprint_of(["x"]) == fingerprint_of("x") != digest
+        for field in ("prompt", "reference_submission"):
+            red = fingerprint_of("x", **{field: [Image(RED), "q"]})
+            assert red == fingerprint_of("x", **{field: [Image(red_file), "q"]})
+            assert red != fingerprint_of("x", **{field: [Image(BLUE), "q"]})
+            assert red != fingerprint_of("x", **{field: "q"})
 
     def test_equal_halves_of_a_split_differ_where_the_dataset_hash_collides(self):
         data = dataset((ITEMS * 2)[:12])

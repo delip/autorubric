@@ -210,5 +210,12 @@ cython_debug/
 
 .DS_Storesite/
 
-# Raw parquet cache for research-plan-gen converter (scripts/convert_research_plan_gen.py)
+# Raw downloads cached by the dataset converters: the research-plan-gen parquet files
+# (scripts/convert_research_plan_gen.py) and the SciFigAlign clone
+# (scripts/convert_scifigalign.py)
 .cache/
+
+# SciFigAlign dataset files and figures, written by scripts/convert_scifigalign.py;
+# only the folder's README is tracked
+examples/data/scifigalign/*
+!examples/data/scifigalign/README.md

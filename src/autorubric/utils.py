@@ -6,8 +6,10 @@ import asyncio
 import dataclasses
 import re
 import warnings
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
+from autorubric.content import Content, Image, _content_text
 from autorubric.types import LengthPenalty, ThinkingOutputDict, ToGradeInput, TokenUsage
 
 if TYPE_CHECKING:
@@ -94,17 +96,31 @@ def parse_thinking_output(text: str) -> ThinkingOutputDict:
 def normalize_to_grade_input(to_grade: ToGradeInput) -> ThinkingOutputDict:
     """Normalize to_grade input to dict format.
 
+    A string's sections are parsed by ``parse_thinking_output``. Content that holds images
+    is read as its text alone: its sections are parsed from ``_content_text(to_grade)``,
+    which writes a newline where each image is, so the length penalty counts text only. The
+    newline keeps the words on either side of an image apart (``word_count`` counts them as
+    it counts words around a line break) and is one more character (one more unit for a
+    ``count_fn`` that counts characters, possibly one more token) per image. No image file
+    is read.
+
     Args:
-        to_grade: Either a string (with optional markers) or a dict.
+        to_grade: A string (with optional markers), other ``Content`` (an ``Image``, or a
+            sequence of strings and images), or a dict.
 
     Returns:
         Dict with 'thinking' and 'output' keys.
 
     Raises:
-        ValueError: If dict format is invalid (missing keys, wrong types).
+        ValueError: If to_grade is neither content nor a dict, or the dict format is
+            invalid (missing keys, wrong types).
+        TypeError: If a sequence holds a part that is neither a ``str`` nor an ``Image``.
     """
     if isinstance(to_grade, str):
         return parse_thinking_output(to_grade)
+
+    if isinstance(to_grade, Image | Sequence):
+        return parse_thinking_output(_content_text(to_grade))
 
     # Handle dict input
     if not isinstance(to_grade, dict):
@@ -153,7 +169,7 @@ def _normalize_guidelines(guidelines: str | None) -> str | None:
     return guidelines if guidelines.strip() else None
 
 
-def compute_length_penalty(text: str | ThinkingOutputDict, config: LengthPenalty) -> float:
+def compute_length_penalty(text: Content | ThinkingOutputDict, config: LengthPenalty) -> float:
     """Compute the length penalty for the given text based on the config.
 
     The penalty follows an exponential curve:
@@ -164,7 +180,10 @@ def compute_length_penalty(text: str | ThinkingOutputDict, config: LengthPenalty
     Args:
         text: Either a string (backwards compatible) or a dict with 'thinking'
             and 'output' keys. When a string is provided, it's treated as
-            all output (no thinking section).
+            all output (no thinking section). Other ``Content`` (an ``Image``, or a
+            sequence of strings and images) is treated as all output too, its text alone
+            counted: ``_content_text`` writes a newline where each image is (see
+            ``normalize_to_grade_input``).
         config: LengthPenalty configuration specifying thresholds, penalty,
             and which sections to count based on penalty_type.
 
@@ -175,6 +194,8 @@ def compute_length_penalty(text: str | ThinkingOutputDict, config: LengthPenalty
     if isinstance(text, str):
         # Backwards compatibility: treat string as output only
         text_dict = ThinkingOutputDict(thinking="", output=text)
+    elif isinstance(text, Image | Sequence):
+        text_dict = ThinkingOutputDict(thinking="", output=_content_text(text))
     else:
         text_dict = text
 
@@ -405,8 +426,12 @@ async def fill_ground_truth(
     Raises:
         ValueError: If dataset has no items, or if a judge's call fails with a
             configuration error (an unsupported parameter, an invalid API key, an unknown
-            model: see ``CriterionGrader.judge``), which would fail every item alike. The
-            items still being graded are then cancelled.
+            model: see ``CriterionGrader.judge``), which would fail every item alike, as
+            would an item holding images for a decision-model judge whose model is not in
+            autorubric's decision-model registry or does not accept images. The items
+            still being graded are then cancelled.
+        ImportError: If an item holds images for a decision-model judge and the installed
+            TypeSafe SDK cannot send images (before 0.7.5), likewise.
 
     Warns:
         UserWarning: Once, before grading, when ``grader`` is a confidence cascade whose

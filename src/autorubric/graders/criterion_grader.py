@@ -20,15 +20,32 @@ from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast, get_args, overloa
 
 from pydantic import BaseModel
 
+from autorubric.content import (
+    Content,
+    _content_digest,
+    _content_identity,
+    _has_images,
+    _is_content,
+    _load_content,
+    _load_content_async,
+    _normalize_content,
+    _Normalized,
+)
 from autorubric.decision import (
+    _CONFIGURATION_ERROR_NOTE,
+    _REGISTRY_IN_PACKAGE,
     DecisionModelClient,
     DecisionModelConfig,
+    _configuration_error,
     _describe,
     _is_real_number,
+    _judge_capabilities,
+    _sdk_image_type,
     answer_to_report,
     build_questions,
     build_state,
     question_id,
+    state_images,
 )
 from autorubric.graders.base import Grader, _caller_stacklevel
 from autorubric.llm import (
@@ -37,6 +54,8 @@ from autorubric.llm import (
     LLMConfig,
     _caches_prompts,
     _is_configuration_error,
+    _is_payment_required,
+    _litellm_supports_vision,
     _prefix_reaches_cache_minimum,
     classify_grading_error,
 )
@@ -138,6 +157,23 @@ def _ground_truth_reason(item: DataItem, criterion_idx: int) -> str | None:
     """
     reasons = item.ground_truth_reasons
     return reasons[criterion_idx] if reasons is not None else None
+
+
+def _count(n: int, noun: str) -> str:
+    """``n`` and ``noun``, plural unless ``n`` is 1."""
+    return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
+
+
+def _binary_label(label: CriterionVerdict | str) -> CriterionVerdict | None:
+    """A binary criterion's training label as its verdict, or ``None`` if it names none.
+
+    A label is a ``CriterionVerdict`` or its value (``"MET"``), as ``resolve_ground_truth``
+    reads it. A label that names no verdict (``"yes"``) cannot label a few-shot example.
+    """
+    try:
+        return CriterionVerdict(label)
+    except ValueError:
+        return None
 
 
 def _posed_question(criterion: Criterion) -> tuple[object, ...]:
@@ -804,13 +840,81 @@ async def _gather_or_cancel(*aws: Awaitable[_T]) -> list[_T]:
 
 
 def _is_judge_configuration_error(exc: BaseException) -> bool:
-    """Whether ``exc`` is the ``ValueError`` a grade raises for a judge's configuration error.
+    """Whether ``exc`` is an error a grade raises for a judge's configuration error.
 
-    ``_failed_judgment_result`` raises it, chained from the provider's exception, so that
-    callers that keep going past an item that failed to grade (``fill_ground_truth``) can
-    tell it from such a failure: it fails every item alike.
+    It is either the ``ValueError`` ``_failed_judgment_result`` raises, chained from the
+    provider's exception, or an error marked by ``_configuration_error`` (its
+    ``_CONFIGURATION_ERROR_NOTE``): a decision model that does not accept images or whose
+    capabilities neither the registry nor its config declares (``_image_capabilities``),
+    an LLM judge not known to accept images (``_llm_image_refusal``), or an SDK too old to
+    send images. Callers
+    that keep going past an item that failed to grade (``fill_ground_truth``) can thus tell
+    it from such a failure: it fails every item alike.
     """
+    if _CONFIGURATION_ERROR_NOTE in getattr(exc, "__notes__", ()):
+        return True
     return isinstance(exc, ValueError) and _is_configuration_error(exc.__cause__)
+
+
+def _image_capabilities(judge: JudgeSpec) -> Mapping[str, Any]:
+    """The images decision-model judge ``judge``'s model accepts: its capabilities.
+
+    Read by the one lookup, ``_judge_capabilities``: the judge's
+    ``DecisionModelConfig.capabilities`` when set, else autorubric's decision-model
+    registry entry for its model (``decision_model_capabilities``). Only for content
+    holding images; text never needs an entry.
+
+    Raises:
+        ValueError: Marked as a configuration error (``_configuration_error``), naming the
+            judge and its model, if neither ``capabilities`` nor the registry lists the
+            model, or the entry says it does not accept images.
+    """
+    config = cast(DecisionModelConfig, judge.llm_config)
+    model = config.model
+    capabilities = _judge_capabilities(config)
+    if capabilities is None:
+        raise _configuration_error(
+            ValueError(
+                f"Judge {judge.judge_id!r} uses decision model {model!r}, which is not in "
+                f"autorubric's decision-model registry ({_REGISTRY_IN_PACKAGE}, inside the "
+                "installed package); add an entry saying whether it accepts images, or pass "
+                "DecisionModelConfig(capabilities=...)"
+            )
+        )
+    if not capabilities["images"]:
+        remedy = (
+            "its DecisionModelConfig(capabilities=...) says images: false"
+            if config.capabilities is not None
+            else "use jev-1.14.0 or later"
+        )
+        raise _configuration_error(
+            ValueError(
+                f"Judge {judge.judge_id!r} uses {model!r}, which does not accept images; {remedy}"
+            )
+        )
+    return capabilities
+
+
+def _llm_image_refusal(judge: JudgeSpec, *, declared: bool) -> ValueError:
+    """The configuration error refusing LLM judge ``judge`` content holding images.
+
+    ``declared`` says whether its ``LLMConfig(images=False)`` says it does not accept them;
+    otherwise LiteLLM's model map does not list its model as accepting them and nothing
+    declares that it does. Marked by ``_configuration_error``, so ``fill_ground_truth``
+    raises it.
+    """
+    model = getattr(judge.llm_config, "model", None)
+    if declared:
+        message = (
+            f"Judge {judge.judge_id!r} uses LLM {model!r}, which does not accept images; "
+            "its LLMConfig(images=False) says so"
+        )
+    else:
+        message = (
+            f"Judge {judge.judge_id!r} uses LLM {model!r}, which LiteLLM does not list as "
+            "accepting images; if it does, pass LLMConfig(images=True)"
+        )
+    return _configuration_error(ValueError(message))
 
 
 def _failed_judgment_result(
@@ -827,12 +931,12 @@ def _failed_judgment_result(
     for each criterion posed in it), an answer that cannot be used, and a criterion a
     decision model cannot be asked about. The failure is classified by
     ``classify_grading_error`` and logged with the judge's id. A configuration error
-    (``_is_configuration_error``: LiteLLM's ``UnsupportedParamsError``, a 401, 403 (but
-    OpenRouter's moderation 403) or 404
-    from the provider or TypeSafe, the OpenAI SDK's refusal to build its client) is not a
-    failed judgment: it fails every call the judge makes, so it is raised, never routed
-    (#40). Infrastructure (API/network) and parse/validation failures are not the
-    submission's fault, so they abstain: ``CANNOT_ASSESS`` (binary) or ``na=True``
+    (``_is_configuration_error``: LiteLLM's ``UnsupportedParamsError``, a 401, 402 (no
+    credits left, ``_is_payment_required``, said so in the message), 403 (but OpenRouter's
+    moderation 403) or 404 from the provider or TypeSafe, the OpenAI SDK's refusal to build
+    its client) is not a failed judgment: it fails every call the judge makes, so it is
+    raised, never routed (#40). Infrastructure (API/network) and parse/validation failures
+    are not the submission's fault, so they abstain: ``CANNOT_ASSESS`` (binary) or ``na=True``
     (multi-choice), which the default ``CannotAssessStrategy.SKIP`` excludes from scoring,
     instead of a score-affecting worst-case verdict. Only truly unknown errors keep the
     conservative worst case. The report surfaces the failure structurally (``error``,
@@ -855,9 +959,15 @@ def _failed_judgment_result(
             ``fail_fast`` stops the run on the first item).
     """
     if _is_configuration_error(error):
+        cause = (
+            "the provider answered 402 Payment Required (the account has no credits left, "
+            "or a billing problem): "
+            if _is_payment_required(error)
+            else ""
+        )
         raise ValueError(
             f"Judge {judge_id!r} is misconfigured ({type(error).__name__}), so every call "
-            f"it makes fails: {error}"
+            f"it makes fails: {cause}{error}"
         ) from error
     category = classify_grading_error(error)
     # The outcome fields each criterion kind's report has always been built with, so the
@@ -1191,6 +1301,13 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
     # The (criterion index, graded question) pairs ``judge`` has warned get no few-shot
     # examples (``_warn_examples_not_shown``); none for a grader whose ``__init__`` never ran.
     _examples_not_shown_warned: frozenset[tuple[int, tuple[object, ...]]] = frozenset()
+    # Each training submission holding images, loaded, while ``_prepare_examples`` draws the
+    # examples (``_example_submission``); ``None`` at any other time.
+    _loaded_example_submissions: dict[_Normalized, _Normalized] | None = None
+    # What LiteLLM's model map said of each LLM judge's model when the grader was first to
+    # send it images (``_llm_accepts_images``), by model; ``None`` until then, and for a
+    # grader whose ``__init__`` never ran.
+    _litellm_image_support: dict[str, bool] | None = None
 
     def __init__(
         self,
@@ -1608,16 +1725,21 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         # Pre-compute few-shot examples if training data provided
         # Note: For multi-choice, examples are stored as (submission, selected_index, reason)
         self._criterion_examples: dict[tuple[int, str], list[FewShotExample]] = {}
-        self._multi_choice_examples: dict[tuple[int, str], list[tuple[str, int, str | None]]] = {}
+        self._multi_choice_examples: dict[
+            tuple[int, str], list[tuple[Content, int, str | None]]
+        ] = {}
         # Under llm_calls="per_item": each LLM judge's examples, whole training items in the
         # order its one call per item shows them, each as (submission, labels, reasons): a
         # label per criterion of the training rubric (_item_labels; None where the item has
         # none) and the item's reason for it, if any
         self._item_examples: dict[
-            str, list[tuple[str, list[CriterionVerdict | int | None], list[str | None]]]
+            str, list[tuple[Content, list[CriterionVerdict | int | None], list[str | None]]]
         ] = {}
         if training_data is not None:
             self._prepare_examples()
+            # Training images go out with every call of the judges that show them, text
+            # items' calls included, so those judges are checked now, once.
+            self._check_examples_reach_judges_accepting_images()
 
     @property
     def is_ensemble(self) -> bool:
@@ -1677,59 +1799,151 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         criterion the examples describe: changing the training rubric after the grader is
         built changes no prompt either.
 
+        An example's submission is the training item's with its images read
+        (``_example_submission``): a submission holding images is read once, here, and the
+        examples hold its bytes, so grading reads no training image file.
+
         Raises:
             ValueError: If the training data has no global rubric, which says what each
-                ground-truth label means.
+                ground-truth label means, or a training image file is not a supported image.
+            OSError: If a training image file that an example shows, or that is compared to
+                pick examples, cannot be read (``FileNotFoundError`` when it is missing).
         """
         training_data = self._training_data
         if training_data is None:
             return
-
-        # Raises without a global rubric, however the judges are called.
-        n_criteria = training_data.num_criteria
-        rubric_criteria = training_data.rubric.rubric if training_data.rubric else []
-        # Taken before any example is drawn: drawing reads it (_training_label).
-        self._training_questions = tuple(
-            _posed_question(self._effective_criterion(criterion)) for criterion in rubric_criteria
-        )
-        llm_judges = [
-            j
-            for j in (*self._judges, *self._escalation_judges)
-            if not isinstance(j.llm_config, DecisionModelConfig)
-        ]
-
-        if self._llm_calls == "per_item":
-            for judge in llm_judges:
-                # Every selected item's labels resolve: only such an item is eligible.
-                self._item_examples[judge.judge_id] = [
-                    (
-                        item.submission,
-                        labels,
-                        [
-                            None if label is None else _ground_truth_reason(item, idx)
-                            for idx, label in enumerate(labels)
-                        ],
-                    )
-                    for item in self._select_item_examples(judge.judge_id)
-                    if (labels := self._item_labels(item)) is not None
-                ]
-            return
-
-        for criterion_idx in range(n_criteria):
-            criterion = (
-                rubric_criteria[criterion_idx] if criterion_idx < len(rubric_criteria) else None
+        # Each training submission holding images is read once while the examples are
+        # drawn, however many judges and criteria show or compare it (_example_submission).
+        self._loaded_example_submissions = {}
+        try:
+            # Raises without a global rubric, however the judges are called.
+            n_criteria = training_data.num_criteria
+            rubric_criteria = training_data.rubric.rubric if training_data.rubric else []
+            # Taken before any example is drawn: drawing reads it (_training_label).
+            self._training_questions = tuple(
+                _posed_question(self._effective_criterion(criterion))
+                for criterion in rubric_criteria
             )
-            # Select examples per judge so that ensemble judges see decorrelated few-shot
-            # subsets/orderings, mirroring per-judge option shuffling.
-            for judge in llm_judges:
-                if criterion is not None and criterion.is_multi_choice:
-                    examples = self._select_multi_choice_examples(criterion_idx, judge.judge_id)
-                    self._multi_choice_examples[(criterion_idx, judge.judge_id)] = examples
-                else:
-                    binary_examples = self._select_examples_for_criterion(
-                        criterion_idx, judge.judge_id
-                    )
-                    self._criterion_examples[(criterion_idx, judge.judge_id)] = binary_examples
+            llm_judges = [
+                j
+                for j in (*self._judges, *self._escalation_judges)
+                if not isinstance(j.llm_config, DecisionModelConfig)
+            ]
+            self._warn_unusable_binary_labels(rubric_criteria)
+
+            if self._llm_calls == "per_item":
+                for judge in llm_judges:
+                    # Every selected item's labels resolve: only such an item is eligible.
+                    self._item_examples[judge.judge_id] = [
+                        (
+                            self._example_submission(item),
+                            labels,
+                            [
+                                None if label is None else _ground_truth_reason(item, idx)
+                                for idx, label in enumerate(labels)
+                            ],
+                        )
+                        for item in self._select_item_examples(judge.judge_id)
+                        if (labels := self._item_labels(item)) is not None
+                    ]
+                return
+
+            for criterion_idx in range(n_criteria):
+                criterion = (
+                    rubric_criteria[criterion_idx] if criterion_idx < len(rubric_criteria) else None
+                )
+                # Select examples per judge so that ensemble judges see decorrelated few-shot
+                # subsets/orderings, mirroring per-judge option shuffling.
+                for judge in llm_judges:
+                    if criterion is not None and criterion.is_multi_choice:
+                        examples = self._select_multi_choice_examples(criterion_idx, judge.judge_id)
+                        self._multi_choice_examples[(criterion_idx, judge.judge_id)] = examples
+                    else:
+                        binary_examples = self._select_examples_for_criterion(
+                            criterion_idx, judge.judge_id
+                        )
+                        self._criterion_examples[(criterion_idx, judge.judge_id)] = binary_examples
+        finally:
+            self._loaded_example_submissions = None
+
+    def _example_submission(self, item: DataItem) -> Content:
+        """A training item's submission as its few-shot examples show it, images read.
+
+        Text is returned as it is (a ``str`` as the same object). A submission holding
+        images is loaded (``_load_content``); while ``_prepare_examples`` draws the
+        examples, the first load of each submission is kept and reused, so a submission is
+        read once however many judges and criteria show it or compare it
+        (``_content_identity`` reads the loaded copy's digests). A submission that is not
+        content (a ``{thinking, output}`` dict) is returned unchanged, as examples showed it
+        before images existed.
+
+        Raises:
+            As ``_load_content``.
+        """
+        if not _is_content(item.submission):
+            return item.submission
+        submission = _normalize_content(item.submission)
+        if isinstance(submission, str):
+            return submission
+        loaded = self._loaded_example_submissions
+        if loaded is None:
+            return _load_content(submission)
+        if submission not in loaded:
+            loaded[submission] = _load_content(submission)
+        return loaded[submission]
+
+    def _warn_unusable_binary_labels(self, rubric_criteria: Sequence[Criterion]) -> None:
+        """Warn once if a binary training label names no verdict, so an item is left out.
+
+        A binary criterion's label is a ``CriterionVerdict`` or its value (``"MET"``,
+        ``_binary_label``); any other label (``"met"``, ``"yes"``) cannot label a few-shot
+        example. Called per criterion, a judge leaves the item out of that criterion's
+        examples only; called per item, it leaves the whole item out, since each example
+        shows an item's labels for every criterion. The warning says which, naming each
+        criterion with its unusable labels and how many items have one there. Called once,
+        when the grader is built, so a grader warns once however many judges draw examples.
+
+        Args:
+            rubric_criteria: The training rubric's criteria.
+        """
+        assert self._training_data is not None
+        unusable: dict[int, tuple[set[str], list[int]]] = {}
+        items_left_out = 0
+        for item in self._training_data:
+            item_has_unusable = False
+            for criterion_idx, criterion in enumerate(rubric_criteria):
+                if not criterion.is_binary:
+                    continue
+                label = self._training_label(item, criterion_idx)
+                if label is not None and _binary_label(label) is None:
+                    labels, count = unusable.setdefault(criterion_idx, (set(), [0]))
+                    labels.add(repr(label))
+                    count[0] += 1
+                    item_has_unusable = True
+            items_left_out += item_has_unusable
+        if not unusable:
+            return
+        named = "; ".join(
+            f"{_describe(rubric_criteria[idx], idx)}: {', '.join(sorted(labels))} "
+            f"({_count(count[0], 'item')})"
+            for idx, (labels, count) in sorted(unusable.items())
+        )
+        if self._llm_calls == "per_item":
+            left_out = (
+                f"leave out {_count(items_left_out, 'training item')} whose binary label "
+                "names no verdict"
+            )
+        else:
+            left_out = (
+                "of a binary criterion leave out each training item whose label for it "
+                "names no verdict"
+            )
+        warnings.warn(
+            f"Few-shot examples {left_out} (expected MET, UNMET or CANNOT_ASSESS, as a "
+            f"CriterionVerdict or its value): {named}",
+            UserWarning,
+            stacklevel=_caller_stacklevel(),
+        )
 
     def _select_examples_for_criterion(
         self, criterion_idx: int, judge_id: str
@@ -1749,18 +1963,20 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         assert seed is not None
         rng = _derive_shuffle_rng(seed, FEW_SHOT_DOMAIN, criterion_idx, judge_id)
 
-        # Group items by verdict for this criterion
-        verdict_groups: dict[CriterionVerdict, list] = {
+        # Group items by verdict for this criterion. A label given as its value ("MET")
+        # is its verdict; an item whose label names no verdict cannot be an example.
+        verdict_groups: dict[CriterionVerdict, list[tuple[DataItem, CriterionVerdict]]] = {
             CriterionVerdict.MET: [],
             CriterionVerdict.UNMET: [],
             CriterionVerdict.CANNOT_ASSESS: [],
         }
 
         for item in self._training_data:
-            verdict = self._training_label(item, criterion_idx)
+            label = self._training_label(item, criterion_idx)
+            verdict = _binary_label(label) if label is not None else None
             if verdict is None:
                 continue
-            verdict_groups[verdict].append(item)
+            verdict_groups[verdict].append((item, verdict))
 
         available_verdicts = [v for v, items in verdict_groups.items() if items]
         if not available_verdicts:
@@ -1771,15 +1987,15 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         if config.balance_verdicts and len(available_verdicts) > 1:
             return self._balanced_selection(verdict_groups, n_examples, criterion_idx, rng)
         else:
-            all_items = [item for items in verdict_groups.values() for item in items]
+            all_items = [labelled for items in verdict_groups.values() for labelled in items]
             rng.shuffle(all_items)
             return [
                 FewShotExample(
-                    submission=item.submission,
-                    verdict=item.ground_truth[criterion_idx],  # type: ignore
+                    submission=self._example_submission(item),
+                    verdict=verdict,
                     reason=_ground_truth_reason(item, criterion_idx),
                 )
-                for item in all_items[:n_examples]
+                for item, verdict in all_items[:n_examples]
             ]
 
     def _balanced_pick(
@@ -1834,22 +2050,25 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
 
     def _balanced_selection(
         self,
-        verdict_groups: dict[CriterionVerdict, list],
+        verdict_groups: dict[CriterionVerdict, list[tuple[DataItem, CriterionVerdict]]],
         n_examples: int,
         criterion_idx: int,
         rng: random.Random,
     ) -> list[FewShotExample]:
-        """Select examples with balanced verdict distribution."""
+        """Select examples with balanced verdict distribution.
+
+        Each group holds its items paired with their verdict for the criterion.
+        """
         return self._balanced_pick(
             groups=verdict_groups,
             n_examples=n_examples,
             rng=rng,
-            transform=lambda item: FewShotExample(
-                submission=item.submission,
-                verdict=item.ground_truth[criterion_idx],  # type: ignore
-                reason=_ground_truth_reason(item, criterion_idx),
+            transform=lambda labelled: FewShotExample(
+                submission=self._example_submission(labelled[0]),
+                verdict=labelled[1],
+                reason=_ground_truth_reason(labelled[0], criterion_idx),
             ),
-            identity=lambda item: item.submission,
+            identity=lambda labelled: _content_identity(self._example_submission(labelled[0])),
         )
 
     def _poses_training_question(self, criterion_idx: int, criterion: Criterion) -> bool:
@@ -1979,7 +2198,7 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
 
     def _select_multi_choice_examples(
         self, criterion_idx: int, judge_id: str
-    ) -> list[tuple[str, int, str | None]]:
+    ) -> list[tuple[Content, int, str | None]]:
         """Select few-shot examples for a multi-choice criterion and judge.
 
         Groups training items by their selected option index and balances
@@ -2024,11 +2243,11 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 n_examples=n_examples,
                 rng=rng,
                 transform=lambda pair: (
-                    pair[0].submission,
+                    self._example_submission(pair[0]),
                     pair[1],
                     _ground_truth_reason(pair[0], criterion_idx),
                 ),
-                identity=lambda pair: pair[0].submission,
+                identity=lambda pair: _content_identity(self._example_submission(pair[0])),
             )
         else:
             all_pairs = [
@@ -2038,7 +2257,11 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
             ]
             rng.shuffle(all_pairs)
             return [
-                (item.submission, resolved_idx, _ground_truth_reason(item, criterion_idx))
+                (
+                    self._example_submission(item),
+                    resolved_idx,
+                    _ground_truth_reason(item, criterion_idx),
+                )
                 for item, resolved_idx in all_pairs[:n_examples]
             ]
 
@@ -2059,7 +2282,8 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
           pick is the item showing the most (criterion index, label) pairs that no picked
           item shows yet, the earliest in the seeded order on a tie. Once no item adds a
           pair, the remaining slots are filled in the seeded order. An item whose submission
-          was already picked is skipped throughout, so no submission is shown twice.
+          was already picked (the same content, by ``_content_identity``) is skipped
+          throughout, so no submission is shown twice.
 
         Reasons (``DataItem.ground_truth_reasons``) never affect the draw.
 
@@ -2094,13 +2318,16 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         ]
         shown: set[tuple[int, CriterionVerdict | int]] = set()
         picked: list[DataItem] = []
-        picked_submissions: set[str] = set()
-        # Picking by coverage while any item adds a pair; a picked item's submission is
-        # among picked_submissions, so an item is picked at most once.
+        identities = [
+            _content_identity(self._example_submission(item)) for item, _labels in candidates
+        ]
+        picked_identities: set[str | tuple[str, str]] = set()
+        # Picking by coverage while any item adds a pair; a picked item's submission identity
+        # is among picked_identities, so an item is picked at most once.
         while len(picked) < n_examples:
             best, best_gain = None, 0
-            for position, (item, _labels) in enumerate(candidates):
-                if item.submission in picked_submissions:
+            for position, identity in enumerate(identities):
+                if identity in picked_identities:
                     continue
                 gain = len(pairs[position] - shown)
                 if gain > best_gain:
@@ -2108,15 +2335,15 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
             if best is None:
                 break
             picked.append(candidates[best][0])
-            picked_submissions.add(candidates[best][0].submission)
+            picked_identities.add(identities[best])
             shown |= pairs[best]
         # Filling the remaining slots in the seeded order
-        for item, _labels in candidates:
+        for (item, _labels), identity in zip(candidates, identities, strict=True):
             if len(picked) >= n_examples:
                 break
-            if item.submission not in picked_submissions:
+            if identity not in picked_identities:
                 picked.append(item)
-                picked_submissions.add(item.submission)
+                picked_identities.add(identity)
         return picked
 
     def _item_labels(self, item: DataItem) -> list[CriterionVerdict | int | None] | None:
@@ -2152,10 +2379,10 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 labels.append(None)
                 continue
             if criterion.options is None:
-                try:
-                    labels.append(CriterionVerdict(label))
-                except ValueError:
+                verdict = _binary_label(label)
+                if verdict is None:
                     return None
+                labels.append(verdict)
                 continue
             shown = self._effective_criterion(criterion)
             option_idx: int | None = None
@@ -2182,9 +2409,9 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         judge: JudgeSpec,
         criterion: Criterion,
         criterion_idx: int,
-        to_grade: str,
-        query: str | None = None,
-        reference_submission: str | None = None,
+        to_grade: Content,
+        query: Content | None = None,
+        reference_submission: Content | None = None,
         *,
         guidelines: str | None = None,
         reused: bool = True,
@@ -2230,9 +2457,9 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         judge: JudgeSpec,
         criterion: Criterion,
         criterion_idx: int,
-        to_grade: str,
-        query: str | None = None,
-        reference_submission: str | None = None,
+        to_grade: Content,
+        query: Content | None = None,
+        reference_submission: Content | None = None,
         *,
         guidelines: str | None = None,
         reused: bool = True,
@@ -2322,9 +2549,9 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         judge: JudgeSpec,
         criterion: Criterion,
         criterion_idx: int,
-        to_grade: str,
-        query: str | None = None,
-        reference_submission: str | None = None,
+        to_grade: Content,
+        query: Content | None = None,
+        reference_submission: Content | None = None,
         *,
         guidelines: str | None = None,
         reused: bool = True,
@@ -2436,24 +2663,24 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
     # item), so that a criterion is shown and its answer mapped the same way in both.
 
     def _presented_criterion(
-        self, criterion: Criterion, criterion_idx: int, judge_id: str, to_grade: str
+        self, criterion: Criterion, criterion_idx: int, judge_id: str, to_grade: Content
     ) -> tuple[Criterion, list[int]]:
         """A multi-choice criterion as ``judge_id`` is shown it, with its option permutation.
 
         With ``shuffle_options`` the options are permuted by
         ``_derive_shuffle_rng(seed, item_key, criterion_idx, judge_id)``, where ``item_key``
-        is the first 16 hex digits of the submission's SHA-256, so a criterion's order
-        depends only on the item, the criterion's index and the judge, and is the same
-        whether the judge is asked about it alone or with the whole rubric. The permutation
-        maps each presented position to the original option index
-        (``shuffled_indices[shuffled_pos] = original_pos``). Without shuffling it is the
+        is the first 16 hex digits of ``_content_digest(to_grade)`` (the submission's SHA-256
+        for text), so a criterion's order depends only on the item, the criterion's index
+        and the judge, and is the same whether the judge is asked about it alone or with the
+        whole rubric. The permutation maps each presented position to the original option
+        index (``shuffled_indices[shuffled_pos] = original_pos``). Without shuffling it is the
         identity, the criterion is returned as it is, and the submission is not hashed.
 
         Args:
             criterion: The multi-choice criterion (from the effective rubric).
             criterion_idx: Its index in the effective rubric.
             judge_id: The judge it is shown to.
-            to_grade: The submission, as the judge receives it; its hash keys the shuffle.
+            to_grade: The submission, as the judge receives it; its digest keys the shuffle.
 
         Returns:
             The criterion to put in the prompt, and the permutation.
@@ -2466,7 +2693,7 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         shuffled_indices = list(range(len(criterion.options)))
         if not self._shuffle_options:
             return criterion, shuffled_indices
-        item_key = hashlib.sha256(to_grade.encode()).hexdigest()[:16]
+        item_key = _content_digest(to_grade)[:16]
         rng = _derive_shuffle_rng(self._seed, item_key, criterion_idx, judge_id)
         rng.shuffle(shuffled_indices)
         prompt_criterion = Criterion(
@@ -2589,9 +2816,9 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         self,
         judge: JudgeSpec,
         rubric: list[Criterion],
-        to_grade: str,
-        query: str | None = None,
-        reference_submission: str | None = None,
+        to_grade: Content,
+        query: Content | None = None,
+        reference_submission: Content | None = None,
         *,
         guidelines: str | None = None,
     ) -> JudgeCriterionResults:
@@ -2634,9 +2861,9 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         self,
         judge: JudgeSpec,
         criteria: list[tuple[int, Criterion]],
-        to_grade: str,
-        query: str | None = None,
-        reference_submission: str | None = None,
+        to_grade: Content,
+        query: Content | None = None,
+        reference_submission: Content | None = None,
         *,
         guidelines: str | None = None,
     ) -> list[CriterionResult]:
@@ -2746,7 +2973,7 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         return await client.generate(**request)
 
     @staticmethod
-    def _warms_cache(judge: JudgeSpec, system_prompt: str, shared: str) -> bool:
+    def _warms_cache(judge: JudgeSpec, system_prompt: str, shared: Content) -> bool:
         """Whether ``judge``'s model can cache a prefix of ``system_prompt`` and ``shared``."""
         config = judge.llm_config
         if not isinstance(config, LLMConfig):
@@ -2761,9 +2988,9 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         self,
         judge: JudgeSpec,
         rubric: list[Criterion],
-        to_grade: str,
-        query: str | None = None,
-        reference_submission: str | None = None,
+        to_grade: Content,
+        query: Content | None = None,
+        reference_submission: Content | None = None,
         *,
         guidelines: str | None = None,
     ) -> list[CriterionResult]:
@@ -2789,6 +3016,16 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         The request's usage and cost ride on the first result, so the judge's
         ``total_usage``/``total_cost`` are the item's totals.
 
+        Images in the submission, query or reference submission are written into the state
+        as their references (``build_state``) and sent as the request's assets, each fitted
+        into the envelope the model accepts, its capabilities (``_image_capabilities``;
+        ``judge`` has already refused a model that does not accept images), by
+        ``DecisionModelClient.prepare_assets``, in a worker thread. Fitting happens before
+        the request and outside its failure handling: an image that cannot be fitted,
+        fitted images over the entry's ``max_request_bytes`` together, or an SDK too old to
+        send images, raises from the grade and this judge sends nothing; it never fails the
+        criteria.
+
         Args:
             judge: The decision-model judge.
             rubric: The effective rubric (NA options already guaranteed).
@@ -2799,6 +3036,13 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
 
         Returns:
             One ``CriterionResult`` per criterion of ``rubric``, in order.
+
+        Raises:
+            ImportError: If the content holds an image and the installed TypeSafe SDK
+                cannot send images (before 0.7.5).
+            ValueError: If an image cannot be fitted for the model (it cannot be decoded, or
+                is still over the size limit once fitted), or the fitted images together are
+                over the model's ``max_request_bytes``.
         """
         client = self._decision_clients[judge.judge_id]
         config = client.config
@@ -2813,8 +3057,28 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         response = None
         request_error: Exception | None = None
         if questions:
+            # Fitted before the request and outside its failure handling, so an image that
+            # cannot be sent raises instead of failing the criteria.
+            images = state_images(to_grade, query, reference_submission)
+            assets = None
+            envelope = None
+            if images:
+                # ``judge`` has checked the model accepts images; this is its entry.
+                envelope = _image_capabilities(judge)
+                assets = await asyncio.to_thread(client.prepare_assets, images, envelope=envelope)
+                # Each asset holds its fitted bytes (``prepare_assets``).
+                total = sum(len(cast(bytes, asset.data)) for asset in assets.values())
+                if total > envelope["max_request_bytes"]:
+                    raise ValueError(
+                        f"Judge {judge.judge_id!r} cannot send this item's images to "
+                        f"{config.model!r}: fitted, they total {total} bytes, over the "
+                        f"{envelope['max_request_bytes']}-byte limit on a request's images "
+                        "(max_request_bytes)"
+                    )
             try:
-                response = await client.system_one(state, questions)
+                response = await client.system_one(
+                    state, questions, assets=assets, envelope=envelope
+                )
             except Exception as e:
                 request_error = e
 
@@ -2867,9 +3131,9 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         self,
         judge: JudgeSpec,
         rubric: list[Criterion],
-        to_grade: str,
-        query: str | None = None,
-        reference_submission: str | None = None,
+        to_grade: Content,
+        query: Content | None = None,
+        reference_submission: Content | None = None,
         *,
         guidelines: str | None = None,
     ) -> tuple[list[CriterionResult], TokenUsage | None, float | None]:
@@ -3034,7 +3298,7 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         rubric: Sequence[Criterion],
         presented: Sequence[tuple[str, Criterion]],
         shuffles: Sequence[list[int] | None],
-    ) -> list[tuple[str, list[tuple[str, Criterion, CriterionVerdict | int, str | None]]]]:
+    ) -> list[tuple[Content, list[tuple[str, Criterion, CriterionVerdict | int, str | None]]]]:
         """The few-shot examples of a judge's one call, each with its judgments as shown.
 
         Each of the judge's examples (``_item_examples``, drawn by
@@ -3162,10 +3426,10 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
 
     async def judge(
         self,
-        to_grade: str,
+        to_grade: Content,
         rubric: list[Criterion],
-        query: str | None = None,
-        reference_submission: str | None = None,
+        query: Content | None = None,
+        reference_submission: Content | None = None,
         *,
         guidelines: str | None = None,
     ) -> list[JudgeCriterionResults]:
@@ -3178,8 +3442,17 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         ``llm_calls="per_item"``, in one call about the whole rubric whose judgments of the
         other criteria are discarded (``_judge_escalated_criteria``).
 
+        The submission, query and reference submission are put in canonical form and their
+        image files read (``_load_content``) before any judge is called, idempotently:
+        content ``Grader.grade`` has loaded reads no file again, so a grade reads each file
+        once, and a direct call to ``judge`` is as safe as one through ``grade``. Every
+        judge gets the same loaded content; an LLM judge receives a document's images as
+        content parts in its user prompt, and a decision model as its request's assets,
+        each fitted into the envelope the model accepts.
+
         Args:
-            to_grade: The submission, as ``Grader.grade`` passes it.
+            to_grade: The submission, as ``Grader.grade`` passes it: text, or a document
+                of text and images.
             rubric: The criteria.
             query: Optional input/query that prompted the submission.
             reference_submission: Optional exemplar response for grading context.
@@ -3195,11 +3468,25 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
             (``role="escalation"``, ``None`` at the criteria not escalated).
 
         Raises:
-            TypeError: If ``guidelines`` is neither a ``str`` nor ``None``.
-            ValueError: If a judge's call or request fails with a configuration error,
-                which would fail every call it makes (#40): LiteLLM's
-                ``UnsupportedParamsError``, or a 401, 403 or 404 from the provider
-                (``litellm.AuthenticationError``, ``PermissionDeniedError``,
+            TypeError: If ``guidelines`` is neither a ``str`` nor ``None``, or the
+                submission, query or reference submission is not ``Content``.
+            OSError: If an image file cannot be read (``FileNotFoundError`` when it is
+                missing); raised before any judge is called.
+            ImportError: If a decision-model judge is given content holding an image and the
+                installed TypeSafe SDK cannot send images (before its request).
+            ValueError: If an image file is not a supported image, or the content holds an
+                image and a judge that could be sent it does not accept images
+                (``_check_judges_accept_images``), before any judge is called: an LLM judge
+                whose ``LLMConfig(images=False)`` says so, or whose model LiteLLM's model
+                map does not list as accepting images with ``images`` unset; or a
+                decision-model judge whose model is neither in autorubric's decision-model
+                registry nor given ``capabilities``, or does not accept images; if a
+                decision-model judge is given an image it cannot fit for its model, or
+                images over its model's ``max_request_bytes`` together (before its
+                request); or if a judge's call or request
+                fails with a configuration error, which would fail every call it makes
+                (#40): LiteLLM's ``UnsupportedParamsError``, or a 401, 403 or 404 from
+                the provider (``litellm.AuthenticationError``, ``PermissionDeniedError``,
                 ``NotFoundError``: e.g. an invalid API key or an unknown model; a 403 also
                 when LiteLLM reports it as another API error, as it does for
                 OpenAI-compatible providers, Anthropic and Gemini, but not OpenRouter's,
@@ -3227,6 +3514,17 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         """
         # Checked before any judge runs; blank guidelines become None.
         guidelines = _normalize_guidelines(guidelines)
+        # Every judge, a cascade's escalation judges included, gets this one loaded copy.
+        # Content Grader.grade passes is loaded already, so nothing is read again here; a
+        # direct call reads each image file once, here, before any judge is called.
+        to_grade = await _load_content_async(to_grade)
+        if query is not None:
+            query = await _load_content_async(query)
+        if reference_submission is not None:
+            reference_submission = await _load_content_async(reference_submission)
+        # Before any judge is called, so that no request at all is sent, by any judge, for
+        # images one of the judges that could be sent them does not accept.
+        self._check_judges_accept_images(to_grade, query, reference_submission)
         if not self._escalation_names_warned and not _ESCALATION_NAMES_CHECKED.get():
             # The flag is set only once the warning is issued, so under a
             # warnings-as-errors filter it raises on every call instead of only once.
@@ -3278,14 +3576,116 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         )
         return [primary, *escalation_results]
 
+    def _check_judges_accept_images(self, *contents: Content | None) -> None:
+        """Refuse content holding images for any judge that could be sent them but cannot
+        take them.
+
+        Only when one of ``contents`` (the submission, query and reference submission) holds
+        an image is any judge checked, every judge that could be sent it, in order: those
+        that judge every criterion (``_judges``: a single judge, each panel member, a
+        cascade's decision model), then a cascade's escalation judges, which are sent the
+        item whenever a criterion escalates. Text never reads a capability.
+
+        - An LLM judge must be known to accept images (``_llm_accepts_images``: its
+          ``LLMConfig.images``, else LiteLLM's model map, asked once per grader per model).
+        - A decision-model judge's capabilities are looked up (``_image_capabilities``: its
+          ``DecisionModelConfig.capabilities``, else autorubric's decision-model registry),
+          and the installed TypeSafe SDK is checked (``_sdk_image_type``), so an SDK too
+          old to send images fails the grade before any judge makes a request.
+
+        Raises:
+            ValueError: Marked as a configuration error, for the first judge that does not
+                accept images: an LLM judge (``_llm_image_refusal``), or a decision-model
+                judge as ``_image_capabilities`` says.
+            ImportError: Marked as a configuration error, if the installed TypeSafe SDK has
+                no ``Image`` (before 0.7.5).
+        """
+        if not any(content is not None and _has_images(content) for content in contents):
+            return
+        for judge in (*self._judges, *self._escalation_judges):
+            if isinstance(judge.llm_config, DecisionModelConfig):
+                _image_capabilities(judge)
+                _sdk_image_type(self._decision_clients[judge.judge_id]._typesafe)
+            else:
+                self._check_llm_accepts_images(judge)
+
+    def _check_examples_reach_judges_accepting_images(self) -> None:
+        """Refuse, when the grader is built, few-shot examples holding images for an LLM
+        judge not known to accept images (``_check_llm_accepts_images``).
+
+        A judge's examples (``_criterion_examples``, ``_multi_choice_examples``, or
+        ``_item_examples`` under ``llm_calls="per_item"``) are part of every call it makes,
+        so a judge shown an example holding images is checked here, once; a judge whose
+        examples are all text is not, and is checked only when an item holding images is
+        graded.
+
+        Raises:
+            ValueError: As ``_check_llm_accepts_images``.
+        """
+        shown: dict[str, list[Any]] = {}
+        for (_, judge_id), examples in self._criterion_examples.items():
+            shown.setdefault(judge_id, []).extend(e.submission for e in examples)
+        for (_, judge_id), choices in self._multi_choice_examples.items():
+            shown.setdefault(judge_id, []).extend(submission for submission, _, _ in choices)
+        for judge_id, items in self._item_examples.items():
+            shown.setdefault(judge_id, []).extend(submission for submission, _, _ in items)
+        for judge in (*self._judges, *self._escalation_judges):
+            if isinstance(judge.llm_config, DecisionModelConfig):
+                continue
+            if any(
+                _is_content(submission) and _has_images(submission)
+                for submission in shown.get(judge.judge_id, ())
+            ):
+                self._check_llm_accepts_images(judge)
+
+    def _check_llm_accepts_images(self, judge: JudgeSpec) -> None:
+        """Refuse LLM judge ``judge`` content holding images unless it is known to accept
+        them (``_llm_accepts_images``).
+
+        Raises:
+            ValueError: Marked as a configuration error (``_llm_image_refusal``), naming the
+                judge and its model.
+        """
+        declared = getattr(judge.llm_config, "images", None)
+        if declared is False:
+            raise _llm_image_refusal(judge, declared=True)
+        if not self._llm_accepts_images(judge):
+            raise _llm_image_refusal(judge, declared=False)
+
+    def _llm_accepts_images(self, judge: JudgeSpec) -> bool:
+        """Whether LLM judge ``judge`` is known to accept images.
+
+        Its ``LLMConfig.images`` when that is a ``bool`` (the user's declaration, which
+        wins); otherwise whether LiteLLM's model map lists its model as accepting images
+        (``_litellm_supports_vision``, which reads the map LiteLLM loaded at import and
+        sends no request; only an answer of ``True`` confirms it). The map is
+        asked once per grader per model, the first time the grader is to send that model
+        images, and the answer kept in ``_litellm_image_support``: by model, because the
+        answer is the model's, so judges sharing one are asked about once and a judge whose
+        config names another model later is asked about that one.
+        """
+        config = judge.llm_config
+        declared = getattr(config, "images", None)
+        if isinstance(declared, bool):
+            return declared
+        model = getattr(config, "model", None)
+        if not isinstance(model, str):
+            return False
+        support = self._litellm_image_support
+        if support is None:
+            support = self._litellm_image_support = {}
+        if model not in support:
+            support[model] = _litellm_supports_vision(model)
+        return support[model]
+
     async def _judge_escalated_criteria(
         self,
         judge: JudgeSpec,
         rubric: list[Criterion],
         escalated: list[int],
-        to_grade: str,
-        query: str | None = None,
-        reference_submission: str | None = None,
+        to_grade: Content,
+        query: Content | None = None,
+        reference_submission: Content | None = None,
         *,
         guidelines: str | None = None,
     ) -> JudgeCriterionResults:

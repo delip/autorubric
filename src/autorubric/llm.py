@@ -37,6 +37,14 @@ from tenacity import (
     wait_exponential,
 )
 
+from autorubric.content import (
+    Content,
+    Image,
+    _content_digest,
+    _content_preview,
+    _content_removeprefix,
+    _normalize_content,
+)
 from autorubric.rate_limit import RateLimitPool
 from autorubric.types import _as_int
 
@@ -111,10 +119,10 @@ def classify_grading_error(exc: BaseException) -> ErrorCategory:
 
     Configuration errors are classified like any other API error (``"infrastructure"``),
     but ``CriterionGrader`` never routes one: an exception that says the judge is
-    misconfigured (LiteLLM's ``UnsupportedParamsError``, a 401, 403 or 404 from the
-    provider (but OpenRouter's 403, a moderation flag on the input) or from TypeSafe, or
-    the OpenAI SDK's refusal to build its client, e.g. with no OpenAI or Azure API key,
-    which LiteLLM reports as an ``InternalServerError`` or, for Azure, an ``APIError``)
+    misconfigured (LiteLLM's ``UnsupportedParamsError``, a 401, 402 (no credits left), 403
+    or 404 from the provider (but OpenRouter's 403, a moderation flag on the input) or from
+    TypeSafe, or the OpenAI SDK's refusal to build its client, e.g. with no OpenAI or Azure
+    API key, which LiteLLM reports as an ``InternalServerError`` or, for Azure, an ``APIError``)
     fails every call the judge makes, so the grade raises a ``ValueError`` naming the
     judge, chained from it, instead of abstaining (#40). Item-specific 400s
     (``ContextWindowExceededError``, ``ContentPolicyViolationError``) and a plain
@@ -160,6 +168,9 @@ def _is_configuration_error(exc: BaseException | None) -> bool:
     - The TypeSafe SDK's ``TypeSafeAuthenticationError``, ``TypeSafePermissionDeniedError``
       and ``TypeSafeNotFoundError`` (e.g. a base URL that names no System One endpoint),
       for decision-model judges.
+    - An HTTP 402 Payment Required answer, from an LLM provider or from TypeSafe
+      (``_is_payment_required``): the account has no credits left, or a billing problem,
+      and every call fails until it is paid. OpenRouter's 402 is one too.
     - The OpenAI SDK's refusal to build its client, before any request (e.g. no API key:
       "Missing credentials"), for OpenAI, OpenAI-compatible providers and Azure, which
       LiteLLM wraps in an ``InternalServerError`` (an ``APIError`` for Azure) with the SDK's
@@ -192,7 +203,7 @@ def _is_configuration_error(exc: BaseException | None) -> bool:
         ),
     ):
         return True
-    if _is_forbidden_answer(exc):
+    if _is_forbidden_answer(exc) or _is_payment_required(exc):
         return True
     sdk = sys.modules.get("typesafe_sdk")
     return sdk is not None and isinstance(
@@ -233,6 +244,43 @@ def _is_forbidden_answer(exc: BaseException) -> bool:
             except (AttributeError, RuntimeError):  # a response built without its request
                 host = ""
             return not (host == _MODERATING_HOST or host.endswith("." + _MODERATING_HOST))
+        current = current.__cause__ or current.__context__
+    return False
+
+
+# The HTTP status of an answer that says the account must pay before any call succeeds.
+_PAYMENT_REQUIRED = 402
+
+
+def _is_payment_required(exc: BaseException) -> bool:
+    """Whether ``exc`` is an API error that is an HTTP 402 Payment Required answer.
+
+    A 402 says the account has no credits left (OpenRouter, TypeSafe: "Your organization
+    has no available TypeSafe API credits") or a billing problem, and fails every call
+    alike until it is paid. LiteLLM has no exception of its own for it: an
+    OpenAI-compatible provider's and OpenRouter's come back as a plain ``APIError`` whose
+    ``status_code`` is 402, Anthropic's and Gemini's as an ``APIConnectionError`` carrying
+    500, and some providers' (NLP Cloud's) as a ``RateLimitError``. Each keeps the
+    provider's HTTP response (``response``) or the status (``status_code``) on some
+    exception of its ``__cause__``/``__context__`` chain, which is where the 402 is looked
+    for. The TypeSafe SDK has no class for a 402 either: it raises its base
+    ``TypeSafeAPIError`` with ``status`` 402. Only an API error is read: another exception,
+    even one raised while a 402 was being handled, is not a 402 answer.
+    """
+    sdk = sys.modules.get("typesafe_sdk")
+    if sdk is not None and isinstance(exc, sdk.TypeSafeAPIError):
+        return getattr(exc, "status", None) == _PAYMENT_REQUIRED
+    if not isinstance(exc, openai.APIError):
+        return False
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if getattr(current, "status_code", None) == _PAYMENT_REQUIRED:
+            return True
+        response = getattr(current, "response", None)
+        if response is not None and getattr(response, "status_code", None) == _PAYMENT_REQUIRED:
+            return True
         current = current.__cause__ or current.__context__
     return False
 
@@ -602,8 +650,44 @@ def _calculate_completion_cost(response: Any) -> float | None:
 _debug_console = Console()
 
 
-def _print_debug_prompt(system_prompt: str, user_prompt: str, model: str) -> None:
-    """Print the fully constructed LLM prompt using Rich formatting."""
+def _content_parts(content: Content) -> list[dict[str, Any]]:
+    """``content`` as a list of OpenAI-style message content parts, in its order.
+
+    A ``{"type": "text", "text": ...}`` part for each run of text (text alone is one part)
+    and an ``{"type": "image_url", "image_url": {"url": ...}}`` part for each image, whose
+    URL is the image's ``data:`` URL (``Image._data_url``).
+    """
+    normalized = _normalize_content(content)
+    if isinstance(normalized, str):
+        return [{"type": "text", "text": normalized}]
+    return [
+        {"type": "image_url", "image_url": {"url": part._data_url}}
+        if isinstance(part, Image)
+        else {"type": "text", "text": part}
+        for part in normalized
+    ]
+
+
+def _user_message(user_prompt: Content) -> dict[str, Any]:
+    """The chat message that carries ``user_prompt`` to the model.
+
+    Text is sent as the message's content, a plain string. A document (content holding an
+    image) is sent as a list of OpenAI-style content parts in the document's order
+    (``_content_parts``). LiteLLM translates these parts for providers with another image
+    format.
+    """
+    user = _normalize_content(user_prompt)
+    if isinstance(user, str):
+        return {"role": "user", "content": user}
+    return {"role": "user", "content": _content_parts(user)}
+
+
+def _print_debug_prompt(system_prompt: str, user_prompt: Content, model: str) -> None:
+    """Print the fully constructed LLM prompt using Rich formatting.
+
+    The user prompt is shown as ``_content_preview`` renders it, with an ``[image: ...]``
+    marker in place of each image.
+    """
     _debug_console.print()
     _debug_console.rule(f"[bold cyan]DEBUG PROMPT — {model}[/bold cyan]")
     _debug_console.print(
@@ -611,7 +695,7 @@ def _print_debug_prompt(system_prompt: str, user_prompt: str, model: str) -> Non
     )
     _debug_console.print(
         Panel(
-            Syntax(user_prompt, "xml", theme="monokai", word_wrap=True),
+            Syntax(_content_preview(user_prompt), "xml", theme="monokai", word_wrap=True),
             title="[bold yellow]User Prompt[/bold yellow]",
             border_style="yellow",
         )
@@ -741,6 +825,16 @@ class LLMConfig:
         seed: Random seed for reproducible outputs (OpenAI, some other providers).
         extra_headers: Additional HTTP headers for provider-specific features.
         extra_params: Additional provider-specific parameters passed to LiteLLM.
+        images: Whether the model accepts images in its prompts. None (default) looks
+            the model up in LiteLLM's model map (the one it loaded at import; no request
+            is sent) the first time a grader is to send this judge an image; ``True`` or
+            ``False`` is your declaration and wins over the map. A judge whose model
+            neither LiteLLM lists nor you declare as accepting images is never sent one:
+            grading an item holding images refuses it before any request
+            (``CriterionGrader``). Set ``images=True`` for a vision model LiteLLM does not
+            map (e.g. a LLaVA or Qwen-VL model served through Ollama, vLLM or
+            OpenRouter). Text-only grading never reads it, so it changes no request. Only
+            ``None``, ``True`` and ``False`` are accepted.
 
     Examples:
         # Basic usage without thinking (provider-default temperature)
@@ -787,14 +881,21 @@ class LLMConfig:
     extra_headers: dict[str, str] = field(default_factory=dict)
     extra_params: dict[str, Any] = field(default_factory=dict)
 
-    def __post_init__(self) -> None:
-        """Validate ``max_tokens``, ``top_p`` and ``thinking``.
+    # Whether the model accepts images: None = ask LiteLLM's model map (last, so that no
+    # positional argument moves)
+    images: bool | None = None
 
-        Each is sent with every request whenever it is not None, so a value no provider
-        can mean is refused here rather than sent or silently dropped. A ``bool`` is
-        never taken for a number. Any ``numbers.Integral`` (numpy integers too) is a
-        ``max_tokens``, stored as ``int``; a ``top_p`` that is a real number other than an
-        ``int`` or ``float`` (a numpy float, say) is stored as ``float``.
+    def __post_init__(self) -> None:
+        """Validate ``max_tokens``, ``top_p``, ``thinking`` and ``images``.
+
+        The first three are sent with every request whenever they are not None, so a value
+        no provider can mean is refused here rather than sent or silently dropped.
+        ``images`` is never sent; it says whether the judge may be sent images, which only
+        a ``bool`` says, so ``1`` or ``"yes"`` is refused rather than read as a
+        declaration. A ``bool`` is never taken for a number. Any ``numbers.Integral``
+        (numpy integers too) is a ``max_tokens``, stored as ``int``; a ``top_p`` that is a
+        real number other than an ``int`` or ``float`` (a numpy float, say) is stored as
+        ``float``.
 
         ``thinking`` is normalized with ``get_thinking_config()`` here, so a value it
         cannot normalize raises now instead of when a request is built, where every judge
@@ -805,9 +906,12 @@ class LLMConfig:
             ValueError: If ``max_tokens`` is neither None nor an integer >= 1, ``top_p``
                 is neither None nor a real number in [0, 1] (NaN is not), or ``thinking``
                 is not a ``ThinkingParam`` form: an unknown level, a ``bool``, a budget
-                below -1, or a value of any other type.
+                below -1, or a value of any other type; or ``images`` is neither None nor
+                a ``bool`` (``1``, ``0`` and numpy booleans are not).
         """
         name = type(self).__name__
+        if self.images is not None and not isinstance(self.images, bool):
+            raise ValueError(f"{name}.images must be None, True or False; got {self.images!r}")
         if self.max_tokens is not None:
             max_tokens = _as_int(self.max_tokens)
             if max_tokens is None or max_tokens < 1:
@@ -924,6 +1028,87 @@ class LLMConfig:
             yaml.dump(data, f, Dumper=_LLMConfigDumper, default_flow_style=False, sort_keys=False)
 
 
+# LiteLLM's proxy route: it names no provider of its own, so any model-map entry fits it.
+_ANY_PROVIDER = "litellm_proxy"
+
+
+def _map_keys(model: str) -> tuple[str | None, list[str]]:
+    """The provider ``model`` names, if any, and the keys LiteLLM's model map could hold it
+    under, most specific first.
+
+    A first path segment that LiteLLM lists as a provider (``litellm.provider_list``) is the
+    provider, and a ``responses/`` segment after it (LiteLLM's Responses API route,
+    ``openai/responses/gpt-5-mini``) is dropped, since the map keys the model, not the
+    route. The keys are then the provider-prefixed name (``openai/gpt-4.1-mini``) and the
+    bare one (``gpt-4.1-mini``), as LiteLLM keys its entries both ways. With no provider
+    the model string is the one key.
+    """
+    head, sep, rest = model.partition("/")
+    if not sep or head not in litellm.provider_list:
+        return None, [model]
+    if rest.startswith("responses/"):
+        rest = rest[len("responses/") :]
+    return head, [f"{head}/{rest}", rest]
+
+
+def _same_provider(listed: object, provider: str | None) -> bool:
+    """Whether a model-map entry whose ``litellm_provider`` is ``listed`` describes the model
+    as ``provider`` serves it: an entry or a model naming no provider fits any, a proxy
+    (``litellm_proxy``) fits every entry, and otherwise the names agree or one is a prefix
+    of the other (``vertex_ai`` and ``vertex_ai-language-models``, ``azure_ai`` and
+    ``azure``), much as LiteLLM's own lookup matches them."""
+    if provider is None or listed is None or provider == _ANY_PROVIDER:
+        return True
+    if not isinstance(listed, str):
+        return False
+    return listed.startswith(provider) or provider.startswith(listed)
+
+
+def _litellm_supports_vision(model: str) -> bool:
+    """Whether LiteLLM's model map lists ``model`` as accepting images.
+
+    It reads the model map LiteLLM loaded at import (``litellm.model_cost``) and nothing
+    else: it sends no request and reads no file, so it never blocks, and it prints and logs
+    nothing. (LiteLLM's own ``supports_vision`` is not used: for some providers, Ollama's
+    among them, it asks the provider's server at run time.) The map is the one LiteLLM
+    fetches from its repository at import unless ``LITELLM_LOCAL_MODEL_COST_MAP=True`` is
+    set, so the answer follows the fetched map rather than the installed package's copy.
+
+    The keys tried are ``_map_keys``'s, exactly and then ignoring case, as LiteLLM matches
+    them; a ``responses/`` route is looked up by its model. The first entry found for the
+    model's provider (``_same_provider``) that says whether the model accepts images
+    decides: only ``supports_vision`` ``True`` confirms it. An entry for the provider that
+    does not say leaves the next key to decide, whatever provider that key's entry names
+    (``azure/gpt-4-turbo`` is silent, so ``gpt-4-turbo``, OpenAI's, decides), as in
+    LiteLLM's own lookup. A model the map does not hold (an Ollama model, a
+    model served through vLLM, a deployment name) is not confirmed, which is what
+    ``LLMConfig(images=True)`` is for. Any error reading the map is not a confirmation
+    either.
+    """
+    try:
+        provider, keys = _map_keys(model)
+        model_map = litellm.model_cost
+        folded: dict[str, str] | None = None
+        silent = False  # an entry for the model's provider was found that does not say
+        for key in keys:
+            if key not in model_map:
+                if folded is None:
+                    folded = {k.lower(): k for k in list(model_map)}
+                key = folded.get(key.lower(), key)
+            entry = model_map.get(key)
+            if not isinstance(entry, dict):
+                continue
+            if not silent and not _same_provider(entry.get("litellm_provider"), provider):
+                continue
+            listed = entry.get("supports_vision")
+            if isinstance(listed, bool):
+                return listed
+            silent = True
+        return False
+    except Exception:
+        return False
+
+
 def _is_anthropic_model(model: str) -> bool:
     """Whether ``model`` is Claude reached in a way that honours ``cache_control`` markers.
 
@@ -973,33 +1158,61 @@ def _prompt_cache_min_tokens(model: str) -> int:
     return _DEFAULT_PROMPT_CACHE_MIN_TOKENS
 
 
-def _prefix_reaches_cache_minimum(model: str, system_prompt: str, shared_prefix: str) -> bool:
+def _prefix_reaches_cache_minimum(model: str, system_prompt: str, shared_prefix: Content) -> bool:
     """Whether this prefix is long enough for ``model``'s prompt cache.
 
     The count is LiteLLM's estimate, so a model it cannot count for is treated as too short.
-    A count too high for Gemini is caught by the fallback in ``LLMClient.generate``.
+    A count too high for Gemini is caught by the fallback in ``LLMClient.generate``. A
+    prefix holding images is counted as the messages it is sent in, so its images count
+    too; LiteLLM sizes each from its ``data:`` URL, with no request.
     """
+    prefix = _normalize_content(shared_prefix)
     try:
-        tokens = litellm.token_counter(model=model, text=system_prompt + shared_prefix)
+        if isinstance(prefix, str):
+            tokens = litellm.token_counter(model=model, text=system_prompt + prefix)
+        else:
+            tokens = litellm.token_counter(
+                model=model,
+                messages=[{"role": "system", "content": system_prompt}, _user_message(prefix)],
+            )
     except Exception:  # LiteLLM's tokenizer lookups raise assorted errors
         return False
     return tokens >= _prompt_cache_min_tokens(model)
 
 
-def _cache_marked(text: str) -> list[dict[str, Any]]:
-    """``text`` as message content carrying Anthropic's ``cache_control`` marker."""
-    return [{"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}]
+def _marked(content: Content, key: str, marker: dict[str, Any]) -> list[dict[str, Any]]:
+    """``content`` as message content parts (``_content_parts``), its last text part
+    carrying ``marker`` under ``key``.
+
+    Text is one part. A document's marker goes on its last text part, since Gemini context
+    caching reads a marker only on text and every provider caches the prompt up to and
+    including the marked part. Every shared prefix ``CriterionGrader`` sends ends with text:
+    ``"\n</submission>"`` for a call without examples, and the criterion's, the question's
+    or the examples' closing tag for a call with them. So that part is the document's last
+    and the whole prefix, images included, is cached. A document with no text part is sent
+    unmarked.
+    """
+    parts = _content_parts(content)
+    for part in reversed(parts):
+        if part["type"] == "text":
+            part[key] = marker
+            break
+    return parts
 
 
-def _context_cache_marked(text: str) -> list[dict[str, Any]]:
-    """``text`` as message content that LiteLLM puts in a Gemini context cache."""
-    marker = {"type": "ephemeral", "ttl": _GEMINI_CACHE_TTL}
-    return [{"type": "text", "text": text, "cache_control": marker}]
+def _cache_marked(content: Content) -> list[dict[str, Any]]:
+    """``content`` as message content carrying Anthropic's ``cache_control`` marker."""
+    return _marked(content, "cache_control", {"type": "ephemeral"})
 
 
-def _breakpoint_marked(text: str) -> list[dict[str, Any]]:
-    """``text`` as message content carrying OpenAI's explicit cache breakpoint."""
-    return [{"type": "text", "text": text, "prompt_cache_breakpoint": {"mode": "explicit"}}]
+def _context_cache_marked(content: Content) -> list[dict[str, Any]]:
+    """``content`` as message content that LiteLLM puts in a Gemini context cache."""
+    return _marked(content, "cache_control", {"type": "ephemeral", "ttl": _GEMINI_CACHE_TTL})
+
+
+def _breakpoint_marked(content: Content) -> list[dict[str, Any]]:
+    """``content`` as message content carrying OpenAI's explicit cache breakpoint."""
+    return _marked(content, "prompt_cache_breakpoint", {"mode": "explicit"})
 
 
 def _open_response_cache(cache_dir: str | Path) -> diskcache.Cache:
@@ -1058,7 +1271,7 @@ class LLMClient:
         self,
         model: str,
         system_prompt: str,
-        user_prompt: str,
+        user_prompt: Content,
         response_format: type | None = None,
         overrides: dict[str, Any] | None = None,
     ) -> str:
@@ -1071,7 +1284,11 @@ class LLMClient:
         Args:
             model: Model identifier sent with the request.
             system_prompt: System message for the LLM.
-            user_prompt: User message for the LLM.
+            user_prompt: User message for the LLM. Text (a sequence of strings alone
+                included, as their concatenation) enters the key as it is, the key it had
+                before images existed; a document holding an image enters it as
+                ``<content sha256=...>`` with its ``_content_digest``, so documents whose
+                images hold the same bytes share a key wherever the images are read from.
             response_format: Optional Pydantic model class for structured output.
             overrides: The per-call overrides passed to ``generate``. A ``temperature``
                 override replaces ``config.temperature`` in the key, so an override never
@@ -1082,6 +1299,8 @@ class LLMClient:
                 which earlier releases keyed this way but did not send, gets a key of its
                 own.
         """
+        user = _normalize_content(user_prompt)
+        user_field = user if isinstance(user, str) else f"<content sha256={_content_digest(user)}>"
         temperature = (overrides or {}).get("temperature", self.config.temperature)
         schema_name = response_format.__name__ if response_format else "str"
         thinking_config = self.config.get_thinking_config()
@@ -1092,7 +1311,7 @@ class LLMClient:
         top_p = self.config.top_p
         top_p_str = f"{top_p}:top_p_sent=True" if top_p is not None and top_p == 0 else top_p
         content = (
-            f"{model}:{system_prompt}:{user_prompt}:{schema_name}"
+            f"{model}:{system_prompt}:{user_field}:{schema_name}"
             f":temp={temperature}"
             f":top_p={top_p_str}"
             f":max_tokens={self.config.max_tokens}"
@@ -1128,12 +1347,12 @@ class LLMClient:
     async def generate(
         self,
         system_prompt: str,
-        user_prompt: str,
+        user_prompt: Content,
         response_format: type[T] | None = None,
         use_cache: bool | None = None,
         return_thinking: bool = False,
         return_result: bool = False,
-        shared_prefix: str | None = None,
+        shared_prefix: Content | None = None,
         pre_1_7_user_prompt: str | None = None,
         pre_1_7_system_prompt: str | None = None,
         **kwargs: Any,
@@ -1142,7 +1361,10 @@ class LLMClient:
 
         Args:
             system_prompt: System message for the LLM.
-            user_prompt: User message for the LLM.
+            user_prompt: User message for the LLM: text, or a document holding images,
+                sent as content parts (see ``_user_message``). Its images are expected
+                to hold their bytes already (``Image._loaded()``); one that does not is
+                read from its file here.
             response_format: Optional Pydantic model class for structured output.
                 When provided, LiteLLM uses the model's JSON schema to constrain
                 the LLM output and returns a validated Pydantic instance.
@@ -1160,7 +1382,10 @@ class LLMClient:
                 default return behavior.
             shared_prefix: The start of ``user_prompt`` shared with other calls, sent as a
                 message of its own where that helps a provider's prompt cache. It does not
-                change the response-cache key, which hashes ``user_prompt``.
+                change the response-cache key, which hashes ``user_prompt``. For a document
+                it is content too, its images in the message of its own with the text
+                around them (``_content_removeprefix`` checks that it starts
+                ``user_prompt``), the cache marker on its last text part (``_marked``).
             pre_1_7_user_prompt: The text this ``user_prompt`` had before 1.7.0. On a
                 response-cache miss, the key of that text is read too, so replies cached by
                 earlier releases are reused; nothing is written under it. Kept for backward
@@ -1189,6 +1414,8 @@ class LLMClient:
             pydantic.ValidationError: If response doesn't match schema, including a JSON
                 reply that is not an object (with or without a thinking trace).
         """
+        user = _normalize_content(user_prompt)
+
         # Determine caching behavior for this request
         should_cache = use_cache if use_cache is not None else self.config.cache_enabled
 
@@ -1202,7 +1429,7 @@ class LLMClient:
             cache_key = self._cache_key(
                 self.config.model,
                 system_prompt,
-                user_prompt,
+                user,
                 response_format,
                 kwargs,
             )
@@ -1228,10 +1455,15 @@ class LLMClient:
         model = kwargs.get("model", self.config.model)
 
         gemini = _GEMINI_CONTEXT_CACHE_MODELS.match(model) is not None
+        # What follows the shared prefix, or None when there is none or it does not start
+        # the prompt.
+        after_prefix = (
+            _content_removeprefix(user, shared_prefix) if shared_prefix is not None else None
+        )
         split = (
-            shared_prefix is not None
+            after_prefix is not None
+            and shared_prefix is not None
             and self.config.prompt_caching
-            and user_prompt.startswith(shared_prefix)
             # A server of the caller's own is not the provider the model map describes.
             and self.config.api_base is None
             and _caches_prompts(model)
@@ -1256,18 +1488,22 @@ class LLMClient:
             "content": mark(system_prompt) if mark else system_prompt,
         }
         if split:
-            assert shared_prefix is not None
-            tail = user_prompt.removeprefix(shared_prefix).removeprefix("\n\n")
+            assert shared_prefix is not None and after_prefix is not None
+            tail = _content_removeprefix(after_prefix, "\n\n")
+            if tail is None:
+                tail = after_prefix
             messages = [
                 system_message,
                 {
                     "role": "user",
-                    "content": mark(shared_prefix) if mark else shared_prefix,
+                    "content": mark(shared_prefix)
+                    if mark
+                    else _user_message(shared_prefix)["content"],
                 },
-                {"role": "user", "content": tail},
+                _user_message(tail),
             ]
         else:
-            messages = [system_message, {"role": "user", "content": user_prompt}]
+            messages = [system_message, _user_message(user)]
 
         params: dict[str, Any] = {
             "model": model,
@@ -1332,7 +1568,7 @@ class LLMClient:
         import autorubric
 
         if autorubric.debug:
-            _print_debug_prompt(system_prompt, user_prompt, model)
+            _print_debug_prompt(system_prompt, user, model)
 
         # Make request with retries
         context_cached = split and gemini
@@ -1351,12 +1587,13 @@ class LLMClient:
                     raise
                 # LiteLLM creates the context cache inside the call, so a refused creation
                 # (a prefix under the minimum, no cache quota) fails it. The cache is only a
-                # discount: send the prompt without one from here on.
+                # discount: send the prompt without one from here on, its images (if it holds
+                # any) as content parts in the one user message.
                 logger.warning("Gemini context cache failed; sending %s without one", model)
                 context_cached = False
                 params["messages"] = [
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
+                    _user_message(user),
                 ]
                 response = await litellm.acompletion(**params)
             raw_response = response
@@ -1503,7 +1740,7 @@ class LLMClient:
 # Convenience function for simple usage
 async def generate(
     system_prompt: str,
-    user_prompt: str,
+    user_prompt: Content,
     model: str,
     response_format: type[T] | None = None,
     **kwargs: Any,
@@ -1514,7 +1751,7 @@ async def generate(
 
     Args:
         system_prompt: System message for the LLM.
-        user_prompt: User message for the LLM.
+        user_prompt: User message for the LLM: text, or a document holding images.
         model: Model identifier (REQUIRED).
         response_format: Optional Pydantic model for structured output.
         **kwargs: Additional LLMConfig parameters.
