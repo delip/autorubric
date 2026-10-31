@@ -25,7 +25,6 @@ import litellm
 import openai
 import yaml
 from dotenv import find_dotenv, load_dotenv
-from litellm.constants import DEFAULT_MINIMUM_PROMPT_CACHE_TOKEN_COUNT
 from pydantic import BaseModel, ValidationError
 from rich.console import Console
 from rich.panel import Panel
@@ -63,6 +62,7 @@ _EXPLICIT_BREAKPOINT_MODELS = re.compile(r"(openai/)?gpt-(5\.[6-9]|[6-9])")
 # ``cache_control`` marker into a context cache. Gemini 4 refuses one with a 400.
 _GEMINI_CONTEXT_CACHE_MODELS = re.compile(r"gemini/gemini-(2\.5|3)")
 _GEMINI_PROMPT_CACHE_MIN_TOKENS = 4096
+_DEFAULT_PROMPT_CACHE_MIN_TOKENS = 1024
 # Long enough for an item's calls: storage is billed by the hour, reads at a tenth of input.
 _GEMINI_CACHE_TTL = "300s"
 
@@ -938,16 +938,17 @@ def _caches_prompts(model: str) -> bool:
 
     Asks LiteLLM's model map, once per model. A model it does not confirm, or cannot look
     up, keeps one user message: splitting gains it nothing, and some OpenAI-compatible
-    servers refuse consecutive user messages. DeepSeek always caches automatically, and the
-    map misses some of its ids. Bedrock and Vertex Claude ids keep their requests as they are.
-    Gemini models without context caches are arranged for like a model with no cache.
+    servers refuse consecutive user messages. DeepSeek's own API and OpenRouter's route to it
+    cache automatically, and the map misses some of their ids, but ``deepseek-reasoner`` has
+    refused consecutive user messages. Bedrock and Vertex Claude ids keep their requests as
+    they are. Gemini models without context caches are arranged for like a model with no cache.
     """
     if "gemini" in model:
         return _GEMINI_CONTEXT_CACHE_MODELS.match(model) is not None
     if "claude" in model and not _is_anthropic_model(model):
         return False
-    if "deepseek" in model:
-        return True
+    if model.startswith(("deepseek/", "openrouter/deepseek/")):
+        return "reasoner" not in model
     try:
         return litellm.utils.supports_prompt_caching(model=model) is True
     except Exception:  # LiteLLM's lookups raise assorted errors for an unknown model
@@ -969,14 +970,14 @@ def _prompt_cache_min_tokens(model: str) -> int:
         return int(recorded)
     if "gemini" in model:
         return _GEMINI_PROMPT_CACHE_MIN_TOKENS
-    return DEFAULT_MINIMUM_PROMPT_CACHE_TOKEN_COUNT
+    return _DEFAULT_PROMPT_CACHE_MIN_TOKENS
 
 
 def _prefix_reaches_cache_minimum(model: str, system_prompt: str, shared_prefix: str) -> bool:
     """Whether this prefix is long enough for ``model``'s prompt cache.
 
-    The count is LiteLLM's estimate: a wrong one costs a little latency or a cache miss, so a
-    model it cannot count for is treated as too short.
+    The count is LiteLLM's estimate, so a model it cannot count for is treated as too short.
+    A count too high for Gemini is caught by the fallback in ``LLMClient.generate``.
     """
     try:
         tokens = litellm.token_counter(model=model, text=system_prompt + shared_prefix)
@@ -1228,6 +1229,8 @@ class LLMClient:
             shared_prefix is not None
             and self.config.prompt_caching
             and user_prompt.startswith(shared_prefix)
+            # A server of the caller's own is not the provider the model map describes.
+            and self.config.api_base is None
             and _caches_prompts(model)
             # A context cache is created per prefix, so one that is too short is not asked for.
             and (not gemini or _prefix_reaches_cache_minimum(model, system_prompt, shared_prefix))
@@ -1329,6 +1332,7 @@ class LLMClient:
             _print_debug_prompt(system_prompt, user_prompt, model)
 
         # Make request with retries
+        context_cached = split and gemini
         retry_decorator = self._get_retry_decorator()
         thinking_content: str | None = None
         refusal: Any = None
@@ -1336,8 +1340,22 @@ class LLMClient:
 
         @retry_decorator
         async def _call() -> str:
-            nonlocal thinking_content, refusal, raw_response
-            response = await litellm.acompletion(**params)
+            nonlocal thinking_content, refusal, raw_response, context_cached
+            try:
+                response = await litellm.acompletion(**params)
+            except openai.APIError:
+                if not context_cached:
+                    raise
+                # LiteLLM creates the context cache inside the call, so a refused creation
+                # (a prefix under the minimum, no cache quota) fails it. The cache is only a
+                # discount: send the prompt without one from here on.
+                logger.warning("Gemini context cache failed; sending %s without one", model)
+                context_cached = False
+                params["messages"] = [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ]
+                response = await litellm.acompletion(**params)
             raw_response = response
 
             # A response with no choices (empty, ``None`` or missing) carries no reply at all;

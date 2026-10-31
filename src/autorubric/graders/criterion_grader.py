@@ -2179,10 +2179,14 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         reference_submission: str | None = None,
         *,
         guidelines: str | None = None,
+        reused: bool = True,
     ) -> CriterionResult:
         """Judge a single criterion with a single judge.
 
         Handles both binary (MET/UNMET) and multi-choice criteria.
+
+        ``reused`` says whether another call will read what this one shares with it, which is
+        worth a cache write only if so.
         """
         client = self._clients[judge.judge_id]
 
@@ -2197,6 +2201,7 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 query,
                 reference_submission,
                 guidelines=guidelines,
+                reused=reused,
             )
         else:
             return await self._judge_binary_criterion(
@@ -2208,6 +2213,7 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 query,
                 reference_submission,
                 guidelines=guidelines,
+                reused=reused,
             )
 
     async def _judge_binary_criterion(
@@ -2221,6 +2227,7 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         reference_submission: str | None = None,
         *,
         guidelines: str | None = None,
+        reused: bool = True,
     ) -> CriterionResult:
         """Judge a binary (MET/UNMET) criterion.
 
@@ -2258,7 +2265,7 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 user_prompt=user_prompt,
                 response_format=self._binary_response_format,
                 return_result=True,
-                shared_prefix=shared,
+                shared_prefix=shared if reused else None,
                 pre_1_7_user_prompt=pre_1_7_prompt,
             )
 
@@ -2294,6 +2301,7 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         reference_submission: str | None = None,
         *,
         guidelines: str | None = None,
+        reused: bool = True,
     ) -> CriterionResult:
         """Judge a multi-choice criterion.
 
@@ -2351,7 +2359,7 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 user_prompt=user_prompt,
                 response_format=self._multi_choice_response_format,
                 return_result=True,
-                shared_prefix=shared,
+                shared_prefix=shared if reused else None,
                 pre_1_7_user_prompt=pre_1_7_prompt,
             )
 
@@ -2615,6 +2623,7 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 query,
                 reference_submission,
                 guidelines=guidelines,
+                reused=sum(c.is_multi_choice == criterion.is_multi_choice for _, c in criteria) > 1,
             )
 
         shared = _shared_user_content(to_grade, query, reference_submission, guidelines=guidelines)

@@ -9,6 +9,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import diskcache
+import litellm
 import pytest
 
 from autorubric.llm import (
@@ -170,6 +171,38 @@ class TestMessages:
             {"role": "system", "content": "SYS"},
             {"role": "user", "content": PROMPT},
         ]
+
+    @pytest.mark.asyncio
+    async def test_a_failed_context_cache_falls_back_to_one_message(self) -> None:
+        client = LLMClient(LLMConfig(model="gemini/gemini-3.8-flash", max_retries=1))
+        refusal = litellm.BadRequestError("too short", "gemini-3.8-flash", "gemini")
+        with (
+            patch("autorubric.llm._prefix_reaches_cache_minimum", return_value=True),
+            patch("autorubric.llm.litellm.acompletion", new_callable=AsyncMock) as completion,
+        ):
+            completion.side_effect = [refusal, _response()]
+            reply = await client.generate("SYS", PROMPT, use_cache=False, shared_prefix=SHARED)
+        assert reply == "ok"
+        assert completion.call_args.kwargs["messages"] == [
+            {"role": "system", "content": "SYS"},
+            {"role": "user", "content": PROMPT},
+        ]
+
+    @pytest.mark.asyncio
+    async def test_a_custom_api_base_keeps_one_message(self) -> None:
+        client = LLMClient(LLMConfig(model="openai/gpt-5.6-luna", api_base="http://localhost:9"))
+        with patch("autorubric.llm.litellm.acompletion", new_callable=AsyncMock) as completion:
+            completion.return_value = _response()
+            await client.generate("SYS", PROMPT, use_cache=False, shared_prefix=SHARED)
+        assert "extra_body" not in completion.call_args.kwargs
+        assert len(completion.call_args.kwargs["messages"]) == 2
+
+    @pytest.mark.parametrize(
+        "model", ["ollama/deepseek-r1:14b", "openai/deepseek-r1", "deepseek/deepseek-reasoner"]
+    )
+    @pytest.mark.asyncio
+    async def test_deepseek_on_other_routes_keeps_one_message(self, model: str) -> None:
+        assert len(await _messages(model, shared_prefix=SHARED)) == 2
 
     @pytest.mark.asyncio
     async def test_a_prefix_that_is_not_one_stays_joined(self) -> None:

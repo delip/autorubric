@@ -173,6 +173,22 @@ class TestWarming:
         assert names == ["m", "a", "n", "b"]
 
     @pytest.mark.asyncio
+    async def test_a_call_with_nothing_to_share_with_writes_no_cache(self) -> None:
+        grader, recorder = _grader()
+        seen: list[dict] = []
+        original = recorder.generate
+
+        async def spy(**kwargs: Any) -> GenerateResult:
+            seen.append(kwargs)
+            return await original(**kwargs)
+
+        recorder.generate = spy  # type: ignore[method-assign]
+        await _judge(grader, [_binary("a"), _binary("b"), _multi("m")], "S")
+        by_kind = {k["response_format"] is CriterionJudgment: k for k in seen}
+        assert by_kind[True]["shared_prefix"] is not None
+        assert by_kind[False]["shared_prefix"] is None
+
+    @pytest.mark.asyncio
     async def test_generate_receives_the_shared_prefix(self) -> None:
         grader, recorder = _grader()
         seen: list[dict] = []
@@ -183,7 +199,7 @@ class TestWarming:
             return await original(**kwargs)
 
         recorder.generate = spy  # type: ignore[method-assign]
-        await _judge(grader, [_binary("a"), _multi("m")], "S")
+        await _judge(grader, [_binary("a"), _binary("b"), _multi("m"), _multi("n")], "S")
         assert {k["shared_prefix"] for k in seen} == {"<submission>\nS\n</submission>"}
         for k in seen:
             assert k["user_prompt"].startswith(k["shared_prefix"] + "\n\n")

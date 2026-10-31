@@ -871,8 +871,8 @@ def build_rubric_user_prompt(
     The rubric's guidelines first, when it has any, then every criterion in ``<criteria>``,
     each in a ``<rubric_criterion>`` tagged with its id and holding the block a per-criterion
     prompt poses it with (``_binary_criterion_block``, ``_multi_choice_criterion_block``),
-    then the examples, the input, the reference submission and the submission, in the order
-    a per-criterion prompt has them.
+    then the examples, the input, the reference submission and the submission. The whole
+    prompt is one call's, so unlike a per-criterion prompt it has no shared start to keep.
 
     Args:
         criteria: Each criterion with its id, in the order to list them. A multi-choice
