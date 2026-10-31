@@ -2,7 +2,8 @@
 
 import os
 import re
-from collections.abc import Iterator
+import socket
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -126,6 +127,28 @@ def _no_new_experiments_in_the_working_directory(
             "evaluate(..., experiments_dir=tmp_path))",
             pytrace=False,
         )
+
+
+@pytest.fixture
+def refuse_network(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], None]:
+    """A function that makes every socket connection and DNS lookup raise ``message``.
+
+    Use it so that a mistake in a test cannot send a real, possibly paid, request. Call it
+    only once the test's event loop exists: inside an async test, or in an async fixture
+    (``pytest_asyncio.fixture``), never in a sync fixture of an async test. On Windows an
+    event loop is built on ``socket.socketpair()``, which CPython implements there by
+    connecting to ``127.0.0.1``; refusing connections before the loop exists breaks the
+    loop itself, so the test errors at setup instead of checking anything.
+    """
+
+    def refuse(message: str) -> None:
+        def no_network(*args: Any, **kwargs: Any) -> Any:
+            raise AssertionError(message)
+
+        monkeypatch.setattr(socket.socket, "connect", no_network)
+        monkeypatch.setattr(socket, "getaddrinfo", no_network)
+
+    return refuse
 
 
 @pytest.fixture

@@ -27,6 +27,7 @@ import httpx
 import litellm
 import openai
 import pytest
+import pytest_asyncio
 
 from autorubric import (
     Criterion,
@@ -353,17 +354,23 @@ class TestRunsStopOnTheFirstItem:
 # =============================================================================
 
 
-@pytest.fixture
-def no_request(monkeypatch):
+@pytest_asyncio.fixture
+async def no_request(monkeypatch, refuse_network):
     """A dummy key and a refused network, so that a mistake cannot send a paid request.
-    LiteLLM refuses a parameter on the client, before it needs either."""
+    LiteLLM refuses a parameter on the client, before it needs either. Async, so the
+    network is refused only once the test's event loop exists (``refuse_network``)."""
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-key-never-valid-40")
+    refuse_network("a refused parameter reached the network")
 
-    def no_network(*args: Any, **kwargs: Any) -> Any:
-        raise AssertionError("a refused parameter reached the network")
 
-    monkeypatch.setattr(socket.socket, "connect", no_network)
-    monkeypatch.setattr(socket, "getaddrinfo", no_network)
+@pytest.mark.asyncio
+async def test_the_network_guard_refuses_connections_and_lookups(no_request):
+    """The guard these tests rely on is in force while the test runs, after the event loop
+    exists: a connection or a DNS lookup raises instead of leaving the machine."""
+    with pytest.raises(AssertionError, match="reached the network"):
+        socket.create_connection(("192.0.2.1", 443), timeout=1)
+    with pytest.raises(AssertionError, match="reached the network"):
+        socket.getaddrinfo("api.openai.com", 443)
 
 
 class TestARefusedParameter:
@@ -656,18 +663,13 @@ class TestAMissingOpenAIKey:
     and LiteLLM wraps that as an ``InternalServerError`` (not ``AuthenticationError``),
     with the SDK's bare ``openai.OpenAIError`` in its ``__context__`` chain."""
 
-    @pytest.fixture
-    def no_openai_key(self, monkeypatch):
+    @pytest_asyncio.fixture
+    async def no_openai_key(self, monkeypatch, refuse_network):
         for name in ("OPENAI_API_KEY", "OPENAI_ADMIN_KEY", "OPENAI_BASE_URL", "OPENAI_API_BASE"):
             monkeypatch.delenv(name, raising=False)
         monkeypatch.setattr(litellm, "api_key", None)
         monkeypatch.setattr(litellm, "openai_key", None)
-
-        def no_network(*args: Any, **kwargs: Any) -> Any:
-            raise AssertionError("a missing key reached the network")
-
-        monkeypatch.setattr(socket.socket, "connect", no_network)
-        monkeypatch.setattr(socket, "getaddrinfo", no_network)
+        refuse_network("a missing key reached the network")
 
     @pytest.mark.asyncio
     async def test_the_real_litellm_error_is_a_configuration_error(self, no_openai_key):
@@ -708,8 +710,8 @@ class TestAMissingAzureKey:
     refuses to build its client, before any request, and LiteLLM wraps that as an
     ``APIError``, with the SDK's bare ``openai.OpenAIError`` in its chain."""
 
-    @pytest.fixture
-    def no_azure_key(self, monkeypatch):
+    @pytest_asyncio.fixture
+    async def no_azure_key(self, monkeypatch, refuse_network):
         for name in (
             "AZURE_API_KEY",
             "AZURE_OPENAI_API_KEY",
@@ -727,12 +729,7 @@ class TestAMissingAzureKey:
         monkeypatch.setenv("AZURE_API_VERSION", "2024-02-01")
         monkeypatch.setattr(litellm, "api_key", None)
         monkeypatch.setattr(litellm, "azure_key", None)
-
-        def no_network(*args: Any, **kwargs: Any) -> Any:
-            raise AssertionError("a missing key reached the network")
-
-        monkeypatch.setattr(socket.socket, "connect", no_network)
-        monkeypatch.setattr(socket, "getaddrinfo", no_network)
+        refuse_network("a missing key reached the network")
 
     @pytest.mark.asyncio
     async def test_the_real_litellm_error_is_a_configuration_error(self, no_azure_key):

@@ -15,7 +15,6 @@ reaches the network.
 
 from __future__ import annotations
 
-import socket
 from typing import Any
 
 import httpx2
@@ -193,18 +192,13 @@ class TestTheEscalationJudges:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("llm_calls", ["per_criterion", "per_item"])
     async def test_a_refused_parameter_raises_on_the_first_call(
-        self, fake_sdk, make_grader, monkeypatch, llm_calls
+        self, fake_sdk, make_grader, monkeypatch, refuse_network, llm_calls
     ):
         """LiteLLM refuses ``reasoning_effort`` for this model on the client, before any
         request, so the escalation judge's first call raises. The real ``LLMClient`` runs,
         with a dummy key and the network refused, so a mistake cannot send a request."""
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test-key-never-valid-40")
-
-        def no_network(*args: Any, **kwargs: Any) -> Any:
-            raise AssertionError("a refused parameter reached the network")
-
-        monkeypatch.setattr(socket.socket, "connect", no_network)
-        monkeypatch.setattr(socket, "getaddrinfo", no_network)
+        refuse_network("a refused parameter reached the network")
         # The request fails transiently, so every criterion escalates.
         fake_sdk.error = ROUTED_ERRORS["TypeSafeAPIConnectionError"]()
         grader = make_grader(
