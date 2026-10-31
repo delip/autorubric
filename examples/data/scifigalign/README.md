@@ -166,7 +166,7 @@ A judge whose macro MAE on the test split is not below about 0.74 does no better
 
 ## Running the Demo
 
-`examples/scifigalign_demo.py` grades a split with an LLM judge (`--judge llm`, default `openai/gpt-4.1-mini`) or with Jev (`--judge jev`, default `typesafe/jev-1.14.0`). Without `--run` it spends nothing. It prints the split's histograms, the constant baselines and an estimate of the run's tokens and cost, then exits.
+`examples/scifigalign_demo.py` grades a split with an LLM judge (`--judge llm`, default `openai/gpt-5.6-luna`) or with Jev (`--judge jev`, default `typesafe/jev-1.14.0`). Without `--run` it spends nothing. It prints the split's histograms, the constant baselines and an estimate of the run's tokens and cost, then exits.
 
 ```bash
 uv run python examples/scifigalign_demo.py                       # LLM judge, dry run

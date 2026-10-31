@@ -76,7 +76,7 @@ from autorubric.types import Criterion
 DATA_DIR = Path(__file__).resolve().parent / "data" / "scifigalign"
 SPLITS = ("train", "val", "test", "all")
 
-DEFAULT_LLM_MODEL = "openai/gpt-4.1-mini"
+DEFAULT_LLM_MODEL = "openai/gpt-5.6-luna"
 DEFAULT_JEV_MODEL = "typesafe/jev-1.14.0"
 
 # Assumptions behind the cost estimate. Providers count an image's input tokens in their

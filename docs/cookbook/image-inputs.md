@@ -52,7 +52,7 @@ rubric = Rubric([
     Criterion(name="chart_type", weight=5.0, requirement="The chart type suits the data shown"),
 ])
 
-grader = CriterionGrader(judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"))
+grader = CriterionGrader(judge_model_config=LLMConfig(model="openai/gpt-5.6-luna"))
 result = await rubric.grade(
     to_grade=report,
     grader=grader,
@@ -92,7 +92,7 @@ Alice and Bob plotted the same results. The tables give the verdict each criteri
 
 Bob's caption reads as a fine caption on its own. Only a judge that sees the chart can tell that the curve flattens above 7B, so a text-only judge cannot grade `trend` at all, and with the image it is the criterion that separates the two reports.
 
-The model must accept images; `gpt-4.1-mini` does. The judge receives each image inside the prompt, where it occurs in the submission, as an OpenAI-style content part that LiteLLM translates for other providers (see [Images in Prompts](../api/llm.md#images-in-prompts)).
+The model must accept images; `gpt-5.6-luna` does. The judge receives each image inside the prompt, where it occurs in the submission, as an OpenAI-style content part that LiteLLM translates for other providers (see [Images in Prompts](../api/llm.md#images-in-prompts)).
 
 autorubric never sends an image to an LLM judge that is not known to accept images. The first time a grader is to send a judge an image, it looks the judge's model up in LiteLLM's model map (`litellm.model_cost`) to see whether the model accepts images, and keeps the answer for every later item. The lookup reads the map LiteLLM loaded at import and sends no request. LiteLLM fetches that map from its repository at import unless `LITELLM_LOCAL_MODEL_COST_MAP=True` is set. A model given with a `responses/` route, such as `openai/responses/gpt-5-mini`, is looked up by its model. A model the map does not list as accepting images raises `ValueError` naming the judge and the model, before any judge sends a request. The same holds for every judge that could be sent the image, including each member of a panel and a cascade's escalation judges. Text-only grading never asks.
 
