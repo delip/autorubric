@@ -16,6 +16,10 @@ We re-ran nine datasets (5,003 criterion judgments) with each judge and compared
 
 Expect some verdicts to change. On a 10% repeat, two runs of the new layout agreed on 86.4% of Luna's verdicts, 86.1% of DeepSeek's and 96.4% of Gemini's, while the old and new layouts agreed on 81.1%, 77.9% and 93.6%. So the order itself moves verdicts, beyond run-to-run noise. Accuracy against the labels changed by −0.4 points for Luna (95% interval −1.3 to +0.5), +0.5 for DeepSeek (−0.5 to +1.5) and −1.4 for Gemini (−2.1 to −0.8). If you compare scores across this upgrade, re-grade a sample with both versions first.
 
+### Meta-rubric evaluation is told what it is reading
+
+The meta-judge now receives an instruction that the submission is a rubric, not a response to grade. Without it, judges could fault a rubric for containing no response. Meta-rubric scores can change, and replies cached for those requests are not reused.
+
 ### Your response caches keep working
 
 Cache directories written by earlier releases still load, and their replies are still used, so upgrading does not pay again for calls you have already made. A run reading such a cache can return verdicts generated under the old order. Clear the cache to get replies generated under the new one.

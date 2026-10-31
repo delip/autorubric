@@ -14,6 +14,8 @@ A rubric without guidelines produces exactly the artifacts it did before guideli
 
 ### Rubric Guidelines in Meta-Rubric Evaluation and the Loop
 
+The meta-judge has the general grading system prompt, so its instruction (`_meta_judge_instruction(rubric, *, in_context=False)`) opens with `_RUBRIC_SUBJECT_INSTRUCTION`, saying the submission is the rubric and no response is part of it, and in context `_TASK_PROMPT_INSTRUCTION`. Without them judges faulted a rubric for holding no response.
+
 `Rubric.guidelines` (see [Type Catalog](types.md)) is rubric text that applies to every criterion, so the meta paths treat it as part of the rubric:
 
 - **Meta-judge.** `evaluate_rubric_standalone`/`evaluate_rubric_in_context` build the rubric under review with `_rubric_for_meta_judge`: `{"guidelines": ..., "criteria": [...]}` (guidelines first, as on disk) when present, `{"criteria": [...]}` otherwise. `_meta_judge_instruction` appends `_GUIDELINES_REF_INSTRUCTION` (what the field is, the rule judges get — the criterion text governs, the guidelines clarify how to apply it — and to assess each criterion as a rater would apply it with the guidelines) to `_CRITERIA_REF_INSTRUCTION` only when present. The display summary (`_rubric_summary`) reads "... criteria and guidelines".

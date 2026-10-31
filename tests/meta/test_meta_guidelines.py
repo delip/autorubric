@@ -135,7 +135,9 @@ class TestMetaJudgeSeesGuidelines:
         assert payload["guidelines"] == GUIDELINES
         assert [c["index"] for c in payload["criteria"]] == [1, 2]
         assert instruction == (
-            evaluate_module._CRITERIA_REF_INSTRUCTION + evaluate_module._GUIDELINES_REF_INSTRUCTION
+            evaluate_module._RUBRIC_SUBJECT_INSTRUCTION
+            + evaluate_module._CRITERIA_REF_INSTRUCTION
+            + evaluate_module._GUIDELINES_REF_INSTRUCTION
         )
         assert "The criterion text governs" in instruction
 
@@ -155,10 +157,18 @@ class TestMetaJudgeSeesGuidelines:
     async def test_without_guidelines_nothing_changes(self, run: str) -> None:
         submission = await _meta_submission(run, _rubric(None))
         instruction, payload = _split_submission(submission)
-        assert instruction == evaluate_module._CRITERIA_REF_INSTRUCTION
+        assert instruction.endswith(evaluate_module._CRITERIA_REF_INSTRUCTION)
+        assert evaluate_module._GUIDELINES_REF_INSTRUCTION not in instruction
         rubric_data = payload if run == "standalone" else payload["rubric"]
         assert list(rubric_data) == ["criteria"]
         assert "guidelines" not in submission
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("run", ["standalone", "in_context"])
+    async def test_the_judge_is_told_the_submission_is_the_rubric(self, run: str) -> None:
+        instruction, _ = _split_submission(await _meta_submission(run, _rubric(None)))
+        assert instruction.startswith("The submission is a grading rubric, not a response")
+        assert ('"task_prompt" field' in instruction) == (run == "in_context")
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
