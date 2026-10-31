@@ -446,7 +446,9 @@ class TestARefusedParameter:
 # =============================================================================
 
 # Real-shaped 402 answers. OpenRouter and TypeSafe answer 402 when the account is out of
-# credits, Anthropic (as its billing_error) when the credit balance is too low.
+# credits, Anthropic (as its billing_error) when the credit balance is too low. OPENAI_402 is
+# an OpenAI-compatible body at status 402, as OpenRouter and Groq send; OpenAI itself reports
+# an exhausted quota as a 429 (insufficient_quota), which stays a retried rate limit.
 OPENAI_402 = {
     "error": {
         "message": "You have run out of credits",
