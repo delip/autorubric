@@ -17,12 +17,12 @@ THEME = (
 )
 
 METRICS = ["Accuracy", "Cohen's Kappa"]
-BASELINE = [75.0, 41.2]
-CALIBRATED = [90.0, 78.2]
+BASELINE = [100.0, 100.0]
+CALIBRATED = [100.0, 100.0]
 
 # Original-scale kappa values for annotation
-KAPPA_BASELINE = 0.412
-KAPPA_CALIBRATED = 0.782
+KAPPA_BASELINE = 1.000
+KAPPA_CALIBRATED = 1.000
 
 COLOR_BASELINE = "#6c8ebf"
 COLOR_CALIBRATED = "#82b366"
@@ -53,7 +53,7 @@ def main() -> None:
         ax.text(
             bars_base[0].get_x() + bars_base[0].get_width() / 2,
             bars_base[0].get_height() + 1.5,
-            "75.0%",
+            "100.0%",
             ha="center",
             va="bottom",
             fontsize=6,
@@ -61,7 +61,7 @@ def main() -> None:
         ax.text(
             bars_cal[0].get_x() + bars_cal[0].get_width() / 2,
             bars_cal[0].get_height() + 1.5,
-            "90.0%",
+            "100.0%",
             ha="center",
             va="bottom",
             fontsize=6,
@@ -71,7 +71,7 @@ def main() -> None:
         ax.text(
             bars_base[1].get_x() + bars_base[1].get_width() / 2,
             bars_base[1].get_height() + 1.5,
-            f"{KAPPA_BASELINE}",
+            f"{KAPPA_BASELINE:.3f}",
             ha="center",
             va="bottom",
             fontsize=6,
@@ -79,7 +79,7 @@ def main() -> None:
         ax.text(
             bars_cal[1].get_x() + bars_cal[1].get_width() / 2,
             bars_cal[1].get_height() + 1.5,
-            f"{KAPPA_CALIBRATED}",
+            f"{KAPPA_CALIBRATED:.3f}",
             ha="center",
             va="bottom",
             fontsize=6,
@@ -88,7 +88,7 @@ def main() -> None:
         ax.set_ylabel("Score")
         ax.set_xticks(x)
         ax.set_xticklabels(METRICS)
-        ax.set_ylim(0, 105)
+        ax.set_ylim(0, 112)
 
         ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.01), ncol=2, frameon=False)
         fig.suptitle("Few-Shot Calibration: Baseline vs Calibrated", fontweight="bold", y=0.98)

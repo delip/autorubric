@@ -7,11 +7,13 @@ and provider-specific features like extended thinking and prompt caching.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import logging
 import math
 import numbers
+import re
 import sys
 from dataclasses import asdict, dataclass, field, fields
 from enum import Enum
@@ -40,6 +42,7 @@ from autorubric.content import (
     Image,
     _content_digest,
     _content_preview,
+    _content_removeprefix,
     _normalize_content,
 )
 from autorubric.rate_limit import RateLimitPool
@@ -56,6 +59,20 @@ logger = logging.getLogger(__name__)
 
 # Type variable for structured output
 T = TypeVar("T", bound=BaseModel)
+
+# OpenAI models whose automatic caching writes a whole prompt at the end of its last message,
+# which calls that differ in their last message never read. They cache a shared prefix only
+# with an explicit breakpoint.
+_EXPLICIT_BREAKPOINT_MODELS = re.compile(r"(openai/)?gpt-(5\.[6-9]|[6-9])")
+
+# Gemini models that take explicit context caches: their automatic cache was not readable
+# until about a minute after a call, too late for an item's other calls. LiteLLM turns a
+# ``cache_control`` marker into a context cache. Gemini 4 refuses one with a 400.
+_GEMINI_CONTEXT_CACHE_MODELS = re.compile(r"gemini/gemini-(2\.5|3)")
+_GEMINI_PROMPT_CACHE_MIN_TOKENS = 4096
+_DEFAULT_PROMPT_CACHE_MIN_TOKENS = 1024
+# Long enough for an item's calls: storage is billed by the hour, reads at a tenth of input.
+_GEMINI_CACHE_TTL = "300s"
 
 
 # ============================================================================
@@ -527,7 +544,8 @@ def _extract_usage_from_response(response: Any) -> TokenUsage:
 
     Additional fields may be present for specific providers:
     - cache_creation_input_tokens: Tokens used to create cache (Anthropic)
-    - cache_read_input_tokens: Tokens read from cache (Anthropic)
+    - cache_read_input_tokens: Tokens read from cache (Anthropic, Gemini)
+    - prompt_tokens_details: ``cached_tokens`` and ``cache_write_tokens`` (OpenAI, DeepSeek)
 
     Args:
         response: The LiteLLM response object
@@ -548,9 +566,16 @@ def _extract_usage_from_response(response: Any) -> TokenUsage:
     completion_tokens = getattr(usage, "completion_tokens", 0) or 0
     total_tokens = getattr(usage, "total_tokens", 0) or 0
 
-    # Extract Anthropic prompt caching fields if present
-    cache_creation = getattr(usage, "cache_creation_input_tokens", 0) or 0
-    cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+    # Providers report prompt caching in one of two places
+    details = getattr(usage, "prompt_tokens_details", None)
+    cache_creation = (
+        getattr(usage, "cache_creation_input_tokens", 0)
+        or getattr(details, "cache_write_tokens", 0)
+        or 0
+    )
+    cache_read = (
+        getattr(usage, "cache_read_input_tokens", 0) or getattr(details, "cached_tokens", 0) or 0
+    )
 
     return TokenUsage(
         prompt_tokens=prompt_tokens,
@@ -585,28 +610,36 @@ def _calculate_completion_cost(response: Any) -> float | None:
 _debug_console = Console()
 
 
+def _content_parts(content: Content) -> list[dict[str, Any]]:
+    """``content`` as a list of OpenAI-style message content parts, in its order.
+
+    A ``{"type": "text", "text": ...}`` part for each run of text (text alone is one part)
+    and an ``{"type": "image_url", "image_url": {"url": ...}}`` part for each image, whose
+    URL is the image's ``data:`` URL (``Image._data_url``).
+    """
+    normalized = _normalize_content(content)
+    if isinstance(normalized, str):
+        return [{"type": "text", "text": normalized}]
+    return [
+        {"type": "image_url", "image_url": {"url": part._data_url}}
+        if isinstance(part, Image)
+        else {"type": "text", "text": part}
+        for part in normalized
+    ]
+
+
 def _user_message(user_prompt: Content) -> dict[str, Any]:
     """The chat message that carries ``user_prompt`` to the model.
 
     Text is sent as the message's content, a plain string. A document (content holding an
-    image) is sent as a list of OpenAI-style content parts in the document's order: a
-    ``{"type": "text", "text": ...}`` part for each run of text and an
-    ``{"type": "image_url", "image_url": {"url": ...}}`` part for each image, whose URL is
-    the image's ``data:`` URL (``Image._data_url``). LiteLLM translates these parts for
-    providers with another image format.
+    image) is sent as a list of OpenAI-style content parts in the document's order
+    (``_content_parts``). LiteLLM translates these parts for providers with another image
+    format.
     """
     user = _normalize_content(user_prompt)
     if isinstance(user, str):
         return {"role": "user", "content": user}
-    return {
-        "role": "user",
-        "content": [
-            {"type": "image_url", "image_url": {"url": part._data_url}}
-            if isinstance(part, Image)
-            else {"type": "text", "text": part}
-            for part in user
-        ],
-    }
+    return {"role": "user", "content": _content_parts(user)}
 
 
 def _print_debug_prompt(system_prompt: str, user_prompt: Content, model: str) -> None:
@@ -735,14 +768,20 @@ class LLMConfig:
             - OpenAI: Reasoning for o-series and GPT-5 models
             - Gemini: Thinking mode (2.5+, 3.0+ models)
             - DeepSeek: Reasoning content
-        prompt_caching: Mark the system prompt for Anthropic's prompt cache (default: True).
-            Applies only to model ids that start with ``anthropic/`` or ``claude``: the
-            system message is sent with ``cache_control: {"type": "ephemeral"}``. Prompt
-            caching is generally available, so no beta header is added, and an
-            ``anthropic-beta`` value in ``extra_headers`` is sent unchanged. Other model
-            ids, Claude models served through Bedrock or Vertex AI included, are sent
-            unchanged. Providers that cache long prompts on their own (OpenAI, DeepSeek) do
-            so whatever this setting is.
+        prompt_caching: Arrange requests for the provider's prompt cache (default: True).
+            A per-criterion call sends what an item's calls share as a user message of its
+            own when LiteLLM's model map says the model caches prompts, and
+            ``CriterionGrader`` lets one call finish before the rest when that prefix is long
+            enough to cache. Model ids that start with ``anthropic/``, ``claude`` or
+            ``openrouter/anthropic/`` also get ``cache_control: {"type": "ephemeral"}`` on
+            the system message and that shared message, OpenAI models from GPT-5.6 on get
+            explicit cache breakpoints there, and Gemini 2.5 and 3 models a five-minute
+            context cache when the prefix reaches 4,096 tokens. Prompt caching is generally
+            available, so no beta header is added, and an ``anthropic-beta`` value in
+            ``extra_headers`` is sent unchanged. Claude models served through Bedrock or
+            Vertex AI are sent one user message with no marker. With False every request
+            is one user message; providers that cache long prompts on their own (OpenAI,
+            DeepSeek) still do so, at message endings.
         seed: Random seed for reproducible outputs (OpenAI, some other providers).
         extra_headers: Additional HTTP headers for provider-specific features.
         extra_params: Additional provider-specific parameters passed to LiteLLM.
@@ -762,7 +801,7 @@ class LLMConfig:
         config = LLMConfig(model="openai/gpt-5.2")
 
         # Explicit temperature
-        config = LLMConfig(model="openai/gpt-4.1-mini", temperature=0.0)  # explicit; sent as-is
+        config = LLMConfig(model="gemini/gemini-3.8-flash", temperature=0.0)  # sent as-is
 
         # Enable thinking with a level
         config = LLMConfig(model="anthropic/claude-sonnet-4-5-20250929", thinking="high")
@@ -1030,6 +1069,110 @@ def _litellm_supports_vision(model: str) -> bool:
         return False
 
 
+def _is_anthropic_model(model: str) -> bool:
+    """Whether ``model`` is Claude reached in a way that honours ``cache_control`` markers.
+
+    Bedrock and Vertex ids are left out and keep their requests as they are.
+    """
+    return model.startswith(("anthropic/", "claude", "openrouter/anthropic/"))
+
+
+@functools.cache
+def _caches_prompts(model: str) -> bool:
+    """Whether a shared prefix sent as its own message can be reused by ``model``'s cache.
+
+    Asks LiteLLM's model map, once per model. A model it does not confirm, or cannot look
+    up, keeps one user message: splitting gains it nothing, and some OpenAI-compatible
+    servers refuse consecutive user messages. DeepSeek's own API and OpenRouter's route to it
+    cache automatically, and the map misses some of their ids, but ``deepseek-reasoner`` has
+    refused consecutive user messages. Bedrock and Vertex Claude ids keep their requests as
+    they are. Gemini models without context caches are arranged for like a model with no cache.
+    """
+    if "gemini" in model:
+        return _GEMINI_CONTEXT_CACHE_MODELS.match(model) is not None
+    if "claude" in model and not _is_anthropic_model(model):
+        return False
+    if model.startswith(("deepseek/", "openrouter/deepseek/")):
+        return "reasoner" not in model
+    try:
+        return litellm.utils.supports_prompt_caching(model=model) is True
+    except Exception:  # LiteLLM's lookups raise assorted errors for an unknown model
+        return False
+
+
+@functools.cache
+def _prompt_cache_min_tokens(model: str) -> int:
+    """The shortest prefix ``model``'s prompt cache stores, in tokens.
+
+    LiteLLM's model map records it for Anthropic-family entries only. Others get Gemini 3's
+    minimum or LiteLLM's general fallback.
+    """
+    try:
+        recorded = litellm.get_model_info(model=model).get("prompt_cache_min_tokens")
+    except Exception:  # as in _caches_prompts
+        recorded = None
+    if recorded:
+        return int(recorded)
+    if "gemini" in model:
+        return _GEMINI_PROMPT_CACHE_MIN_TOKENS
+    return _DEFAULT_PROMPT_CACHE_MIN_TOKENS
+
+
+def _prefix_reaches_cache_minimum(model: str, system_prompt: str, shared_prefix: Content) -> bool:
+    """Whether this prefix is long enough for ``model``'s prompt cache.
+
+    The count is LiteLLM's estimate, so a model it cannot count for is treated as too short.
+    A count too high for Gemini is caught by the fallback in ``LLMClient.generate``. A
+    prefix holding images is counted as the messages it is sent in, so its images count
+    too; LiteLLM sizes each from its ``data:`` URL, with no request.
+    """
+    prefix = _normalize_content(shared_prefix)
+    try:
+        if isinstance(prefix, str):
+            tokens = litellm.token_counter(model=model, text=system_prompt + prefix)
+        else:
+            tokens = litellm.token_counter(
+                model=model,
+                messages=[{"role": "system", "content": system_prompt}, _user_message(prefix)],
+            )
+    except Exception:  # LiteLLM's tokenizer lookups raise assorted errors
+        return False
+    return tokens >= _prompt_cache_min_tokens(model)
+
+
+def _marked(content: Content, key: str, marker: dict[str, Any]) -> list[dict[str, Any]]:
+    """``content`` as message content parts (``_content_parts``), its last text part
+    carrying ``marker`` under ``key``.
+
+    Text is one part. A document's marker goes on its last text part, since Gemini context
+    caching reads a marker only on text and every provider caches the prompt up to and
+    including the marked part. The shared prefixes ``CriterionGrader`` sends end with the
+    text ``"\n</submission>"``, so that part is the document's last and the whole prefix,
+    images included, is cached. A document with no text part is sent unmarked.
+    """
+    parts = _content_parts(content)
+    for part in reversed(parts):
+        if part["type"] == "text":
+            part[key] = marker
+            break
+    return parts
+
+
+def _cache_marked(content: Content) -> list[dict[str, Any]]:
+    """``content`` as message content carrying Anthropic's ``cache_control`` marker."""
+    return _marked(content, "cache_control", {"type": "ephemeral"})
+
+
+def _context_cache_marked(content: Content) -> list[dict[str, Any]]:
+    """``content`` as message content that LiteLLM puts in a Gemini context cache."""
+    return _marked(content, "cache_control", {"type": "ephemeral", "ttl": _GEMINI_CACHE_TTL})
+
+
+def _breakpoint_marked(content: Content) -> list[dict[str, Any]]:
+    """``content`` as message content carrying OpenAI's explicit cache breakpoint."""
+    return _marked(content, "prompt_cache_breakpoint", {"mode": "explicit"})
+
+
 def _open_response_cache(cache_dir: str | Path) -> diskcache.Cache:
     """Open the on-disk response cache at ``cache_dir``, creating the directory if needed.
 
@@ -1167,6 +1310,8 @@ class LLMClient:
         use_cache: bool | None = None,
         return_thinking: bool = False,
         return_result: bool = False,
+        shared_prefix: Content | None = None,
+        pre_1_7_user_prompt: str | None = None,
         **kwargs: Any,
     ) -> str | T | GenerateResult:
         """Generate LLM response with optional structured output.
@@ -1192,6 +1337,16 @@ class LLMClient:
                 including usage statistics and completion cost. This is useful when
                 you need to track token usage. When True, takes precedence over the
                 default return behavior.
+            shared_prefix: The start of ``user_prompt`` shared with other calls, sent as a
+                message of its own where that helps a provider's prompt cache. It does not
+                change the response-cache key, which hashes ``user_prompt``. For a document
+                it is content too, its images in the message of its own with the text
+                around them (``_content_removeprefix`` checks that it starts
+                ``user_prompt``), the cache marker on its last text part (``_marked``).
+            pre_1_7_user_prompt: The text this ``user_prompt`` had before 1.7.0. On a
+                response-cache miss, the key of that text is read too, so replies cached by
+                earlier releases are reused; nothing is written under it. Kept for backward
+                compatibility and planned for removal in 2.0.0.
             **kwargs: Override any LLMConfig parameters for this call. In particular,
                 ``temperature`` accepts a float to send for this call, or None to omit it
                 so the provider's default applies (regardless of ``config.temperature``).
@@ -1234,6 +1389,19 @@ class LLMClient:
                 kwargs,
             )
             cached = cache.get(cache_key)
+            if cached is None and pre_1_7_user_prompt is not None:
+                # Backward compatibility: read a reply cached before 1.7.0, whose key hashed
+                # the old layout. Nothing is written under that key, and 2.0.0 is planned to
+                # drop this lookup.
+                cached = cache.get(
+                    self._cache_key(
+                        self.config.model,
+                        system_prompt,
+                        pre_1_7_user_prompt,
+                        response_format,
+                        kwargs,
+                    )
+                )
             if cached is not None:
                 logger.debug(f"Cache hit for {cache_key[:8]}...")
                 return cached  # type: ignore[return-value]
@@ -1241,33 +1409,56 @@ class LLMClient:
         # Build request parameters
         model = kwargs.get("model", self.config.model)
 
-        # Check if this is an Anthropic model that supports prompt caching
-        # Anthropic requires cache_control on message content; other providers
-        # handle caching automatically (OpenAI, Deepseek) or don't support it
-        is_anthropic = model.startswith("anthropic/") or model.startswith("claude")
-        use_prompt_caching = self.config.prompt_caching and is_anthropic
-        if use_prompt_caching:
-            # Anthropic requires cache_control on message content
+        gemini = _GEMINI_CONTEXT_CACHE_MODELS.match(model) is not None
+        # What follows the shared prefix, or None when there is none or it does not start
+        # the prompt.
+        after_prefix = (
+            _content_removeprefix(user, shared_prefix) if shared_prefix is not None else None
+        )
+        split = (
+            after_prefix is not None
+            and shared_prefix is not None
+            and self.config.prompt_caching
+            # A server of the caller's own is not the provider the model map describes.
+            and self.config.api_base is None
+            and _caches_prompts(model)
+            # A context cache is created per prefix, so one that is too short is not asked for.
+            and (not gemini or _prefix_reaches_cache_minimum(model, system_prompt, shared_prefix))
+        )
+        # Anthropic and Gemini cache at cache_control markers on message content. The other
+        # providers cache automatically, at message endings, which is why the shared prefix is
+        # a message of its own: a prefix ending inside a message is not reused.
+        explicit = split and _EXPLICIT_BREAKPOINT_MODELS.match(model) is not None
+        mark = (
+            _breakpoint_marked
+            if explicit
+            else _context_cache_marked
+            if split and gemini
+            else _cache_marked
+            if self.config.prompt_caching and _is_anthropic_model(model)
+            else None
+        )
+        system_message: dict[str, Any] = {
+            "role": "system",
+            "content": mark(system_prompt) if mark else system_prompt,
+        }
+        if split:
+            assert shared_prefix is not None and after_prefix is not None
+            tail = _content_removeprefix(after_prefix, "\n\n")
+            if tail is None:
+                tail = after_prefix
             messages = [
+                system_message,
                 {
-                    "role": "system",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": system_prompt,
-                            "cache_control": {"type": "ephemeral"},
-                        }
-                    ],
+                    "role": "user",
+                    "content": mark(shared_prefix)
+                    if mark
+                    else _user_message(shared_prefix)["content"],
                 },
-                _user_message(user),
+                _user_message(tail),
             ]
         else:
-            # Standard message format for other providers
-            # OpenAI/Deepseek: Caching is automatic for prompts ≥1024 tokens
-            messages = [
-                {"role": "system", "content": system_prompt},
-                _user_message(user),
-            ]
+            messages = [system_message, _user_message(user)]
 
         params: dict[str, Any] = {
             "model": model,
@@ -1278,6 +1469,12 @@ class LLMClient:
             "timeout": kwargs.get("timeout", self.config.timeout),
             **self.config.extra_params,
         }
+
+        if explicit:
+            params["extra_body"] = {
+                **params.get("extra_body", {}),
+                "prompt_cache_options": {"mode": "explicit"},
+            }
 
         # Sent whenever set: LLMConfig refuses values no provider can mean, and a top_p of
         # 0 is a real setting.
@@ -1329,6 +1526,7 @@ class LLMClient:
             _print_debug_prompt(system_prompt, user, model)
 
         # Make request with retries
+        context_cached = split and gemini
         retry_decorator = self._get_retry_decorator()
         thinking_content: str | None = None
         refusal: Any = None
@@ -1336,8 +1534,23 @@ class LLMClient:
 
         @retry_decorator
         async def _call() -> str:
-            nonlocal thinking_content, refusal, raw_response
-            response = await litellm.acompletion(**params)
+            nonlocal thinking_content, refusal, raw_response, context_cached
+            try:
+                response = await litellm.acompletion(**params)
+            except openai.APIError:
+                if not context_cached:
+                    raise
+                # LiteLLM creates the context cache inside the call, so a refused creation
+                # (a prefix under the minimum, no cache quota) fails it. The cache is only a
+                # discount: send the prompt without one from here on, its images (if it holds
+                # any) as content parts in the one user message.
+                logger.warning("Gemini context cache failed; sending %s without one", model)
+                context_cached = False
+                params["messages"] = [
+                    {"role": "system", "content": system_prompt},
+                    _user_message(user),
+                ]
+                response = await litellm.acompletion(**params)
             raw_response = response
 
             # A response with no choices (empty, ``None`` or missing) carries no reply at all;

@@ -14,19 +14,19 @@ from autorubric.graders import CriterionGrader, JudgeSpec, Grader
 
 # Single LLM mode
 grader = CriterionGrader(
-    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    judge_model_config=LLMConfig(model="openai/gpt-5.6-luna"),
 )
 
 # One call per item: the judge grades the whole rubric in a single call
 # instead of one call per criterion
 grader = CriterionGrader(
-    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    judge_model_config=LLMConfig(model="openai/gpt-5.6-luna"),
     llm_calls="per_item",
 )
 
 # With custom system prompt
 grader = CriterionGrader(
-    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    judge_model_config=LLMConfig(model="openai/gpt-5.6-luna"),
     system_prompt="You are evaluating technical documentation...",
 )
 
@@ -41,7 +41,7 @@ grader = CriterionGrader(
 
 # Single LLM + few-shot
 grader = CriterionGrader(
-    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    judge_model_config=LLMConfig(model="openai/gpt-5.6-luna"),
     training_data=train_data,
     few_shot_config=FewShotConfig(n_examples=3, balance_verdicts=True),
 )
@@ -65,7 +65,7 @@ Either accepts a `DecisionModelConfig` as well as an `LLMConfig`: a decision-mod
 
 ```python
 grader = CriterionGrader(
-    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    judge_model_config=LLMConfig(model="openai/gpt-5.6-luna"),
 
     # Score normalization
     normalize=True,          # True: 0-1 range, False: raw weighted sum

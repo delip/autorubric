@@ -1,10 +1,18 @@
 """Tests for prompt construction (multi-choice NA / abstain rendering)."""
 
+import pytest
+
 from autorubric.prompts import (
+    GUIDELINES_BLOCK,
     MULTI_CHOICE_SYSTEM_PROMPT,
+    _binary_criterion_block,
+    _pre_1_7_user_prompt,
+    _shared_user_content,
+    build_few_shot_user_prompt,
     build_multi_choice_user_prompt,
+    build_user_prompt,
 )
-from autorubric.types import Criterion, CriterionOption
+from autorubric.types import Criterion, CriterionOption, CriterionVerdict, FewShotExample
 
 _NA_MARKER = "(cannot assess / not applicable)"
 
@@ -207,3 +215,69 @@ def test_binary_system_prompt_is_built_from_the_verdict_definitions():
         f"- MET: {NEGATIVE_MET_DEFINITION}\n"
         f"- UNMET: {NEGATIVE_UNMET_DEFINITION}\n"
     ) in GRADER_SYSTEM_PROMPT_DEFAULT
+
+
+class TestPerCriterionLayout:
+    """Shared content first, then examples, then the criterion."""
+
+    CRITERION = Criterion(name="c", requirement="States the boiling point", weight=1.0)
+    OTHER = Criterion(name="d", requirement="Names the unit", weight=1.0)
+    SHARED_ARGS = {"query": "Q?", "reference_submission": "REF", "guidelines": "Be strict."}
+    EXAMPLE = FewShotExample(submission="ex", verdict=CriterionVerdict.MET, reason=None)
+
+    def test_criterion_ends_every_per_criterion_prompt(self) -> None:
+        block = _binary_criterion_block(self.CRITERION)
+        prompt = build_user_prompt(self.CRITERION, "S", **self.SHARED_ARGS)
+        few_shot = build_few_shot_user_prompt(
+            self.CRITERION, "S", [self.EXAMPLE], **self.SHARED_ARGS
+        )
+        assert isinstance(prompt, str) and isinstance(few_shot, str)
+        assert prompt.endswith(block)
+        assert few_shot.endswith(block)
+
+    def test_examples_sit_just_before_the_criterion(self) -> None:
+        prompt = build_few_shot_user_prompt(self.CRITERION, "S", [self.EXAMPLE], **self.SHARED_ARGS)
+        assert isinstance(prompt, str)
+        assert (
+            prompt.index("</submission>")
+            < prompt.index("<examples>")
+            < prompt.index("</examples>")
+            < prompt.index("<criterion_type>")
+        )
+
+    def test_shared_block_is_equal_across_criteria_of_an_item(self) -> None:
+        shared = _shared_user_content("S", "Q?", "REF", guidelines="Be strict.")
+        assert isinstance(shared, str)
+        for criterion in (self.CRITERION, self.OTHER):
+            prompt = build_user_prompt(criterion, "S", **self.SHARED_ARGS)
+            assert isinstance(prompt, str)
+            assert prompt.startswith(shared + "\n\n")
+
+    @pytest.mark.parametrize("with_guidelines", [False, True])
+    @pytest.mark.parametrize("with_examples", [False, True])
+    def test_pre_1_7_text_is_the_old_layout(
+        self, with_guidelines: bool, with_examples: bool
+    ) -> None:
+        guidelines = "Be strict." if with_guidelines else None
+        block = _binary_criterion_block(self.CRITERION)
+        shared = _shared_user_content("S", "Q?", "REF", guidelines=guidelines)
+        examples = "<examples>\n<example_1>\n<example_submission>ex</example_submission>\n"
+        examples += "<verdict>MET</verdict>\n</example_1>\n</examples>"
+        if with_examples:
+            prompt = build_few_shot_user_prompt(
+                self.CRITERION,
+                "S",
+                [self.EXAMPLE],
+                "Q?",
+                reference_submission="REF",
+                guidelines=guidelines,
+            )
+        else:
+            prompt = build_user_prompt(self.CRITERION, "S", "Q?", "REF", guidelines=guidelines)
+        head = GUIDELINES_BLOCK.format(guidelines="Be strict.") if with_guidelines else ""
+        posed = f"{block}\n\n{examples}" if with_examples else block
+        assert _pre_1_7_user_prompt(prompt, shared, block, guidelines) == (
+            f"{head}{posed}\n\n<input>Q?</input>\n\n"
+            "<reference_submission>\nREF\n</reference_submission>\n\n"
+            "<submission>\nS\n</submission>"
+        )

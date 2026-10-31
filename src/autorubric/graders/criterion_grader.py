@@ -52,8 +52,10 @@ from autorubric.llm import (
     GenerateResult,
     LLMClient,
     LLMConfig,
+    _caches_prompts,
     _is_configuration_error,
     _litellm_supports_vision,
+    _prefix_reaches_cache_minimum,
     classify_grading_error,
 )
 from autorubric.prompts import (
@@ -61,7 +63,11 @@ from autorubric.prompts import (
     GRADER_SYSTEM_PROMPT_DEFAULT,
     MULTI_CHOICE_FEW_SHOT_ADDITION,
     MULTI_CHOICE_SYSTEM_PROMPT,
+    _binary_criterion_block,
     _format_rubric_examples,
+    _multi_choice_criterion_block,
+    _pre_1_7_user_prompt,
+    _shared_user_content,
     build_few_shot_user_prompt,
     build_multi_choice_few_shot_user_prompt,
     build_multi_choice_user_prompt,
@@ -2317,10 +2323,14 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         reference_submission: Content | None = None,
         *,
         guidelines: str | None = None,
+        reused: bool = True,
     ) -> CriterionResult:
         """Judge a single criterion with a single judge.
 
         Handles both binary (MET/UNMET) and multi-choice criteria.
+
+        ``reused`` says whether another call will read what this one shares with it, which is
+        worth a cache write only if so.
         """
         client = self._clients[judge.judge_id]
 
@@ -2335,6 +2345,7 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 query,
                 reference_submission,
                 guidelines=guidelines,
+                reused=reused,
             )
         else:
             return await self._judge_binary_criterion(
@@ -2346,6 +2357,7 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 query,
                 reference_submission,
                 guidelines=guidelines,
+                reused=reused,
             )
 
     async def _judge_binary_criterion(
@@ -2359,6 +2371,7 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         reference_submission: Content | None = None,
         *,
         guidelines: str | None = None,
+        reused: bool = True,
     ) -> CriterionResult:
         """Judge a binary (MET/UNMET) criterion.
 
@@ -2385,12 +2398,19 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 criterion, to_grade, query, reference_submission, guidelines=guidelines
             )
 
+        shared = _shared_user_content(to_grade, query, reference_submission, guidelines=guidelines)
+        pre_1_7_prompt = _pre_1_7_user_prompt(
+            user_prompt, shared, _binary_criterion_block(criterion), guidelines
+        )
+
         try:
             result: GenerateResult = await client.generate(
                 system_prompt=self._system_prompt,
                 user_prompt=user_prompt,
                 response_format=self._binary_response_format,
                 return_result=True,
+                shared_prefix=shared if reused else None,
+                pre_1_7_user_prompt=pre_1_7_prompt,
             )
 
             judgment = result.parsed
@@ -2425,6 +2445,7 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
         reference_submission: Content | None = None,
         *,
         guidelines: str | None = None,
+        reused: bool = True,
     ) -> CriterionResult:
         """Judge a multi-choice criterion.
 
@@ -2471,12 +2492,19 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 prompt_criterion, to_grade, query, reference_submission, guidelines=guidelines
             )
 
+        shared = _shared_user_content(to_grade, query, reference_submission, guidelines=guidelines)
+        pre_1_7_prompt = _pre_1_7_user_prompt(
+            user_prompt, shared, _multi_choice_criterion_block(prompt_criterion), guidelines
+        )
+
         try:
             result: GenerateResult = await client.generate(
                 system_prompt=self._multi_choice_system_prompt,
                 user_prompt=user_prompt,
                 response_format=self._multi_choice_response_format,
                 return_result=True,
+                shared_prefix=shared if reused else None,
+                pre_1_7_user_prompt=pre_1_7_prompt,
             )
 
             judgment: MultiChoiceJudgment = result.parsed
@@ -2665,8 +2693,8 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
     ) -> JudgeCriterionResults:
         """Evaluate all criteria for a single judge, one result per criterion, in order.
 
-        An LLM judge is asked about each criterion in its own call, all in parallel, each
-        user prompt starting with the rubric's guidelines when there are any; under
+        An LLM judge is asked about each criterion in its own call (``_judge_criteria``),
+        each user prompt starting with the rubric's guidelines when there are any; under
         ``llm_calls="per_item"`` it is asked about the whole rubric in one call instead
         (``_judge_rubric_in_one_call``), whose user prompt starts with them. A
         decision-model judge is asked about the whole rubric in one request
@@ -2684,23 +2712,92 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
             if results:
                 results[0] = dataclasses.replace(results[0], usage=usage, cost=cost)
         else:
-            tasks = [
-                self._judge_single_criterion(
-                    judge,
-                    criterion,
-                    idx,
-                    to_grade,
-                    query,
-                    reference_submission,
-                    guidelines=guidelines,
-                )
-                for idx, criterion in enumerate(rubric)
-            ]
-            results = await _gather_or_cancel(*tasks)
+            results = await self._judge_criteria(
+                judge,
+                list(enumerate(rubric)),
+                to_grade,
+                query,
+                reference_submission,
+                guidelines=guidelines,
+            )
         return JudgeCriterionResults(
             judge_id=judge.judge_id,
             weight=judge.weight,
             criterion_results=list(results),
+        )
+
+    async def _judge_criteria(
+        self,
+        judge: JudgeSpec,
+        criteria: list[tuple[int, Criterion]],
+        to_grade: Content,
+        query: Content | None = None,
+        reference_submission: Content | None = None,
+        *,
+        guidelines: str | None = None,
+    ) -> list[CriterionResult]:
+        """Ask an LLM judge about each of ``criteria`` in its own call, warming its cache first.
+
+        Calls that start out the same can only reuse a provider's prompt cache once one of
+        them has written it, so sent together they all miss. Binary and multi-choice
+        criteria have different system prompts and so share nothing: each kind with at least
+        two calls and a prefix worth caching (``_warms_cache``) sends its first call ahead
+        of the rest. Those warming calls run together, so a mixed rubric waits about one
+        call. A warming call that fails is reported as any failed call, and the rest go on.
+
+        Args:
+            judge: The LLM judge.
+            criteria: ``(criterion_idx, criterion)`` pairs.
+            to_grade: The submission, as ``judge`` receives it.
+            query: The input that prompted the submission.
+            reference_submission: An exemplar response for grading context.
+            guidelines: The rubric's guidelines.
+
+        Returns:
+            One result per entry of ``criteria``, in that order.
+        """
+
+        def call(position: int) -> Awaitable[CriterionResult]:
+            criterion_idx, criterion = criteria[position]
+            return self._judge_single_criterion(
+                judge,
+                criterion,
+                criterion_idx,
+                to_grade,
+                query,
+                reference_submission,
+                guidelines=guidelines,
+                reused=sum(c.is_multi_choice == criterion.is_multi_choice for _, c in criteria) > 1,
+            )
+
+        shared = _shared_user_content(to_grade, query, reference_submission, guidelines=guidelines)
+        warming: list[int] = []
+        for system_prompt, is_multi_choice in (
+            (self._system_prompt, False),
+            (self._multi_choice_system_prompt, True),
+        ):
+            kind = [p for p, (_, c) in enumerate(criteria) if c.is_multi_choice == is_multi_choice]
+            if len(kind) > 1 and self._warms_cache(judge, system_prompt, shared):
+                warming.append(kind[0])
+
+        results: dict[int, CriterionResult] = {}
+        results.update(
+            zip(warming, await _gather_or_cancel(*map(call, warming)), strict=True),
+        )
+        rest = [position for position in range(len(criteria)) if position not in results]
+        results.update(zip(rest, await _gather_or_cancel(*map(call, rest)), strict=True))
+        return [results[position] for position in range(len(criteria))]
+
+    @staticmethod
+    def _warms_cache(judge: JudgeSpec, system_prompt: str, shared: Content) -> bool:
+        """Whether ``judge``'s model can cache a prefix of ``system_prompt`` and ``shared``."""
+        config = judge.llm_config
+        if not isinstance(config, LLMConfig):
+            return False
+        return (
+            config.prompt_caching
+            and _caches_prompts(config.model)
+            and _prefix_reaches_cache_minimum(config.model, system_prompt, shared)
         )
 
     async def _judge_all_criteria_with_decision_model(
@@ -3433,19 +3530,13 @@ class CriterionGrader(Grader[EnsembleEvaluationReport]):
                 for criterion_idx in escalated:
                     criterion_results[criterion_idx] = results[criterion_idx]
         else:
-            results = await _gather_or_cancel(
-                *(
-                    self._judge_single_criterion(
-                        judge,
-                        rubric[criterion_idx],
-                        criterion_idx,
-                        to_grade,
-                        query,
-                        reference_submission,
-                        guidelines=guidelines,
-                    )
-                    for criterion_idx in escalated
-                )
+            results = await self._judge_criteria(
+                judge,
+                [(criterion_idx, rubric[criterion_idx]) for criterion_idx in escalated],
+                to_grade,
+                query,
+                reference_submission,
+                guidelines=guidelines,
             )
             for criterion_idx, result in zip(escalated, results, strict=True):
                 criterion_results[criterion_idx] = result

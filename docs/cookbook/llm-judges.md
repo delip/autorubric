@@ -20,7 +20,7 @@ Every call repeats the system prompt, about 1,600 tokens with OpenAI's tokenizer
 
 ## Installation and provider keys
 
-LLM judges need no extra: `pip install autorubric` installs LiteLLM. A judge's `model` is a LiteLLM model id, `provider/model`, such as `openai/gpt-4.1-mini`, `anthropic/claude-sonnet-4-5-20250929` or `gemini/gemini-3-flash-preview`. LiteLLM reads each provider's key from that provider's environment variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, ...), and `api_key=` overrides it for one config. [Supported providers](../quickstart.md#supported-providers) lists common providers and their variables; the [LiteLLM provider list](https://docs.litellm.ai/docs/providers) has the rest.
+LLM judges need no extra: `pip install autorubric` installs LiteLLM. A judge's `model` is a LiteLLM model id, `provider/model`, such as `openai/gpt-5.6-luna`, `anthropic/claude-sonnet-4-5-20250929` or `gemini/gemini-3-flash-preview`. LiteLLM reads each provider's key from that provider's environment variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, ...), and `api_key=` overrides it for one config. [Supported providers](../quickstart.md#supported-providers) lists common providers and their variables; the [LiteLLM provider list](https://docs.litellm.ai/docs/providers) has the rest.
 
 When it is imported, AutoRubric loads the nearest `.env` file at or above the working directory, in scripts and notebooks alike. Variables already set in the environment take precedence.
 
@@ -32,7 +32,7 @@ Keys are not checked when a grader is built, since checking one takes a request.
 from autorubric import LLMConfig
 
 gpt = LLMConfig(
-    model="openai/gpt-4.1-mini",  # the key comes from OPENAI_API_KEY
+    model="openai/gpt-5.6-luna",  # the key comes from OPENAI_API_KEY
     cache_enabled=True,           # reproducible re-runs (see below)
     max_parallel_requests=10,     # concurrent calls to this provider (see below)
 )
@@ -42,7 +42,7 @@ Every field except `model` has a default. [LLM Infrastructure](../api/llm.md) is
 
 | Field | Default | Meaning |
 |---|---|---|
-| `model` | required | LiteLLM model id, e.g. `"openai/gpt-4.1-mini"` |
+| `model` | required | LiteLLM model id, e.g. `"openai/gpt-5.6-luna"` |
 | `temperature` | `None` | Sampling temperature; `None` leaves it out of the request, so the provider's default applies, and any number, `0.0` included, is sent |
 | `max_tokens` | `None` | Cap on response tokens, an integer of at least 1; `None` sends no cap |
 | `top_p` | `None` | Nucleus sampling, a number in [0, 1] (`0.0` is sent); `None` sends none |
@@ -54,7 +54,7 @@ Every field except `model` has a default. [LLM Infrastructure](../api/llm.md) is
 | `api_key` | `None` | Provider key; `None` lets LiteLLM read the provider's environment variable |
 | `api_base` | `None` | Base URL of the endpoint, for proxies and self-hosted servers |
 | `thinking` | `None` | Extended thinking: a level (`"low"`, `"medium"`, `"high"`, `"none"`), a token budget, or a `ThinkingConfig` |
-| `prompt_caching` | `True` | Mark the system prompt for Anthropic's prompt cache (model ids starting with `anthropic/` or `claude`; others are unaffected) |
+| `prompt_caching` | `True` | Arrange per-criterion requests for the provider's prompt cache: what an item's calls share goes in its own message, marked where the provider needs it, and one call finishes before the rest. See [prompt caching](cost-optimization.md#step-5-enable-prompt-caching-anthropic) |
 | `seed` | `None` | Sampling seed sent with every call; for a provider LiteLLM knows takes none, such as Anthropic or Gemini, the first call's grade raises `ValueError` unless `extra_params={"drop_params": True}` |
 | `extra_headers` | `{}` | Additional HTTP headers sent with every call |
 | `extra_params` | `{}` | Additional LiteLLM parameters sent with every call |
@@ -66,7 +66,7 @@ Leaving `temperature` at `None` is recommended for reasoning models such as GPT-
 
 ### Extended thinking
 
-`thinking` turns on the provider's reasoning mode through LiteLLM. A level is sent as `reasoning_effort`, which LiteLLM translates for each provider; a token budget, as an int or `ThinkingConfig(budget_tokens=...)`, is sent as an explicit thinking budget; `None`, the default, sends nothing. Set it only for models with a reasoning mode. On others, such as `openai/gpt-4.1-mini`, LiteLLM refuses every value, `"none"` included, so the first call's grade raises `ValueError` (see [Parameters LiteLLM refuses](#parameters-litellm-refuses)). The trace, when the provider returns one as text, is in each vote's `reasoning`. A trace in any other shape is dropped, and the verdict is kept. [Extended Thinking](extended-thinking.md) covers provider support and budgets.
+`thinking` turns on the provider's reasoning mode through LiteLLM. A level is sent as `reasoning_effort`, which LiteLLM translates for each provider; a token budget, as an int or `ThinkingConfig(budget_tokens=...)`, is sent as an explicit thinking budget; `None`, the default, sends nothing. Set it only for models with a reasoning mode. On others, such as `openai/gpt-5.6-luna`, LiteLLM refuses every value, `"none"` included, so the first call's grade raises `ValueError` (see [Parameters LiteLLM refuses](#parameters-litellm-refuses)). The trace, when the provider returns one as text, is in each vote's `reasoning`. A trace in any other shape is dropped, and the verdict is kept. [Extended Thinking](extended-thinking.md) covers provider support and budgets.
 
 ### Cost
 
@@ -99,7 +99,7 @@ AutoRubric retries a call that raises one of LiteLLM's rate-limit, service-unava
 from autorubric import LLMConfig
 from autorubric.graders import CriterionGrader
 
-grader = CriterionGrader(judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"))
+grader = CriterionGrader(judge_model_config=LLMConfig(model="openai/gpt-5.6-luna"))
 report = await rubric.grade(to_grade=submission, grader=grader, query=prompt)  # one call per criterion (the default)
 
 vote = report.report[0].votes[0]
@@ -154,7 +154,7 @@ from autorubric.graders import CriterionGrader, JudgeSpec
 
 grader = CriterionGrader(
     judges=[
-        JudgeSpec(LLMConfig(model="openai/gpt-4.1-mini"), "gpt"),
+        JudgeSpec(LLMConfig(model="openai/gpt-5.6-luna"), "gpt"),
         JudgeSpec(LLMConfig(model="anthropic/claude-sonnet-4-5-20250929"), "claude"),
         JudgeSpec(LLMConfig(model="gemini/gemini-3-flash-preview"), "gemini"),
     ],
@@ -196,7 +196,7 @@ grader = CriterionGrader(
     escalation=EscalationConfig(
         judges=[
             JudgeSpec(LLMConfig(model="gemini/gemini-3-flash-preview"), "gemini"),
-            JudgeSpec(LLMConfig(model="openai/gpt-4.1-mini"), "gpt"),
+            JudgeSpec(LLMConfig(model="openai/gpt-5.6-luna"), "gpt"),
             JudgeSpec(LLMConfig(model="anthropic/claude-sonnet-4-5-20250929"), "claude"),
         ],
         threshold=0.72,
@@ -218,7 +218,7 @@ A single judge:
 
 ```python
 grader = CriterionGrader(
-    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    judge_model_config=LLMConfig(model="openai/gpt-5.6-luna"),
     llm_calls="per_item",
 )
 report = await rubric.grade(to_grade=submission, grader=grader, query=prompt)  # one call for the whole rubric
@@ -230,7 +230,7 @@ A panel — each LLM judge makes one call per item; a decision-model judge in th
 grader = CriterionGrader(
     judges=[
         JudgeSpec(DecisionModelConfig(model="jev-latest"), "jev"),
-        JudgeSpec(LLMConfig(model="openai/gpt-4.1-mini"), "gpt"),
+        JudgeSpec(LLMConfig(model="openai/gpt-5.6-luna"), "gpt"),
     ],
     llm_calls="per_item",
 )
@@ -241,7 +241,7 @@ A cascade — an escalation judge makes one full-rubric call for an item on whic
 ```python
 grader = CriterionGrader(
     judge_model_config=DecisionModelConfig(model="jev-latest"),
-    escalation=EscalationConfig(judges=LLMConfig(model="openai/gpt-4.1-mini"), threshold=0.72),
+    escalation=EscalationConfig(judges=LLMConfig(model="openai/gpt-5.6-luna"), threshold=0.72),
     llm_calls="per_item",
 )
 ```
@@ -258,7 +258,7 @@ The judge answers with one structured judgment per criterion: `RubricJudgment`, 
 
 ### Tokens and cost
 
-With N criteria, a submission (with its input and reference) of S tokens, a system prompt of P tokens, and about c tokens per criterion block, a per-criterion judge's input tokens per item and judge scale as N·(P + S + c); a `per_item` judge's scale as P_w + S + N·c, where P_w is the wrapped system prompt (the preamble, the guide for each kind of criterion present, and the closing format). For N = 10 and S = 1,000, that is roughly 26,700 input tokens per item and judge called per criterion, against roughly 3,400 (a rubric of one kind) to 5,000 (both kinds) under `per_item`. [Prompt caching](cost-optimization.md#step-5-enable-prompt-caching-anthropic) narrows the gap only for the system-prompt part: under `per_criterion` the submission follows the criterion in every call and is re-sent each time, so caching never covers it.
+With N criteria, a submission (with its input and reference) of S tokens, a system prompt of P tokens, and about c tokens per criterion block, a per-criterion judge's input tokens per item and judge scale as N·(P + S + c); a `per_item` judge's scale as P_w + S + N·c, where P_w is the wrapped system prompt (the preamble, the guide for each kind of criterion present, and the closing format). For N = 10 and S = 1,000, that is roughly 26,700 input tokens per item and judge called per criterion, against roughly 3,400 (a rubric of one kind) to 5,000 (both kinds) under `per_item`. [Prompt caching](cost-optimization.md#step-5-enable-prompt-caching-anthropic) narrows the gap on input: a `per_criterion` prompt puts the submission before the criterion, so a provider can reuse the system prompt and submission across an item's calls. It cannot reduce output, and `per_criterion` writes more of it.
 
 The call's token usage and cost ride on its first criterion's result, so a report's `token_usage` and `completion_cost` add up each judge's one call. A call in which some criteria fail alone is counted in full; a call that fails adds nothing, as a failed per-criterion call adds nothing.
 

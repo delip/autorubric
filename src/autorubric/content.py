@@ -4,7 +4,8 @@ A submission (and a query or reference submission) is ``Content``: a string, an 
 or a sequence of strings and images read in order (a *document*, such as a figure followed
 by its caption). The helpers here are the one place that reads content: they put it in a
 canonical form (``_normalize_content``), join it (``_concat``), take its text
-(``_content_text``, ``_content_preview``), tell it from other values (``_is_content``),
+(``_content_text``, ``_content_preview``), take what follows a prefix
+(``_content_removeprefix``), tell it from other values (``_is_content``),
 identify it (``_content_digest``, ``_content_key``) and read its image files
 (``_load_content``, ``_load_content_async``).
 
@@ -345,6 +346,42 @@ def _concat(*pieces: Content) -> _Normalized:
         else:
             parts.extend(normalized)
     return _normalize_content(parts)
+
+
+def _content_removeprefix(value: Content, prefix: Content) -> _Normalized | None:
+    """What follows ``prefix`` in ``value``, in canonical form, or ``None`` if ``value`` does
+    not start with it.
+
+    Text works as ``str.startswith`` and slicing do. For a document, the parts of ``prefix``
+    before its last must equal ``value``'s first parts (images by ``Image`` equality, so by
+    source, with no I/O), and its last part must start the part at that position: the same
+    image, or text the part begins with. That is how a prompt built with ``_concat`` from
+    ``prefix`` and more content starts, since ``_concat`` joins the text the two meet.
+
+    Raises:
+        TypeError: As ``_normalize_content``, for a part that is not content.
+    """
+    whole = _normalize_content(value)
+    start = _normalize_content(prefix)
+    if isinstance(whole, str) and isinstance(start, str):
+        return whole[len(start) :] if whole.startswith(start) else None
+    if start == "":
+        return whole
+    whole_parts = [whole] if isinstance(whole, str) else list(whole)
+    start_parts = [start] if isinstance(start, str) else list(start)
+    last = len(start_parts) - 1
+    if len(whole_parts) <= last or whole_parts[:last] != start_parts[:last]:
+        return None
+    meeting, ending = whole_parts[last], start_parts[last]
+    if isinstance(ending, str):
+        if not isinstance(meeting, str) or not meeting.startswith(ending):
+            return None
+        rest: list[str | Image] = [meeting[len(ending) :]]
+    elif meeting == ending:
+        rest = []
+    else:
+        return None
+    return _normalize_content([*rest, *whole_parts[last + 1 :]])
 
 
 def _has_images(value: Content) -> bool:

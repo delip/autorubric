@@ -1,3 +1,9 @@
+<input>At what temperature does water boil?</input>
+
+<submission>
+Water boils at 100 degrees Celsius at sea level.
+</submission>
+
 <criterion_type>
 positive
 </criterion_type>
@@ -5,9 +11,3 @@ positive
 <criterion>
 States the boiling point of water at sea level
 </criterion>
-
-<input>At what temperature does water boil?</input>
-
-<submission>
-Water boils at 100 degrees Celsius at sea level.
-</submission>

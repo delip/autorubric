@@ -149,22 +149,41 @@ class Provider:
         ]
 
 
-def user_message(params: dict[str, Any]) -> Any:
-    (message,) = [m for m in params["messages"] if m["role"] == "user"]
-    return message["content"]
+def user_messages(params: dict[str, Any]) -> list[Any]:
+    """The contents of a call's user messages, in order.
+
+    A per-criterion call to a model that caches prompts sends the part an item's calls
+    share (the submission included) as a user message of its own and the rest after it.
+    """
+    contents = [m["content"] for m in params["messages"] if m["role"] == "user"]
+    assert contents, "a call sends the prompt as user messages"
+    return contents
 
 
 def user_parts(params: dict[str, Any]) -> list[dict[str, Any]]:
-    content = user_message(params)
-    assert isinstance(content, list), "a prompt holding images is sent as content parts"
-    return content
+    """The content parts of a call's user messages, in order, across the messages.
+
+    A message sent as text (the criterion that follows a shared prefix, say) counts as one
+    text part; at least one message must be content parts.
+    """
+    contents = user_messages(params)
+    assert any(isinstance(c, list) for c in contents), (
+        "a prompt holding images is sent as content parts"
+    )
+    parts: list[dict[str, Any]] = []
+    for content in contents:
+        parts.extend([{"type": "text", "text": content}] if isinstance(content, str) else content)
+    return parts
 
 
 def user_text(params: dict[str, Any]) -> str:
-    content = user_message(params)
-    if isinstance(content, str):
-        return content
-    return "".join(part["text"] for part in content if part["type"] == "text")
+    texts = []
+    for content in user_messages(params):
+        if isinstance(content, str):
+            texts.append(content)
+        else:
+            texts.append("".join(part["text"] for part in content if part["type"] == "text"))
+    return "\n\n".join(texts)
 
 
 @pytest.fixture
@@ -215,6 +234,32 @@ class TestImagesReachTheProvider:
             # Spliced into the submission block, right after its opening tag.
             assert parts[image_at - 1]["text"].endswith("<submission>\n")
             assert parts[image_at + 1]["text"].startswith(CAPTION)
+
+    @pytest.mark.asyncio
+    async def test_a_split_request_carries_the_figure_in_the_shared_message(
+        self, tmp_path, provider
+    ):
+        """A per-criterion call to a model that caches prompts sends what the item's calls
+        share, the figure included, as a user message of its own, and the criterion after
+        it; a Claude model's cache marker sits on the shared message's last text part."""
+        document, path = figure(tmp_path)
+        claude = LLMConfig(model="anthropic/claude-sonnet-4-5")
+        grader = CriterionGrader(judge_model_config=claude, seed=SEED)
+        report = await Rubric([LEGIBLE, CLUTTERED]).grade(document, grader=grader)
+
+        assert report.error is None
+        assert len(provider.calls) == 2
+        for params in provider.calls:
+            shared, tail = user_messages(params)
+            assert isinstance(shared, list)
+            assert [p["image_url"]["url"] for p in shared if p["type"] == "image_url"] == [
+                data_url(path.read_bytes())
+            ]
+            assert shared[-1]["type"] == "text"
+            assert shared[-1]["text"].endswith("\n</submission>")
+            assert shared[-1]["cache_control"] == {"type": "ephemeral"}
+            assert all("cache_control" not in p for p in shared[:-1])
+            assert isinstance(tail, str) and tail.startswith("<criterion_type>")
 
     @pytest.mark.asyncio
     async def test_a_per_item_call_sends_the_figure_once(self, tmp_path, provider):
@@ -412,7 +457,8 @@ class TestLoading:
             await Rubric([LEGIBLE]).grade(TEXT, grader=grader)
         (passed,) = received
         assert passed is TEXT
-        assert user_message(provider.calls[0]).count(TEXT) == 1
+        assert all(isinstance(c, str) for c in user_messages(provider.calls[0]))
+        assert user_text(provider.calls[0]).count(TEXT) == 1
 
 
 # =============================================================================
@@ -547,10 +593,17 @@ class TestFewShotImages:
         await Rubric(rubric).grade(document, grader=grader)
 
         examples = {data_url(encoded_png("green")), data_url(encoded_png("blue"))}
+        graded = [data_url(encoded_png("red"))]
         for urls in provider.image_urls():
-            # Both examples' figures, then the graded figure, each once.
-            assert sorted(urls[:2]) == sorted(examples)
-            assert urls[2:] == [data_url(encoded_png("red"))]
+            if llm_calls == "per_criterion":
+                # The graded figure, in the part an item's calls share, then both examples'
+                # figures, each once.
+                assert urls[:1] == graded
+                assert sorted(urls[1:]) == sorted(examples)
+            else:
+                # Both examples' figures, then the graded figure, each once.
+                assert sorted(urls[:2]) == sorted(examples)
+                assert urls[2:] == graded
         # Grading read the graded figure alone: the examples hold their bytes.
         assert {p: reads[p] for p in [*paths, path]} == {**dict.fromkeys(paths, 1), path: 1}
 

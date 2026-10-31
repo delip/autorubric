@@ -112,6 +112,7 @@ extra:
 nav:
   - Home: index.md
   - Quickstart: quickstart.md
+  - Upgrade Notes: upgrading.md
   - Cookbook:
       - cookbook/index.md
       - Foundation:

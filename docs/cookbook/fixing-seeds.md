@@ -35,7 +35,7 @@ from autorubric import LLMConfig
 from autorubric.graders import CriterionGrader
 
 grader = CriterionGrader(
-    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini", temperature=0.3),
+    judge_model_config=LLMConfig(model="openai/gpt-5.6-luna"),
     seed=42,
 )
 
@@ -48,7 +48,7 @@ The seed must be `None` or an integer. A numpy integer such as `np.int64(42)` is
 
 ```python
 grader = CriterionGrader(
-    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    judge_model_config=LLMConfig(model="openai/gpt-5.6-luna"),
 )
 print(f"Auto seed: {grader.seed}")  # e.g. 1738294021
 ```
@@ -152,11 +152,11 @@ Run the same evaluation twice with the same seed:
 ```python
 async def verify_reproducibility():
     grader_a = CriterionGrader(
-        judge_model_config=LLMConfig(model="openai/gpt-4.1-mini", temperature=0.3),
+        judge_model_config=LLMConfig(model="openai/gpt-5.6-luna"),
         seed=42,
     )
     grader_b = CriterionGrader(
-        judge_model_config=LLMConfig(model="openai/gpt-4.1-mini", temperature=0.3),
+        judge_model_config=LLMConfig(model="openai/gpt-5.6-luna"),
         seed=42,
     )
 
@@ -194,7 +194,7 @@ with open(Path("experiments/seeded-run-42/manifest.json")) as f:
 
 print(manifest["grader_config"]["master_seed"])      # 42
 print(manifest["grader_config"]["shuffle_options"])   # True
-print(manifest["grader_config"]["judges"][0]["temperature"])  # 0.3 (None = provider default)
+print(manifest["grader_config"]["judges"][0]["temperature"])  # None = provider default
 ```
 
 A grader built with `llm_calls="per_item"` also records `"llm_calls": "per_item"` in `grader_config`; a grader that calls its LLM judges per criterion, the default, records no `llm_calls` key.
@@ -216,7 +216,7 @@ When using few-shot examples, the master seed automatically flows to `FewShotCon
 from autorubric import FewShotConfig
 
 grader = CriterionGrader(
-    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    judge_model_config=LLMConfig(model="openai/gpt-5.6-luna"),
     training_data=train_data,
     few_shot_config=FewShotConfig(n_examples=3),
     seed=42,  # Also governs example selection
@@ -331,7 +331,7 @@ async def main():
 
     # Create a seeded grader
     grader = CriterionGrader(
-        judge_model_config=LLMConfig(model="openai/gpt-4.1-mini", temperature=0.3),
+        judge_model_config=LLMConfig(model="openai/gpt-5.6-luna"),
         seed=42,
     )
     print(f"Master seed: {grader.seed}")

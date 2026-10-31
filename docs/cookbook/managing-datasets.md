@@ -468,7 +468,7 @@ async def main():
 
     # Evaluate the test set
     grader = CriterionGrader(
-        judge_model_config=LLMConfig(model="openai/gpt-4.1-mini")
+        judge_model_config=LLMConfig(model="openai/gpt-5.6-luna")
     )
 
     print("\n" + "=" * 60)

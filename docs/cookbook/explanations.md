@@ -48,7 +48,7 @@ rubric = Rubric.from_dict([
 ])
 
 grader = CriterionGrader(
-    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini")
+    judge_model_config=LLMConfig(model="openai/gpt-5.6-luna")
 )
 
 async def main():
@@ -124,7 +124,7 @@ from autorubric.graders import CriterionGrader, JudgeSpec
 
 grader = CriterionGrader(
     judges=[
-        JudgeSpec(LLMConfig(model="openai/gpt-4.1-mini"), "gpt"),
+        JudgeSpec(LLMConfig(model="openai/gpt-5.6-luna"), "gpt"),
         JudgeSpec(LLMConfig(model="anthropic/claude-sonnet-4-5-20250929"), "claude"),
     ],
     aggregation="majority",
@@ -250,7 +250,7 @@ async def main():
     dataset = RubricDataset.from_file(DATASET_PATH)
 
     grader = CriterionGrader(
-        judge_model_config=LLMConfig(model="openai/gpt-4.1-mini")
+        judge_model_config=LLMConfig(model="openai/gpt-5.6-luna")
     )
 
     item = dataset.items[0]

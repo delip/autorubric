@@ -766,11 +766,11 @@ class TestCalls:
 
         blocks_by_judge = {}
         for judge_id in ("a", "b"):
-            # Each per-criterion prompt is its criterion part, then the input and submission.
+            # Each per-criterion prompt is the input and submission, then its criterion part.
             parts = {}
             for call in per_criterion[judge_id].calls:
-                part, rest = call.user_prompt.split("\n\n<input>", 1)
-                assert rest == f"{QUERY}</input>\n\n<submission>\n{SUBMISSION}\n</submission>"
+                rest, part = call.user_prompt.split("</submission>\n\n", 1)
+                assert rest == f"<input>{QUERY}</input>\n\n<submission>\n{SUBMISSION}\n"
                 parts[next(c.requirement for c in rubric if c.requirement in part)] = part
             (call,) = per_item[judge_id].calls
             blocks = rubric_blocks(call.user_prompt)

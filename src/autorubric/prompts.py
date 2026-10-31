@@ -277,6 +277,61 @@ def _binary_criterion_block(criterion: Criterion) -> str:
 </criterion>"""
 
 
+def _shared_user_content(
+    to_grade: Content,
+    query: Content | None = None,
+    reference_submission: Content | None = None,
+    *,
+    guidelines: str | None = None,
+) -> Content:
+    """The start of a per-criterion user prompt: the part an item's calls have in common.
+
+    Guidelines, input, reference submission and submission, in that order. Few-shot examples
+    and the criterion follow it, since they differ from one criterion to the next and would
+    end the prefix a provider's prompt cache can reuse across the item's calls.
+
+    A ``str`` for text; a document, its images where their text would be, when a part holds
+    an image. Either way it ends with the text ``"\n</submission>"``, so a cache marker
+    placed on its last part is placed on text (``LLMClient.generate``).
+    """
+    return _concat(
+        _guidelines_block(guidelines),
+        _input_block(query),
+        _reference_block(reference_submission),
+        _submission_block(to_grade),
+    )
+
+
+def _pre_1_7_user_prompt(
+    user_prompt: Content,
+    shared: Content,
+    criterion_block: str,
+    guidelines: str | None = None,
+) -> str | None:
+    """The text a per-criterion ``user_prompt`` had before 1.7.0, or ``None`` for a document.
+
+    Used only to compute the response-cache key those releases used, so that replies cached
+    by them are still found (``LLMClient.generate``). They put the criterion and then its
+    examples after the guidelines, ahead of the input. Kept for backward compatibility and
+    planned for removal in 2.0.0.
+
+    A prompt holding an image has no earlier key to find: no release before 1.7.0 sent
+    images, so ``None`` is returned for one.
+
+    Args:
+        user_prompt: The prompt as sent now.
+        shared: Its start (``_shared_user_content``).
+        criterion_block: Its end (``_binary_criterion_block``, ``_multi_choice_criterion_block``).
+        guidelines: The rubric guidelines ``shared`` was built with.
+    """
+    if not isinstance(user_prompt, str) or not isinstance(shared, str):
+        return None
+    examples_text = user_prompt[len(shared) : -len(criterion_block)].strip("\n")
+    posed = f"{criterion_block}\n\n{examples_text}" if examples_text else criterion_block
+    guidelines_text = _guidelines_block(guidelines)
+    return f"{guidelines_text}{posed}\n\n{shared.removeprefix(guidelines_text)}"
+
+
 def build_user_prompt(
     criterion: Criterion,
     to_grade: Content,
@@ -304,19 +359,8 @@ def build_user_prompt(
         TypeError: If ``guidelines`` is neither a ``str`` nor ``None``, or a submission,
             query or reference submission is not ``Content``.
     """
-    criterion_text = _binary_criterion_block(criterion)
-    guidelines_text = _guidelines_block(guidelines)
-    query_text = _input_block(query)
-    reference_text = _reference_block(reference_submission)
-
-    return _concat(
-        guidelines_text,
-        criterion_text,
-        "\n\n",
-        query_text,
-        reference_text,
-        _submission_block(to_grade),
-    )
+    shared = _shared_user_content(to_grade, query, reference_submission, guidelines=guidelines)
+    return _concat(shared, "\n\n", _binary_criterion_block(criterion))
 
 
 def build_few_shot_user_prompt(
@@ -349,22 +393,9 @@ def build_few_shot_user_prompt(
         TypeError: If ``guidelines`` is neither a ``str`` nor ``None``, or a submission,
             query or reference submission is not ``Content``.
     """
-    criterion_text = _binary_criterion_block(criterion)
-    guidelines_text = _guidelines_block(guidelines)
-    query_text = _input_block(query)
+    shared = _shared_user_content(to_grade, query, reference_submission, guidelines=guidelines)
     examples_text = _format_few_shot_examples(examples, include_reason)
-    reference_text = _reference_block(reference_submission)
-
-    return _concat(
-        guidelines_text,
-        criterion_text,
-        "\n\n",
-        examples_text,
-        "\n\n",
-        query_text,
-        reference_text,
-        _submission_block(to_grade),
-    )
+    return _concat(shared, "\n\n", examples_text, "\n\n", _binary_criterion_block(criterion))
 
 
 def _format_few_shot_examples(
@@ -651,19 +682,8 @@ def build_multi_choice_user_prompt(
         TypeError: If ``guidelines`` is neither a ``str`` nor ``None``, or a submission,
             query or reference submission is not ``Content``.
     """
-    criterion_text = _multi_choice_criterion_block(criterion)
-    guidelines_text = _guidelines_block(guidelines)
-    query_text = _input_block(query)
-    reference_text = _reference_block(reference_submission)
-
-    return _concat(
-        guidelines_text,
-        criterion_text,
-        "\n\n",
-        query_text,
-        reference_text,
-        _submission_block(to_grade),
-    )
+    shared = _shared_user_content(to_grade, query, reference_submission, guidelines=guidelines)
+    return _concat(shared, "\n\n", _multi_choice_criterion_block(criterion))
 
 
 def build_multi_choice_few_shot_user_prompt(
@@ -697,24 +717,9 @@ def build_multi_choice_few_shot_user_prompt(
         TypeError: If ``guidelines`` is neither a ``str`` nor ``None``, or a submission,
             query or reference submission is not ``Content``.
     """
-    criterion_text = _multi_choice_criterion_block(criterion)
-    guidelines_text = _guidelines_block(guidelines)
-    query_text = _input_block(query)
-    reference_text = _reference_block(reference_submission)
-
-    # Format examples
+    shared = _shared_user_content(to_grade, query, reference_submission, guidelines=guidelines)
     examples_text = _format_multi_choice_examples(criterion, examples, include_reason)
-
-    return _concat(
-        guidelines_text,
-        criterion_text,
-        "\n\n",
-        examples_text,
-        "\n\n",
-        query_text,
-        reference_text,
-        _submission_block(to_grade),
-    )
+    return _concat(shared, "\n\n", examples_text, "\n\n", _multi_choice_criterion_block(criterion))
 
 
 def _format_multi_choice_examples(
@@ -943,8 +948,8 @@ def build_rubric_user_prompt(
     The rubric's guidelines first, when it has any, then every criterion in ``<criteria>``,
     each in a ``<rubric_criterion>`` tagged with its id and holding the block a per-criterion
     prompt poses it with (``_binary_criterion_block``, ``_multi_choice_criterion_block``),
-    then the examples, the input, the reference submission and the submission, in the order
-    a per-criterion prompt has them.
+    then the examples, the input, the reference submission and the submission. The whole
+    prompt is one call's, so unlike a per-criterion prompt it has no shared start to keep.
 
     Args:
         criteria: Each criterion with its id, in the order to list them. A multi-choice

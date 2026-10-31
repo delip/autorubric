@@ -174,7 +174,7 @@ from autorubric import LLMConfig
 from autorubric.graders import CriterionGrader
 
 grader = CriterionGrader(
-    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    judge_model_config=LLMConfig(model="openai/gpt-5.6-luna"),
     shuffle_options=True,  # Randomize option order (default)
 )
 ```
@@ -238,22 +238,22 @@ for cr in result.report:
 Sample output:
 
 ```
-Overall Score: 0.89
+Overall Score: 0.91
 
 [Excellent] detail_level
   Value: 1.00
-  Reason: Review provides specific details about dishes, service, ambiance, and pricing.
+  Reason: default: The review is highly detailed and informative, covering specific dish qualities, service expertise, ambiance, dessert limitations, and price/value. Descriptions such as the salmon’s “crispy skin and buttery interior” and the server’s pairing suggestions give readers useful, concrete information.
 
-[Positive] review_tone
+[Mixed] review_tone
+  Value: 0.50
+  Reason: default: The review is predominantly positive, praising the food, service, ambiance, and value, but it also notes a limited dessert menu and an unmemorable tiramisu; these contrasting comments make the overall tone mixed.
+
+[Outstanding] food_quality
   Value: 1.00
-  Reason: Overall positive with only minor criticism of dessert menu.
-
-[Above Average] food_quality
-  Value: 0.75
-  Reason: Reviewer praises the salmon and risotto highly, mild criticism of dessert.
+  Reason: default: The reviewer rates the food as exceptional, praising the perfectly cooked salmon and creamy risotto; although the dessert was unremarkable, the overall food quality is clearly outstanding.
 
 [UNMET] spam_content
-  Reason: No promotional or spam content detected.
+  Reason: default: The review provides a personal account of the meal, service, ambiance, and value, but it contains no spam or overt promotional content.
 ```
 
 ### Step 7: Ensemble Aggregation for Multi-Choice
@@ -558,7 +558,7 @@ async def main():
 
     # Configure grader
     grader = CriterionGrader(
-        judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
+        judge_model_config=LLMConfig(model="openai/gpt-5.6-luna"),
         shuffle_options=True,
     )
 

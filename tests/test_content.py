@@ -26,6 +26,7 @@ from autorubric.content import (
     _content_identity,
     _content_key,
     _content_preview,
+    _content_removeprefix,
     _content_text,
     _has_images,
     _images,
@@ -386,6 +387,34 @@ class TestContentHelpers:
 
     def test_content_preview_reads_no_file(self, tmp_path: Path) -> None:
         assert _content_preview([Image(tmp_path / "gone.png")]) == "[image: gone.png]"
+
+    def test_removeprefix_of_text_is_str_removeprefix(self) -> None:
+        assert _content_removeprefix("<s>x</s> rest", "<s>x</s>") == " rest"
+        assert _content_removeprefix("<s>x</s>", "") == "<s>x</s>"
+        assert _content_removeprefix("<s>x</s>", "<t>") is None
+
+    def test_removeprefix_of_a_document(self, png: bytes, other_png: bytes) -> None:
+        image, other = Image(png), Image(other_png)
+        shared = _concat("<s>\n", [image, "cap"], "\n</s>")
+        whole = _concat(shared, "\n\n<ex>", other, "</ex>")
+        assert _content_removeprefix(whole, shared) == ("\n\n<ex>", other, "</ex>")
+        assert _content_removeprefix(whole, "") == whole
+        assert _content_removeprefix(_concat(shared, "\n\nend"), shared) == "\n\nend"
+        assert _content_removeprefix(shared, shared) == ""
+        # An image prefix ending: the same image, whatever follows.
+        assert _content_removeprefix(("a", image, "b"), ("a", image)) == "b"
+
+    def test_removeprefix_refuses_what_does_not_start_the_document(
+        self, png: bytes, other_png: bytes
+    ) -> None:
+        image, other = Image(png), Image(other_png)
+        whole = ("<s>\n", image, "cap\n</s>")
+        assert _content_removeprefix(whole, ("<s>\n", other, "cap")) is None
+        assert _content_removeprefix(whole, ("<t>\n", image, "cap")) is None
+        assert _content_removeprefix(whole, ("<s>\n", image, "cap\n</s> more")) is None
+        assert _content_removeprefix(whole, ("<s>\n", image, "cap\n</s>", other)) is None
+        assert _content_removeprefix("text", ("text", image)) is None
+        assert _content_removeprefix(whole, "<s>\n") == (image, "cap\n</s>")
 
 
 class TestContentDigest:

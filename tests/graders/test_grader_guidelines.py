@@ -778,4 +778,4 @@ class TestCriterionGraderLLM:
         zero, one, two = (prompts_for(f"Item {n}.") for n in ("zero", "one", "two"))
         assert len(zero) == 2 and all(p.startswith(_block("Global guidelines.")) for p in zero)
         assert len(one) == 3 and all(p.startswith(_block("Item one guidelines.")) for p in one)
-        assert len(two) == 2 and all(p.startswith("<criterion_type>") for p in two)
+        assert len(two) == 2 and all("<guidelines>" not in p for p in two)

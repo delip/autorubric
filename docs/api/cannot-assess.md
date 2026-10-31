@@ -18,18 +18,18 @@ from autorubric.graders import CriterionGrader
 
 # Default: skip unassessable criteria (adjust denominator)
 grader = CriterionGrader(
-    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    judge_model_config=LLMConfig(model="openai/gpt-5.6-luna"),
 )
 
 # Be conservative: treat cannot-assess as failure
 grader = CriterionGrader(
-    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    judge_model_config=LLMConfig(model="openai/gpt-5.6-luna"),
     cannot_assess_config=CannotAssessConfig(strategy=CannotAssessStrategy.FAIL),
 )
 
 # Give partial credit (30%)
 grader = CriterionGrader(
-    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    judge_model_config=LLMConfig(model="openai/gpt-5.6-luna"),
     cannot_assess_config=CannotAssessConfig(
         strategy=CannotAssessStrategy.PARTIAL,
         partial_credit=0.3

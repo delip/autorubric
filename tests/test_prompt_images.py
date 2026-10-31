@@ -202,6 +202,13 @@ def test_text_alone_builds_a_string(builder: str) -> None:
     assert isinstance(build(TEXT_FIELDS), str)
 
 
+# The builders of a per-criterion prompt, which puts what an item's calls share first (the
+# guidelines, input, reference submission and submission) and the examples and criterion
+# after it. ``build_rubric_user_prompt`` keeps the examples ahead of the input and ends with
+# the submission.
+PER_CRITERION = {"user", "few_shot", "multi_choice", "multi_choice_few_shot"}
+
+
 @pytest.mark.parametrize("builder", sorted(BUILDERS))
 def test_a_submission_that_is_one_image_is_the_whole_submission_block(builder: str) -> None:
     """A bare image as the submission is the only thing inside ``<submission>``."""
@@ -213,17 +220,31 @@ def test_a_submission_that_is_one_image_is_the_whole_submission_block(builder: s
     assert isinstance(head, str)
     assert head.endswith("<submission>\n")
     assert image is RED
-    assert tail == "\n</submission>"
+    if builder in PER_CRITERION:
+        # The submission block closes the shared start; what follows it is the text
+        # prompt's own ending.
+        text_prompt = build({**TEXT_FIELDS, "submission": SENTINEL})
+        assert isinstance(text_prompt, str)
+        assert isinstance(tail, str)
+        assert tail == text_prompt.split(SENTINEL, 1)[1]
+        assert tail.startswith("\n</submission>\n\n")
+    else:
+        assert tail == "\n</submission>"
 
 
 @pytest.mark.parametrize("builder", sorted(BUILDERS))
 def test_images_in_every_field_keep_the_prompt_order(builder: str) -> None:
-    """Images in several fields appear in the order the prompt reads: examples, then the
-    input, then the reference submission, then the submission."""
+    """Images in several fields appear in the order the prompt reads: in a per-criterion
+    prompt the input, then the reference submission, then the submission, then the
+    examples; in a whole-rubric prompt the examples first, then the other three."""
     build, fields = BUILDERS[builder]
     given = {"example": GRAY, "query": GREEN, "reference": BLUE, "submission": RED}
     prompt = build({**TEXT_FIELDS, **{field: given[field] for field in fields}})
-    order = ("example", "query", "reference", "submission")
+    order = (
+        ("query", "reference", "submission", "example")
+        if builder in PER_CRITERION
+        else ("example", "query", "reference", "submission")
+    )
     expected = [given[field] for field in order if field in fields]
     parts = _image_parts(prompt)
     assert len(parts) == len(expected)

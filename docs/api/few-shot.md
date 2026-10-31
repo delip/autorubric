@@ -24,7 +24,7 @@ train_data, test_data = dataset.split_train_test(n_train=100, stratify=True, see
 
 # Configure few-shot grader
 grader = CriterionGrader(
-    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    judge_model_config=LLMConfig(model="openai/gpt-5.6-luna"),
     training_data=train_data,
     few_shot_config=FewShotConfig(
         n_examples=3,
@@ -161,7 +161,7 @@ example is a whole training item, shown once in the call with its label on every
 
 ```python
 grader = CriterionGrader(
-    judge_model_config=LLMConfig(model="openai/gpt-4.1-mini"),
+    judge_model_config=LLMConfig(model="openai/gpt-5.6-luna"),
     llm_calls="per_item",
     training_data=train_data,
     few_shot_config=FewShotConfig(n_examples=3, balance_verdicts=True, seed=42),
