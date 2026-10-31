@@ -22,7 +22,7 @@ We measured few-shot grading (five examples each) on 40 RiceChem answers and 30 
 
 | Judge | Cached before | Cached after | Cost before | Cost after |
 |---|---|---|---|---|
-| gpt-5.6-luna | 55% | 89% | $0.354 | $0.207 |
+| gpt-5.6-luna | 54% | 90% | $0.354 | $0.207 |
 | claude-haiku-5-5 | 56% | 88% | $0.244 | $0.155 |
 | gemini-3.8-flash | 2% | 45% | $3.571 | $2.860 |
 | deepseek-v4.1-flash | 42% | 82% | $0.616 | $0.724 |
