@@ -40,7 +40,7 @@ The full script is [`examples/eyeq_fundus_quality.py`](https://github.com/delip/
 
 ### Step 1: Write the Rubric from the Protocol
 
-EyeQ's paper defines each grade in a sentence. Those sentences become the options of one ordinal criterion, so the judge reads the same rules the experts used:
+EyeQ's paper defines each grade in a sentence. The grades become the options of one ordinal criterion, and the sentences go into the criterion's requirement, so the judge reads the same rules the experts used:
 
 | Grade | Rule |
 |---|---|
@@ -53,21 +53,23 @@ A second, binary criterion asks the question the screening program acts on: can 
 ```python
 from autorubric import Criterion, CriterionOption, Rubric
 
-GRADES = {
-    0: "Good: no low-quality indicators, and every retinal structure is clearly visible",
-    1: "Usable: the optic disc and macula are present, but low-quality indicators "
-       "(blur, uneven illumination, over- or under-exposure, artifacts) affect at most "
-       "20% of the fundus",
-    2: "Reject: the optic disc or the macula is missing, or low-quality indicators "
-       "cover more than 20% of the fundus",
-}
+GRADES = {0: "Good", 1: "Usable", 2: "Reject"}
 
 rubric = Rubric([
     Criterion(
         name="quality_grade",
         weight=10.0,
-        requirement="Grade the quality of this retinal fundus photograph for diabetic "
-                    "retinopathy screening.",
+        requirement=(
+            "Grade the quality of this retinal fundus photograph for diabetic "
+            "retinopathy screening, using these rules. "
+            "Good: no low-quality indicators, and every retinal structure is clearly "
+            "visible. "
+            "Usable: the optic disc and macula are present, but low-quality indicators "
+            "(blur, uneven illumination, over- or under-exposure, artifacts) affect at "
+            "most 20% of the fundus. "
+            "Reject: the optic disc or the macula is missing, or low-quality indicators "
+            "cover more than 20% of the fundus."
+        ),
         scale_type="ordinal",
         options=[
             CriterionOption(label=GRADES[0], value=1.0),
@@ -122,7 +124,7 @@ for row in rows:  # rows sampled from Label_EyeQ_train.csv
     )
 ```
 
-A multi-choice label is the option's label text, so the ground truth for `quality_grade` is the full rule.
+A multi-choice label is the option's label text, so the ground truth for `quality_grade` is `Good`, `Usable` or `Reject`.
 
 ### Step 3: Grade with Gemini
 
@@ -151,7 +153,7 @@ The summary compares the judge's verdicts with the expert labels. This is the pe
 Binary Criteria:
 Criterion                 Acc     Prec      Rec       F1    Kappa      Phi    FP    FN     FPR     FNR
 ------------------------------------------------------------------------------------------------------
-gradeable              100.0%     1.00     1.00     1.00    1.000    1.000     0     0    0.00    0.00
+gradeable               83.3%     1.00     0.75     0.86    0.667    0.707     0     1    0.00    0.25
 
 Ordinal Criteria:
 Criterion               Exact      Adj   WKappa   Spearman     RMSE
@@ -159,21 +161,21 @@ Criterion               Exact      Adj   WKappa   Spearman     RMSE
 quality_grade           50.0%   100.0%    0.571     0.8165   0.3536
 ```
 
-The judge separated usable photographs from rejected ones without error, but gave the experts' grade for only three of the six photographs. Each of the other three was one grade off (`Adj` is 100%). Both Good photographs were graded Usable, and one Usable photograph was graded Reject, so the judge was stricter than the experts. The weighted score has a mean bias of −0.17 for the same reason. The run cost $0.06.
+The judge gave the experts' grade for three of the six photographs. Each of the other three was one grade off (`Adj` is 100%). Both Good photographs were graded Usable, and one Usable photograph was graded Reject, so the judge was stricter than the experts. It also called that Usable photograph not gradeable, its one `gradeable` error (`FN` is 1). The weighted score has a mean bias of −0.22 for the same reason. The run cost $0.06.
 
 To compare judges, rerun with another model on the same photographs (`--model gemini/gemini-4-argon`). The two runs, on the same six photographs:
 
 | | gemini-3.8-flash | gemini-4-argon |
 |---|---|---|
-| `gradeable` accuracy | 6 of 6 | 6 of 6 |
+| `gradeable` accuracy | 5 of 6 | 6 of 6 |
 | `quality_grade` exact match | 3 of 6 | 5 of 6 |
 | `quality_grade` within one grade | 6 of 6 | 6 of 6 |
 | `quality_grade` weighted kappa | 0.571 | 0.889 |
-| Score RMSE | 0.236 | 0.136 |
-| Score mean bias | −0.17 (stricter than the experts) | +0.06 (more lenient) |
+| Score RMSE | 0.333 | 0.136 |
+| Score mean bias | −0.22 (stricter than the experts) | +0.06 (more lenient) |
 | Cost | $0.06 | $0.09 |
 
-gemini-4-argon agreed with the experts' grade on two more photographs, including `11937_left` (below). Its one miss went the other way from flash's: it graded a Usable photograph Good, saying it saw "no notable artifacts or low-quality indicators". On six photographs, one or two photographs separate the two judges, so the table shows how to compare judges, not which judge is better.
+gemini-4-argon agreed with the experts' grade on two more photographs, including `11937_left` (below). Its one miss went the other way from flash's: it graded a Usable photograph Good, saying it saw "no low-quality indicators". On six photographs, one or two photographs separate the two judges, so the table shows how to compare judges, not which judge is better.
 
 Six photographs are enough to show the pipeline working, not to measure the judge. Before trusting it, run it on a few hundred photographs and look at the confidence intervals (see [Judge Validation](judge-validation.md)).
 
@@ -205,14 +207,19 @@ In the gemini-3.8-flash run, the experts graded this photograph Usable and the j
 
 ```text
 11937_left.jpeg [quality_grade]
-  truth:     Usable: the optic disc and macula are present, but low-quality indicators (blur, uneven illumination, over- or under-exposure, artifacts) affect at most 20% of the fundus
-  predicted: Reject: the optic disc or the macula is missing, or low-quality indicators cover more than 20% of the fundus
-  reasoning: default: A severe dark illumination shadow and artifact completely obscure the macular region temporal to the optic disc, rendering the macula ungradable and covering a substantial portion of the fundus.
+  truth:     Usable
+  predicted: Reject
+  reasoning: default: A prominent dark artifact and uneven illumination obscure the macular region and cover more than 20% of the fundus, meeting the criteria for Reject.
+
+11937_left.jpeg [gradeable]
+  truth:     MET
+  predicted: UNMET
+  reasoning: default: The photograph is unusable for diabetic retinopathy screening because a large shadow artifact directly obscures the macular region, preventing adequate visualization of the macula.
 ```
 
-The dark region the judge calls a shadow is where the macula lies, and the macula normally looks darker than the rest of the retina. We think the judge mistook it for an illumination artifact, though only a grader could say how much of the darkness is real shadow. The judge's two verdicts on this photograph also disagree with each other. Asked the `gradeable` question in a separate call, it found the macula "within the field of view" and the photograph usable. To catch that kind of inconsistency, compare the criteria of one item, or grade the whole rubric in one call with `llm_calls="per_item"` (see [Holistic Rubric grading](single-call-grading.md)).
+The dark region the judge calls an artifact is where the macula lies, and the macula normally looks darker than the rest of the retina. We think the judge mistook it for an illumination artifact, though only a grader could say how much of the darkness is real shadow. The judge made the same reading in both of its calls, so the two verdicts agree with each other and both disagree with the experts. A judge reading the photograph differently in its two calls would show as a `quality_grade` and a `gradeable` verdict that contradict each other; comparing the criteria of one item catches that.
 
-The two Good photographs that the judge graded Usable show a different pattern. The judge described "slight haze" and "mild blur" in each, and EyeQ's Good grade allows no low-quality indicators at all, so the judge applied the rule more literally than the experts did. A rubric option that says which minor flaws a Good photograph may still have would test that.
+The two Good photographs that the judge graded Usable show the same strictness. For one, the judge again saw "a localized dark shadow/artifact over the macular region"; for the other, it described "slight haziness/blur and uneven illumination". EyeQ's Good grade allows no low-quality indicators at all, so the judge applied the rule more literally than the experts did. A requirement that says which minor flaws a Good photograph may still have would test that.
 
 ## Running It
 

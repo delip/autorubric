@@ -48,28 +48,25 @@ from autorubric import (
 )
 from autorubric.graders import CriterionGrader
 
-# EyeQ's label codes and the grading rules its paper gives for each grade.
-GRADES = {
-    0: "Good: no low-quality indicators, and every retinal structure is clearly visible",
-    1: (
-        "Usable: the optic disc and macula are present, but low-quality indicators "
-        "(blur, uneven illumination, over- or under-exposure, artifacts) affect at most "
-        "20% of the fundus"
-    ),
-    2: (
-        "Reject: the optic disc or the macula is missing, or low-quality indicators "
-        "cover more than 20% of the fundus"
-    ),
-}
+# EyeQ's label codes, in the order of its grades.
+GRADES = {0: "Good", 1: "Usable", 2: "Reject"}
 
 RUBRIC = Rubric(
     [
         Criterion(
             name="quality_grade",
             weight=10.0,
+            # The grading rules EyeQ's paper gives for each grade.
             requirement=(
                 "Grade the quality of this retinal fundus photograph for diabetic "
-                "retinopathy screening."
+                "retinopathy screening, using these rules. "
+                "Good: no low-quality indicators, and every retinal structure is clearly "
+                "visible. "
+                "Usable: the optic disc and macula are present, but low-quality indicators "
+                "(blur, uneven illumination, over- or under-exposure, artifacts) affect at "
+                "most 20% of the fundus. "
+                "Reject: the optic disc or the macula is missing, or low-quality indicators "
+                "cover more than 20% of the fundus."
             ),
             scale_type="ordinal",
             options=[
@@ -155,7 +152,7 @@ async def main() -> None:
 
     print("== Data ==")
     for item in dataset.items:
-        print(f"{item.description:24s} truth: {item.ground_truth[0].split(':')[0]}")
+        print(f"{item.description:24s} truth: {item.ground_truth[0]}")
 
     grader = CriterionGrader(judge_model_config=LLMConfig(model=args.model), seed=args.seed)
     result = await evaluate(
