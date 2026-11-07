@@ -144,8 +144,10 @@ nav:
           - Per-Item Rubrics: cookbook/per-item-rubrics.md
           - Cost Optimization: cookbook/cost-optimization.md
           - Configuration Management: cookbook/configuration-management.md
+      - Use cases:
           - Evaluating Agent Skills: cookbook/agent-skill-evaluation.md
           - Improving Agent Skills: cookbook/improving-agent-skills.md
+          - Fundus Image Quality (EyeQ): cookbook/fundus-image-quality.md
   - API Reference:
       - api/index.md
       - Core Grading: api/core-grading.md

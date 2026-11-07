@@ -64,8 +64,16 @@ Advanced patterns for specific needs.
 | [Per-Item Rubrics](per-item-rubrics.md) | Coding Interviews | Different rubrics for different items |
 | [Cost Optimization](cost-optimization.md) | News Fact-Checking | Caching and model selection strategies |
 | [Configuration Management](configuration-management.md) | Academic Papers | Sharing reproducible configs across teams |
+
+### Use cases
+
+End-to-end applications of AutoRubric to a specific task.
+
+| Recipe | Domain | What You'll Learn |
+|--------|--------|-------------------|
 | [Evaluating Agent Skills](agent-skill-evaluation.md) | Peer Review | Skill evaluation with with/without-skill comparison |
 | [Improving Agent Skills](improving-agent-skills.md) | Peer Review | Automated skill refinement using rubric feedback |
+| [Fundus Image Quality (EyeQ)](fundus-image-quality.md) | Retinal Screening | Grading images against a clinical protocol with an LLM judge |
 
 ## Quick Start
 
