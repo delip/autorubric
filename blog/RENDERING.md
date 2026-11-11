@@ -158,6 +158,12 @@ and screenshot it:
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless --hide-scrollbars --force-device-scale-factor=1 --window-size=1200,630 --screenshot=blog/posts/SLUG/card.png "file://$PWD/blog/posts/SLUG/card.html"
 ```
 
+Design the card for the smallest place it appears. LinkedIn shows a link's image as
+a thumbnail about 250px wide, so anything set below roughly 80px on the 1200px card
+is unreadable there. Use few words (a short headline, the wordmark, at most a
+version or date), very large type, and one bold shape. Leave out URLs, captions and
+fine detail. Check it by scaling `card.png` down to 256px wide and reading it.
+
 Set `og:image:alt` to a sentence describing the card. Keep `card.png` under about
 300 KB (flat color compresses well; avoid noise and photographs).
 

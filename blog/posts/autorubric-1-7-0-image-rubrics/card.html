@@ -13,63 +13,45 @@
         position: relative;
     }
     .mono { font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace; }
-    .brand { position: absolute; left: 72px; top: 72px; display: flex; align-items: center; gap: 20px; }
-    .wordmark { font-size: 34px; font-weight: 700; }
+    /* Sized to stay legible when a platform shrinks the card to a ~250px thumbnail. */
+    .brand { position: absolute; left: 64px; top: 56px; display: flex; align-items: center; gap: 20px; }
+    .wordmark { font-size: 40px; font-weight: 700; }
     .version {
-        font-size: 22px; color: #f0b429; padding: 6px 14px; border-radius: 8px;
-        border: 2px solid rgba(240, 180, 41, 0.55); background: rgba(240, 180, 41, 0.10);
+        font-size: 30px; font-weight: 700; color: #0d1117; background: #f0b429;
+        padding: 6px 16px; border-radius: 8px;
     }
     h1 {
-        position: absolute; left: 72px; top: 196px; width: 600px;
-        font-size: 60px; line-height: 1.15; font-weight: 700; letter-spacing: -0.5px;
+        position: absolute; left: 64px; top: 204px; width: 800px;
+        font-size: 104px; line-height: 1.06; font-weight: 700; letter-spacing: -2px;
     }
     h1 span { display: block; color: #f0b429; }
-    .url { position: absolute; left: 72px; bottom: 64px; font-size: 22px; color: #8b949e; }
 
-    .motif { position: absolute; left: 740px; top: 72px; width: 388px; }
+    .motif { position: absolute; left: 868px; top: 178px; width: 268px; height: 330px; }
     .sheet {
-        width: 388px; height: 243px; background: #ffffff; border-radius: 12px;
-        border: 1px solid #30363d; display: block;
+        position: absolute; left: 0; top: 0; width: 268px; height: 268px;
+        background: #ffffff; border-radius: 24px; display: block;
     }
-    .rows { margin-top: 20px; display: grid; gap: 12px; }
-    .row {
-        height: 56px; display: flex; align-items: center; justify-content: space-between;
-        padding: 0 18px 0 20px; background: #161b22; border: 1px solid #30363d; border-radius: 8px;
-        font-size: 22px;
+    .badge {
+        position: absolute; right: -20px; bottom: 0; width: 132px; height: 132px;
+        border-radius: 50%; background: #f0b429; border: 10px solid #0d1117;
+        display: flex; align-items: center; justify-content: center;
     }
-    .row.key { background: #21262d; box-shadow: inset 4px 0 0 #f0b429; }
-    .chip {
-        font-size: 16px; font-weight: 700; padding: 4px 12px; border-radius: 8px;
-        color: #8b949e; background: #21262d; border: 1px solid #30363d;
-    }
-    .row.key .chip { background: #161b22; }
-    .chip.met { color: #f0b429; background: rgba(240, 180, 41, 0.10); border-color: rgba(240, 180, 41, 0.55); }
 </style>
 </head>
 <body>
     <div class="brand"><span class="wordmark">AutoRubric</span><span class="version mono">v1.7.0</span></div>
-    <h1>AutoRubric 1.7.0: <span>grade images against a rubric</span></h1>
-    <div class="url">autorubric.org/blog</div>
+    <h1>Grade images <span>against a rubric</span></h1>
 
     <div class="motif" aria-hidden="true">
-        <svg class="sheet" viewBox="0 0 388 243" xmlns="http://www.w3.org/2000/svg">
-            <g stroke="#e5e7eb" stroke-width="1">
-                <line x1="40" y1="60" x2="364" y2="60"/><line x1="40" y1="105" x2="364" y2="105"/>
-                <line x1="40" y1="150" x2="364" y2="150"/><line x1="40" y1="195" x2="364" y2="195"/>
-            </g>
-            <polyline points="40,22 40,212 364,212" fill="none" stroke="#1f2328" stroke-width="2"/>
-            <polyline points="56,190 104,140 180,103 236,72 276,64 324,60 352,58"
-                fill="none" stroke="#2b6cb0" stroke-width="4" stroke-linejoin="round"/>
-            <g fill="#2b6cb0">
-                <circle cx="56" cy="190" r="6"/><circle cx="104" cy="140" r="6"/><circle cx="180" cy="103" r="6"/>
-                <circle cx="236" cy="72" r="6"/><circle cx="276" cy="64" r="6"/><circle cx="324" cy="60" r="6"/>
-                <circle cx="352" cy="58" r="6"/>
-            </g>
+        <svg class="sheet" viewBox="0 0 268 268" xmlns="http://www.w3.org/2000/svg">
+            <polyline points="44,36 44,224 232,224" fill="none" stroke="#1f2328" stroke-width="8"
+                stroke-linecap="round" stroke-linejoin="round"/>
+            <polyline points="64,196 100,140 140,104 180,84 224,76" fill="none" stroke="#2b6cb0"
+                stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
-        <div class="rows">
-            <div class="row"><span class="mono">axes</span><span class="chip">UNMET</span></div>
-            <div class="row key"><span class="mono">trend</span><span class="chip">UNMET</span></div>
-            <div class="row"><span class="mono">chart_type</span><span class="chip met">MET</span></div>
+        <div class="badge">
+            <svg width="72" height="72" viewBox="0 0 24 24" fill="none" stroke="#0d1117" stroke-width="3.5"
+                stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
         </div>
     </div>
 </body>
