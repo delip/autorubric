@@ -55,7 +55,7 @@ draft: true                                # left out of the deployed site
 variables:                                 # used in the body as {{ name }}
   judge_model: openai/gpt-5.6-luna
 canonical: https://example.com/original    # when the post first appeared elsewhere
-image: hero.png                            # social image instead of card.png
+image: card.png?v=2                        # a new URL for a replaced card, or another image file
 math: false                                # the post has no LaTeX
 chrome: none                               # the post brings its own header and footer
 ---

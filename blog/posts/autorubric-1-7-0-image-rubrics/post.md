@@ -6,6 +6,7 @@ version: 1
 description: AutoRubric 1.7.0 grades charts, screenshots and scans against a rubric with LLM judges and decision models, and lowers per-criterion cost with prompt caching.
 tags: [release, images, prompt-caching]
 author: Delip Rao
+image: card.png?v=2
 variables:
   release: 1.7.0
   release_date: October 31, 2026
