@@ -220,23 +220,22 @@ One inline script at the end of `<body>` (plus the shared footer's year script):
 
 `card.html` → `card.png`, 1200×630, body `#0d1117`, system font stack
 (`'Inter', -apple-system, …`; JetBrains Mono → SF Mono/Menlo for mono), rendered
-with headless Chrome at device scale 1 (about 50 KB).
+with headless Chrome at device scale 1 (about 43 KB). Everything is sized to stay
+legible when a platform shrinks the card to a thumbnail about 250px wide, as LinkedIn
+does: few words, very large type, one bold motif, no small text.
 
-- Top left at (72, 72): "AutoRubric" wordmark 34px/700 `#e6edf3`, then 20px gap and a
-  "v1.7.0" badge (mono 22px, gold, padding `6px 14px`, radius 8px, 2px gold 55%
-  border, gold 10% fill).
-- Title at (72, 196), 600px wide, 60px/1.15/700, letter-spacing −0.5px:
-  "AutoRubric 1.7.0:" in `#e6edf3`, then "grade images against a rubric" on its own
-  lines in gold `#f0b429`.
-- "autorubric.org/blog" at left 72, bottom 64, 22px `#8b949e`.
-- Motif at (740, 72), 388px wide: a white 388×243 sheet (radius 12px, 1px `#30363d`)
-  holding an inline-SVG line chart drawn after Bob's (rising, then flat; four light
-  gridlines, dark axes, blue `#2b6cb0` 4px line with seven 6px dots, no labels); 20px
-  below, three rows 56px tall, 12px apart (`#161b22`, 1px `#30363d`, radius 8px, 22px
-  mono criterion name left, chip right): `axes` UNMET, `trend` UNMET (row on
-  `#21262d` with a 4px gold inset left bar), `chart_type` MET. Chips 16px/700, padding
-  `4px 12px`, radius 8px; MET gold on gold 10% with gold 55% border; UNMET `#8b949e`.
-  These are Bob's verdicts from the post.
+- Top left at (64, 56): "AutoRubric" wordmark 40px/700 `#e6edf3`, then a 20px gap and a
+  "v1.7.0" badge (mono 30px/700, `#0d1117` on solid gold `#f0b429`, padding `6px 16px`,
+  radius 8px).
+- Headline at (64, 204), 800px wide, 104px/1.06/700, letter-spacing −2px: "Grade images"
+  in `#e6edf3`, then "against a rubric" on its own line in gold. The version is in the
+  badge, so the headline drops "AutoRubric 1.7.0:".
+- Motif at (868, 178), 268×330: a white 268×268 sheet (radius 24px) holding an inline-SVG
+  chart with no labels (dark `#1f2328` axes, 8px stroke; a blue `#2b6cb0` 14px line that
+  rises and flattens, round caps). Overlapping its bottom-right corner (right −20px,
+  bottom 0) is a 132px gold circle with a 10px `#0d1117` ring and a 72px dark check mark
+  (Feather `check`, stroke 3.5).
+- No URL line and no rubric rows: neither survives the thumbnail size.
 
 ## Deviations
 
@@ -277,3 +276,6 @@ with headless Chrome at device scale 1 (about 50 KB).
   `wordCount` 2102 → 2105.
 - v1 (2026-11-10): the example explanation is now real output (Bob's report graded once with
   `openai/gpt-5.6-luna`; the `axes` line); the paragraph above it reworded; `wordCount` 2105 → 2099.
+- v1 (2026-11-10): social card redesigned after seeing it on LinkedIn, where link previews
+  are small thumbnails: larger type (104px headline), a solid version badge, one large motif;
+  `og:image:alt` and `twitter:image:alt` rewritten to match.
