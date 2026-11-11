@@ -19,13 +19,13 @@
 A Python library for evaluating text outputs against weighted criteria using AI judges such as LLMs and decision models.
 
 ```bibtex
-  @misc{rao2026autorubric,
-        title={Autorubric: A Unified Framework for Rubric-Based LLM Evaluation},
+  @inproceedings{rao2026autorubric,
+        title={Autorubric: A Unifying Framework for Rubric-Based LLM Evaluation on Non-Verifiable Tasks},
         author={Delip Rao and Chris Callison-Burch},
+        booktitle={Conference on Language Modeling (COLM)},
         year={2026},
         eprint={2603.00077},
         archivePrefix={arXiv},
-        primaryClass={cs.CL},
         url={https://arxiv.org/abs/2603.00077},
   }
 ```

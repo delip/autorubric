@@ -8,7 +8,7 @@
     <meta name="description"
         content="Publications and preprints from the AutoRubric project on rubric-based LLM evaluation, LLM-as-a-Judge, ensemble judging, and meta-rubric evaluation.">
     <meta name="keywords"
-        content="AutoRubric, publications, rubric-based LLM evaluation, LLM-as-a-Judge, ensemble judging, meta-rubric evaluation, Delip Rao, Chris Callison-Burch, arXiv 2603.00077">
+        content="AutoRubric, publications, rubric-based LLM evaluation, LLM-as-a-Judge, ensemble judging, meta-rubric evaluation, Delip Rao, decision models, Chris Callison-Burch, COLM 2026, arXiv 2603.00077">
     <meta name="robots" content="index, follow, max-image-preview:large">
     <link rel="canonical" href="https://autorubric.org/research/">
 
@@ -35,6 +35,38 @@
     "meta-rubric evaluation"
   ],
   "hasPart": [
+    {
+      "@type": "ScholarlyArticle",
+      "name": "Decision Models vs. LLMs as Rubric Judges: Cheaper, Faster, and Wrong in the Same Places",
+      "headline": "Decision Models vs. LLMs as Rubric Judges: Cheaper, Faster, and Wrong in the Same Places",
+      "author": [
+        {
+          "@type": "Person",
+          "name": "Delip Rao"
+        },
+        {
+          "@type": "Person",
+          "name": "Chris Callison-Burch"
+        }
+      ],
+      "datePublished": "2026",
+      "url": "https://arxiv.org/abs/2609.29769",
+      "sameAs": "https://arxiv.org/abs/2609.29769",
+      "identifier": "arXiv:2609.29769",
+      "publisher": {
+        "@type": "Organization",
+        "name": "arXiv"
+      },
+      "creativeWorkStatus": "Preprint",
+      "inLanguage": "en",
+      "about": [
+        "LLM-as-a-Judge",
+        "decision models",
+        "rubric-based evaluation",
+        "judge cascades"
+      ],
+      "abstract": "LLM judges now score outputs against rubrics, in benchmarks and as training rewards. Decision models return probabilities over permitted answers with a confidence score but no free text. Two such models are Jev and an open reproduction, Perplexity's Decider. We compare each with three flash-tier LLM judges on nine panels from seven benchmarks with human judgments, giving every judge identical criterion texts. The LLM judges run in two setups, reading a whole rubric at once or one criterion at a time. Our findings suggest both decision models can often stand in for them. The LLM judges cost 16 to 357 times as much and take 5 to 350 times as long, yet in both setups each decision model trails them significantly in at most 6 of 27 comparisons. The two kinds of judge err alike, agreeing more with one another than with the human-annotated judgment labels on ordinal criteria. Over 85% of flash-tier LLM verdicts on either decision model's most confident errors repeat them, where independent errors would give about half. Each decision model's confidence ranks its errors on most ordinal panels, so each is a natural first stage for a cascade deferring uncertain verdicts to an LLM judge. Yet with flash-tier fallbacks, such cascades gained a mere 2.7 points at best over the strongest single judge, even with oracle thresholds, suggesting they mainly save cost. A cascade needs a fallback that is right where its first stage errs, but the LLM judges are mostly wrong in the same places as Jev, and the Decider is already the strongest single judge on most panels. Even each vendor's higher-tier model repeats those errors, and as a fallback it lifted no cascade more than 1.7 points above both tiers' strongest single judge. Holding across setups, effort levels, and tiers, these findings suggest designing future decision models afresh to get right what LLM judges get wrong, and vice versa."
+    },
     {
       "@type": "ScholarlyArticle",
       "name": "Agreement Metrics for LLM-as-Judge Evaluation: What to Report and Why",
@@ -69,8 +101,8 @@
     },
     {
       "@type": "ScholarlyArticle",
-      "name": "AutoRubric: A Unified Framework for Rubric-Based LLM Evaluation",
-      "headline": "AutoRubric: A Unified Framework for Rubric-Based LLM Evaluation",
+      "name": "Autorubric: A Unifying Framework for Rubric-Based LLM Evaluation on Non-Verifiable Tasks",
+      "headline": "Autorubric: A Unifying Framework for Rubric-Based LLM Evaluation on Non-Verifiable Tasks",
       "author": [
         {
           "@type": "Person",
@@ -85,18 +117,18 @@
       "url": "https://arxiv.org/abs/2603.00077",
       "sameAs": "https://arxiv.org/abs/2603.00077",
       "identifier": "arXiv:2603.00077",
-      "publisher": {
-        "@type": "Organization",
-        "name": "arXiv"
+      "isPartOf": {
+        "@type": "PublicationIssue",
+        "name": "Conference on Language Modeling (COLM 2026)"
       },
-      "creativeWorkStatus": "Preprint",
+      "creativeWorkStatus": "Published",
       "inLanguage": "en",
       "about": [
         "LLM evaluation",
         "rubric-based evaluation",
         "LLM-as-a-Judge"
       ],
-      "abstract": "Rubric-based evaluation with large language models (LLMs) has become standard practice for assessing text generation at scale, yet the underlying techniques are scattered across papers with inconsistent terminology and partial solutions. We present a unified framework: each identified technique is paired with its realization in AutoRubric, an open-source Python framework proposed in this paper. AutoRubric supports binary, ordinal, and nominal criteria with configurable weights; single-judge and multi-judge ensemble evaluation with majority, weighted, unanimous, and any-vote aggregation; few-shot calibration with verdict-balanced sampling; and mitigations for position bias (option shuffling), verbosity bias (length penalties), and criterion conflation (per-criterion atomic evaluation with natural language explanations). The framework provides reliability metrics drawn from psychometrics (Cohen's kappa, weighted kappa, correlation coefficients, and distribution-level tests) alongside production infrastructure including response caching, checkpointing with resumable runs, multi-provider rate limiting, and cost tracking. We evaluate AutoRubric on three benchmarks spanning educational assessment, deep research evaluation, and chatbot quality assessment, demonstrating that it produces results consistent with published benchmarks. We also contribute CHARM-100, a 100-sample chatbot evaluation dataset with per-sample ground truth labels across all three criterion types. Beyond measurement, we demonstrate an application where per-criterion rubric scores serve as an optimization signal for iterative agent skill improvement, raising a peer review agent's score from 0.46 to 0.89 in a single revision."
+      "abstract": "Rubric-based LLM judges have become indispensable for evaluating and optimizing systems on non-verifiable tasks, where success cannot be reduced to exact programmatic checks. Yet the underlying judges remain vulnerable to position bias, stochastic inconsistency, criterion conflation, forced judgments under uncertainty, and model-dependent calibration. Rubrics structure evaluation but do not eliminate these failures; they add consequential choices about criterion design, scale types, weighting, aggregation, abstention, calibration, and reliability measurement. Despite extensive research across LLM evaluation, educational measurement, and psychometrics, the relevant methods remain scattered across papers and partial implementations. Researchers therefore pay a reinvention tax, repeatedly rebuilding evaluation machinery instead of accumulating knowledge on a common substrate. We introduce Autorubric, an open-source framework that makes rubric and judge choices explicit, reusable, and auditable. Through a unified API, it supports atomic evaluation of mixed criterion types alongside configurable bias mitigations, calibration, ensembling, abstention, and psychometric diagnostics. Evaluations spanning college chemistry grading, deep-research systems, and CHARM-100—a new mixed-criterion chatbot benchmark—reveal criterion-specific failures, systematic judge-family differences, and configuration effects that do not support a universal mitigation stack. We further demonstrate how per-criterion scores and explanations can support agent skill revision and reward modeling for reinforcement learning. By providing shared infrastructure from measurement through optimization, Autorubric gives the community a common basis for comparing methods, reproducing evaluation choices, and accumulating evidence across studies."
     }
   ]
 }
@@ -513,6 +545,37 @@
             <div class="container">
                 <article class="pub">
                     <h3 class="pub-title">
+                        <a href="https://arxiv.org/abs/2609.29769" target="_blank" rel="noopener noreferrer">Decision Models vs. LLMs as Rubric Judges: Cheaper, Faster, and Wrong in the Same Places</a>
+                    </h3>
+                    <p class="pub-authors"><a href="https://deliprao.com" target="_blank" rel="noopener noreferrer">Delip Rao</a>, <a href="https://www.cis.upenn.edu/~ccb/index.html" target="_blank" rel="noopener noreferrer">Chris Callison-Burch</a></p>
+                    <p class="pub-meta">arXiv preprint &middot; cs.CL &middot; 2026</p>
+                    <details class="pub-abstract">
+                        <summary>Abstract</summary>
+                        <div class="pub-abstract-body">LLM judges now score outputs against rubrics, in benchmarks and as training rewards. Decision models return probabilities over permitted answers with a confidence score but no free text. Two such models are Jev and an open reproduction, Perplexity's Decider. We compare each with three flash-tier LLM judges on nine panels from seven benchmarks with human judgments, giving every judge identical criterion texts. The LLM judges run in two setups, reading a whole rubric at once or one criterion at a time. Our findings suggest both decision models can often stand in for them. The LLM judges cost 16 to 357 times as much and take 5 to 350 times as long, yet in both setups each decision model trails them significantly in at most 6 of 27 comparisons. The two kinds of judge err alike, agreeing more with one another than with the human-annotated judgment labels on ordinal criteria. Over 85% of flash-tier LLM verdicts on either decision model's most confident errors repeat them, where independent errors would give about half. Each decision model's confidence ranks its errors on most ordinal panels, so each is a natural first stage for a cascade deferring uncertain verdicts to an LLM judge. Yet with flash-tier fallbacks, such cascades gained a mere 2.7 points at best over the strongest single judge, even with oracle thresholds, suggesting they mainly save cost. A cascade needs a fallback that is right where its first stage errs, but the LLM judges are mostly wrong in the same places as Jev, and the Decider is already the strongest single judge on most panels. Even each vendor's higher-tier model repeats those errors, and as a fallback it lifted no cascade more than 1.7 points above both tiers' strongest single judge. Holding across setups, effort levels, and tiers, these findings suggest designing future decision models afresh to get right what LLM judges get wrong, and vice versa.</div>
+                    </details>
+                    <div class="pub-links">
+                        <a class="chip chip-arxiv" href="https://arxiv.org/abs/2609.29769" target="_blank" rel="noopener noreferrer">arXiv</a>
+                        <a class="chip" href="https://arxiv.org/pdf/2609.29769" target="_blank" rel="noopener noreferrer">PDF</a>
+                    </div>
+                    <details class="cite">
+                        <summary class="chip">Cite (BibTeX)</summary>
+                        <div class="cite-panel">
+                            <button class="copy-bib" type="button" data-bib="bib-rao2026decision">Copy</button>
+                            <pre id="bib-rao2026decision">@misc{rao2026decision,
+    title={Decision Models vs. LLMs as Rubric Judges: Cheaper, Faster, and Wrong in the Same Places},
+    author={Delip Rao and Chris Callison-Burch},
+    year={2026},
+    eprint={2609.29769},
+    archivePrefix={arXiv},
+    primaryClass={cs.CL},
+    url={https://arxiv.org/abs/2609.29769},
+}</pre>
+                        </div>
+                    </details>
+                </article>
+
+                <article class="pub">
+                    <h3 class="pub-title">
                         <a href="https://arxiv.org/abs/2606.00093" target="_blank" rel="noopener noreferrer">Agreement Metrics for LLM-as-Judge Evaluation: What to Report and Why</a>
                     </h3>
                     <p class="pub-authors"><a href="https://deliprao.com" target="_blank" rel="noopener noreferrer">Delip Rao</a>, <a href="https://www.cis.upenn.edu/~ccb/index.html" target="_blank" rel="noopener noreferrer">Chris Callison-Burch</a></p>
@@ -545,13 +608,13 @@
 
                 <article class="pub">
                     <h3 class="pub-title">
-                        <a href="https://arxiv.org/abs/2603.00077" target="_blank" rel="noopener noreferrer">AutoRubric: A Unified Framework for Rubric-Based LLM Evaluation</a>
+                        <a href="https://arxiv.org/abs/2603.00077" target="_blank" rel="noopener noreferrer">Autorubric: A Unifying Framework for Rubric-Based LLM Evaluation on Non-Verifiable Tasks</a>
                     </h3>
                     <p class="pub-authors"><a href="https://deliprao.com" target="_blank" rel="noopener noreferrer">Delip Rao</a>, <a href="https://www.cis.upenn.edu/~ccb/index.html" target="_blank" rel="noopener noreferrer">Chris Callison-Burch</a></p>
-                    <p class="pub-meta">arXiv preprint · cs.CL · 2026</p>
+                    <p class="pub-meta">COLM 2026 &middot; Conference on Language Modeling</p>
                     <details class="pub-abstract">
                         <summary>Abstract</summary>
-                        <div class="pub-abstract-body">Rubric-based evaluation with large language models (LLMs) has become standard practice for assessing text generation at scale, yet the underlying techniques are scattered across papers with inconsistent terminology and partial solutions. We present a unified framework: each identified technique is paired with its realization in AutoRubric, an open-source Python framework proposed in this paper. AutoRubric supports binary, ordinal, and nominal criteria with configurable weights; single-judge and multi-judge ensemble evaluation with majority, weighted, unanimous, and any-vote aggregation; few-shot calibration with verdict-balanced sampling; and mitigations for position bias (option shuffling), verbosity bias (length penalties), and criterion conflation (per-criterion atomic evaluation with natural language explanations). The framework provides reliability metrics drawn from psychometrics (Cohen's $\kappa$, weighted $\kappa$, correlation coefficients, and distribution-level tests) alongside production infrastructure including response caching, checkpointing with resumable runs, multi-provider rate limiting, and cost tracking. We evaluate AutoRubric on three benchmarks spanning educational assessment, deep research evaluation, and chatbot quality assessment, demonstrating that it produces results consistent with published benchmarks while exercising the framework's key capabilities: per-criterion binary evaluation with few-shot calibration (RiceChem), multi-judge ensemble evaluation across judge models (ResearcherBench), and mixed criterion types combining binary, ordinal, and nominal scales (CHARM-100). We also contribute CHARM-100, a 100-sample chatbot evaluation dataset with per-sample ground truth labels across all three criterion types, designed to stress-test rubric evaluation frameworks on heterogeneous criteria. Beyond measurement, we demonstrate an application where per-criterion rubric scores serve as an optimization signal for iterative agent skill improvement, raising a peer review agent's score from 0.46 to 0.89 in a single revision.</div>
+                        <div class="pub-abstract-body">Rubric-based LLM judges have become indispensable for evaluating and optimizing systems on non-verifiable tasks, where success cannot be reduced to exact programmatic checks. Yet the underlying judges remain vulnerable to position bias, stochastic inconsistency, criterion conflation, forced judgments under uncertainty, and model-dependent calibration. Rubrics structure evaluation but do not eliminate these failures; they add consequential choices about criterion design, scale types, weighting, aggregation, abstention, calibration, and reliability measurement. Despite extensive research across LLM evaluation, educational measurement, and psychometrics, the relevant methods remain scattered across papers and partial implementations. Researchers therefore pay a reinvention tax, repeatedly rebuilding evaluation machinery instead of accumulating knowledge on a common substrate. We introduce Autorubric, an open-source framework that makes rubric and judge choices explicit, reusable, and auditable. Through a unified API, it supports atomic evaluation of mixed criterion types alongside configurable bias mitigations, calibration, ensembling, abstention, and psychometric diagnostics. Evaluations spanning college chemistry grading, deep-research systems, and CHARM-100&mdash;a new mixed-criterion chatbot benchmark&mdash;reveal criterion-specific failures, systematic judge-family differences, and configuration effects that do not support a universal mitigation stack. We further demonstrate how per-criterion scores and explanations can support agent skill revision and reward modeling for reinforcement learning. By providing shared infrastructure from measurement through optimization, Autorubric gives the community a common basis for comparing methods, reproducing evaluation choices, and accumulating evidence across studies.</div>
                     </details>
                     <div class="pub-links">
                         <a class="chip chip-arxiv" href="https://arxiv.org/abs/2603.00077" target="_blank" rel="noopener noreferrer">arXiv</a>
@@ -562,13 +625,13 @@
                         <summary class="chip">Cite (BibTeX)</summary>
                         <div class="cite-panel">
                             <button class="copy-bib" type="button" data-bib="bib-rao2026">Copy</button>
-                            <pre id="bib-rao2026">@misc{rao2026autorubric,
-    title={AutoRubric: A Unified Framework for Rubric-Based LLM Evaluation},
+                            <pre id="bib-rao2026">@inproceedings{rao2026autorubric,
+    title={Autorubric: A Unifying Framework for Rubric-Based LLM Evaluation on Non-Verifiable Tasks},
     author={Delip Rao and Chris Callison-Burch},
+    booktitle={Conference on Language Modeling (COLM)},
     year={2026},
     eprint={2603.00077},
     archivePrefix={arXiv},
-    primaryClass={cs.CL},
     url={https://arxiv.org/abs/2603.00077},
 }</pre>
                         </div>
