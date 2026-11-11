@@ -1,0 +1,17 @@
+<footer>
+    <div class="container">
+        <p>&copy; <span data-year>2026</span> Delip Rao. MIT License.</p>
+        <div class="footer-links">
+            <a href="https://github.com/delip/autorubric">GitHub</a>
+            <a href="https://pypi.org/project/autorubric/">PyPI</a>
+            <a href="/blog/">Blog</a>
+            <a href="/blog/feed.xml">Feed</a>
+            <a href="/docs/">Docs</a>
+        </div>
+    </div>
+</footer>
+<script>
+    document.querySelectorAll('[data-year]').forEach(function (el) {
+        el.textContent = new Date().getFullYear();
+    });
+</script>

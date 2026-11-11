@@ -118,6 +118,7 @@ exclude = [
     "experiments/",
     "tests/",
     "docs/",
+    "blog/",
     "dist/",
     ".github/",
     ".claude/",

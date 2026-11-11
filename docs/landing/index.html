@@ -127,6 +127,12 @@
             font-size: 0.95rem;
         }
 
+        .announcement-bar a {
+            color: inherit;
+            text-decoration: underline;
+            text-underline-offset: 2px;
+        }
+
         /* Header */
         header {
             padding: 20px 0;
@@ -457,8 +463,14 @@
                 padding: 70px 0 50px;
             }
 
+            header .container {
+                flex-wrap: wrap;
+                gap: 10px 20px;
+            }
+
             nav {
-                gap: 20px;
+                flex-wrap: wrap;
+                gap: 10px 20px;
             }
         }
     </style>
@@ -466,12 +478,14 @@
 
 <body>
     <div class="announcement-bar">
-        News: AutoRubric is headed to COLM 2026! See us in San Francisco 🌉 🚀
+        New: AutoRubric v1.7.0 is released with <a href="/blog/autorubric-1-7-0-image-rubrics/">image grading feature</a>! 🏞️📋
     </div>
+    <!-- blog:header:start -->
     <header>
         <div class="container">
             <a href="/" class="logo">AutoRubric</a>
             <nav>
+                <a href="/blog/">Blog</a>
                 <a href="/docs/">Docs</a>
                 <a href="/docs/cookbook/">Cookbook</a>
                 <a href="/research/">Research</a>
@@ -480,6 +494,7 @@
             </nav>
         </div>
     </header>
+    <!-- blog:header:end -->
 
     <main>
         <section class="hero">
@@ -769,6 +784,7 @@ asyncio.run(main())</pre>
             <div class="footer-links">
                 <a href="https://github.com/delip/autorubric">GitHub</a>
                 <a href="https://pypi.org/project/autorubric/">PyPI</a>
+                <a href="/blog/">Blog</a>
                 <a href="/docs/">Docs</a>
             </div>
         </div>

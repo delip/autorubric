@@ -477,17 +477,20 @@
         @media (max-width: 768px) {
             .page-head h1 { font-size: 1.75rem; }
             .page-head { padding: 50px 0 32px; }
-            nav { gap: 20px; }
+            header .container { flex-wrap: wrap; gap: 10px 20px; }
+            nav { flex-wrap: wrap; gap: 10px 20px; }
         }
     </style>
 </head>
 
 <body>
     <a href="#main" class="skip-link">Skip to content</a>
+    <!-- blog:header:start current=/research/ -->
     <header>
         <div class="container">
             <a href="/" class="logo">AutoRubric</a>
             <nav>
+                <a href="/blog/">Blog</a>
                 <a href="/docs/">Docs</a>
                 <a href="/docs/cookbook/">Cookbook</a>
                 <a href="/research/" aria-current="page">Research</a>
@@ -496,6 +499,7 @@
             </nav>
         </div>
     </header>
+    <!-- blog:header:end -->
 
     <main id="main">
         <section class="page-head">
@@ -580,6 +584,7 @@
             <div class="footer-links">
                 <a href="https://github.com/delip/autorubric">GitHub</a>
                 <a href="https://pypi.org/project/autorubric/">PyPI</a>
+                <a href="/blog/">Blog</a>
                 <a href="/docs/">Docs</a>
             </div>
         </div>
