@@ -368,6 +368,26 @@ class TestCheck:
         (directory / "card.png").unlink()
         assert "card.png is missing" in _problems(site, "kappa")
 
+    def test_a_card_with_a_new_url_is_still_checked(self, site: Path) -> None:
+        directory = _add_post(site, "kappa")
+        (directory / "post.md").write_text(
+            _front_matter("kappa", image="card.png?v=2") + "Some text.\n", encoding="utf-8"
+        )
+        page = directory / "index.html"
+        page.write_text(
+            page.read_text(encoding="utf-8").replace("kappa/card.png", "kappa/card.png?v=2"),
+            encoding="utf-8",
+        )
+        post = blog.load_post(directory, blog.load_site(site))
+        assert post.image_url == "https://autorubric.org/blog/kappa/card.png?v=2"
+        blog.stamp_source(post)
+        assert _problems(site, "kappa") == []
+
+        _png(directory / "card.png", 800, 600)
+        assert any("card.png is (800, 600)" in problem for problem in _problems(site, "kappa"))
+        (directory / "card.png").unlink()
+        assert "card.png is missing" in _problems(site, "kappa")
+
     def test_an_edited_navbar_region_is_reported(self, site: Path) -> None:
         directory = _add_post(site, "kappa")
         page = directory / "index.html"

@@ -164,6 +164,11 @@ is unreadable there. Use few words (a short headline, the wordmark, at most a
 version or date), very large type, and one bold shape. Leave out URLs, captions and
 fine detail. Check it by scaling `card.png` down to 256px wide and reading it.
 
+Platforms cache a card by its URL, some for a week or more. When you replace the card
+of a post that has already been shared, give it a new URL by setting `image:
+card.png?v=2` in the front matter (then `?v=3`, and so on) and using that URL in the
+head. The file stays `card.png`.
+
 Set `og:image:alt` to a sentence describing the card. Keep `card.png` under about
 300 KB (flat color compresses well; avoid noise and photographs).
 

@@ -279,3 +279,5 @@ does: few words, very large type, one bold motif, no small text.
 - v1 (2026-11-10): social card redesigned after seeing it on LinkedIn, where link previews
   are small thumbnails: larger type (104px headline), a solid version badge, one large motif;
   `og:image:alt` and `twitter:image:alt` rewritten to match.
+- v1 (2026-11-10): the card's URL is now `card.png?v=2` (front matter `image`), so platforms
+  that cached the first card fetch the redesigned one. The file is still `card.png`.

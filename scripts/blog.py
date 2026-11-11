@@ -646,12 +646,15 @@ def post_problems(post: Post, blog_dir: Path = BLOG_DIR) -> list[str]:
         if stamp_chrome(text, blog_dir) != text:
             problems.append("navbar or footer differs from blog/_shared: run 'blog.py sync-chrome'")
 
-    # Social card.
-    if "image" not in post.meta:
-        card = directory / "card.png"
+    # Social card. `image: card.png?v=2` is still the post's own card: the query only
+    # gives the image a new URL, so platforms that cached the old card fetch it again.
+    image = post.meta.get("image", "card.png")
+    if not re.match(r"https?://", image):
+        name = image.split("?", 1)[0]
+        card = directory / name
         if not card.is_file():
-            problems.append("card.png is missing")
-        elif png_size(card) != CARD_SIZE:
+            problems.append(f"{name} is missing")
+        elif name == "card.png" and png_size(card) != CARD_SIZE:
             problems.append(
                 f"card.png is {png_size(card)}; a social card is {CARD_SIZE[0]}x{CARD_SIZE[1]}"
             )
