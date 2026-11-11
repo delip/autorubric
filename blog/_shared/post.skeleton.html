@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<!-- Starting point for a post's index.html. Copy it, replace every ALL-CAPS value
+     from the post's front matter, then design the body. See blog/RENDERING.md. -->
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>POST TITLE — AutoRubric Blog</title>
+    <meta name="autorubric:source" content="">
+    <meta name="description" content="POST DESCRIPTION">
+    <meta name="author" content="AUTHOR">
+    <meta name="keywords" content="TAG, TAG">
+    <meta name="robots" content="index, follow, max-image-preview:large">
+    <link rel="canonical" href="https://autorubric.org/blog/SLUG/">
+    <link rel="alternate" type="text/markdown" href="https://autorubric.org/blog/SLUG/index.md">
+    <link rel="alternate" type="application/atom+xml" title="AutoRubric Blog" href="/blog/feed.xml">
+
+    <meta property="og:type" content="article">
+    <meta property="og:site_name" content="AutoRubric">
+    <meta property="og:title" content="POST TITLE">
+    <meta property="og:description" content="POST DESCRIPTION">
+    <meta property="og:url" content="https://autorubric.org/blog/SLUG/">
+    <meta property="og:image" content="https://autorubric.org/blog/SLUG/card.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="WHAT THE CARD SHOWS">
+    <meta property="article:published_time" content="YYYY-MM-DD">
+    <meta property="article:modified_time" content="YYYY-MM-DD">
+    <meta property="article:author" content="AUTHOR">
+    <meta property="article:tag" content="TAG">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="POST TITLE">
+    <meta name="twitter:description" content="POST DESCRIPTION">
+    <meta name="twitter:image" content="https://autorubric.org/blog/SLUG/card.png">
+
+    <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "BlogPosting",
+      "headline": "POST TITLE",
+      "description": "POST DESCRIPTION",
+      "url": "https://autorubric.org/blog/SLUG/",
+      "mainEntityOfPage": "https://autorubric.org/blog/SLUG/",
+      "datePublished": "YYYY-MM-DD",
+      "dateModified": "YYYY-MM-DD",
+      "author": [{ "@type": "Person", "name": "AUTHOR" }],
+      "publisher": { "@type": "Organization", "name": "AutoRubric", "url": "https://autorubric.org/" },
+      "image": "https://autorubric.org/blog/SLUG/card.png",
+      "keywords": ["TAG", "TAG"],
+      "inLanguage": "en",
+      "isPartOf": { "@type": "Blog", "name": "AutoRubric Blog", "url": "https://autorubric.org/blog/" }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        { "@type": "ListItem", "position": 1, "name": "AutoRubric", "item": "https://autorubric.org/" },
+        { "@type": "ListItem", "position": 2, "name": "Blog", "item": "https://autorubric.org/blog/" },
+        { "@type": "ListItem", "position": 3, "name": "POST TITLE", "item": "https://autorubric.org/blog/SLUG/" }
+      ]
+    }
+  ]
+}
+    </script>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="/blog/assets/base.css">
+
+    <!-- KaTeX (drop these three lines and the script at the end when the post has no math) -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css"
+        integrity="sha384-5TcZemv2l/9On385z///+d7MSYlvIEw9FuZTIdZ14vJLqWphw7e7ZPuOiCHJcFCP" crossorigin="anonymous">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js"
+        integrity="sha384-cMkvdD8LoxVzGF/RPUKAcvmm49FQ0oxwDF3BGKtDXcEc+T1b2N+teh/OJfpU0jr6" crossorigin="anonymous"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/contrib/auto-render.min.js"
+        integrity="sha384-hCXGrW6PitJEwbkoStFjeJxv+fSOOQKOPbJxSfM6G5sWZjAyWhXiTIIAmQqnlLlh" crossorigin="anonymous"></script>
+
+    <style>
+        /* This post's own design goes here, after base.css. */
+    </style>
+</head>
+
+<body>
+    <a href="#main" class="skip-link">Skip to content</a>
+    <!-- blog:header:start current=/blog/ -->
+    <!-- blog:header:end -->
+
+    <main id="main">
+        <article>
+            <header class="post-head">
+                <div class="container">
+                    <p class="eyebrow"><a href="/blog/tags/TAG/">TAG</a></p>
+                    <h1>POST TITLE</h1>
+                    <p class="dek">POST DESCRIPTION</p>
+                    <p class="post-meta">AUTHOR &middot; <time datetime="YYYY-MM-DD">MONTH D, YYYY</time></p>
+                </div>
+            </header>
+
+            <div class="container">
+                <div class="prose">
+                    <!-- The post body. -->
+                </div>
+            </div>
+        </article>
+    </main>
+
+    <!-- blog:footer:start -->
+    <!-- blog:footer:end -->
+
+    <script>
+        // Typeset math once the deferred KaTeX scripts have loaded.
+        document.addEventListener('DOMContentLoaded', function () {
+            if (!window.renderMathInElement) return;
+            renderMathInElement(document.querySelector('article'), {
+                delimiters: [
+                    { left: '$$', right: '$$', display: true },
+                    { left: '\\[', right: '\\]', display: true },
+                    { left: '$', right: '$', display: false },
+                    { left: '\\(', right: '\\)', display: false }
+                ],
+                ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'],
+                throwOnError: false
+            });
+        });
+    </script>
+</body>
+
+</html>

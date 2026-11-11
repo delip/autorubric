@@ -27,7 +27,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install mkdocs-material mkdocstrings[python]
+          pip install mkdocs-material mkdocstrings[python] pyyaml
 
       - name: Build documentation
         run: |
@@ -40,6 +40,11 @@ jobs:
           # Copy standalone Research page to /research/
           mkdir -p site/research
           cp docs/research/index.html site/research/index.html
+
+          # Check the blog's posts, then assemble /blog/ and the root
+          # sitemap.xml, robots.txt and llms.txt. Draft posts are left out.
+          python scripts/blog.py check
+          python scripts/blog.py build --out site
 
           # Copy CNAME to root for custom domain
           cp docs/CNAME site/

@@ -1,0 +1,568 @@
+/* AutoRubric blog: shared base stylesheet, served at /blog/assets/base.css.
+   Tokens, header, footer and sizes mirror docs/landing/index.html and
+   docs/research/index.html (see WEBSITE-DESIGN-STYLE-NOTES.md and blog/DESIGN.md).
+   A post adds its own design in an inline <style> after this file. */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+:root {
+    color-scheme: dark;
+    --bg-primary: #0d1117;
+    --bg-secondary: #161b22;
+    --bg-tertiary: #21262d;
+    --text-primary: #e6edf3;
+    --text-secondary: #8b949e;
+    --accent: #f0b429;
+    --accent-hover: #f7c948;
+    --border: #30363d;
+    /* Syntax palette (GitHub dark), as on the landing page. */
+    --syn-keyword: #ff7b72;
+    --syn-string: #a5d6ff;
+    --syn-function: #d2a8ff;
+    --syn-number: #79c0ff;
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+    --measure: 700px;
+}
+
+body {
+    font-family: var(--font-sans);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+a { color: inherit; }
+
+[hidden] { display: none !important; }
+
+img, svg, video, canvas { max-width: 100%; }
+img { height: auto; }
+
+:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 24px;
+}
+
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+}
+
+.skip-link {
+    position: absolute;
+    left: -9999px;
+    top: 8px;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    padding: 8px 16px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    text-decoration: none;
+    z-index: 10;
+}
+.skip-link:focus { left: 24px; }
+
+/* Site header, nav and footer (same rules as the landing and Research pages).
+   Scoped to the page's own header and footer, the direct children of <body>, so a
+   post's <header>, <nav> or <footer> inside its article is left alone. */
+body > header {
+    padding: 20px 0;
+    border-bottom: 1px solid var(--border);
+}
+
+body > header .container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.logo {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    text-decoration: none;
+}
+
+body > header nav {
+    display: flex;
+    gap: 32px;
+}
+
+body > header nav a {
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-weight: 500;
+    transition: color 0.2s;
+}
+
+body > header nav a:hover,
+body > header nav a[aria-current="page"] {
+    color: var(--text-primary);
+}
+
+/* Footer */
+body > footer {
+    margin-top: auto;
+    padding: 40px 0;
+    border-top: 1px solid var(--border);
+}
+
+body > footer .container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+body > footer p {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+body > footer a {
+    color: var(--text-secondary);
+    text-decoration: none;
+    transition: color 0.2s;
+}
+
+body > footer a:hover { color: var(--text-primary); }
+
+.footer-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 24px;
+}
+
+/* Page head (index, tag pages) */
+.page-head { padding: 80px 0 40px; }
+
+.page-head h1 {
+    font-size: 2.25rem;
+    font-weight: 700;
+    line-height: 1.15;
+    margin-bottom: 16px;
+}
+
+.page-head .tagline {
+    font-size: 1.25rem;
+    color: var(--text-secondary);
+    max-width: 700px;
+    line-height: 1.6;
+}
+
+/* Tag chips */
+.tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    list-style: none;
+}
+
+.tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 10px;
+    border-radius: 8px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-decoration: none;
+    color: var(--text-secondary);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    transition: border-color 0.2s, color 0.2s;
+}
+
+a.tag:hover {
+    border-color: var(--text-secondary);
+    color: var(--text-primary);
+}
+
+/* Post listing */
+.posts { padding: 0 0 80px; }
+
+.post-entry {
+    max-width: 800px;
+    padding: 24px 0;
+    border-top: 1px solid var(--border);
+}
+
+.post-entry:first-child {
+    border-top: 0;
+    padding-top: 0;
+}
+
+.post-entry time {
+    display: block;
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+}
+
+.post-entry h2 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    line-height: 1.35;
+    margin-bottom: 8px;
+}
+
+.post-entry h2 a {
+    color: var(--text-primary);
+    text-decoration: none;
+    transition: color 0.2s;
+}
+
+.post-entry h2 a:hover { color: var(--accent); }
+
+.post-entry p {
+    font-size: 1rem;
+    line-height: 1.6;
+    color: var(--text-secondary);
+    margin-bottom: 16px;
+}
+
+.empty {
+    color: var(--text-secondary);
+    font-size: 1.05rem;
+}
+
+.pagination {
+    max-width: 800px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    margin-top: 32px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+
+.pagination a {
+    color: var(--text-primary);
+    text-decoration: none;
+    font-weight: 600;
+    padding: 8px 16px;
+    border-radius: 8px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    transition: border-color 0.2s;
+}
+
+.pagination a:hover { border-color: var(--text-secondary); }
+.pagination .spacer { visibility: hidden; }
+
+/* Post head */
+.post-head { padding: 80px 0 40px; }
+
+.post-head .eyebrow {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--accent);
+    margin-bottom: 16px;
+}
+
+.post-head .eyebrow a { text-decoration: none; }
+
+.post-head h1 {
+    font-size: 2.25rem;
+    font-weight: 700;
+    line-height: 1.15;
+    margin-bottom: 16px;
+    max-width: 800px;
+}
+
+.post-head .dek {
+    font-size: 1.25rem;
+    line-height: 1.6;
+    color: var(--text-secondary);
+    max-width: var(--measure);
+    margin-bottom: 20px;
+}
+
+.post-meta {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+
+/* Prose: the default article body */
+.prose {
+    max-width: var(--measure);
+    font-size: 1.05rem;
+    line-height: 1.7;
+    padding-bottom: 80px;
+}
+
+.prose > * + * { margin-top: 20px; }
+
+.prose h2 {
+    font-size: 1.75rem;
+    font-weight: 600;
+    line-height: 1.15;
+    margin-top: 48px;
+}
+
+.prose h3 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    line-height: 1.35;
+    margin-top: 32px;
+}
+
+.prose h4 {
+    font-size: 1rem;
+    font-weight: 600;
+    margin-top: 24px;
+}
+
+.prose a:not(.tag) {
+    color: var(--text-primary);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    text-decoration-color: var(--text-secondary);
+    transition: color 0.2s, text-decoration-color 0.2s;
+}
+
+.prose a:not(.tag):hover {
+    color: var(--accent);
+    text-decoration-color: var(--accent);
+}
+
+.prose ul:not(.tags),
+.prose ol { padding-left: 24px; }
+
+.prose :not(.tags) > li + li { margin-top: 8px; }
+
+.prose strong { font-weight: 600; }
+
+.prose hr {
+    border: 0;
+    border-top: 1px solid var(--border);
+    margin: 40px 0;
+}
+
+.prose blockquote {
+    padding: 16px 20px;
+    background: var(--bg-secondary);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 8px 8px 0;
+    color: var(--text-secondary);
+}
+
+.prose blockquote > * + * { margin-top: 16px; }
+
+/* Code */
+code, kbd, pre {
+    font-family: var(--font-mono);
+    font-weight: 400;
+}
+
+.prose :not(pre) > code {
+    font-size: 0.82em;
+    padding: 2px 6px;
+    border-radius: 8px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+}
+
+.code-block {
+    position: relative;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+}
+
+.code-block pre {
+    font-size: 0.82rem;
+    line-height: 1.6;
+    overflow-x: auto;
+    white-space: pre;
+    tab-size: 4;
+}
+
+.code-block .code-label {
+    display: block;
+    font-family: var(--font-sans);
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+    margin-bottom: 16px;
+}
+
+.copy-code {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    font-family: var(--font-sans);
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 4px 10px;
+    cursor: pointer;
+    transition: border-color 0.2s, color 0.2s;
+}
+
+.copy-code:hover {
+    border-color: var(--text-secondary);
+    color: var(--text-primary);
+}
+
+/* Syntax highlighting. Two equivalent vocabularies:
+   the landing page's long class names, and Pygments' short ones
+   (python -m pygments -f html -O nowrap). */
+.keyword,
+.hl .k, .hl .kn, .hl .kd, .hl .kc, .hl .kr, .hl .kt, .hl .ow, .hl .nt { color: var(--syn-keyword); }
+.string,
+.hl .s, .hl .s1, .hl .s2, .hl .sa, .hl .sb, .hl .sc, .hl .sd, .hl .se, .hl .sh, .hl .si, .hl .sx, .hl .sr, .hl .ss { color: var(--syn-string); }
+.function,
+.hl .nf, .hl .fm, .hl .nc, .hl .nd, .hl .ne, .hl .nn, .hl .na { color: var(--syn-function); }
+.number,
+.hl .m, .hl .mi, .hl .mf, .hl .mh, .hl .mo, .hl .mb, .hl .il, .hl .nb, .hl .bp { color: var(--syn-number); }
+.comment,
+.hl .c, .hl .c1, .hl .cm, .hl .ch, .hl .cs, .hl .cp, .hl .cpf { color: var(--text-secondary); }
+
+/* Figures */
+figure { margin-left: 0; margin-right: 0; }
+
+/* Framed images. An SVG chart or diagram is not framed: it draws its own ground. */
+figure img {
+    display: block;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+}
+
+figcaption {
+    margin-top: 10px;
+    font-size: 0.9rem;
+    line-height: 1.55;
+    color: var(--text-secondary);
+}
+
+/* Tables */
+.table-wrap { overflow-x: auto; }
+
+.prose table,
+.table-wrap table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+
+th, td {
+    text-align: left;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+}
+
+th {
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+td.num, th.num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Callouts */
+.callout {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+}
+
+.callout > * + * { margin-top: 10px; }
+
+.callout-title {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--accent);
+}
+
+/* Math (KaTeX). Display equations scroll instead of overflowing the page. */
+.katex-display {
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 4px 0;
+}
+
+.math-display { overflow-x: auto; }
+
+/* Footnotes */
+.footnotes {
+    margin-top: 48px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+    font-size: 0.9rem;
+    line-height: 1.55;
+    color: var(--text-secondary);
+}
+
+.footnotes ol { padding-left: 24px; }
+.footnotes li + li { margin-top: 8px; }
+
+sup a {
+    text-decoration: none;
+    color: var(--accent);
+    font-weight: 600;
+}
+
+/* Form controls used by interactive pieces */
+button, input, select, textarea { font: inherit; color: inherit; }
+input[type="range"] { accent-color: var(--accent); }
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}
+
+@media (max-width: 768px) {
+    body > header .container {
+        flex-wrap: wrap;
+        gap: 10px 20px;
+    }
+    body > header nav {
+        flex-wrap: wrap;
+        gap: 10px 20px;
+    }
+    .page-head h1,
+    .post-head h1 { font-size: 1.75rem; }
+    .page-head,
+    .post-head { padding: 50px 0 32px; }
+    .prose h2 { font-size: 1.5rem; }
+}

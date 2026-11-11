@@ -1,0 +1,30 @@
+# Blog-wide settings read by scripts/blog.py.
+title: AutoRubric Blog
+description: Notes on rubric-based evaluation with AI judges, from the AutoRubric project.
+tagline: Notes on rubric-based evaluation with AI judges.
+url: https://autorubric.org
+author: Delip Rao
+language: en
+page_size: 10
+
+# Entry points listed in /llms.txt next to the blog posts.
+llms:
+  summary: >-
+    AutoRubric is an open-source Python library for grading text and images against
+    weighted rubrics with AI judges: LLMs, decision models, or both.
+  docs:
+    - title: Documentation home
+      url: https://autorubric.org/docs/
+      note: Overview and installation
+    - title: Quickstart
+      url: https://autorubric.org/docs/quickstart/
+      note: First rubric and first grade
+    - title: Cookbook
+      url: https://autorubric.org/docs/cookbook/
+      note: Worked recipes by topic
+    - title: Research
+      url: https://autorubric.org/research/
+      note: Papers and preprints
+    - title: Source code
+      url: https://github.com/delip/autorubric
+      note: GitHub repository

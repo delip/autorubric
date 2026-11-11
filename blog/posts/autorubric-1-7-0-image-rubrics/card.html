@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Social card: AutoRubric 1.7.0</title>
+<style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 1200px; height: 630px; overflow: hidden; }
+    body {
+        background: #0d1117;
+        color: #e6edf3;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif;
+        position: relative;
+    }
+    .mono { font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace; }
+    .brand { position: absolute; left: 72px; top: 72px; display: flex; align-items: center; gap: 20px; }
+    .wordmark { font-size: 34px; font-weight: 700; }
+    .version {
+        font-size: 22px; color: #f0b429; padding: 6px 14px; border-radius: 8px;
+        border: 2px solid rgba(240, 180, 41, 0.55); background: rgba(240, 180, 41, 0.10);
+    }
+    h1 {
+        position: absolute; left: 72px; top: 196px; width: 600px;
+        font-size: 60px; line-height: 1.15; font-weight: 700; letter-spacing: -0.5px;
+    }
+    h1 span { display: block; color: #f0b429; }
+    .url { position: absolute; left: 72px; bottom: 64px; font-size: 22px; color: #8b949e; }
+
+    .motif { position: absolute; left: 740px; top: 72px; width: 388px; }
+    .sheet {
+        width: 388px; height: 243px; background: #ffffff; border-radius: 12px;
+        border: 1px solid #30363d; display: block;
+    }
+    .rows { margin-top: 20px; display: grid; gap: 12px; }
+    .row {
+        height: 56px; display: flex; align-items: center; justify-content: space-between;
+        padding: 0 18px 0 20px; background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+        font-size: 22px;
+    }
+    .row.key { background: #21262d; box-shadow: inset 4px 0 0 #f0b429; }
+    .chip {
+        font-size: 16px; font-weight: 700; padding: 4px 12px; border-radius: 8px;
+        color: #8b949e; background: #21262d; border: 1px solid #30363d;
+    }
+    .row.key .chip { background: #161b22; }
+    .chip.met { color: #f0b429; background: rgba(240, 180, 41, 0.10); border-color: rgba(240, 180, 41, 0.55); }
+</style>
+</head>
+<body>
+    <div class="brand"><span class="wordmark">AutoRubric</span><span class="version mono">v1.7.0</span></div>
+    <h1>AutoRubric 1.7.0: <span>grade images against a rubric</span></h1>
+    <div class="url">autorubric.org/blog</div>
+
+    <div class="motif" aria-hidden="true">
+        <svg class="sheet" viewBox="0 0 388 243" xmlns="http://www.w3.org/2000/svg">
+            <g stroke="#e5e7eb" stroke-width="1">
+                <line x1="40" y1="60" x2="364" y2="60"/><line x1="40" y1="105" x2="364" y2="105"/>
+                <line x1="40" y1="150" x2="364" y2="150"/><line x1="40" y1="195" x2="364" y2="195"/>
+            </g>
+            <polyline points="40,22 40,212 364,212" fill="none" stroke="#1f2328" stroke-width="2"/>
+            <polyline points="56,190 104,140 180,103 236,72 276,64 324,60 352,58"
+                fill="none" stroke="#2b6cb0" stroke-width="4" stroke-linejoin="round"/>
+            <g fill="#2b6cb0">
+                <circle cx="56" cy="190" r="6"/><circle cx="104" cy="140" r="6"/><circle cx="180" cy="103" r="6"/>
+                <circle cx="236" cy="72" r="6"/><circle cx="276" cy="64" r="6"/><circle cx="324" cy="60" r="6"/>
+                <circle cx="352" cy="58" r="6"/>
+            </g>
+        </svg>
+        <div class="rows">
+            <div class="row"><span class="mono">axes</span><span class="chip">UNMET</span></div>
+            <div class="row key"><span class="mono">trend</span><span class="chip">UNMET</span></div>
+            <div class="row"><span class="mono">chart_type</span><span class="chip met">MET</span></div>
+        </div>
+    </div>
+</body>
+</html>

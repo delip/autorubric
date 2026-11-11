@@ -1,0 +1,938 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AutoRubric 1.7.0: grade images against a rubric — AutoRubric Blog</title>
+    <meta name="autorubric:source" content="version=1; post=sha256:b6799b27b660615e783a300a747ad0fa14740baabd085ed16480076904a3d957; design=sha256:3161d865fd34e5ba05b3a1f2c2385df67d042c49f55cf71a93f67f3284b953b6">
+    <meta name="description" content="AutoRubric 1.7.0 grades charts, screenshots and scans against a rubric with LLM judges and decision models, and lowers per-criterion cost with prompt caching.">
+    <meta name="author" content="Delip Rao">
+    <meta name="keywords" content="release, images, prompt-caching, AutoRubric 1.7.0, image inputs, LLM judges, decision models, Jev, prompt cache, per-criterion grading, LiteLLM">
+    <meta name="robots" content="index, follow, max-image-preview:large">
+    <link rel="canonical" href="https://autorubric.org/blog/autorubric-1-7-0-image-rubrics/">
+    <link rel="alternate" type="text/markdown" href="https://autorubric.org/blog/autorubric-1-7-0-image-rubrics/index.md">
+    <link rel="alternate" type="application/atom+xml" title="AutoRubric Blog" href="/blog/feed.xml">
+
+    <meta property="og:type" content="article">
+    <meta property="og:site_name" content="AutoRubric">
+    <meta property="og:title" content="AutoRubric 1.7.0: grade images against a rubric">
+    <meta property="og:description" content="AutoRubric 1.7.0 grades charts, screenshots and scans against a rubric with LLM judges and decision models, and lowers per-criterion cost with prompt caching.">
+    <meta property="og:url" content="https://autorubric.org/blog/autorubric-1-7-0-image-rubrics/">
+    <meta property="og:image" content="https://autorubric.org/blog/autorubric-1-7-0-image-rubrics/card.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="The AutoRubric wordmark, a v1.7.0 badge and the title “AutoRubric 1.7.0: grade images against a rubric”, beside a small line chart and three rubric criteria, axes, trend and chart_type, marked UNMET, UNMET and MET.">
+    <meta property="article:published_time" content="2026-11-10">
+    <meta property="article:modified_time" content="2026-11-10">
+    <meta property="article:author" content="Delip Rao">
+    <meta property="article:section" content="release">
+    <meta property="article:tag" content="release">
+    <meta property="article:tag" content="images">
+    <meta property="article:tag" content="prompt-caching">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="AutoRubric 1.7.0: grade images against a rubric">
+    <meta name="twitter:description" content="AutoRubric 1.7.0 grades charts, screenshots and scans against a rubric with LLM judges and decision models, and lowers per-criterion cost with prompt caching.">
+    <meta name="twitter:image" content="https://autorubric.org/blog/autorubric-1-7-0-image-rubrics/card.png">
+    <meta name="twitter:image:alt" content="The AutoRubric wordmark, a v1.7.0 badge and the title “AutoRubric 1.7.0: grade images against a rubric”, beside a small line chart and three rubric criteria, axes, trend and chart_type, marked UNMET, UNMET and MET.">
+
+    <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "BlogPosting",
+      "@id": "https://autorubric.org/blog/autorubric-1-7-0-image-rubrics/#article",
+      "headline": "AutoRubric 1.7.0: grade images against a rubric",
+      "description": "AutoRubric 1.7.0 grades charts, screenshots and scans against a rubric with LLM judges and decision models, and lowers per-criterion cost with prompt caching.",
+      "url": "https://autorubric.org/blog/autorubric-1-7-0-image-rubrics/",
+      "mainEntityOfPage": "https://autorubric.org/blog/autorubric-1-7-0-image-rubrics/",
+      "datePublished": "2026-11-10",
+      "dateModified": "2026-11-10",
+      "author": [{ "@type": "Person", "name": "Delip Rao" }],
+      "publisher": { "@type": "Organization", "name": "AutoRubric", "url": "https://autorubric.org/" },
+      "image": "https://autorubric.org/blog/autorubric-1-7-0-image-rubrics/card.png",
+      "keywords": ["release", "images", "prompt-caching", "AutoRubric 1.7.0", "image inputs", "LLM judges", "decision models", "Jev", "prompt cache", "per-criterion grading", "LiteLLM"],
+      "articleSection": "release",
+      "wordCount": 2099,
+      "inLanguage": "en",
+      "about": { "@id": "https://autorubric.org/#software" },
+      "mentions": [
+        { "@id": "https://autorubric.org/#software" },
+        { "@type": "SoftwareApplication", "name": "LiteLLM" },
+        { "@type": "Thing", "name": "Jev", "description": "A decision model; jev-1.14.0 and jev-latest accept PNG and JPEG images." },
+        { "@type": "Organization", "name": "TypeSafe" }
+      ],
+      "isPartOf": { "@type": "Blog", "name": "AutoRubric Blog", "url": "https://autorubric.org/blog/" }
+    },
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://autorubric.org/#software",
+      "name": "AutoRubric",
+      "softwareVersion": "1.7.0",
+      "url": "https://autorubric.org/",
+      "applicationCategory": "DeveloperApplication",
+      "releaseNotes": "https://autorubric.org/blog/autorubric-1-7-0-image-rubrics/"
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        { "@type": "ListItem", "position": 1, "name": "AutoRubric", "item": "https://autorubric.org/" },
+        { "@type": "ListItem", "position": 2, "name": "Blog", "item": "https://autorubric.org/blog/" },
+        { "@type": "ListItem", "position": 3, "name": "AutoRubric 1.7.0: grade images against a rubric", "item": "https://autorubric.org/blog/autorubric-1-7-0-image-rubrics/" }
+      ]
+    },
+    {
+      "@type": "FAQPage",
+      "@id": "https://autorubric.org/blog/autorubric-1-7-0-image-rubrics/#questions",
+      "url": "https://autorubric.org/blog/autorubric-1-7-0-image-rubrics/#questions",
+      "isPartOf": { "@id": "https://autorubric.org/blog/autorubric-1-7-0-image-rubrics/#article" },
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "Which image formats does AutoRubric accept?",
+          "acceptedAnswer": { "@type": "Answer", "text": "PNG, JPEG, GIF and WebP. LLM judges receive an image in its own format. Jev receives PNG or JPEG, and AutoRubric converts other formats for it." }
+        },
+        {
+          "@type": "Question",
+          "name": "Does AutoRubric resize my images?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Not for LLM judges, which receive the original bytes. For Jev, an image outside 280 to 1568 pixels per side is scaled, and padded with white if a side is still too short." }
+        },
+        {
+          "@type": "Question",
+          "name": "Can I send an image to a model that LiteLLM does not list as a vision model?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Yes. Set images=True on the judge's LLMConfig. Without that declaration the grade raises an error before any request is sent." }
+        },
+        {
+          "@type": "Question",
+          "name": "Do I have to change my code to upgrade?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Usually not. Valid text-only code runs unchanged, although some verdicts change with the new prompt order. A misconfigured judge now raises an error where it used to abstain, and invalid settings are refused when they are built. A custom grader that annotates judge arguments as str still runs, though a type checker will ask for Content." }
+        },
+        {
+          "@type": "Question",
+          "name": "Do I need to re-run old experiments?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Only if you compare scores across the upgrade. The new prompt order changes some verdicts, so re-grade a sample with both versions before comparing." }
+        }
+      ]
+    }
+  ]
+}
+    </script>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="/blog/assets/base.css">
+
+    <style>
+        /* ---- Layout: one column; a sticky contents rail from 1100px ---- */
+        .post-layout { padding-bottom: 80px; }
+        .post-head { padding: 80px 0 40px; }
+
+        .post-body.prose { max-width: none; padding-bottom: 0; }
+        .post-body > * { max-width: var(--measure); }
+        .post-body > .wide,
+        .post-body > .code-block,
+        .post-body > .table-wrap,
+        .post-body > .cost { max-width: 960px; }
+        .post-body h2, .post-body h3 { scroll-margin-top: 24px; }
+
+        @media (min-width: 1100px) {
+            .post-layout {
+                display: grid;
+                grid-template-columns: 220px minmax(0, 1fr);
+                column-gap: 60px;
+                align-items: start;
+            }
+            .post-head { grid-column: 2; grid-row: 1; }
+            .toc { grid-column: 1; grid-row: 1 / span 2; position: sticky; top: 24px; margin-top: 80px; }
+            .post-body { grid-column: 2; grid-row: 2; }
+        }
+
+        /* ---- Post head ---- */
+        .post-head .eyebrow { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+        .post-head .eyebrow a:hover { color: var(--accent-hover); }
+        .post-head h1 { max-width: 800px; }
+        .post-head h1 .accent { display: block; color: var(--accent); }
+        .release-line {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px 16px;
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            margin-bottom: 20px;
+        }
+        .version {
+            font-family: var(--font-mono);
+            font-size: 0.82rem;
+            color: var(--accent);
+            padding: 4px 10px;
+            border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+            background: color-mix(in srgb, var(--accent) 10%, transparent);
+            border-radius: 8px;
+        }
+
+        /* ---- Contents rail ---- */
+        .toc details {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px 20px;
+            margin-bottom: 40px;
+        }
+        .toc summary {
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        .toc .toc-title {
+            display: none;
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 16px;
+        }
+        .toc ol { list-style: none; margin-top: 16px; border-left: 1px solid var(--border); }
+        .toc li + li { margin-top: 8px; }
+        .toc a {
+            display: block;
+            margin-left: -1px;
+            padding: 0 0 0 16px;
+            border-left: 2px solid transparent;
+            font-size: 0.9rem;
+            line-height: 1.5;
+            color: var(--text-secondary);
+            text-decoration: none;
+            transition: color 0.2s, border-color 0.2s;
+        }
+        .toc a:hover { color: var(--text-primary); }
+        .toc a[aria-current="location"] { color: var(--text-primary); border-left-color: var(--accent); }
+        @media (min-width: 1100px) {
+            .toc details { background: none; border: 0; border-radius: 0; padding: 0; margin: 0; }
+            .toc summary { display: none; }
+            .toc .toc-title { display: block; }
+            .toc ol { margin-top: 0; }
+        }
+
+        /* ---- "In this release" summary ---- */
+        .summary {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-left: 3px solid var(--accent);
+            border-radius: 12px;
+            padding: 24px;
+        }
+        .summary > * + * { margin-top: 16px; }
+        .prose .summary h2 {
+            margin-top: 0;
+            font-size: 1rem;
+            font-weight: 600;
+            line-height: 1.5;
+            color: var(--accent);
+        }
+        .summary ul { padding-left: 20px; }
+
+        /* ---- Alice and Bob ---- */
+        .compare {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 20px;
+            align-items: start;
+        }
+        .report {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+            min-width: 0;
+        }
+        .report figure img {
+            width: 100%;
+            background: #fff;
+            border-radius: 8px;
+        }
+        .report .full-size { display: block; border-radius: 8px; }
+        .report figcaption { margin-top: 10px; }
+        .report figcaption strong { color: var(--text-primary); font-weight: 600; }
+
+        .verdicts { display: block; width: 100%; margin-top: 16px; font-size: 0.9rem; line-height: 1.55; }
+        .verdicts thead {
+            position: absolute; width: 1px; height: 1px; overflow: hidden;
+            clip: rect(0 0 0 0); white-space: nowrap;
+        }
+        .verdicts tbody { display: block; }
+        .verdicts tr {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            grid-template-areas: "crit verdict" "req req" "why why";
+            gap: 8px 16px;
+            align-items: center;
+            padding: 16px 10px;
+            border-top: 1px solid var(--border);
+        }
+        .verdicts th, .verdicts td { padding: 0; border: 0; }
+        .verdicts th[scope="row"] { grid-area: crit; color: var(--text-primary); }
+        .verdicts td.req { grid-area: req; }
+        .verdicts td.verdict { grid-area: verdict; }
+        .verdicts td.why { grid-area: why; color: var(--text-secondary); }
+        .verdicts td[data-label]::before {
+            content: attr(data-label);
+            display: block;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+        .verdicts tr.is-trend {
+            background: var(--bg-tertiary);
+            border-top-color: transparent;
+            border-radius: 8px;
+            box-shadow: inset 3px 0 0 var(--accent);
+            padding-left: 16px;
+        }
+        .verdicts tr.is-trend td[data-label]::before { color: var(--text-primary); }
+
+        .chip {
+            display: inline-block;
+            font-size: 0.75rem;
+            font-weight: 600;
+            line-height: 1.5;
+            padding: 2px 10px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            background: var(--bg-tertiary);
+        }
+        .chip.met {
+            color: var(--accent);
+            border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+            background: color-mix(in srgb, var(--accent) 10%, transparent);
+        }
+
+        /* ---- Code ---- */
+        .code-block .code-label { margin-bottom: 10px; }
+        .copy-code[data-state="copied"] { color: var(--accent); border-color: var(--accent); }
+
+        /* ---- Tables ---- */
+        .prose tbody th[scope="row"] { color: var(--text-primary); font-weight: 500; }
+        .table-wrap code, .cost tbody th { white-space: nowrap; }
+        .post-body .table-wrap table { min-width: 600px; }
+
+        /* ---- Callout ---- */
+        .callout { border-left: 3px solid var(--accent); }
+
+        /* ---- Cost comparison ---- */
+        .cost {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+        }
+        .cost-bars { margin: 0; }
+        .cost-legend {
+            display: flex;
+            gap: 16px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 16px;
+        }
+        .cost-legend span::before {
+            content: "";
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            margin-right: 8px;
+            vertical-align: -1px;
+            background: var(--swatch);
+        }
+        .cost-row {
+            display: grid;
+            grid-template-columns: 170px minmax(0, 1fr);
+            gap: 8px 16px;
+            align-items: center;
+            padding: 10px 0;
+        }
+        .cost-row + .cost-row { border-top: 1px solid var(--border); }
+        .cost-judge { font-size: 0.9rem; color: var(--text-primary); }
+        .cost-pair { display: grid; gap: 8px; }
+        .bar-line { display: flex; align-items: center; gap: 10px; }
+        .bar-track { flex: 1; min-width: 0; }
+        .bar { display: block; height: 10px; width: var(--w); }
+        .bar.before { background: var(--syn-number); }
+        .bar.after { background: var(--accent); }
+        .bar-val {
+            width: 56px;
+            text-align: right;
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            font-variant-numeric: tabular-nums;
+        }
+        .cost .table-wrap { margin-top: 24px; }
+        .cost table th:first-child, .cost table td:first-child { padding-left: 0; }
+
+        /* ---- Lists, FAQ, next steps, tags ---- */
+        .post-body ul.more > li + li { margin-top: 16px; }
+
+        .faq-item { padding-top: 24px; border-top: 1px solid var(--border); }
+        .prose .faq-item h3 { margin-top: 0; font-size: 1rem; }
+        .faq-item p { margin-top: 8px; color: var(--text-primary); }
+        .post-body > .faq-item { margin-top: 24px; }
+
+        .next {
+            list-style: none;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+        }
+        .prose ul.next { padding-left: 0; }
+        .prose .next > li + li { margin-top: 0; }
+        .next li {
+            position: relative;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px 24px;
+            font-size: 0.9rem;
+            line-height: 1.55;
+            color: var(--text-secondary);
+            transition: border-color 0.2s;
+        }
+        .next li:hover { border-color: var(--text-secondary); }
+        .prose .next a {
+            font-size: 1rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            text-decoration: none;
+        }
+        .prose .next a::after { content: ""; position: absolute; inset: 0; border-radius: 12px; }
+        .prose .next a:hover { color: var(--accent); }
+        .prose .next a:focus-visible { outline: none; }
+        .prose .next a:focus-visible::after { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+        .post-foot {
+            margin-top: 60px;
+            padding-top: 24px;
+            border-top: 1px solid var(--border);
+            max-width: 960px;
+        }
+
+        @media (max-width: 768px) {
+            .post-head { padding: 50px 0 32px; }
+            .report { padding: 16px; }
+            .code-block { padding: 20px 16px; }
+            .code-block .copy-code { top: 12px; right: 12px; }
+            .cost { padding: 20px; }
+            .cost-row { grid-template-columns: minmax(0, 1fr); }
+        }
+        /* A block of prose-like output wraps instead of scrolling sideways. */
+        .code-block.wrap pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+    </style>
+</head>
+
+<body>
+    <a href="#main" class="skip-link">Skip to content</a>
+    <!-- blog:header:start current=/blog/ -->
+    <header>
+        <div class="container">
+            <a href="/" class="logo">AutoRubric</a>
+            <nav>
+                <a href="/blog/" aria-current="page">Blog</a>
+                <a href="/docs/">Docs</a>
+                <a href="/docs/cookbook/">Cookbook</a>
+                <a href="/research/">Research</a>
+                <a href="https://github.com/delip/autorubric">GitHub</a>
+                <a href="https://pypi.org/project/autorubric/">PyPI</a>
+            </nav>
+        </div>
+    </header>
+    <!-- blog:header:end -->
+
+    <main id="main">
+        <article class="container post-layout">
+            <header class="post-head">
+                <p class="eyebrow">
+                    <a href="/blog/tags/release/">release</a>
+                    <a href="/blog/tags/images/">images</a>
+                    <a href="/blog/tags/prompt-caching/">prompt-caching</a>
+                </p>
+                <h1>AutoRubric 1.7.0: <span class="accent">grade images against a rubric</span></h1>
+                <p class="release-line"><span class="version">v1.7.0</span> <span>Released <time datetime="2026-10-31">October 31, 2026</time></span></p>
+                <p class="dek">AutoRubric 1.7.0 grades charts, screenshots and scans against a rubric with LLM judges and decision models, and lowers per-criterion cost with prompt caching.</p>
+                <p class="post-meta">Delip Rao &middot; <time datetime="2026-11-10">November 10, 2026</time></p>
+            </header>
+
+            <nav class="toc" aria-labelledby="toc-title">
+                <details open>
+                    <summary>On this page</summary>
+                    <p class="toc-title" id="toc-title">On this page</p>
+                    <ol>
+                        <li><a href="#in-this-release">In this release</a></li>
+                        <li><a href="#why-would-a-rubric-need-to-see-an-image">Why would a rubric need to see an image?</a></li>
+                        <li><a href="#how-do-i-grade-a-submission-that-holds-images">How do I grade a submission that holds images?</a></li>
+                        <li><a href="#which-judges-can-be-sent-images">Which judges can be sent images?</a></li>
+                        <li><a href="#explanations">Explanations</a></li>
+                        <li><a href="#how-are-images-stored-in-a-dataset-file">How are images stored in a dataset file?</a></li>
+                        <li><a href="#what-changed-in-the-cost-of-per-criterion-grading">What changed in the cost of per-criterion grading?</a></li>
+                        <li><a href="#what-else-is-in-1-7-0">What else is in 1.7.0?</a></li>
+                        <li><a href="#questions">Questions</a></li>
+                        <li><a href="#where-to-go-next">Where to go next</a></li>
+                    </ol>
+                </details>
+            </nav>
+
+            <div class="post-body prose">
+                <section class="summary" aria-labelledby="in-this-release">
+                    <h2 id="in-this-release">In this release</h2>
+                    <p>AutoRubric 1.7.0 was released on October 31, 2026. It has two main changes.</p>
+                    <ul>
+                        <li><strong>Image inputs.</strong> A submission can now hold images as well as text, so a rubric can ask about a chart, a screenshot or a scanned page. LLM judges and decision models both grade them, and dataset files store them.</li>
+                        <li><strong>Cheaper per-criterion grading.</strong> Per-criterion prompts are reordered so that a provider's prompt cache can reuse the submission across an item's calls. In our runs the cost of per-criterion grading fell by nearly a quarter for two of the three judges.</li>
+                    </ul>
+                </section>
+
+                <p>The release also tells the meta-judge that it is reading a rubric, and makes a misconfigured judge, including one whose account is out of credits, raise an error where it used to abstain. Upgrade with:</p>
+
+                <div class="code-block hl"><span class="code-label">Shell</span><pre><code>pip<span class="w"> </span>install<span class="w"> </span>-U<span class="w"> </span>autorubric</code></pre></div>
+
+                <h2 id="why-would-a-rubric-need-to-see-an-image">Why would a rubric need to see an image?</h2>
+
+                <p>Many submissions carry their evidence in a picture. A lab report is judged partly on its figures, a design review on its screenshots, and a scanned exam on handwriting. A judge that reads only text cannot check a criterion such as "Both axes of the chart are labelled, with units".</p>
+
+                <p>Take two students, Alice and Bob, who plotted the same results and wrote a caption each. The rubric has three criteria: <code>axes</code> (weight 5), <code>trend</code> (weight 10) and <code>chart_type</code> (weight 5). The verdicts below are the ones a teaching assistant would give. They are not the output of a model.</p>
+
+                <div class="compare wide">
+                    <div class="report">
+                        <figure>
+                            <a class="full-size" href="assets/alice-chart.png"><img src="assets/alice-chart.png" width="1200" height="750" loading="lazy" decoding="async"
+                                alt="Alice's chart: a labelled line chart of accuracy (%) against model size (billions of parameters, log scale), rising from 41% at 0.5B to 71% at 7B and levelling off near 74% at 70B"></a>
+                            <figcaption><strong>Alice.</strong> Figure 1. Accuracy rises with model size and levels off above 7B parameters.</figcaption>
+                        </figure>
+                        <table class="verdicts" role="table" aria-label="Verdicts for Alice">
+                            <thead role="rowgroup">
+                                <tr role="row">
+                                    <th scope="col" role="columnheader">Criterion</th>
+                                    <th scope="col" role="columnheader">Requirement</th>
+                                    <th scope="col" role="columnheader">Verdict</th>
+                                    <th scope="col" role="columnheader">Why</th>
+                                </tr>
+                            </thead>
+                            <tbody role="rowgroup">
+                                <tr role="row">
+                                    <th scope="row" role="rowheader"><code>axes</code></th>
+                                    <td class="req" role="cell" data-label="Requirement">Both axes of the chart are labelled, with units</td>
+                                    <td class="verdict" role="cell"><span class="chip met">MET</span></td>
+                                    <td class="why" role="cell" data-label="Why">Model size in billions of parameters; accuracy in %</td>
+                                </tr>
+                                <tr role="row" class="is-trend">
+                                    <th scope="row" role="rowheader"><code>trend</code></th>
+                                    <td class="req" role="cell" data-label="Requirement">The caption states the trend the chart shows</td>
+                                    <td class="verdict" role="cell"><span class="chip met">MET</span></td>
+                                    <td class="why" role="cell" data-label="Why">The curve climbs to 7B and is nearly flat after it, as the caption says</td>
+                                </tr>
+                                <tr role="row">
+                                    <th scope="row" role="rowheader"><code>chart_type</code></th>
+                                    <td class="req" role="cell" data-label="Requirement">The chart type suits the data shown</td>
+                                    <td class="verdict" role="cell"><span class="chip met">MET</span></td>
+                                    <td class="why" role="cell" data-label="Why">A line over ordered sizes, on a log axis that spaces them evenly</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="report">
+                        <figure>
+                            <a class="full-size" href="assets/bob-chart.png"><img src="assets/bob-chart.png" width="1200" height="750" loading="lazy" decoding="async"
+                                alt="Bob's chart: the same line of accuracy against model size, levelling off above 7B, but with no axis labels and no title"></a>
+                            <figcaption><strong>Bob.</strong> Figure 1. Accuracy keeps climbing steadily as the model grows.</figcaption>
+                        </figure>
+                        <table class="verdicts" role="table" aria-label="Verdicts for Bob">
+                            <thead role="rowgroup">
+                                <tr role="row">
+                                    <th scope="col" role="columnheader">Criterion</th>
+                                    <th scope="col" role="columnheader">Requirement</th>
+                                    <th scope="col" role="columnheader">Verdict</th>
+                                    <th scope="col" role="columnheader">Why</th>
+                                </tr>
+                            </thead>
+                            <tbody role="rowgroup">
+                                <tr role="row">
+                                    <th scope="row" role="rowheader"><code>axes</code></th>
+                                    <td class="req" role="cell" data-label="Requirement">Both axes of the chart are labelled, with units</td>
+                                    <td class="verdict" role="cell"><span class="chip">UNMET</span></td>
+                                    <td class="why" role="cell" data-label="Why">Neither axis has a label, so neither has units</td>
+                                </tr>
+                                <tr role="row" class="is-trend">
+                                    <th scope="row" role="rowheader"><code>trend</code></th>
+                                    <td class="req" role="cell" data-label="Requirement">The caption states the trend the chart shows</td>
+                                    <td class="verdict" role="cell"><span class="chip">UNMET</span></td>
+                                    <td class="why" role="cell" data-label="Why">The curve levels off above 7B; it does not keep climbing steadily</td>
+                                </tr>
+                                <tr role="row">
+                                    <th scope="row" role="rowheader"><code>chart_type</code></th>
+                                    <td class="req" role="cell" data-label="Requirement">The chart type suits the data shown</td>
+                                    <td class="verdict" role="cell"><span class="chip met">MET</span></td>
+                                    <td class="why" role="cell" data-label="Why">The same line chart as Alice's</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <p>Bob's caption reads as a fine caption on its own. Only a judge that sees the chart can tell that the curve flattens above 7B, so a judge that reads only the captions cannot grade <code>trend</code>.</p>
+
+                <h2 id="how-do-i-grade-a-submission-that-holds-images">How do I grade a submission that holds images?</h2>
+
+                <p>A submission is now <code>Content</code>, which is a string, an <code>Image</code>, or a list of strings and images. The judge reads a list in order, so a chart followed by its caption reaches the judge as a chart followed by its caption.</p>
+
+                <div class="code-block hl"><span class="code-label">Python</span><pre><code><span class="kn">from</span><span class="w"> </span><span class="nn">autorubric</span><span class="w"> </span><span class="kn">import</span> <span class="n">Criterion</span><span class="p">,</span> <span class="n">Image</span><span class="p">,</span> <span class="n">LLMConfig</span><span class="p">,</span> <span class="n">Rubric</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">autorubric.graders</span><span class="w"> </span><span class="kn">import</span> <span class="n">CriterionGrader</span>
+
+<span class="n">report</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="n">Image</span><span class="p">(</span><span class="s2">&quot;reports/alice/chart.png&quot;</span><span class="p">),</span>
+    <span class="s2">&quot;Figure 1. Accuracy rises with model size and levels off above 7B parameters.&quot;</span><span class="p">,</span>
+<span class="p">]</span>
+
+<span class="n">rubric</span> <span class="o">=</span> <span class="n">Rubric</span><span class="p">([</span>
+    <span class="n">Criterion</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;axes&quot;</span><span class="p">,</span> <span class="n">weight</span><span class="o">=</span><span class="mf">5.0</span><span class="p">,</span> <span class="n">requirement</span><span class="o">=</span><span class="s2">&quot;Both axes of the chart are labelled, with units&quot;</span><span class="p">),</span>
+    <span class="n">Criterion</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;trend&quot;</span><span class="p">,</span> <span class="n">weight</span><span class="o">=</span><span class="mf">10.0</span><span class="p">,</span> <span class="n">requirement</span><span class="o">=</span><span class="s2">&quot;The caption states the trend the chart shows&quot;</span><span class="p">),</span>
+    <span class="n">Criterion</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;chart_type&quot;</span><span class="p">,</span> <span class="n">weight</span><span class="o">=</span><span class="mf">5.0</span><span class="p">,</span> <span class="n">requirement</span><span class="o">=</span><span class="s2">&quot;The chart type suits the data shown&quot;</span><span class="p">),</span>
+<span class="p">])</span>
+
+<span class="n">grader</span> <span class="o">=</span> <span class="n">CriterionGrader</span><span class="p">(</span><span class="n">judge_model_config</span><span class="o">=</span><span class="n">LLMConfig</span><span class="p">(</span><span class="n">model</span><span class="o">=</span><span class="s2">&quot;openai/gpt-5.6-luna&quot;</span><span class="p">))</span>
+<span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">rubric</span><span class="o">.</span><span class="n">grade</span><span class="p">(</span>
+    <span class="n">to_grade</span><span class="o">=</span><span class="n">report</span><span class="p">,</span>
+    <span class="n">grader</span><span class="o">=</span><span class="n">grader</span><span class="p">,</span>
+    <span class="n">query</span><span class="o">=</span><span class="s2">&quot;Plot accuracy against model size and interpret the result in a caption.&quot;</span><span class="p">,</span>
+<span class="p">)</span></code></pre></div>
+
+                <p><code>Image(path)</code> reads nothing when it is created. The file is read once per grade, before any judge is called. A missing or unreadable file raises an error from the grade, so a broken path never turns into a verdict. <code>Image(data)</code> takes bytes you already hold. An image is PNG, JPEG, GIF or WebP.</p>
+
+                <p>The query and the reference submission are <code>Content</code> as well. A task prompt can therefore show the data a chart was made from, and a reference can be a model answer's chart. For LLM judges, few-shot training items may hold images too.</p>
+
+                <h2 id="which-judges-can-be-sent-images">Which judges can be sent images?</h2>
+
+                <p>AutoRubric grades with two kinds of AI judges, LLMs and decision models, and each kind handles images differently.</p>
+
+                <h3 id="llm-judges">LLM judges</h3>
+
+                <p>An LLM judge such as OpenAI's <code>gpt-5.6-luna</code> or Google's <code>gemini-3.8-flash</code> receives each image inside the prompt, at the place where it occurs in the submission. The original bytes are sent. AutoRubric does not convert or resize them.</p>
+
+                <p>An image is sent only to a model that is known to accept images. The first time a grader is about to send an image, it looks the model up in LiteLLM's model map. A model that the map does not list as accepting images raises a <code>ValueError</code> that names the judge and the model, before any judge sends a request. This check covers every judge that could receive the image, including each member of a panel and a cascade's escalation judges.</p>
+
+                <p>LiteLLM's map does not hold every vision model. Models served through Ollama, vLLM or OpenRouter are often missing from it. If your model does accept images, declare it on the judge's configuration.</p>
+
+                <div class="code-block hl"><span class="code-label">Python</span><pre><code><span class="kn">from</span><span class="w"> </span><span class="nn">autorubric</span><span class="w"> </span><span class="kn">import</span> <span class="n">LLMConfig</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">autorubric.graders</span><span class="w"> </span><span class="kn">import</span> <span class="n">CriterionGrader</span>
+
+<span class="n">llava</span> <span class="o">=</span> <span class="n">LLMConfig</span><span class="p">(</span><span class="n">model</span><span class="o">=</span><span class="s2">&quot;ollama/llava&quot;</span><span class="p">,</span> <span class="n">images</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>  <span class="c1"># declares that the model accepts images</span>
+<span class="n">grader</span> <span class="o">=</span> <span class="n">CriterionGrader</span><span class="p">(</span><span class="n">judge_model_config</span><span class="o">=</span><span class="n">llava</span><span class="p">)</span>
+<span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">rubric</span><span class="o">.</span><span class="n">grade</span><span class="p">(</span><span class="n">to_grade</span><span class="o">=</span><span class="n">report</span><span class="p">,</span> <span class="n">grader</span><span class="o">=</span><span class="n">grader</span><span class="p">)</span></code></pre></div>
+
+                <h3 id="decision-models">Decision models</h3>
+
+                <p>A decision model answers the whole rubric in one request. Jev accepts images from <code>jev-1.14.0</code> on.</p>
+
+                <div class="code-block hl"><span class="code-label">Python</span><pre><code><span class="kn">from</span><span class="w"> </span><span class="nn">autorubric</span><span class="w"> </span><span class="kn">import</span> <span class="n">DecisionModelConfig</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">autorubric.graders</span><span class="w"> </span><span class="kn">import</span> <span class="n">CriterionGrader</span>
+
+<span class="n">jev</span> <span class="o">=</span> <span class="n">DecisionModelConfig</span><span class="p">(</span><span class="n">model</span><span class="o">=</span><span class="s2">&quot;jev-1.14.0&quot;</span><span class="p">)</span>  <span class="c1"># needs pip install &#39;autorubric[typesafe]&#39;</span>
+<span class="n">grader</span> <span class="o">=</span> <span class="n">CriterionGrader</span><span class="p">(</span><span class="n">judge_model_config</span><span class="o">=</span><span class="n">jev</span><span class="p">)</span>
+<span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">rubric</span><span class="o">.</span><span class="n">grade</span><span class="p">(</span><span class="n">to_grade</span><span class="o">=</span><span class="n">report</span><span class="p">,</span> <span class="n">grader</span><span class="o">=</span><span class="n">grader</span><span class="p">)</span></code></pre></div>
+
+                <p>Jev reads only PNG and JPEG images whose sides are between 280 and 1568 pixels, and it does not resize images itself. AutoRubric therefore fits each image before sending it. An image already inside these limits is sent unchanged. Any other image is re-encoded as PNG or JPEG, scaled to fit, and padded with white when a side is still too short.</p>
+
+                <p>Which decision models accept images comes from a registry that ships with AutoRubric. A model the registry lists as text-only, such as <code>jev-1.13.0</code>, or does not list at all, raises a <code>ValueError</code> as soon as the content holds an image, and no judge sends a request. For an unlisted model, such as a self-hosted endpoint, pass its limits as <code>DecisionModelConfig(model=..., capabilities={...})</code>.</p>
+
+                <h3 id="formats-at-a-glance">Formats at a glance</h3>
+
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th scope="col">Judge</th>
+                                <th scope="col">Formats sent</th>
+                                <th scope="col">What AutoRubric does</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <th scope="row">LLM judges</th>
+                                <td>The image's own format</td>
+                                <td>Sends the original bytes, never converted or resized, and only to a model known to accept images. The provider's limits on formats, size and number of images apply.</td>
+                            </tr>
+                            <tr>
+                                <th scope="row">Jev (<code>jev-1.14.0</code>, <code>jev-latest</code>)</th>
+                                <td>PNG and JPEG only</td>
+                                <td>Fits every image by converting other encodings, scaling, and padding with white.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <p>PNG and JPEG are the safe choice for every judge. GIF and WebP are not accepted by every provider or model.</p>
+
+                <h2 id="explanations">Explanations</h2>
+
+                <p>As with all AutoRubric grading, an LLM judge that grades an image explains each verdict. Every criterion in the report carries its verdict and the judge's reason.</p>
+
+                <div class="code-block hl"><span class="code-label">Python</span><pre><code><span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">result</span><span class="o">.</span><span class="n">report</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[</span><span class="si">{</span><span class="n">item</span><span class="o">.</span><span class="n">final_verdict</span><span class="o">.</span><span class="n">value</span><span class="si">}</span><span class="s2">] </span><span class="si">{</span><span class="n">item</span><span class="o">.</span><span class="n">criterion</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">item</span><span class="o">.</span><span class="n">final_reason</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span></code></pre></div>
+
+                <p>For Bob's report, the judge marked <code>axes</code> as not met. This is the line it printed, from one run with <code>gpt-5.6-luna</code>. <code>default</code> is the id of the single judge.</p>
+
+                <div class="code-block hl wrap"><span class="code-label">Text</span><pre><code>[UNMET] axes: default: The chart shows numeric tick marks, but neither axis has a descriptive label or units (e.g., model size and accuracy percentage).</code></pre></div>
+
+                <aside class="callout" role="note">
+                    <p><strong>Decision models.</strong> Grading with a decision model does not produce explanations. A decision model returns probabilities and not text, so its <code>reason</code> is <code>None</code>.</p>
+                </aside>
+
+                <h2 id="how-are-images-stored-in-a-dataset-file">How are images stored in a dataset file?</h2>
+
+                <p>In a dataset file an image is an object whose only key is <code>"image"</code>, and a submission that mixes text and images is an array.</p>
+
+                <div class="code-block hl"><span class="code-label">JSON</span><pre><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;submission&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span><span class="nt">&quot;image&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;reports/alice/chart.png&quot;</span><span class="p">},</span>
+<span class="w">    </span><span class="s2">&quot;Figure 1. Accuracy rises with model size and levels off above 7B parameters.&quot;</span>
+<span class="w">  </span><span class="p">],</span>
+<span class="w">  </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;alice&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;ground_truth&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;MET&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;MET&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;MET&quot;</span><span class="p">]</span>
+<span class="p">}</span></code></pre></div>
+
+                <p>When a dataset is loaded with <code>RubricDataset.from_file</code>, a relative path is resolved against the directory of the dataset file, so the file and its folder of figures can be moved or shared together. Loading a dataset opens no image. A dataset whose figures are missing still loads, and the missing file is reported when its item is graded.</p>
+
+                <aside class="callout" role="note">
+                    <p><strong>Memory.</strong> Each item being graded holds its images in memory until its grade finishes. <code>evaluate()</code> starts every item at once unless <code>max_concurrent_items</code> is set, so for an image dataset set it to a few times the number of requests your provider allows in parallel.</p>
+                </aside>
+
+                <div class="code-block hl"><span class="code-label">Python</span><pre><code><span class="kn">from</span><span class="w"> </span><span class="nn">autorubric</span><span class="w"> </span><span class="kn">import</span> <span class="n">evaluate</span>
+
+<span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">evaluate</span><span class="p">(</span><span class="n">dataset</span><span class="p">,</span> <span class="n">grader</span><span class="p">,</span> <span class="n">max_concurrent_items</span><span class="o">=</span><span class="mi">32</span><span class="p">,</span> <span class="n">show_progress</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></code></pre></div>
+
+                <h2 id="what-changed-in-the-cost-of-per-criterion-grading">What changed in the cost of per-criterion grading?</h2>
+
+                <p>By default an LLM judge is called once per criterion, and every call re-sends the submission. A provider's prompt cache can discount the repeated part, but only when the repeated part comes first. Before 1.7.0 the criterion came first, which kept providers from reusing the submission across an item's calls.</p>
+
+                <p>Without few-shot examples, a per-criterion prompt now runs in this order: guidelines, input, reference submission, submission, criterion. With examples, which differ per criterion, the examples and the criterion come after the guidelines and before the input. Few-shot examples also name a multi-choice option by its label now, where they used a number. The rest of the text is unchanged, and decision-model requests do not change.</p>
+
+                <p>We re-ran nine datasets (5,003 criterion judgments) with three judges under the old and the new order.</p>
+
+                <div class="cost">
+                    <figure class="cost-bars" aria-hidden="true">
+                        <div class="cost-legend"><span style="--swatch: var(--syn-number)">Before</span><span style="--swatch: var(--accent)">After</span></div>
+                        <div class="cost-row">
+                            <span class="cost-judge"><code>gpt-5.6-luna</code></span>
+                            <span class="cost-pair">
+                                <span class="bar-line"><span class="bar-track"><span class="bar before" style="--w: 100%"></span></span><span class="bar-val">$1.84</span></span>
+                                <span class="bar-line"><span class="bar-track"><span class="bar after" style="--w: 76.09%"></span></span><span class="bar-val">$1.40</span></span>
+                            </span>
+                        </div>
+                        <div class="cost-row">
+                            <span class="cost-judge"><code>deepseek-v4.1-flash</code></span>
+                            <span class="cost-pair">
+                                <span class="bar-line"><span class="bar-track"><span class="bar before" style="--w: 100%"></span></span><span class="bar-val">$4.18</span></span>
+                                <span class="bar-line"><span class="bar-track"><span class="bar after" style="--w: 77.27%"></span></span><span class="bar-val">$3.23</span></span>
+                            </span>
+                        </div>
+                        <div class="cost-row">
+                            <span class="cost-judge"><code>gemini-3.8-flash</code></span>
+                            <span class="cost-pair">
+                                <span class="bar-line"><span class="bar-track"><span class="bar before" style="--w: 99.56%"></span></span><span class="bar-val">$20.59</span></span>
+                                <span class="bar-line"><span class="bar-track"><span class="bar after" style="--w: 100%"></span></span><span class="bar-val">$20.68</span></span>
+                            </span>
+                        </div>
+                    </figure>
+
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th scope="col">Judge</th>
+                                    <th scope="col" class="num">Cost before</th>
+                                    <th scope="col" class="num">Cost after</th>
+                                    <th scope="col" class="num">Cached prompt tokens before</th>
+                                    <th scope="col" class="num">Cached prompt tokens after</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <th scope="row"><code>gpt-5.6-luna</code></th>
+                                    <td class="num">$1.84</td>
+                                    <td class="num">$1.40</td>
+                                    <td class="num">80%</td>
+                                    <td class="num">91%</td>
+                                </tr>
+                                <tr>
+                                    <th scope="row"><code>deepseek-v4.1-flash</code></th>
+                                    <td class="num">$4.18</td>
+                                    <td class="num">$3.23</td>
+                                    <td class="num">68%</td>
+                                    <td class="num">82%</td>
+                                </tr>
+                                <tr>
+                                    <th scope="row"><code>gemini-3.8-flash</code></th>
+                                    <td class="num">$20.59</td>
+                                    <td class="num">$20.68</td>
+                                    <td class="num">none</td>
+                                    <td class="num">about 1%</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <p>Cost fell for the two judges whose caches these prompts could reach. Gemini's prompts in these runs were below its 4,096-token minimum for caching, so its cost stayed about the same. Longer submissions and images should reach that minimum more often.</p>
+
+                <p>Few-shot examples are now cached across items as well. We measured this on 500 few-shot criterion calls per judge, over 40 RiceChem answers and 30 ELLIPSE essays with five examples each. For <code>gpt-5.6-luna</code> the share of cached prompt tokens rose from 53% to 89% and the cost fell from $0.354 to $0.207. Cost also fell for <code>claude-haiku-5-5</code> and <code>gemini-3.8-flash</code>. It rose for <code>deepseek-v4.1-flash</code>, from $0.616 to $0.724, because that judge wrote more output in the run.</p>
+
+                <h3 id="will-my-scores-change">Will my scores change?</h3>
+
+                <p>Some verdicts will. We repeated 10% of the judgments to separate the effect of the new order from run-to-run noise. Two runs of the new order agreed on 86.4% of <code>gpt-5.6-luna</code>'s verdicts, while the old and new orders agreed on 81.1%. The order itself therefore moves some verdicts.</p>
+
+                <p>Accuracy against the datasets' labels changed by −0.4 points for <code>gpt-5.6-luna</code> (95% interval −1.3 to +0.5), by +0.5 for <code>deepseek-v4.1-flash</code> (−0.5 to +1.5) and by −1.4 for <code>gemini-3.8-flash</code> (−2.1 to −0.8). If you compare scores across this upgrade, re-grade a sample with both versions first.</p>
+
+                <h2 id="what-else-is-in-1-7-0">What else is in 1.7.0?</h2>
+
+                <ul class="more">
+                    <li><strong>The meta-judge is told what it is reading.</strong> Meta-rubric evaluation grades a rubric. The meta-judge now receives an instruction that its submission is a rubric and not a response to grade. Without it, judges could fault a rubric for containing no response. Meta-rubric scores can change.</li>
+                    <li><strong>A misconfigured judge raises an error.</strong> A rejected or missing key, an unknown model, a parameter LiteLLM refuses, or an account that is out of credits (a 402 Payment Required answer) now makes the grade raise a <code>ValueError</code> that names the judge. The call is not retried. Before, each such call abstained, so under the default <code>SKIP</code> strategy a run could reach its end with every affected item left without a score. <code>evaluate()</code> records the error on each affected item and goes on, or stops at the first one with <code>fail_fast=True</code>.</li>
+                    <li><strong>Invalid settings are refused when they are built.</strong> <code>LLMConfig</code> refuses an invalid <code>thinking</code>, <code>max_tokens</code> or <code>top_p</code>. <code>FewShotConfig</code> refuses an example count that is not a positive integer, <code>CriterionGrader</code> refuses a seed that is not an integer, and a criterion refuses two options with the same label.</li>
+                    <li><strong>Response caches keep working.</strong> Cache directories written by earlier releases still load, so upgrading does not pay again for calls you have already made. Replies cached for meta-rubric evaluation are the exception, because its prompt changed. A run that reads an older cache can return verdicts generated under the old prompt order. Clear the cache to get replies generated under the new one.</li>
+                    <li><strong>Unfinished runs resume.</strong> Resuming an experiment from an earlier release grades its remaining items in the new order, so that run mixes the two orders. Start a new experiment if you need a single order.</li>
+                </ul>
+
+                <h2 id="questions">Questions</h2>
+
+                <div class="faq-item">
+                    <h3 id="which-image-formats-does-autorubric-accept">Which image formats does AutoRubric accept?</h3>
+                    <p>PNG, JPEG, GIF and WebP. LLM judges receive an image in its own format. Jev receives PNG or JPEG, and AutoRubric converts other formats for it.</p>
+                </div>
+                <div class="faq-item">
+                    <h3 id="does-autorubric-resize-my-images">Does AutoRubric resize my images?</h3>
+                    <p>Not for LLM judges, which receive the original bytes. For Jev, an image outside 280 to 1568 pixels per side is scaled, and padded with white if a side is still too short.</p>
+                </div>
+                <div class="faq-item">
+                    <h3 id="can-i-send-an-image-to-a-model-that-litellm-does-not-list-as-a-vision-model">Can I send an image to a model that LiteLLM does not list as a vision model?</h3>
+                    <p>Yes. Set <code>images=True</code> on the judge's <code>LLMConfig</code>. Without that declaration the grade raises an error before any request is sent.</p>
+                </div>
+                <div class="faq-item">
+                    <h3 id="do-i-have-to-change-my-code-to-upgrade">Do I have to change my code to upgrade?</h3>
+                    <p>Usually not. Valid text-only code runs unchanged, although some verdicts change with the new prompt order. A misconfigured judge now raises an error where it used to abstain, and invalid settings are refused when they are built. A custom grader that annotates <code>judge</code> arguments as <code>str</code> still runs, though a type checker will ask for <code>Content</code>.</p>
+                </div>
+                <div class="faq-item">
+                    <h3 id="do-i-need-to-re-run-old-experiments">Do I need to re-run old experiments?</h3>
+                    <p>Only if you compare scores across the upgrade. The new prompt order changes some verdicts, so re-grade a sample with both versions before comparing.</p>
+                </div>
+
+                <h2 id="where-to-go-next">Where to go next</h2>
+
+                <ul class="next wide">
+                    <li><a href="https://autorubric.org/docs/cookbook/image-inputs/">Grading Submissions with Images</a>, the full recipe behind this post</li>
+                    <li><a href="https://autorubric.org/docs/cookbook/fundus-image-quality/">Fundus Image Quality (EyeQ)</a>, a worked use case that grades retinal photographs</li>
+                    <li><a href="https://autorubric.org/docs/upgrading/">Upgrade Notes</a>, with every measurement for 1.7.0</li>
+                    <li><a href="https://autorubric.org/docs/cookbook/decision-models/">Decision-Model Judges</a></li>
+                </ul>
+
+                <nav class="post-foot wide" aria-label="Tags">
+                    <ul class="tags">
+                        <li><a class="tag" href="/blog/tags/release/">release</a></li>
+                        <li><a class="tag" href="/blog/tags/images/">images</a></li>
+                        <li><a class="tag" href="/blog/tags/prompt-caching/">prompt-caching</a></li>
+                    </ul>
+                </nav>
+            </div>
+        </article>
+    </main>
+
+    <!-- blog:footer:start -->
+    <footer>
+        <div class="container">
+            <p>&copy; <span data-year>2026</span> Delip Rao. MIT License.</p>
+            <div class="footer-links">
+                <a href="https://github.com/delip/autorubric">GitHub</a>
+                <a href="https://pypi.org/project/autorubric/">PyPI</a>
+                <a href="/blog/">Blog</a>
+                <a href="/blog/feed.xml">Feed</a>
+                <a href="/docs/">Docs</a>
+            </div>
+        </div>
+    </footer>
+    <script>
+        document.querySelectorAll('[data-year]').forEach(function (el) {
+            el.textContent = new Date().getFullYear();
+        });
+    </script>
+    <!-- blog:footer:end -->
+
+    <script>
+        (function () {
+            // Copy buttons on code blocks. Without the Clipboard API (or without
+            // JavaScript) there is no button; the code is plain selectable text.
+            if (navigator.clipboard && window.isSecureContext) {
+                document.querySelectorAll('.code-block').forEach(function (block) {
+                    var code = block.querySelector('pre code');
+                    if (!code) return;
+                    var button = document.createElement('button');
+                    button.type = 'button';
+                    button.className = 'copy-code';
+                    button.textContent = 'Copy';
+                    button.setAttribute('aria-label', 'Copy code');
+                    var status = document.createElement('span');
+                    status.className = 'sr-only';
+                    status.setAttribute('aria-live', 'polite');
+                    var timer;
+                    button.addEventListener('click', function () {
+                        navigator.clipboard.writeText(code.textContent.replace(/\n$/, '')).then(function () {
+                            button.textContent = 'Copied';
+                            button.dataset.state = 'copied';
+                            status.textContent = 'Copied';
+                            clearTimeout(timer);
+                            timer = setTimeout(function () {
+                                button.textContent = 'Copy';
+                                delete button.dataset.state;
+                                status.textContent = '';
+                            }, 2000);
+                        }, function () {
+                            button.textContent = 'Copy failed';
+                        });
+                    });
+                    block.appendChild(button);
+                    block.appendChild(status);
+                });
+            }
+
+            // Contents rail: open and pinned from 1100px, a closed disclosure below.
+            var details = document.querySelector('.toc details');
+            var wide = window.matchMedia('(min-width: 1100px)');
+            function syncRail() { if (details) details.open = wide.matches; }
+            syncRail();
+            if (wide.addEventListener) wide.addEventListener('change', syncRail);
+
+            // Mark the section being read in the rail.
+            var links = Array.prototype.slice.call(document.querySelectorAll('.toc a[href^="#"]'));
+            var targets = links.map(function (a) { return document.getElementById(a.getAttribute('href').slice(1)); });
+            var pending = false;
+            function markCurrent() {
+                pending = false;
+                var current = 0;
+                for (var i = 0; i < targets.length; i++) {
+                    if (targets[i] && targets[i].getBoundingClientRect().top <= 120) current = i;
+                }
+                links.forEach(function (a, i) {
+                    if (i === current) a.setAttribute('aria-current', 'location');
+                    else a.removeAttribute('aria-current');
+                });
+            }
+            window.addEventListener('scroll', function () {
+                if (!pending) { pending = true; window.requestAnimationFrame(markCurrent); }
+            }, { passive: true });
+            markCurrent();
+        })();
+    </script>
+</body>
+
+</html>
